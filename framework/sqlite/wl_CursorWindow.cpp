@@ -113,7 +113,7 @@ status_t CursorWindow::maybeInflate() {
             mSlotsOffset = newSlotsOffset;
             updateSlotsData();
             fprintf(stderr, "[WESTLAKE-453] CursorWindow inflated to %zu bytes via malloc "
-                    "(no ashmem on this platform)\n", mInflatedSize);
+                    "(no ashmem on this platform)\n", (size_t) mInflatedSize);
             fflush(stderr);
             return OK;
         }
@@ -189,7 +189,7 @@ heap_fallback:
         if (!logged) {
             logged = true;
             fprintf(stderr, "[WESTLAKE-453] CursorWindow inflated to %zu bytes via malloc "
-                    "(ashmem unavailable)\n", mInflatedSize);
+                    "(ashmem unavailable)\n", (size_t) mInflatedSize);
             fflush(stderr);
         }
         return OK;

@@ -1,0 +1,23 @@
+{
+  "files": [
+    {
+      "path": "sqlite3.c",
+      "sha256": "1a206854aa9fe0ccc1b609f5cfce67eb52ac0a8f5aa2f5e853f7c3ed84c710ab",
+      "upstream_path": "sqlite-amalgamation-3450100/sqlite3.c"
+    },
+    {
+      "path": "sqlite3.h",
+      "sha256": "41e066ccd4f89e938f136ceb48c996c54dc381b59fe566dea48864c3750b779e",
+      "upstream_path": "sqlite-amalgamation-3450100/sqlite3.h"
+    },
+    {
+      "path": "sqlite3ext.h",
+      "sha256": "b184dd1586d935133d37ad76fa353faf0a1021ff2fdedeedcc3498fff74bbb94",
+      "upstream_path": "sqlite-amalgamation-3450100/sqlite3ext.h"
+    }
+  ],
+  "note": "Public-domain SQLite amalgamation, unmodified. Build options are supplied by framework/sqlite/CMakeLists.txt, not by editing this source.",
+  "revision": "2024-01-30 16:01:20 e876e51a0ed5c5b3126f52e532044363a014bc594cfefa87ffb5b82257cc467a",
+  "url": "https://www.sqlite.org/2024/sqlite-amalgamation-3450100.zip",
+  "version": "3.45.1"
+}

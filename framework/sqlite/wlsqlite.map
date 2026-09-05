@@ -1,0 +1,14 @@
+/*
+ * Export list for libwlsqlite.so.
+ *
+ * JNI_OnLoad is the entire public surface: it RegisterNatives()es the
+ * android.database.sqlite natives and nothing else needs to be reachable from
+ * outside. Keeping sqlite3_* internal matters because this library is loaded
+ * into a process that may already carry its own SQLite and its own C++ runtime.
+ */
+{
+    global:
+        JNI_OnLoad;
+    local:
+        *;
+};
