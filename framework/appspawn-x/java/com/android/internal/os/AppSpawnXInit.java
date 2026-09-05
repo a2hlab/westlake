@@ -1060,6 +1060,20 @@ public class AppSpawnXInit {
             //     stubs return safe defaults for all methods; hot ones (attachApp,
             //     addWindow, etc.) log when called so we know if Activity lifecycle
             //     actually exercises them. Swap to real adapters once bridge ready.
+            // 4a. Take over the adapter's construct-only TLS shim before any app
+            //     code can obtain an SSLContext from it. This has to be here, in
+            //     the child and after initAdapterLayer() has registered the
+            //     "TlsShim" provider, and it has to be before app code runs:
+            //     okhttp caches the SSLSocketFactory it gets from its first
+            //     lookup, so one early question would pin the process to the
+            //     broken shim for its whole life. The synchronous half is only
+            //     map writes; the real provider loads on a background thread and
+            //     early callers block in WlTlsGate rather than being handed
+            //     something that cannot connect.
+            appLog("J_before_tlsGate");
+            adapter.security.WlTlsBootstrap.start();
+            appLog("J_after_tlsGate");
+
             appLog("J_before_installActivityManagerStub");
             installActivityManagerStub();
             appLog("J_after_installActivityManagerStub");
