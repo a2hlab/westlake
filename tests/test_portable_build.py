@@ -44,6 +44,55 @@ class PortableBuildTests(unittest.TestCase):
                      'nativePeerChain', 'nativeInfo', 'nativeClose']:
             self.assertEqual(generated.count('M("' + name + '"'), 1)
 
+    def test_sqlite_refuses_reused_output(self):
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            with self.assertRaisesRegex(ValueError, 'NEW directory'):
+                module('build_sqlite').build(Path(tmp), sdk=Path('/missing-sdk'))
+
+    def test_sqlite_requires_exactly_one_abi(self):
+        builder = module('build_sqlite')
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            for kwargs in ({}, {'sdk': Path('/a'), 'ndk': Path('/b')}):
+                with self.assertRaisesRegex(ValueError, 'exactly one'):
+                    builder.build(Path(tmp) / 'out', **kwargs)
+
+    def test_sqlite_options_come_from_cmakelists(self):
+        """The driver must not restate the option set; drift would be silent."""
+        defines = module('build_sqlite').sqlite_defines()
+        self.assertIn('-DSQLITE_THREADSAFE=1', defines)
+        self.assertIn('-DSQLITE_TEMP_STORE=3', defines)
+        self.assertTrue(all(d.startswith('-DSQLITE_') or d.startswith('-DHAVE_')
+                            for d in defines), defines)
+        cmake = (ROOT / 'framework/sqlite/CMakeLists.txt').read_text()
+        for define in defines:
+            self.assertIn(define[2:], cmake)
+
+    def test_sqlite_sources_all_exist(self):
+        builder = module('build_sqlite')
+        for source in builder.C_SOURCES + builder.CXX_SOURCES:
+            self.assertTrue(source.is_file(), source)
+
+    def test_dex_inventory_reads_a_synthetic_dex(self):
+        """Exercise the DEX tables the inventory walks, without a checked-in blob."""
+        inventory = module('dex_class_inventory')
+        self.assertEqual(inventory.descriptor_to_binary('Ladapter/activity/Foo$Bar;'),
+                         'adapter.activity.Foo$Bar')
+        self.assertEqual(inventory.read_uleb128(bytes([0x00]), 0), (0, 1))
+        self.assertEqual(inventory.read_uleb128(bytes([0x81, 0x02]), 0), (257, 2))
+        with self.assertRaisesRegex(ValueError, 'bad magic'):
+            inventory.dex_defined_types(b'not-a-dex' + bytes(200))
+
+    def test_dex_inventory_attributes_sources(self):
+        inventory = module('dex_class_inventory')
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            root = Path(tmp)
+            (root / 'p').mkdir()
+            (root / 'p' / 'Thing.java').write_text(
+                'package a.b;\npublic final class Thing {\n  class Nested {}\n}\n')
+            owned, duplicates = inventory.source_classes([root])
+            self.assertEqual(duplicates, [])
+            self.assertIn('a.b.Thing', owned)
+
 
 if __name__ == '__main__':
     unittest.main()
