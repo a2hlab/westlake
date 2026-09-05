@@ -69,6 +69,95 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // SurfaceControl every relayout makes ViewRootImpl see a changed surface each traversal
     // → hwui destroys+recreates its EGLSurface → the recreate fails (cannot bind a 2nd window
     // surface to the same OH producer) → libhwui abort before frame #1 draws.
+    // ====================================================================
+    // Sub-window neutralisation
+    //
+    // A sub-window (TYPE_APPLICATION_PANEL and friends -- everything in
+    // [FIRST_SUB_WINDOW, LAST_SUB_WINDOW]) is what PopupWindow, Spinner
+    // dropdowns and context menus put on screen. This adapter cannot give one a
+    // real OH scene session: CreateAndConnectSpecificSession is only reachable
+    // for a main app window, so a sub-window degrades to session=1 -- no
+    // surface, no input.
+    //
+    // Left alone, that is not merely useless, it is fatal to the host Activity.
+    // When the sub-window relayouts, the degenerate session tears down the
+    // *host activity's* surface with it, and the next host draw dies:
+    //
+    //     ASSERT FAILED [skia] mEglSurface == EGL_NO_SURFACE   -> abort, exit 134
+    //
+    // and with hardware acceleration off, the software path instead throws
+    //
+    //     IllegalStateException: Surface was not locked                -> exit 1
+    //
+    // The fix is to answer as a WMS legitimately may: accept the window, then
+    // never hand it a valid surface and never report a surface change. AOSP's
+    // ViewRootImpl.draw() opens with `if (!surface.isValid()) return false;`,
+    // so a client holding no valid surface simply never reaches lock/unlock.
+    //
+    // Two details are load-bearing, both learned the hard way on hardware:
+    //
+    //   * relayout() only receives LayoutParams when they change. From the
+    //     second relayout onwards `attrs` is null, so a test written against
+    //     attrs.type stops matching and the window gets a surface back on call
+    //     two. Hence the registry: classify once at addToDisplay(), where attrs
+    //     is authoritative, and remember it by window identity.
+    //
+    //   * Returning a non-zero relayout result is itself the trigger. Reporting
+    //     SURFACE_CHANGED makes ViewRootImpl re-acquire and redraw, which is
+    //     precisely the sequence that aborts. The neutralised path returns 0.
+    //
+    // Frontline measurements before this landed as WMS logic (proxy-based
+    // prototype, DAYU200 / OpenHarmony 6.1.0.31): sub-window interceptions rose
+    // from 2 to 13 once the registry replaced the attrs-only test, both crash
+    // signatures went to zero, and process survival went from 60-80s to the
+    // full 180s sample. That prototype reached into the client's ViewRootImpl
+    // by reflection because it could not change this class; here we are the
+    // window session, so withholding the surface at the source does the same
+    // job without touching client internals.
+    // ====================================================================
+
+    /** android.view.WindowManager.LayoutParams.FIRST_SUB_WINDOW. */
+    private static final int FIRST_SUB_WINDOW = 1000;
+    /** android.view.WindowManager.LayoutParams.LAST_SUB_WINDOW. */
+    private static final int LAST_SUB_WINDOW = 1999;
+
+    /**
+     * Windows classified as neutralised sub-windows, by client binder.
+     *
+     * Entries are added in addToDisplay() and dropped in remove(), so this
+     * tracks exactly the same lifetime as mSessionMap and needs no weak keys.
+     */
+    private final java.util.Set<IBinder> mSubWindows = new java.util.HashSet<>();
+
+    private static boolean isSubWindowType(int androidWindowType) {
+        return androidWindowType >= FIRST_SUB_WINDOW && androidWindowType <= LAST_SUB_WINDOW;
+    }
+
+    /** True once addToDisplay() has classified this window as a sub-window. */
+    private boolean isNeutralizedSubWindow(IWindow window) {
+        return window != null && mSubWindows.contains(window.asBinder());
+    }
+
+    /**
+     * Classify a window at add time and sanitise its LayoutParams.
+     *
+     * Clearing FLAG_HARDWARE_ACCELERATED is deliberate and belongs on the
+     * server: a window that will never own a surface must not have the client
+     * stand up a HardwareRenderer for it, because that renderer is what reaches
+     * for an EGL surface and aborts when there is none.
+     */
+    private void noteSubWindow(IWindow window, WindowManager.LayoutParams attrs) {
+        if (window == null || attrs == null || !isSubWindowType(attrs.type)) {
+            return;
+        }
+        mSubWindows.add(window.asBinder());
+        if ((attrs.flags & WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED) != 0) {
+            attrs.flags &= ~WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+        }
+        System.err.println("[OH_WSA] sub-window type=" + attrs.type
+                + " neutralized: no OH scene session, no surface will be reported");
+    }
+
     private final Map<IBinder, SurfaceControl> mSurfaceControls =
             java.util.Collections.synchronizedMap(new HashMap<IBinder, SurfaceControl>());
 
@@ -232,6 +321,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                         & WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED) != 0)
                 + ")");
         logBridged("addToDisplay", "-> OH ISceneSessionManager.CreateAndConnectSpecificSession");
+
+        // Classify before anything else: relayout() sees LayoutParams only when
+        // they change, so this is the one call where attrs.type is reliable.
+        noteSubWindow(window, attrs);
 
         String windowName = attrs.getTitle() != null ? attrs.getTitle().toString() : "AndroidWindow";
         int windowType = attrs.type;
@@ -495,6 +588,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // Clean up InputChannel
         InputEventBridge.getInstance().destroyInputChannel(window.asBinder());
 
+        mSubWindows.remove(window.asBinder());
+
         int[] sessionInfo = mSessionMap.remove(window.asBinder());
         if (sessionInfo != null) {
             int sessionId = sessionInfo[0];
@@ -532,6 +627,18 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             InsetsState insetsState, InsetsSourceControl.Array activeControls,
             Bundle bundle) throws RemoteException {
         logBridged("relayout", "-> OH ISession.UpdateSessionRect");
+
+        if (isNeutralizedSubWindow(window)) {
+            // Report "nothing changed" and hand back no surface. Returning any
+            // surface-change bit here is what makes ViewRootImpl re-acquire and
+            // redraw, and that redraw is what tore down the host activity's
+            // EGL surface. Releasing outSurfaceControl keeps the client from
+            // adopting a stale SurfaceControl from a previous call.
+            if (outSurfaceControl != null) {
+                outSurfaceControl.release();
+            }
+            return 0;
+        }
 
         int[] sessionInfo = mSessionMap.get(window.asBinder());
         if (sessionInfo == null) {
