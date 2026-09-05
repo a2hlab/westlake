@@ -1,0 +1,36 @@
+{
+  "app": {
+    "apiReleaseType": "Release",
+    "bundleName": "org.westlake.imehost",
+    "icon": "",
+    "label": "$string:app_name",
+    "minAPIVersion": 20,
+    "targetAPIVersion": 20,
+    "vendor": "westlake",
+    "versionCode": 2,
+    "versionName": "1.0.0"
+  },
+  "module": {
+    "abilities": [{
+      "exported": true,
+      "icon": "",
+      "label": "$string:app_name",
+      "name": "EntryAbility",
+      "skills": [{"actions": ["action.system.home"], "entities": ["entity.system.home"]}],
+      "visible": true,
+      "srcEntry": "./ets/entryability/EntryAbility.ets"
+    }],
+    "deliveryWithInstall": true,
+    "description": "Isolated Android window and keyboard host",
+    "deviceTypes": ["default", "phone"],
+    "installationFree": false,
+    "mainElement": "EntryAbility",
+    "name": "entry",
+    "pages": "$profile:main_pages",
+    "type": "entry",
+    "uiSyntax": "ets",
+    "virtualMachine": "ark24.0.0.0",
+    "apiType": "stageMode",
+    "requestPermissions": [{"name": "ohos.permission.INTERNET"}]
+  }
+}
