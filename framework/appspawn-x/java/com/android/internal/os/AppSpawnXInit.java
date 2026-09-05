@@ -496,6 +496,20 @@ public class AppSpawnXInit {
             Log.i(TAG, "JCA providers overridden for OH (dropped " + dropped
                     + " original, installed BC + CertPath)");
 
+            // Conscrypt owned SecureRandom on Android, and the repackaged BC has
+            // its SecureRandom registrations "Android-removed" for exactly that
+            // reason -- the same treatment the MessageDigest, AES and X.509
+            // entries below get. Dropping Conscrypt therefore leaves the process
+            // with no SecureRandom service at all, which breaks AndroidX static
+            // initialisers and makes every TLS handshake impossible. Install the
+            // kernel-backed provider before anything can ask for one.
+            String randomProvider = OHSecureRandomProvider.install();
+            if (randomProvider == null) {
+                Log.e(TAG, "no SecureRandom available: TLS and AndroidX init will fail");
+            } else {
+                Log.i(TAG, "SecureRandom provider=" + randomProvider);
+            }
+
             // Trigger Providers.<clinit> via Security.getProviders so BC is
             // instantiated, then patch BC to expose MessageDigest services.
             // Android's repackaged BC in this AOSP tree explicitly comments
