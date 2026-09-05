@@ -1,0 +1,52 @@
+{
+ "app": {
+  "apiReleaseType": "Release",
+  "bundleName": "com.github.ashutoshgngwr.noice",
+  "distributedNotificationEnabled": false,
+  "icon": "",
+  "label": "$string:app_name",
+  "labelId": 16777216,
+  "minAPIVersion": 20,
+  "targetAPIVersion": 20,
+  "vendor": "westlake",
+  "versionCode": 1,
+  "versionName": "1.0.0"
+ },
+ "module": {
+  "abilities": [
+   {
+    "exported": true,
+    "icon": "",
+    "label": "$string:app_name",
+    "labelId": 16777216,
+    "name": "EntryAbility",
+    "skills": [
+     {
+      "actions": [
+       "action.system.home"
+      ],
+      "entities": [
+       "entity.system.home"
+      ]
+     }
+    ],
+    "visible": true,
+    "srcEntry": "./ets/entryability/EntryAbility.ets"
+   }
+  ],
+  "deliveryWithInstall": true,
+  "description": "Noice",
+  "deviceTypes": [
+   "default",
+   "phone"
+  ],
+  "installationFree": false,
+  "mainElement": "EntryAbility",
+  "name": "entry",
+  "pages": "$profile:main_pages",
+  "type": "entry",
+  "uiSyntax": "ets",
+  "virtualMachine": "ark24.0.0.0",
+  "apiType": "stageMode"
+ }
+}

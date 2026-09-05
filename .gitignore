@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+/out/
+*.o
+*.so
+*.apk
+*.hap
+*.p12
+*.jks
+*.key
+*.log
+*.jsonl

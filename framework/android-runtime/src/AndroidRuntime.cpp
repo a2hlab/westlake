@@ -1,0 +1,4075 @@
+// ============================================================================
+// AndroidRuntime.cpp
+//
+// OH-Adapter's replacement of frameworks/base/core/jni/AndroidRuntime.cpp's
+// startReg() dispatch. Kept intentionally small: each entry is a register_*
+// function that has already been implemented in this project.
+//
+// Adding a new JNI module:
+//   1. Write src/android_<area>_<Class>.cpp with a `register_android_*` fn.
+//   2. Declare it in include/AndroidRuntime.h.
+//   3. Add a line to `kRegJNI[]` below.
+//   4. Rebuild liboh_android_runtime.so.
+// ============================================================================
+
+#include <atomic>
+#include <map>
+#include <mutex>
+#include <set>
+#include <unistd.h>
+#include "AndroidRuntime.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <dlfcn.h>
+#include <netdb.h>
+#include <poll.h>
+#include <string>
+#include <vector>
+#include <string.h>
+#include <signal.h>     // §626 SIGPROF sampler
+#include <ucontext.h>   // §626 uc_mcontext.pc (arm64)
+#include <stdlib.h>
+#include <pthread.h>
+#include <fcntl.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <linux/if_packet.h>
+#include <net/if.h>
+#include <sys/statvfs.h>
+#include <sys/syscall.h>
+#include <sys/inotify.h>
+#include <sstream>      // §624 thread-dump hook (must be with the top includes:
+#include <sys/stat.h>   //   a late libc++ include breaks the std::__h namespace setup)
+#include <errno.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <hilog/log.h>
+#include <nativehelper/JNIHelp.h>  // jniRegisterNativeMethods (L2)
+// OHOS exports the RegexPattern/RegexMatcher vtables, while several individual virtual methods
+// are intentionally hidden. `final` lets Clang devirtualize those calls into hidden references.
+// Removing only that compile-time qualifier preserves the ICU object ABI and forces public vtable
+// dispatch for region/bounds/group operations.
+#define final
+#include <unicode/regex.h>
+#undef final
+#include <unicode/unistr.h>
+
+// §494: declared at FILE scope and with C linkage. It cannot go inside the function -- C++ forbids
+// extern "C" in a function body -- and a plain C++ declaration would mangle to
+// _ZN7android24register_MediaCodec_shimEP7_JNIEnv, which does not exist. The bridge links with
+// --unresolved-symbols=ignore-all, so that mistake does not fail the build: it fails at LOAD time and
+// the entire bridge stops registering (zero startReg markers in the child log).
+extern "C" int register_MediaCodec_shim(JNIEnv* env);
+extern "C" int register_android_functions(JNIEnv* env);
+
+namespace android {
+
+// Cached JavaVM so ApkAssets.cpp's AndroidRuntime::getJNIEnv() works.
+static JavaVM* g_vm = nullptr;
+
+void AndroidRuntime::setJavaVM(JavaVM* vm) { g_vm = vm; }
+
+JNIEnv* AndroidRuntime::getJNIEnv() {
+    if (g_vm == nullptr) return nullptr;
+    JNIEnv* env = nullptr;
+    jint rc = g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (rc == JNI_OK && env != nullptr) return env;
+    // Attach if needed (not used in HelloWorld bring-up; defensive)
+    if (rc == JNI_EDETACHED) {
+        JavaVMAttachArgs args = { JNI_VERSION_1_6, "AndroidRuntime", nullptr };
+        if (g_vm->AttachCurrentThread(&env, &args) == JNI_OK) return env;
+    }
+    return nullptr;
+}
+
+// 2026-05-18 (L2): AOSP-compatible static helper used by frameworks/base/
+// core/jni/core_jni_helpers.h when AOSP JNI source (e.g., MotionEvent.cpp)
+// registers its native methods.  Trivial passthrough to libnativehelper —
+// mirrors frameworks/base/core/jni/AndroidRuntime.cpp.
+/*static*/ int AndroidRuntime::registerNativeMethods(JNIEnv* env,
+        const char* className, const JNINativeMethod* gMethods, int numMethods) {
+    return jniRegisterNativeMethods(env, className, gMethods, numMethods);
+}
+
+// G2.4 (2026-04-30): graphics JNI compat shim — last-wins overrides for
+// methods whose libhwui impl aborts (fid==null) or whose AOSP libandroid_runtime
+// impl is missing (we don't cross-compile that .so).  Spec: doc/graphics_jni_inventory.html §4.1.
+extern int register_android_graphics_compat_shim(JNIEnv* env);
+// §541: declared here because libcore_io_Memory.cpp has no header of its own; the
+// kit's AndroidRuntime.cpp references it in kRegJNI but never declared it.
+extern int register_libcore_io_Memory(JNIEnv* env);
+
+// G2.14k (2026-05-01) + 2026-05-02 audit: NAR applyFreeFunction guard.
+// User flagged for removal as "defensive hack" but empirical removal breaks
+// initChild Java entry on main thread (SIGSEGV pc=0).  TODO P1: identify the
+// implicit class-init dependency this provides, then replace.  See header
+// comment in libcore_util_NativeAllocationRegistry_guard.cpp.
+extern int register_libcore_util_NativeAllocationRegistry_guard(JNIEnv* env);
+
+// G2.14n (2026-05-01): PropertyValuesHolder JNI cache for animation framework.
+// View.setContentView path triggers Animator/PropertyValuesHolder static init
+// which calls nGetFloatMethod / nGetIntMethod via JNI.
+extern int register_android_animation_PropertyValuesHolder(JNIEnv* env);
+
+// B.15: register_android_graphics_Typeface — minimal in-runtime impl.
+// Earlier dlopen("libhwui.so") attempt hung (libhwui has heavy GPU init not
+// safe in init service ctx).  Compiled directly into liboh_android_runtime.so.
+extern int register_android_graphics_Typeface(JNIEnv* env);
+
+// G2.14u (2026-05-07): AOSP-ported android_os_Parcel.cpp.  Provides ~30
+// Parcel native methods needed by SurfaceControl / Bundle / Intent / Binder
+// IPC paths that ViewRootImpl.relayoutWindow follows on first frame.
+// Source: frameworks/base/core/jni/android_os_Parcel.cpp (918 lines), pulled
+// in via SRCS_AOSP (compile_oh_android_runtime.sh).
+extern int register_android_os_Parcel(JNIEnv* env);
+
+// G2.14w (2026-05-08): adapter-rewritten android_view_KeyCharacterMap.cpp.
+// Provides 13 native methods for android.view.KeyCharacterMap.  KCM.load
+// fallback path (KCM.obtainEmptyMap → nativeObtainEmptyKeyCharacterMap)
+// previously hit UnsatisfiedLinkError because no register_X covered it,
+// blocking PhoneWindow.preparePanel after InputManagerAdapter VIRTUAL_KEYBOARD
+// double mapping landed.  Source pattern: frameworks/base/core/jni/
+// android_view_KeyCharacterMap.cpp (AOSP 14, 284 lines), adapter-adapted to
+// strip <binder/Parcel.h> + <input/*.h> deps; mMap permanently nullptr in
+// Phase 1 (Phase 3 will populate from OH MMI keymap data).
+extern int register_android_view_KeyCharacterMap(JNIEnv* env);
+
+// 2026-05-18: adapter-rewritten android_view_MotionEvent_aosp.cpp.  Provides
+// all 51 native methods for android.view.MotionEvent.  Final dependency for
+// Input_Adapter_design §3.3.5 Phase 2 — without it, MotionEvent.obtain
+// throws UnsatisfiedLinkError on nativeInitialize, blocking helloworld
+// touch dispatch (CHANGE COLOR button click never reaches APK onClick).
+// Source pattern: AOSP 14 frameworks/base/core/jni/android_view_MotionEvent.cpp
+// (917 lines), but reimplemented with a self-contained OhMotionEvent struct
+// to avoid pulling libinput.so / libui.so / ui::Transform / HmacKeyManager /
+// IInputConstants AIDL chain into liboh_android_runtime.
+extern int register_android_view_MotionEvent(JNIEnv* env);
+// WESTLAKE §700: stock android.graphics.SurfaceTexture Java lifecycle backed by an
+// OHOS in-process consumer/producer surface pair at the native boundary.
+extern int register_android_graphics_SurfaceTexture_oh(JNIEnv* env);
+// WESTLAKE §702: TextureView retains the OH producer endpoint exposed by the
+// SurfaceTexture boundary; the Android Java and HWUI lifecycle remain stock.
+extern int register_android_view_TextureView_oh(JNIEnv* env);
+// WESTLAKE diagnostic only: temporary TextureLayer no-op probe used to expose
+// downstream article-WebView blockers without rebuilding preserved libhwui.
+extern int register_android_graphics_TextureLayer_probe(JNIEnv* env);
+
+// B.20.r7: register_android_os_GraphicsEnvironment — 11 natives, all no-op
+// safe defaults. setupGraphicsSupport line 6680 calls isDebuggable() then
+// (within setup) calls layer/driver/ANGLE configuration natives.  AOSP
+// registers these in libandroid_servers.so (system_server-side); on OH the
+// child process needs them resolved in liboh_android_runtime.so.
+extern int register_android_os_GraphicsEnvironment(JNIEnv* env);
+
+// Phase 2 r27 (2026-04-28): all graphics register_X functions
+// (Paint/Canvas/RenderNode/HardwareRenderer/Matrix/Path/...) come from real
+// cross-compiled libhwui.so via dlopen+dlsym in startReg below.  Stub
+// register_android_graphics_Canvas / HardwareRenderer / RenderNode / Paint
+// are retired (no longer compiled into liboh_android_runtime).
+
+struct RegJNIRec {
+    const char* name;
+    int (*proc)(JNIEnv*);
+};
+
+// Dispatch table. Grows as we port more AOSP register_* functions.
+extern int register_android_database_SQLiteConnection(JNIEnv* env);
+extern int register_android_database_CursorWindow(JNIEnv* env);
+extern int register_westlake_class_library_services(JNIEnv* env);
+static const RegJNIRec kRegJNI[] = {
+    { "register_android_util_Log",            register_android_util_Log },
+    // §504 (2026-08-04): libcore.io.Memory ships in libjavacore.so upstream,
+    // which this port does not have, so DirectByteBuffer's bulk copies were
+    // unbound. Register early — every java.nio direct-buffer write depends on
+    // it, and the resulting UnsatisfiedLinkError is an Error, so it kills the
+    // calling thread outright instead of surfacing as a catchable exception.
+    { "register_libcore_io_Memory",           register_libcore_io_Memory },
+    { "register_westlake_class_library_services",
+      register_westlake_class_library_services },
+    { "register_android_util_EventLog",       register_android_util_EventLog },
+    { "register_android_app_Activity",        register_android_app_Activity },
+    { "register_android_os_SystemProperties", register_android_os_SystemProperties },
+    { "register_android_os_Trace",            register_android_os_Trace },
+    { "register_android_os_Process",          register_android_os_Process },
+    { "register_android_os_SystemClock",      register_android_os_SystemClock },
+    { "register_android_os_Binder",           register_android_os_Binder },
+    // 2026-05-07 G2.14u: AOSP-ported android_os_Parcel.cpp providing
+    // ~30 Parcel native methods (nativeCreate / nativeWriteToParcel /
+    // nativeMarshall / etc).  HelloWorld TextView path → ViewRootImpl
+    // .performTraversals → relayoutWindow → adapter WindowSessionAdapter
+    // .relayout → SurfaceControl.<init> → Parcel.obtain → Parcel.<init>
+    // → Parcel.nativeCreate UnsatisfiedLinkError before this entry.
+    { "register_android_os_Parcel",           register_android_os_Parcel },
+    { "register_android_view_SurfaceControl", register_android_view_SurfaceControl },
+    { "register_android_view_SurfaceSession", register_android_view_SurfaceSession },
+    { "register_android_graphics_SurfaceTexture_oh",
+      register_android_graphics_SurfaceTexture_oh },
+    { "register_android_view_TextureView_oh",
+      register_android_view_TextureView_oh },
+    { "register_android_graphics_TextureLayer_probe",
+      register_android_graphics_TextureLayer_probe },
+    { "register_android_view_DisplayEventReceiver", register_android_view_DisplayEventReceiver },
+    { "register_android_view_InputChannel",   register_android_view_InputChannel },
+    { "register_android_view_KeyCharacterMap", register_android_view_KeyCharacterMap },
+    // 2026-05-18: MotionEvent JNI must register BEFORE InputEventReceiver
+    // so the worker-thread MotionEvent.obtain JNI lookup (cached in
+    // ensureJavaRefs at first dispatch) finds nativeInitialize already
+    // bound.  Both register_X are last-wins-safe regardless of order.
+    //
+    // 2026-05-18 (Plan A): restored.  Now backed by adapter-private
+    // android_view_MotionEvent_aosp.cpp (replaces AOSP direct-reference
+    // MotionEvent.cpp; class layout under adapter control, no ABI drift).
+    { "register_android_view_MotionEvent",    register_android_view_MotionEvent },
+    { "register_android_view_InputEventReceiver", register_android_view_InputEventReceiver },
+    { "register_android_content_AssetManager", register_android_content_AssetManager },
+    { "register_android_os_MessageQueue",     register_android_os_MessageQueue },
+    { "register_android_content_res_ApkAssets", register_android_content_res_ApkAssets },
+    { "register_android_content_StringBlock", register_android_content_StringBlock },
+    { "register_android_content_XmlBlock",    register_android_content_XmlBlock },
+    { "register_com_android_internal_os_ClassLoaderFactory", register_com_android_internal_os_ClassLoaderFactory },
+    { "register_com_android_internal_util_VirtualRefBasePtr", register_com_android_internal_util_VirtualRefBasePtr },
+    { "register_android_graphics_Typeface",   register_android_graphics_Typeface },
+    { "register_android_os_GraphicsEnvironment", register_android_os_GraphicsEnvironment },
+    // 2026-05-02 audit: kept; see libcore_util_NativeAllocationRegistry_guard.cpp
+    // header.  TODO P1: identify implicit dep then replace + remove.
+    { "register_libcore_util_NativeAllocationRegistry_guard",
+      register_libcore_util_NativeAllocationRegistry_guard },
+    { "register_android_animation_PropertyValuesHolder",
+      register_android_animation_PropertyValuesHolder },
+    // Phase 2 (r27): graphics natives provided by real libhwui.so via dlopen
+    // block in startReg below — see kHwuiRegFns table.
+    // WESTLAKE 2026-07-22: SQLite JNI (Room/AppIntro DB). Appended LAST so a failure
+    // cannot affect earlier modules. sqlite3 amalgamation is bundled (board libsqlite.z.so
+    // exports only 3 sqlite3_* symbols - none usable).
+    { "register_android_database_SQLiteConnection", register_android_database_SQLiteConnection },
+    { "register_android_database_CursorWindow", register_android_database_CursorWindow },
+};
+
+static constexpr size_t kRegJNICount = sizeof(kRegJNI) / sizeof(kRegJNI[0]);
+
+static jstring wl_Class_getInnerClassName(JNIEnv* env, jobject clazz) {
+    jclass classClass = env->FindClass("java/lang/Class");
+    if (classClass == nullptr) return nullptr;
+    jmethodID getName = env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+    if (getName == nullptr) return nullptr;
+    jstring name = static_cast<jstring>(env->CallObjectMethod(clazz, getName));
+    if (name == nullptr || env->ExceptionCheck()) return nullptr;
+    const char* chars = env->GetStringUTFChars(name, nullptr);
+    if (chars == nullptr) return nullptr;
+    const char* suffix = std::strrchr(chars, '$');
+    if (suffix == nullptr || suffix[1] == '\0') {
+        env->ReleaseStringUTFChars(name, chars);
+        return nullptr;
+    }
+    ++suffix;
+    bool allDigits = true;
+    for (const char* p = suffix; *p != '\0'; ++p) {
+        if (*p < '0' || *p > '9') {
+            allDigits = false;
+            break;
+        }
+    }
+    jstring result = allDigits ? nullptr : env->NewStringUTF(suffix);
+    env->ReleaseStringUTFChars(name, chars);
+    return result;
+}
+
+static void wl_RegisterClassLibraryBoundaryNatives(JNIEnv* env) {
+    jclass classClass = env->FindClass("java/lang/Class");
+    if (classClass == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    const JNINativeMethod method = {
+        const_cast<char*>("getInnerClassName"),
+        const_cast<char*>("()Ljava/lang/String;"),
+        reinterpret_cast<void*>(wl_Class_getInnerClassName),
+    };
+    if (env->RegisterNatives(classClass, &method, 1) != JNI_OK && env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+}
+
+// Early framework-native bootstrap used while ART is starting. Keep the
+// framework-specific registration list on this side of the boundary: ART sees
+// one generic callback and does not link or dispatch register_android_* symbols.
+extern "C" __attribute__((visibility("default")))
+int WestlakeRegisterEarlyFrameworkNatives(JNIEnv* env) {
+    if (env == nullptr) return -1;
+
+    wl_RegisterClassLibraryBoundaryNatives(env);
+
+    struct EarlyReg {
+        const char* name;
+        int (*proc)(JNIEnv*);
+    };
+    static const EarlyReg kEarlyRegs[] = {
+        {"register_android_functions", ::register_android_functions},
+        {"register_android_os_Binder", register_android_os_Binder},
+        {"register_android_os_Process", register_android_os_Process},
+        {"register_android_os_Parcel", register_android_os_Parcel},
+        {"register_android_os_SystemProperties", register_android_os_SystemProperties},
+        {"register_android_os_SystemClock", register_android_os_SystemClock},
+        {"register_android_os_Trace", register_android_os_Trace},
+        {"register_android_os_MessageQueue", register_android_os_MessageQueue},
+        {"register_android_content_AssetManager", register_android_content_AssetManager},
+        {"register_android_content_res_ApkAssets", register_android_content_res_ApkAssets},
+        {"register_android_content_StringBlock", register_android_content_StringBlock},
+        {"register_android_content_XmlBlock", register_android_content_XmlBlock},
+        {"register_android_view_SurfaceControl", register_android_view_SurfaceControl},
+        {"register_android_view_SurfaceSession", register_android_view_SurfaceSession},
+        {"register_android_view_InputChannel", register_android_view_InputChannel},
+        {"register_android_view_MotionEvent", register_android_view_MotionEvent},
+        {"register_android_app_Activity", register_android_app_Activity},
+        {"register_android_animation_PropertyValuesHolder",
+         register_android_animation_PropertyValuesHolder},
+        {"register_android_database_SQLiteConnection",
+         register_android_database_SQLiteConnection},
+        {"register_android_database_CursorWindow", register_android_database_CursorWindow},
+        {"register_android_util_Log", register_android_util_Log},
+    };
+
+    int failures = 0;
+    for (const EarlyReg& reg : kEarlyRegs) {
+        const int rc = reg.proc(env);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            ++failures;
+        } else if (rc != 0) {
+            ++failures;
+        }
+    }
+    return failures == 0 ? 0 : -failures;
+}
+
+// 2026-05-01 G2.14n: hook RegisterNatives to dump every (class, method, sig, fnPtr)
+// registration. Goal: identify which Java method's ArtMethod entry_point is being
+// set to a corrupted address that lands in lib .bss when later invoked via
+// art_quick_invoke_stub_internal blx r12 → SIGILL.
+namespace {
+using OrigRegisterNatives = jint (*)(JNIEnv*, jclass, const JNINativeMethod*, jint);
+static OrigRegisterNatives g_orig_register_natives = nullptr;
+
+static jint hooked_RegisterNatives(JNIEnv* env, jclass clazz,
+                                    const JNINativeMethod* methods, jint nMethods) {
+    // Resolve class name for logging. Use stack buffer to avoid heap allocation
+    // here (we re-enter JNI carefully — no recursion into RegisterNatives).
+    char className[256] = "?";
+    if (clazz) {
+        // Use original FindClass/GetMethodID/CallObjectMethod/GetStringUTFChars
+        // through env->functions, but those are unaffected by our hook (only
+        // RegisterNatives is patched).
+        jclass cls = env->GetObjectClass(clazz);  // returns Class.class
+        if (cls) {
+            jmethodID mGetName = env->GetMethodID(cls, "getName", "()Ljava/lang/String;");
+            if (mGetName) {
+                jstring nameStr = (jstring)env->CallObjectMethod(clazz, mGetName);
+                if (nameStr) {
+                    const char* utf = env->GetStringUTFChars(nameStr, nullptr);
+                    if (utf) {
+                        snprintf(className, sizeof(className), "%s", utf);
+                        env->ReleaseStringUTFChars(nameStr, utf);
+                    }
+                    env->DeleteLocalRef(nameStr);
+                }
+            }
+            env->DeleteLocalRef(cls);
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    for (jint i = 0; i < nMethods; i++) {
+        // 2026-05-02 G2.14n+: enhanced flagging for suspicious fnPtr.
+        // SIGILL crash signature: PC ends in f98 (ARM) or f99 (Thumb bit set)
+        // and falls inside libskia_canvaskit.z.so .text. Flag both criteria.
+        uintptr_t fp = (uintptr_t)methods[i].fnPtr;
+        uintptr_t pageOff = fp & 0xFFFu;
+        bool offHit = (pageOff == 0xf98u) || (pageOff == 0xf99u);
+        bool libHit = false;
+        const char* libName = "?";
+        Dl_info info;
+        if (methods[i].fnPtr && dladdr(methods[i].fnPtr, &info) && info.dli_fname) {
+            libName = info.dli_fname;
+            if (strstr(info.dli_fname, "libskia_canvaskit") != nullptr) libHit = true;
+        }
+        const char* tag = (offHit || libHit) ? "OH_RegHook_BAD" : "OH_RegHook";
+        HiLogPrint(LOG_CORE, LOG_INFO, 0xD000F00u, tag,
+            "%{public}s%{public}s::%{public}s%{public}s -> fn=%{public}p (lib=%{public}s pageOff=0x%{public}x)",
+            (offHit || libHit) ? "[!!! SUSPECT] " : "",
+            className,
+            methods[i].name ? methods[i].name : "?",
+            methods[i].signature ? methods[i].signature : "?",
+            methods[i].fnPtr, libName, pageOff);
+    }
+    return g_orig_register_natives(env, clazz, methods, nMethods);
+}
+
+static void install_register_natives_hook(JNIEnv* env) {
+    if (g_orig_register_natives) return;  // already installed
+    // env->functions is `const struct JNINativeInterface*`. We allocate a copy
+    // we can patch, then point env->functions at the copy.
+    static struct JNINativeInterface patched;
+    const struct JNINativeInterface* orig =
+        *(const struct JNINativeInterface**)env;
+    memcpy(&patched, orig, sizeof(patched));
+    g_orig_register_natives = orig->RegisterNatives;
+    patched.RegisterNatives = hooked_RegisterNatives;
+    // Cast away const and overwrite the JNIEnv's functions pointer.
+    *(const struct JNINativeInterface**)env = &patched;
+    HiLogPrint(LOG_CORE, LOG_INFO, 0xD000F00u, "OH_RegHook",
+        "RegisterNatives hook INSTALLED orig=%{public}p hook=%{public}p",
+        (void*)g_orig_register_natives, (void*)hooked_RegisterNatives);
+}
+}  // namespace
+
+// WESTLAKE §258: point ICU at its data as EARLY as possible.
+// §257 set the data dir from createSession and the text-measure crash was unchanged; §257b then
+// showed `icudt66_dat` inside libicuuc.so is only 56 bytes -- a STUB -- so ICU really must load the
+// external icudt66l.dat (shipped to /data/local/tmp/asx in §257). The remaining suspicion is that our
+// call came too late: ICU caches its data state on first use, and text/locale work happens long
+// before any window is created. Do it here, at runtime registration, before any Java code runs.
+// The child resets `environ`, so the ICU_DATA exported by run_asx.sh never reaches us (§194/§208).
+static void wl_icu_early_init() {
+    static bool wl_done = false;
+    if (wl_done) { return; }
+    wl_done = true;
+    void* h = dlopen("libicuuc.so", RTLD_NOW);
+    if (h == nullptr) {
+        fprintf(stderr, "[WESTLAKE-ICU] early: dlopen(libicuuc.so) failed\n"); fflush(stderr);
+        return;
+    }
+    using SetDirFn = void (*)(const char*);
+    SetDirFn setDir = reinterpret_cast<SetDirFn>(dlsym(h, "u_setDataDirectory_66"));
+    if (setDir == nullptr) { setDir = reinterpret_cast<SetDirFn>(dlsym(h, "u_setDataDirectory")); }
+    if (setDir != nullptr) {
+        setDir("/data/local/tmp/asx");
+        fprintf(stderr, "[WESTLAKE-ICU] early u_setDataDirectory(/data/local/tmp/asx)\n");
+    } else {
+        fprintf(stderr, "[WESTLAKE-ICU] early: u_setDataDirectory not found\n");
+    }
+    fflush(stderr);
+}
+
+// ============================================================
+// WESTLAKE §404 — repair java.lang.invoke classes that arrive INITIALISED but EMPTY.
+//
+// §202 established that some classes reach this child already marked initialised even though
+// their <clinit> never ran in any process, so their `static final` reference fields stay null
+// forever and ART never reports an initialisation failure.  libart carries a hardcoded repair
+// for java.io.BufferedInputStream (class_linker.cc `[WESTLAKE-REPAIR]`); this is the same repair,
+// done from the bridge so it can cover a list of classes without rebuilding libart.
+//
+// The class that matters here is java.lang.invoke.MethodType: `internTable` is null, and
+// MethodType.makeImpl()'s very first statement is `internTable.get(...)`, so EVERY
+// invokedynamic / Kotlin-lambda path throws
+//   NullPointerException: Attempt to invoke InvokeType(2) method
+//   'java.lang.Object java.lang.invoke.MethodType$ConcurrentWeakInternSet.get(java.lang.Object)'
+//   on a null object reference
+// (§403 counted ~3100 of these in one run).  noice's click listeners are all Kotlin lambdas, so
+// this is what makes every delivered touch abort the child.
+//
+// Detection is allow-listed on purpose: a null static reference field is perfectly legal in
+// general, so it cannot be used as a global test (same reasoning as the libart repair).
+//
+// Repair = invoke <clinit> directly.  ART's GetStaticMethodID resolves "<clinit>" like any other
+// direct static method, which is exactly what libart's repair does natively.
+static bool wl_class_has_null_static_ref(JNIEnv* env, jclass cls, const char* desc) {
+    // Enumerate static fields reflectively: JNI has no field iteration.
+    jclass clsCls = env->FindClass("java/lang/Class");
+    jclass fieldCls = env->FindClass("java/lang/reflect/Field");
+    jclass modCls = env->FindClass("java/lang/reflect/Modifier");
+    if (!clsCls || !fieldCls || !modCls) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+    jmethodID getDF = env->GetMethodID(clsCls, "getDeclaredFields", "()[Ljava/lang/reflect/Field;");
+    jmethodID getMod = env->GetMethodID(fieldCls, "getModifiers", "()I");
+    jmethodID getType = env->GetMethodID(fieldCls, "getType", "()Ljava/lang/Class;");
+    jmethodID getName = env->GetMethodID(fieldCls, "getName", "()Ljava/lang/String;");
+    jmethodID setAcc = env->GetMethodID(fieldCls, "setAccessible", "(Z)V");
+    jmethodID fGet = env->GetMethodID(fieldCls, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
+    jmethodID isPrim = env->GetMethodID(clsCls, "isPrimitive", "()Z");
+    jmethodID isStatic = env->GetStaticMethodID(modCls, "isStatic", "(I)Z");
+    if (!getDF || !getMod || !getType || !getName || !setAcc || !fGet || !isPrim || !isStatic) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return false;
+    }
+    jobjectArray fields = static_cast<jobjectArray>(env->CallObjectMethod(cls, getDF));
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
+    if (fields == nullptr) return false;
+    bool needs = false;
+    const jsize n = env->GetArrayLength(fields);
+    for (jsize i = 0; i < n && !needs; ++i) {
+        jobject f = env->GetObjectArrayElement(fields, i);
+        if (f == nullptr) continue;
+        const jint mods = env->CallIntMethod(f, getMod);
+        if (!env->CallStaticBooleanMethod(modCls, isStatic, mods)) { env->DeleteLocalRef(f); continue; }
+        jobject ftype = env->CallObjectMethod(f, getType);
+        const bool prim = ftype ? (env->CallBooleanMethod(ftype, isPrim) == JNI_TRUE) : true;
+        if (ftype) env->DeleteLocalRef(ftype);
+        if (prim) { env->DeleteLocalRef(f); continue; }
+        env->CallVoidMethod(f, setAcc, JNI_TRUE);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        jobject val = env->CallObjectMethod(f, fGet, nullptr);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); env->DeleteLocalRef(f); continue; }
+        if (val == nullptr) {
+            jstring jn = static_cast<jstring>(env->CallObjectMethod(f, getName));
+            const char* nm = jn ? env->GetStringUTFChars(jn, nullptr) : nullptr;
+            fprintf(stderr, "[WESTLAKE-404] %s: static ref field '%s' is NULL\n",
+                    desc, nm ? nm : "?");
+            if (jn && nm) env->ReleaseStringUTFChars(jn, nm);
+            if (jn) env->DeleteLocalRef(jn);
+            needs = true;
+        } else {
+            env->DeleteLocalRef(val);
+        }
+        env->DeleteLocalRef(f);
+    }
+    env->DeleteLocalRef(fields);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return needs;
+}
+
+static void wl_repair_invoke_classes(JNIEnv* env) {
+    static bool wl_done = false;
+    if (wl_done) { return; }
+    wl_done = true;
+    // MethodType first: everything else in java.lang.invoke depends on it.
+    static const char* kClasses[] = {
+        "java/lang/invoke/MethodType",
+        "java/lang/invoke/MethodTypeForm",
+        "java/lang/invoke/MethodHandleStatics",
+        "java/lang/invoke/MethodHandleNatives",
+        "java/lang/invoke/MethodHandles",
+        "java/lang/invoke/MethodHandleImpl",
+        "java/lang/invoke/LambdaMetafactory",
+        "java/lang/invoke/InnerClassLambdaMetafactory",
+        "java/lang/invoke/Invokers",
+        "java/lang/invoke/CallSite",
+        // The verify-only boot image can mark this class initialized without
+        // running its initializer, leaving close()'s CAS updater null. Repair
+        // it before java.security.Security reads and closes its properties.
+        "java/io/BufferedInputStream",
+    };
+    for (const char* desc : kClasses) {
+        if (env->PushLocalFrame(64) < 0) { continue; }
+        jclass cls = env->FindClass(desc);
+        if (cls == nullptr || env->ExceptionCheck()) {
+            env->ExceptionClear();
+            fprintf(stderr, "[WESTLAKE-404] %s: not found\n", desc);
+            env->PopLocalFrame(nullptr);
+            continue;
+        }
+        if (wl_class_has_null_static_ref(env, cls, desc)) {
+            jmethodID clinit = env->GetStaticMethodID(cls, "<clinit>", "()V");
+            if (env->ExceptionCheck()) { env->ExceptionClear(); clinit = nullptr; }
+            if (clinit != nullptr) {
+                env->CallStaticVoidMethod(cls, clinit);
+                if (env->ExceptionCheck()) {
+                    fprintf(stderr, "[WESTLAKE-404] %s: <clinit> THREW:\n", desc);
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                }
+                const bool still = wl_class_has_null_static_ref(env, cls, desc);
+                fprintf(stderr, "[WESTLAKE-404] %s: direct <clinit> done, stillNull=%d\n",
+                        desc, still ? 1 : 0);
+            } else {
+                fprintf(stderr, "[WESTLAKE-404] %s: no <clinit> method to invoke\n", desc);
+            }
+        } else {
+            fprintf(stderr, "[WESTLAKE-404] %s: statics OK\n", desc);
+        }
+        env->PopLocalFrame(nullptr);
+    }
+    // Last resort for the one field that actually blocks input: build the intern set by hand.
+    // MethodType.makeImpl() only needs `internTable` to be non-null to stop NPE-ing.
+    if (env->PushLocalFrame(16) >= 0) {
+        jclass mt = env->FindClass("java/lang/invoke/MethodType");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        jfieldID it = mt ? env->GetStaticFieldID(mt, "internTable",
+            "Ljava/lang/invoke/MethodType$ConcurrentWeakInternSet;") : nullptr;
+        if (env->ExceptionCheck()) { env->ExceptionClear(); it = nullptr; }
+        jobject cur = it ? env->GetStaticObjectField(mt, it) : nullptr;
+        fprintf(stderr, "[WESTLAKE-404] MethodType.internTable fid=%d null=%d\n",
+                it ? 1 : 0, cur == nullptr ? 1 : 0);
+        if (it != nullptr && cur == nullptr) {
+            jclass setCls = env->FindClass("java/lang/invoke/MethodType$ConcurrentWeakInternSet");
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            jmethodID ctor = setCls ? env->GetMethodID(setCls, "<init>", "()V") : nullptr;
+            if (env->ExceptionCheck()) { env->ExceptionClear(); ctor = nullptr; }
+            jobject inst = ctor ? env->NewObject(setCls, ctor) : nullptr;
+            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); inst = nullptr; }
+            if (inst != nullptr) {
+                env->SetStaticObjectField(mt, it, inst);
+                if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+                jobject chk = env->GetStaticObjectField(mt, it);
+                fprintf(stderr, "[WESTLAKE-404] internTable INSTALLED by hand, nowNull=%d\n",
+                        chk == nullptr ? 1 : 0);
+            } else {
+                fprintf(stderr, "[WESTLAKE-404] could not construct ConcurrentWeakInternSet\n");
+            }
+        }
+        env->PopLocalFrame(nullptr);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fflush(stderr);
+}
+
+// WESTLAKE §413 — route the app's HTTP(S) through the host proxy.
+// The board has no network of its own (only `lo`), so noice's OkHttp client cannot reach
+// api.trynoice.com and the Library page shows "Oops! We couldn't fetch the sound library."
+// `hdc rport tcp:8888 tcp:8888` tunnels board:8888 to a host proxy over USB; OkHttp's default
+// ProxySelector honours the standard http/https proxy system properties, so setting them here —
+// before any app code runs — is all that is needed.  Gated on WL_PROXY (host:port, or "1" for the
+// default 127.0.0.1:8888) so a networkless run is still possible.
+static void wl_install_proxy_props(JNIEnv* env) {
+    const char* spec = getenv("WL_PROXY");
+    if (spec == nullptr || spec[0] == '\0') { return; }
+    char host[128] = "127.0.0.1";
+    char port[16]  = "8888";
+    if (strcmp(spec, "1") != 0) {
+        const char* colon = strrchr(spec, ':');
+        if (colon != nullptr) {
+            const size_t hl = static_cast<size_t>(colon - spec);
+            if (hl > 0 && hl < sizeof(host)) { memcpy(host, spec, hl); host[hl] = '\0'; }
+            snprintf(port, sizeof(port), "%s", colon + 1);
+        } else {
+            snprintf(host, sizeof(host), "%s", spec);
+        }
+    }
+    jclass sysCls = env->FindClass("java/lang/System");
+    jmethodID setProp = sysCls ? env->GetStaticMethodID(sysCls, "setProperty",
+        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;") : nullptr;
+    if (setProp == nullptr) { if (env->ExceptionCheck()) env->ExceptionClear(); return; }
+    const char* keys[][2] = {
+        {"http.proxyHost", host}, {"http.proxyPort", port},
+        {"https.proxyHost", host}, {"https.proxyPort", port},
+    };
+    for (auto& kv : keys) {
+        jstring k = env->NewStringUTF(kv[0]);
+        jstring v = env->NewStringUTF(kv[1]);
+        jobject old = env->CallStaticObjectMethod(sysCls, setProp, k, v);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (old) env->DeleteLocalRef(old);
+        env->DeleteLocalRef(k); env->DeleteLocalRef(v);
+    }
+    fprintf(stderr, "[WESTLAKE-413] proxy props set: %s:%s\n", host, port);
+    fflush(stderr);
+}
+
+// ============================================================
+// WESTLAKE §412 — survive an uncaught exception on the main thread
+// ============================================================
+// AppSpawnXInit.initChild() wraps ActivityThread.main() in `catch (Throwable) { ...
+// System.exit(1); }`.  So ANY uncaught exception on the main looper takes the whole app down
+// (`[INITCHILD-FAIL] ...` then `[WESTLAKE-REAP] child N exited(1)`).  On this adapter that happens
+// for every service we do not provide — e.g. tapping the Presets tab hits
+// `NullPointerException: ShortcutManager.getDynamicShortcuts() on a null object reference`, and the
+// whole process dies instead of just that one screen misbehaving.
+//
+// java.lang.Runtime.nativeExit is an ordinary JNI-registered native (libart's openjdk_stub owns it),
+// and RegisterNatives is last-wins, so the bridge can take it over.  When the exit comes from
+// initChild's catch block we re-enter Looper.loop() instead of exiting: ActivityThread, the windows
+// and the view hierarchy are all still intact, so the app carries on and only the failed action is
+// lost.  Every other exit proceeds normally.
+static void WL_Runtime_nativeExit(JNIEnv* env, jclass /*clazz*/, jint status) {
+    static std::atomic<int> wl_resumes{0};
+    const int kMaxResumes = 32;   // do not spin forever if the loop rethrows immediately
+
+    bool fromInitChild = false;
+    if (env != nullptr && !env->ExceptionCheck()) {
+        jclass thCls = env->FindClass("java/lang/Thread");
+        jmethodID curM = thCls ? env->GetStaticMethodID(thCls, "currentThread",
+            "()Ljava/lang/Thread;") : nullptr;
+        jobject cur = curM ? env->CallStaticObjectMethod(thCls, curM) : nullptr;
+        jmethodID stM = thCls ? env->GetMethodID(thCls, "getStackTrace",
+            "()[Ljava/lang/StackTraceElement;") : nullptr;
+        jobjectArray st = (cur && stM)
+            ? static_cast<jobjectArray>(env->CallObjectMethod(cur, stM)) : nullptr;
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (st != nullptr) {
+            jclass steCls = env->FindClass("java/lang/StackTraceElement");
+            jmethodID cnM = steCls ? env->GetMethodID(steCls, "getClassName",
+                "()Ljava/lang/String;") : nullptr;
+            const jsize n = env->GetArrayLength(st);
+            for (jsize i = 0; i < n && !fromInitChild; ++i) {
+                jobject e = env->GetObjectArrayElement(st, i);
+                if (!e) continue;
+                jstring js = cnM ? static_cast<jstring>(env->CallObjectMethod(e, cnM)) : nullptr;
+                const char* cs = js ? env->GetStringUTFChars(js, nullptr) : nullptr;
+                if (cs != nullptr && strstr(cs, "AppSpawnXInit") != nullptr) fromInitChild = true;
+                if (js && cs) env->ReleaseStringUTFChars(js, cs);
+                if (js) env->DeleteLocalRef(js);
+                env->DeleteLocalRef(e);
+            }
+            if (env->ExceptionCheck()) env->ExceptionClear();
+        }
+    }
+
+    if (fromInitChild && wl_resumes.load() < kMaxResumes) {
+        const int nth = wl_resumes.fetch_add(1) + 1;
+        fprintf(stderr, "[WESTLAKE-412] Runtime.nativeExit(%d) from initChild — NOT exiting; "
+                        "re-entering Looper.loop() (resume #%d)\n", (int)status, nth);
+        fflush(stderr);
+        if (env != nullptr) {
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            jclass loopCls = env->FindClass("android/os/Looper");
+            jmethodID myLooper = loopCls ? env->GetStaticMethodID(loopCls, "myLooper",
+                "()Landroid/os/Looper;") : nullptr;
+            jobject lp = myLooper ? env->CallStaticObjectMethod(loopCls, myLooper) : nullptr;
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            jmethodID loopM = loopCls ? env->GetStaticMethodID(loopCls, "loop", "()V") : nullptr;
+            if (lp != nullptr && loopM != nullptr) {
+                // Keep re-entering: a screen whose every frame rethrows (e.g. a text view that
+                // re-parses broken HTML on each tick) would otherwise burn the single resume and
+                // die anyway.  Bounded so a truly wedged app still terminates.
+                for (int i = nth; i <= kMaxResumes; ++i) {
+                    env->CallStaticVoidMethod(loopCls, loopM);   // normally never returns
+                    if (env->ExceptionCheck()) env->ExceptionClear();
+                    fprintf(stderr, "[WESTLAKE-412] Looper.loop() threw again — resume #%d\n", i);
+                    fflush(stderr);
+                    wl_resumes.store(i);
+                }
+                fprintf(stderr, "[WESTLAKE-412] resume budget exhausted (%d)\n", kMaxResumes);
+                fflush(stderr);
+                return;   // let the caller unwind
+            }
+            fprintf(stderr, "[WESTLAKE-412] no Looper on this thread — cannot resume\n");
+            fflush(stderr);
+        }
+        return;
+    }
+    fprintf(stderr, "[WESTLAKE-412] Runtime.nativeExit(%d) proceeding (fromInitChild=%d resumes=%d)\n",
+            (int)status, fromInitChild ? 1 : 0, wl_resumes.load());
+    fflush(stderr);
+    _exit(status);
+}
+
+// ============================================================
+// WESTLAKE §416 — give the app non-null local stubs for system services
+// ============================================================
+// The Settings screen cannot inflate its MaterialSwitch preference:
+//   InflateException: layout/preference_widget_material_switch
+//     caused by NullPointerException: UserManager.isUserUnlocked(int) on a null object reference
+// The same null UserManager also kills ViewRootImpl.enqueueInputEvent (autofill -> DeviceConfig ->
+// Settings$NameValueCache).  It is null because SystemServiceRegistry's fetcher does
+//   new UserManager(ctx, IUserManager.Stub.asInterface(ServiceManager.getServiceOrThrow("user")))
+// and ServiceManager has no "user" service here, so getServiceOrThrow throws
+// ServiceNotFoundException, the CachedServiceFetcher records STATE_NOT_FOUND and
+// getSystemService(USER_SERVICE) returns null forever.
+//
+// ServiceManager.getService(name) consults a static `sCache` map BEFORE asking the real service
+// manager, so seeding that map with a plain android.os.Binder makes the whole normal path work:
+// asInterface() sees no local interface and builds an AIDL Stub.Proxy; a transact() on a local
+// Binder returns false with an untouched reply Parcel, so readException() reads 0 (no exception)
+// and the result reads back as the type's zero value.  isUserUnlocked() therefore returns false
+// instead of throwing — which is all the inflate path needs.
+//
+// Deliberately narrow: seeding a service changes app behaviour, so only names we have diagnosed.
+static void wl_seed_service_manager_cache(JNIEnv* env) {
+    // "user"     — UserManager.isUserUnlocked, needed by MaterialSwitch inflate + autofill (§416)
+    // "shortcut"  — ShortcutManager.getDynamicShortcuts, thrown on entering the Presets tab (§419)
+    // "notification" — NotificationManager APIs are optional on this OHOS bridge, but
+    //                    the Android contract still exposes a non-null INotificationManager.
+    //                    A plain local Binder makes cancellation a no-op and queries return
+    //                    their safe zero/default values instead of throwing on a null receiver.
+    // "content"  — ContentResolver and WebView register process-local observers through
+    //              IContentService. OHOS has no Android SystemServer registry, so expose the
+    //              same generic Binder boundary: observer lifecycle is accepted as a no-op
+    //              and query results decode to their AIDL zero/default values.
+    static const char* kServices[] = { "user", "shortcut", "notification", "content" };
+
+    jclass smCls = env->FindClass("android/os/ServiceManager");
+    if (!smCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-416] android/os/ServiceManager not found\n");
+        return;
+    }
+    // AOSP declares `private static HashMap<String, IBinder> sCache`; accept a Map too.
+    jfieldID cacheF = env->GetStaticFieldID(smCls, "sCache", "Ljava/util/HashMap;");
+    if (!cacheF || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        cacheF = env->GetStaticFieldID(smCls, "sCache", "Ljava/util/Map;");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); cacheF = nullptr; }
+    }
+    if (cacheF == nullptr) {
+        fprintf(stderr, "[WESTLAKE-416] ServiceManager.sCache not found — cannot seed\n");
+        fflush(stderr);
+        return;
+    }
+    jobject cache = env->GetStaticObjectField(smCls, cacheF);
+    if (cache == nullptr || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-416] ServiceManager.sCache is null\n");
+        fflush(stderr);
+        return;
+    }
+    jclass mapCls = env->FindClass("java/util/Map");
+    jmethodID putM = mapCls ? env->GetMethodID(mapCls, "put",
+        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;") : nullptr;
+    jclass binderCls = env->FindClass("android/os/Binder");
+    jmethodID bCtor = binderCls ? env->GetMethodID(binderCls, "<init>", "()V") : nullptr;
+    if (putM == nullptr || bCtor == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-416] Map.put / Binder.<init> unresolved\n");
+        fflush(stderr);
+        return;
+    }
+    for (const char* name : kServices) {
+        jobject binder = env->NewObject(binderCls, bCtor);
+        if (binder == nullptr || env->ExceptionCheck()) {
+            env->ExceptionClear();
+            fprintf(stderr, "[WESTLAKE-416] new Binder() failed for '%s'\n", name);
+            continue;
+        }
+        jstring key = env->NewStringUTF(name);
+        jobject old = env->CallObjectMethod(cache, putM, key, binder);
+        const bool threw = env->ExceptionCheck();
+        if (threw) env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-416] seeded ServiceManager.sCache['%s'] (replaced=%d threw=%d)\n",
+                name, old != nullptr ? 1 : 0, threw ? 1 : 0);
+        if (old) env->DeleteLocalRef(old);
+        env->DeleteLocalRef(key);
+        env->DeleteLocalRef(binder);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(cache);
+    env->DeleteLocalRef(smCls);
+}
+
+// WESTLAKE §414 — android.view.KeyEvent.nativeNextId().
+// AOSP implements it in android_view_KeyEvent.cpp (returns InputEvent::nextId()); we never port
+// that file, so `new KeyEvent(...)` throws UnsatisfiedLinkError and NO key event can be built —
+// which is why injected BACK never worked.  The id only has to be unique-ish per event.
+static jint WL_KeyEvent_nativeNextId(JNIEnv*, jclass) {
+    static std::atomic<int32_t> next{1};
+    return static_cast<jint>(next.fetch_add(1));
+}
+
+// §416b: KeyEvent.nativeKeyCodeToString / nativeKeyCodeFromString are in the same unported AOSP
+// file.  The "Enable media buttons" preference formats key codes, and the missing native threw
+// UnsatisfiedLinkError on the main thread.  AOSP returns names like "KEYCODE_A"; the exact spelling
+// only matters for display, so synthesise "KEYCODE_<n>" and parse that form back.
+static jstring WL_KeyEvent_nativeKeyCodeToString(JNIEnv* env, jclass, jint keyCode) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "KEYCODE_%d", static_cast<int>(keyCode));
+    return env->NewStringUTF(buf);
+}
+
+static jint WL_KeyEvent_nativeKeyCodeFromString(JNIEnv* env, jclass, jstring s) {
+    if (s == nullptr) return 0;
+    const char* cs = env->GetStringUTFChars(s, nullptr);
+    jint rc = 0;
+    if (cs != nullptr) {
+        const char* p = strncmp(cs, "KEYCODE_", 8) == 0 ? cs + 8 : cs;
+        rc = static_cast<jint>(atoi(p));
+        env->ReleaseStringUTFChars(s, cs);
+    }
+    return rc;
+}
+
+static void wl_register_keyevent_natives(JNIEnv* env) {
+    jclass keCls = env->FindClass("android/view/KeyEvent");
+    if (!keCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-414] android/view/KeyEvent not found\n");
+        return;
+    }
+    static const JNINativeMethod m[] = {
+        {"nativeNextId", "()I", reinterpret_cast<void*>(WL_KeyEvent_nativeNextId)},
+        {"nativeKeyCodeToString", "(I)Ljava/lang/String;",
+         reinterpret_cast<void*>(WL_KeyEvent_nativeKeyCodeToString)},
+        {"nativeKeyCodeFromString", "(Ljava/lang/String;)I",
+         reinterpret_cast<void*>(WL_KeyEvent_nativeKeyCodeFromString)},
+    };
+    const jint rc = env->RegisterNatives(keCls, m, 3);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fprintf(stderr, "[WESTLAKE-414] KeyEvent.nativeNextId RegisterNatives rc=%d\n", (int)rc);
+    fflush(stderr);
+    env->DeleteLocalRef(keCls);
+}
+
+// ============================================================
+// WESTLAKE §423 — libcore.io.Linux.android_getaddrinfo (DNS)
+// ============================================================
+// THIS is why noice always said "The network is unreachable" even with working WiFi:
+//   [WESTLAKE-JNIMISS] java.net.InetAddress[] libcore.io.Linux.android_getaddrinfo(
+//                        java.lang.String, android.system.StructAddrinfo, int)
+// the native is UNREGISTERED, so every DNS lookup throws UnsatisfiedLinkError *before* a socket is
+// ever created. That matches the evidence exactly: an LD_PRELOAD trace of socket/connect/getaddrinfo
+// recorded ZERO calls from the app, and /proc/net/tcp never showed a socket for its uid, while a
+// probe running as that same uid resolved and connected fine.
+//
+// AOSP implements this in libcore's Linux.cpp on top of bionic's android_getaddrinfofornet(); that
+// symbol does not exist in musl, which is presumably why it was never wired up here. The netId only
+// selects a network on multi-network Android, and this board has exactly one, so plain getaddrinfo()
+// is equivalent. Addresses come back through the public InetAddress.getByAddress(String, byte[]).
+static jobjectArray WL_Linux_android_getaddrinfo(JNIEnv* env, jobject /*thiz*/,
+                                                 jstring jnode, jobject /*hints*/, jint /*netId*/) {
+    if (jnode == nullptr) return nullptr;
+    const char* node = env->GetStringUTFChars(jnode, nullptr);
+    if (node == nullptr) return nullptr;
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo* res = nullptr;
+    // Keep this Java/libcore boundary synchronous and single-shot.  A device
+    // run measured 148 hostname failures where all three former attempts
+    // returned the same error; none was rescued, while native Cronet loaded
+    // the feed independently.  Sleeping here therefore only serialized app
+    // startup.  Chromium's WebView-native resolver has its own bounded retry
+    // at the boundary where it was independently shown to recover a transient
+    // lookup failure.
+    const unsigned attempts = 1;
+    const int rc = getaddrinfo(node, nullptr, &hints, &res);
+    if (rc != 0 || res == nullptr) {
+        fprintf(stderr,
+                "[WESTLAKE-423] getaddrinfo(%s) failed attempts=%u rc=%d (%s)\n",
+                node, attempts, rc, gai_strerror(rc));
+        fflush(stderr);
+        env->ReleaseStringUTFChars(jnode, node);
+        if (res) freeaddrinfo(res);
+        return nullptr;   // libcore turns a null result into UnknownHostException
+    }
+
+    int n = 0;
+    for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
+        if (p->ai_family == AF_INET || p->ai_family == AF_INET6) n++;
+    }
+    jclass iaCls = env->FindClass("java/net/InetAddress");
+    jmethodID byAddr = iaCls ? env->GetStaticMethodID(iaCls, "getByAddress",
+        "(Ljava/lang/String;[B)Ljava/net/InetAddress;") : nullptr;
+    if (byAddr == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-423] InetAddress.getByAddress unresolved\n"); fflush(stderr);
+        env->ReleaseStringUTFChars(jnode, node);
+        freeaddrinfo(res);
+        return nullptr;
+    }
+    jobjectArray out = env->NewObjectArray(n, iaCls, nullptr);
+    int i = 0;
+    for (struct addrinfo* p = res; p != nullptr && i < n; p = p->ai_next) {
+        const unsigned char* raw = nullptr;
+        int len = 0;
+        if (p->ai_family == AF_INET) {
+            raw = (const unsigned char*)&((struct sockaddr_in*)p->ai_addr)->sin_addr; len = 4;
+        } else if (p->ai_family == AF_INET6) {
+            raw = (const unsigned char*)&((struct sockaddr_in6*)p->ai_addr)->sin6_addr; len = 16;
+        } else {
+            continue;
+        }
+        jbyteArray ba = env->NewByteArray(len);
+        env->SetByteArrayRegion(ba, 0, len, (const jbyte*)raw);
+        jobject ia = env->CallStaticObjectMethod(iaCls, byAddr, jnode, ba);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); }
+        else if (ia != nullptr) { env->SetObjectArrayElement(out, i++, ia); }
+        if (ia) env->DeleteLocalRef(ia);
+        env->DeleteLocalRef(ba);
+    }
+    fprintf(stderr,
+            "[WESTLAKE-423] getaddrinfo(%s) attempts=%u -> %d address(es)\n",
+            node, attempts, i);
+    fflush(stderr);
+    env->ReleaseStringUTFChars(jnode, node);
+    freeaddrinfo(res);
+    return out;
+}
+
+// WESTLAKE §424 — the rest of the missing libcore.io.Linux natives.
+// With DNS fixed (§423) the app got as far as creating a socket and hit the NEXT unregistered
+// native: `java.io.FileDescriptor libcore.io.Linux.socket(int,int,int)`. gettid/statvfs were
+// unregistered too. Same cause as the DNS one: libjavacore never bound them here.
+static jobject wl_new_fd(JNIEnv* env, int fd) {
+    jclass fdCls = env->FindClass("java/io/FileDescriptor");
+    if (!fdCls) { if (env->ExceptionCheck()) env->ExceptionClear(); return nullptr; }
+    jmethodID ctor = env->GetMethodID(fdCls, "<init>", "()V");
+    jfieldID descF = env->GetFieldID(fdCls, "descriptor", "I");
+    if (!ctor || !descF) { if (env->ExceptionCheck()) env->ExceptionClear(); return nullptr; }
+    jobject o = env->NewObject(fdCls, ctor);
+    if (o != nullptr) env->SetIntField(o, descF, fd);
+    return o;
+}
+
+static jobject WL_Linux_socket(JNIEnv* env, jobject, jint domain, jint type, jint protocol) {
+    const int fd = socket(domain, type, protocol);
+    if (fd < 0) {
+        fprintf(stderr, "[WESTLAKE-424] socket(%d,%d,%d) failed errno=%d\n",
+                (int)domain, (int)type, (int)protocol, errno);
+        fflush(stderr);
+        return nullptr;
+    }
+    return wl_new_fd(env, fd);
+}
+
+static jint WL_Linux_gettid(JNIEnv*, jobject) {
+    return static_cast<jint>(syscall(SYS_gettid));
+}
+
+static jobject WL_Linux_statvfs(JNIEnv* env, jobject, jstring jpath) {
+    if (jpath == nullptr) return nullptr;
+    const char* path = env->GetStringUTFChars(jpath, nullptr);
+    struct statvfs st;
+    const int rc = path ? statvfs(path, &st) : -1;
+    if (path) env->ReleaseStringUTFChars(jpath, path);
+    if (rc != 0) return nullptr;
+    jclass c = env->FindClass("android/system/StructStatVfs");
+    jmethodID ctor = c ? env->GetMethodID(c, "<init>", "(JJJJJJJJJJJ)V") : nullptr;
+    if (ctor == nullptr) { if (env->ExceptionCheck()) env->ExceptionClear(); return nullptr; }
+    return env->NewObject(c, ctor,
+        (jlong)st.f_bsize, (jlong)st.f_frsize, (jlong)st.f_blocks, (jlong)st.f_bfree,
+        (jlong)st.f_bavail, (jlong)st.f_files, (jlong)st.f_ffree, (jlong)st.f_favail,
+        (jlong)st.f_fsid, (jlong)st.f_flag, (jlong)st.f_namemax);
+}
+
+// WESTLAKE §769 — libcore.io.Linux.getifaddrs.
+//
+// java.net.NetworkInterface.getAll() is implemented on Android in terms of this
+// libcore native.  The OHOS libc already provides POSIX getifaddrs(3), so keep
+// the Android framework path intact and translate each libc record into the
+// public android.system.StructIfaddrs value object.  AF_PACKET records carry
+// the hardware address; AF_INET/AF_INET6 records carry the protocol addresses.
+static jobject wl_inet_address_from_sockaddr(JNIEnv* env, const sockaddr* sa) {
+    if (sa == nullptr || (sa->sa_family != AF_INET && sa->sa_family != AF_INET6)) {
+        return nullptr;
+    }
+    const unsigned char* bytes = nullptr;
+    jsize length = 0;
+    if (sa->sa_family == AF_INET) {
+        bytes = reinterpret_cast<const unsigned char*>(
+            &reinterpret_cast<const sockaddr_in*>(sa)->sin_addr);
+        length = 4;
+    } else {
+        bytes = reinterpret_cast<const unsigned char*>(
+            &reinterpret_cast<const sockaddr_in6*>(sa)->sin6_addr);
+        length = 16;
+    }
+
+    jclass inetClass = env->FindClass("java/net/InetAddress");
+    jmethodID getByAddress = inetClass
+        ? env->GetStaticMethodID(inetClass, "getByAddress", "([B)Ljava/net/InetAddress;")
+        : nullptr;
+    if (getByAddress == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (inetClass) env->DeleteLocalRef(inetClass);
+        return nullptr;
+    }
+    jbyteArray raw = env->NewByteArray(length);
+    if (raw == nullptr) {
+        env->DeleteLocalRef(inetClass);
+        return nullptr;
+    }
+    env->SetByteArrayRegion(raw, 0, length, reinterpret_cast<const jbyte*>(bytes));
+    jobject result = env->CallStaticObjectMethod(inetClass, getByAddress, raw);
+    env->DeleteLocalRef(raw);
+    env->DeleteLocalRef(inetClass);
+    return result;
+}
+
+static jobjectArray WL_Linux_getifaddrs(JNIEnv* env, jobject) {
+    struct ifaddrs* head = nullptr;
+    if (::getifaddrs(&head) != 0) {
+        fprintf(stderr, "[WESTLAKE-769] getifaddrs failed errno=%d\n", errno);
+        fflush(stderr);
+        return nullptr;
+    }
+
+    jclass structClass = env->FindClass("android/system/StructIfaddrs");
+    jmethodID ctor = structClass ? env->GetMethodID(structClass, "<init>",
+        "(Ljava/lang/String;ILjava/net/InetAddress;Ljava/net/InetAddress;"
+        "Ljava/net/InetAddress;[B)V") : nullptr;
+    if (ctor == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (structClass) env->DeleteLocalRef(structClass);
+        ::freeifaddrs(head);
+        fprintf(stderr, "[WESTLAKE-769] StructIfaddrs constructor unresolved\n");
+        fflush(stderr);
+        return nullptr;
+    }
+
+    jsize count = 0;
+    for (const struct ifaddrs* p = head; p != nullptr; p = p->ifa_next) {
+        if (p->ifa_name == nullptr || p->ifa_addr == nullptr) continue;
+        const int family = p->ifa_addr->sa_family;
+        if (family == AF_INET || family == AF_INET6 || family == AF_PACKET) count++;
+    }
+    jobjectArray result = env->NewObjectArray(count, structClass, nullptr);
+    jsize index = 0;
+    for (const struct ifaddrs* p = head; p != nullptr && index < count; p = p->ifa_next) {
+        if (p->ifa_name == nullptr || p->ifa_addr == nullptr) continue;
+        const int family = p->ifa_addr->sa_family;
+        if (family != AF_INET && family != AF_INET6 && family != AF_PACKET) continue;
+
+        jstring name = env->NewStringUTF(p->ifa_name);
+        jobject address = nullptr;
+        jobject netmask = nullptr;
+        jobject broadAddress = nullptr;
+        jbyteArray hardwareAddress = nullptr;
+        if (family == AF_INET || family == AF_INET6) {
+            address = wl_inet_address_from_sockaddr(env, p->ifa_addr);
+            netmask = wl_inet_address_from_sockaddr(env, p->ifa_netmask);
+            broadAddress = wl_inet_address_from_sockaddr(env, p->ifa_broadaddr);
+        } else {
+            const auto* packet = reinterpret_cast<const sockaddr_ll*>(p->ifa_addr);
+            if (packet->sll_halen > 0) {
+                const jsize length = static_cast<jsize>(packet->sll_halen);
+                hardwareAddress = env->NewByteArray(length);
+                if (hardwareAddress != nullptr) {
+                    env->SetByteArrayRegion(hardwareAddress, 0, length,
+                        reinterpret_cast<const jbyte*>(packet->sll_addr));
+                }
+            }
+        }
+
+        jobject entry = env->NewObject(structClass, ctor, name,
+            static_cast<jint>(p->ifa_flags), address, netmask, broadAddress, hardwareAddress);
+        if (!env->ExceptionCheck() && entry != nullptr) {
+            env->SetObjectArrayElement(result, index++, entry);
+        } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        if (entry) env->DeleteLocalRef(entry);
+        if (hardwareAddress) env->DeleteLocalRef(hardwareAddress);
+        if (broadAddress) env->DeleteLocalRef(broadAddress);
+        if (netmask) env->DeleteLocalRef(netmask);
+        if (address) env->DeleteLocalRef(address);
+        if (name) env->DeleteLocalRef(name);
+    }
+    ::freeifaddrs(head);
+    env->DeleteLocalRef(structClass);
+    fprintf(stderr, "[WESTLAKE-769] getifaddrs -> %d record(s)\n", (int)index);
+    fflush(stderr);
+    return result;
+}
+
+static jint WL_Linux_if_nametoindex(JNIEnv* env, jobject, jstring jname) {
+    if (jname == nullptr) return 0;
+    const char* name = env->GetStringUTFChars(jname, nullptr);
+    if (name == nullptr) return 0;
+    const unsigned index = ::if_nametoindex(name);
+    env->ReleaseStringUTFChars(jname, name);
+    fprintf(stderr, "[WESTLAKE-769] if_nametoindex -> %u\n", index);
+    fflush(stderr);
+    return static_cast<jint>(index);
+}
+
+static jstring WL_Linux_if_indextoname(JNIEnv* env, jobject, jint index) {
+    char name[IF_NAMESIZE] = {};
+    if (::if_indextoname(static_cast<unsigned>(index), name) == nullptr) return nullptr;
+    return env->NewStringUTF(name);
+}
+
+static jstring WL_Linux_getnameinfo(JNIEnv* env, jobject, jobject inetAddress, jint flags) {
+    if (inetAddress == nullptr) return nullptr;
+    jclass inetClass = env->FindClass("java/net/InetAddress");
+    jmethodID getAddress = inetClass
+        ? env->GetMethodID(inetClass, "getAddress", "()[B") : nullptr;
+    if (getAddress == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (inetClass) env->DeleteLocalRef(inetClass);
+        return nullptr;
+    }
+    auto raw = static_cast<jbyteArray>(env->CallObjectMethod(inetAddress, getAddress));
+    if (env->ExceptionCheck() || raw == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (raw) env->DeleteLocalRef(raw);
+        env->DeleteLocalRef(inetClass);
+        return nullptr;
+    }
+
+    sockaddr_storage storage = {};
+    socklen_t storageLength = 0;
+    const jsize length = env->GetArrayLength(raw);
+    if (length == 4) {
+        auto* address = reinterpret_cast<sockaddr_in*>(&storage);
+        address->sin_family = AF_INET;
+        env->GetByteArrayRegion(raw, 0, 4,
+            reinterpret_cast<jbyte*>(&address->sin_addr));
+        storageLength = sizeof(*address);
+    } else if (length == 16) {
+        auto* address = reinterpret_cast<sockaddr_in6*>(&storage);
+        address->sin6_family = AF_INET6;
+        env->GetByteArrayRegion(raw, 0, 16,
+            reinterpret_cast<jbyte*>(&address->sin6_addr));
+        jclass inet6Class = env->FindClass("java/net/Inet6Address");
+        if (inet6Class != nullptr && env->IsInstanceOf(inetAddress, inet6Class)) {
+            jmethodID getScopeId = env->GetMethodID(inet6Class, "getScopeId", "()I");
+            if (getScopeId != nullptr) {
+                address->sin6_scope_id = static_cast<uint32_t>(
+                    env->CallIntMethod(inetAddress, getScopeId));
+            } else if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+        }
+        if (inet6Class) env->DeleteLocalRef(inet6Class);
+        storageLength = sizeof(*address);
+    }
+    env->DeleteLocalRef(raw);
+    env->DeleteLocalRef(inetClass);
+    if (storageLength == 0) return nullptr;
+
+    char host[NI_MAXHOST] = {};
+    const int rc = ::getnameinfo(reinterpret_cast<const sockaddr*>(&storage), storageLength,
+        host, sizeof(host), nullptr, 0, static_cast<int>(flags));
+    if (rc != 0) {
+        fprintf(stderr, "[WESTLAKE-769] getnameinfo failed rc=%d (%s) flags=0x%x\n",
+            rc, gai_strerror(rc), static_cast<unsigned>(flags));
+        fflush(stderr);
+        return nullptr;
+    }
+    fprintf(stderr, "[WESTLAKE-769] getnameinfo -> %s\n", host);
+    fflush(stderr);
+    return env->NewStringUTF(host);
+}
+
+// ============================================================
+// WESTLAKE §425 — android.system.OsConstants was never initialised
+// ============================================================
+// With DNS fixed (§423) the app finally reached socket creation and asked for **socket(0,0,0)**,
+// which fails with EAFNOSUPPORT(97):
+//     [WESTLAKE-424] socket(0,0,0) failed errno=97
+//       at java.net.PlainSocketImpl.socketCreate / okhttp3.internal.connection.RealConnection
+// Those three arguments are `OsConstants.AF_INET6 / SOCK_STREAM / 0`. They are ALL ZERO because
+// android.system.OsConstants' statics were never populated: the class has no field initialisers,
+// its values are assigned by a native `initConstants()` invoked from <clinit>, and that never ran
+// here (the log has ZERO OsConstants mentions). Same shape as §404's MethodType.
+//
+// Repair: force <clinit>; if that leaves AF_INET at 0, call initConstants() directly; and if the
+// native itself is unbound, fall back to writing the constants the socket/file paths actually need.
+struct WlConst { const char* name; int value; };
+
+static void wl_repair_os_constants(JNIEnv* env) {
+    jclass cls = env->FindClass("android/system/OsConstants");
+    if (!cls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-425] android/system/OsConstants not found\n"); fflush(stderr);
+        return;
+    }
+    jfieldID afInet = env->GetStaticFieldID(cls, "AF_INET", "I");
+    if (!afInet || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-425] AF_INET field missing\n"); fflush(stderr);
+        return;
+    }
+    jint v = env->GetStaticIntField(cls, afInet);
+    fprintf(stderr, "[WESTLAKE-425] AF_INET before = %d\n", (int)v); fflush(stderr);
+    if (v != 0) return;   // already populated
+
+    // 1. run <clinit> (JNI FindClass does not)
+    jmethodID clinit = env->GetStaticMethodID(cls, "<clinit>", "()V");
+    if (env->ExceptionCheck()) { env->ExceptionClear(); clinit = nullptr; }
+    if (clinit != nullptr) {
+        env->CallStaticVoidMethod(cls, clinit);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); }
+        v = env->GetStaticIntField(cls, afInet);
+        fprintf(stderr, "[WESTLAKE-425] after <clinit> AF_INET = %d\n", (int)v); fflush(stderr);
+    }
+    // 2. call the native initialiser directly
+    if (v == 0) {
+        jmethodID init = env->GetStaticMethodID(cls, "initConstants", "()V");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); init = nullptr; }
+        if (init != nullptr) {
+            env->CallStaticVoidMethod(cls, init);
+            if (env->ExceptionCheck()) { env->ExceptionClear(); }
+            v = env->GetStaticIntField(cls, afInet);
+            fprintf(stderr, "[WESTLAKE-425] after initConstants AF_INET = %d\n", (int)v);
+            fflush(stderr);
+        }
+    }
+    if (v != 0) return;
+
+    // 3. last resort: write the constants the socket / file paths depend on (Linux aarch64 values)
+    static const WlConst kConsts[] = {
+        {"AF_UNSPEC", 0}, {"AF_UNIX", 1}, {"AF_INET", 2}, {"AF_INET6", 10}, {"AF_NETLINK", 16},
+        {"SOCK_STREAM", 1}, {"SOCK_DGRAM", 2}, {"SOCK_RAW", 3}, {"SOCK_SEQPACKET", 5},
+        {"SOCK_CLOEXEC", 02000000}, {"SOCK_NONBLOCK", 04000},
+        {"IPPROTO_IP", 0}, {"IPPROTO_ICMP", 1}, {"IPPROTO_TCP", 6}, {"IPPROTO_UDP", 17},
+        {"IPPROTO_IPV6", 41}, {"IPPROTO_RAW", 255},
+        {"SOL_SOCKET", 1},
+        {"SO_REUSEADDR", 2}, {"SO_KEEPALIVE", 9}, {"SO_BROADCAST", 6}, {"SO_LINGER", 13},
+        {"SO_SNDBUF", 7}, {"SO_RCVBUF", 8}, {"SO_SNDTIMEO", 21}, {"SO_RCVTIMEO", 20},
+        {"SO_ERROR", 4}, {"SO_OOBINLINE", 10}, {"SO_BINDTODEVICE", 25},
+        {"TCP_NODELAY", 1},
+        {"IPV6_MULTICAST_HOPS", 18}, {"IPV6_TCLASS", 67}, {"IPV6_V6ONLY", 26},
+        {"IP_TOS", 1}, {"IP_MULTICAST_TTL", 33}, {"IP_MULTICAST_ALL", IP_MULTICAST_ALL},
+        {"SHUT_RD", 0}, {"SHUT_WR", 1}, {"SHUT_RDWR", 2},
+        {"MSG_PEEK", 2}, {"MSG_OOB", 1}, {"MSG_DONTROUTE", 4},
+        {"O_RDONLY", 0}, {"O_WRONLY", 1}, {"O_RDWR", 2}, {"O_CREAT", 0100},
+        {"O_EXCL", 0200}, {"O_TRUNC", 01000}, {"O_APPEND", 02000}, {"O_NONBLOCK", 04000},
+        {"O_ACCMODE", 3}, {"O_CLOEXEC", 02000000},
+        {"S_IFMT", 0170000}, {"S_IFDIR", 040000}, {"S_IFREG", 0100000}, {"S_IFLNK", 0120000},
+        {"S_IFSOCK", 0140000}, {"S_IFIFO", 010000}, {"S_IFCHR", 020000}, {"S_IFBLK", 060000},
+        {"S_IRUSR", 0400}, {"S_IWUSR", 0200}, {"S_IXUSR", 0100},
+        {"F_GETFL", 3}, {"F_SETFL", 4}, {"F_GETFD", 1}, {"F_SETFD", 2}, {"F_DUPFD", 0},
+        {"FD_CLOEXEC", 1},
+        {"EAGAIN", 11}, {"EWOULDBLOCK", 11}, {"EINTR", 4}, {"EINPROGRESS", 115},
+        {"ECONNRESET", 104}, {"EPIPE", 32}, {"EBADF", 9}, {"ENOENT", 2}, {"EACCES", 13},
+        {"EEXIST", 17}, {"EINVAL", 22}, {"ETIMEDOUT", 110}, {"ECONNREFUSED", 111},
+        {"EHOSTUNREACH", 113}, {"ENETUNREACH", 101}, {"EAFNOSUPPORT", 97}, {"EISCONN", 106},
+        {"EALREADY", 114}, {"ENOTCONN", 107}, {"EADDRINUSE", 98},
+        {"POLLIN", 1}, {"POLLOUT", 4}, {"POLLERR", 8}, {"POLLHUP", 16}, {"POLLNVAL", 32},
+        {"SEEK_SET", 0}, {"SEEK_CUR", 1}, {"SEEK_END", 2},
+        {"MAP_PRIVATE", 2}, {"MAP_SHARED", 1}, {"MAP_ANONYMOUS", 040000},
+        {"PROT_READ", 1}, {"PROT_WRITE", 2}, {"PROT_EXEC", 4}, {"PROT_NONE", 0},
+        {"AI_ADDRCONFIG", 0x20}, {"AI_ALL", 0x10}, {"AI_CANONNAME", 0x2}, {"AI_NUMERICHOST", 0x4},
+        {"AI_PASSIVE", 0x1}, {"AI_V4MAPPED", 0x8},
+        {"NI_NUMERICHOST", 1}, {"NI_NUMERICSERV", 2},
+        {"EAI_AGAIN", -3}, {"EAI_NODATA", -5}, {"EAI_NONAME", -2}, {"EAI_SYSTEM", -11},
+    };
+    int set = 0, missing = 0;
+    for (const WlConst& c : kConsts) {
+        jfieldID f = env->GetStaticFieldID(cls, c.name, "I");
+        if (!f || env->ExceptionCheck()) { env->ExceptionClear(); missing++; continue; }
+        env->SetStaticIntField(cls, f, (jint)c.value);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); missing++; continue; }
+        set++;
+    }
+    fprintf(stderr, "[WESTLAKE-425] wrote %d constants by hand (%d absent); AF_INET now %d\n",
+            set, missing, (int)env->GetStaticIntField(cls, afInet));
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+// WESTLAKE §426 — the remaining unregistered socket natives.
+// Each fix reveals the next one, because the JNIMISS list only shows natives the app has actually
+// HIT. After §425 the app created a socket and immediately needed getsockoptInt/socketpair.
+static int wl_fd_of(JNIEnv* env, jobject fdObj) {
+    if (fdObj == nullptr) return -1;
+    jclass c = env->GetObjectClass(fdObj);
+    jfieldID f = c ? env->GetFieldID(c, "descriptor", "I") : nullptr;
+    if (!f) { if (env->ExceptionCheck()) env->ExceptionClear(); return -1; }
+    return (int)env->GetIntField(fdObj, f);
+}
+
+static void wl_set_fd(JNIEnv* env, jobject fdObj, int fd) {
+    if (fdObj == nullptr) return;
+    jclass c = env->GetObjectClass(fdObj);
+    jfieldID f = c ? env->GetFieldID(c, "descriptor", "I") : nullptr;
+    if (f) env->SetIntField(fdObj, f, fd);
+    else if (env->ExceptionCheck()) env->ExceptionClear();
+}
+
+/* Throw android.system.ErrnoException(functionName, errno) the way libcore callers expect. */
+static void wl_throw_errno(JNIEnv* env, const char* fn, int err) {
+    jclass c = env->FindClass("android/system/ErrnoException");
+    if (!c) { if (env->ExceptionCheck()) env->ExceptionClear(); return; }
+    jmethodID ctor = env->GetMethodID(c, "<init>", "(Ljava/lang/String;I)V");
+    if (!ctor) { if (env->ExceptionCheck()) env->ExceptionClear(); return; }
+    jstring n = env->NewStringUTF(fn);
+    jobject e = env->NewObject(c, ctor, n, (jint)err);
+    if (e) env->Throw((jthrowable)e);
+}
+
+static jint WL_Linux_getsockoptInt(JNIEnv* env, jobject, jobject jfd, jint level, jint option) {
+    int fd = wl_fd_of(env, jfd);
+    int value = 0;
+    socklen_t len = sizeof(value);
+    if (getsockopt(fd, level, option, &value, &len) < 0) {
+        wl_throw_errno(env, "getsockopt", errno);
+        return 0;
+    }
+    if (level == SOL_SOCKET && option == 4 /*SO_ERROR*/) {
+        fprintf(stderr, "[WESTLAKE-429] getsockopt(fd=%d, SO_ERROR) = %d (%s)\n",
+                fd, value, value ? strerror(value) : "no error");
+        fflush(stderr);
+    }
+    return (jint)value;
+}
+
+static void WL_Linux_setsockoptInt(JNIEnv* env, jobject, jobject jfd, jint level, jint option, jint value) {
+    int fd = wl_fd_of(env, jfd);
+    int v = (int)value;
+    if (setsockopt(fd, level, option, &v, sizeof(v)) < 0) {
+        const int error = errno;
+        // Android disables IP_MULTICAST_ALL on every dual-stack datagram
+        // socket. Some OH kernels predate this Linux option and return
+        // ENOPROTOOPT; their multicast behavior already matches the only
+        // available semantics, so absence of the optional knob is not a
+        // socket-creation failure.
+        if (error == ENOPROTOOPT && level == IPPROTO_IP &&
+            option == IP_MULTICAST_ALL && value == 0) {
+            return;
+        }
+        wl_throw_errno(env, "setsockopt", error);
+    }
+}
+
+static jobject WL_Linux_getsockoptLinger(JNIEnv* env, jobject, jobject jfd,
+                                         jint level, jint option) {
+    const int fd = wl_fd_of(env, jfd);
+    linger value{};
+    socklen_t length = sizeof(value);
+    if (getsockopt(fd, level, option, &value, &length) < 0) {
+        wl_throw_errno(env, "getsockopt", errno);
+        return nullptr;
+    }
+    jclass clazz = env->FindClass("android/system/StructLinger");
+    if (clazz == nullptr) return nullptr;
+    jmethodID constructor = env->GetMethodID(clazz, "<init>", "(II)V");
+    jobject result = constructor != nullptr
+            ? env->NewObject(clazz, constructor, value.l_onoff, value.l_linger)
+            : nullptr;
+    env->DeleteLocalRef(clazz);
+    return result;
+}
+
+static void WL_Linux_socketpair(JNIEnv* env, jobject, jint domain, jint type, jint protocol,
+                                jobject jfd1, jobject jfd2) {
+    int fds[2] = {-1, -1};
+    if (socketpair(domain, type, protocol, fds) < 0) { wl_throw_errno(env, "socketpair", errno); return; }
+    wl_set_fd(env, jfd1, fds[0]);
+    wl_set_fd(env, jfd2, fds[1]);
+}
+
+static jint WL_Linux_fcntlInt(JNIEnv* env, jobject, jobject jfd, jint cmd, jint arg) {
+    int fd = wl_fd_of(env, jfd);
+    int r = fcntl(fd, cmd, arg);
+    if (r < 0) { wl_throw_errno(env, "fcntl", errno); return 0; }
+    return (jint)r;
+}
+
+static void WL_Linux_connect(JNIEnv* env, jobject, jobject jfd, jobject jaddr, jint port) {
+    int fd = wl_fd_of(env, jfd);
+    if (fd < 0 || jaddr == nullptr) { wl_throw_errno(env, "connect", EBADF); return; }
+    jclass iaCls = env->FindClass("java/net/InetAddress");
+    jmethodID getAddr = iaCls ? env->GetMethodID(iaCls, "getAddress", "()[B") : nullptr;
+    jbyteArray ba = getAddr ? (jbyteArray)env->CallObjectMethod(jaddr, getAddr) : nullptr;
+    if (ba == nullptr) { if (env->ExceptionCheck()) env->ExceptionClear();
+                         wl_throw_errno(env, "connect", EINVAL); return; }
+    const jsize n = env->GetArrayLength(ba);
+    jbyte raw[16];
+    env->GetByteArrayRegion(ba, 0, n > 16 ? 16 : n, raw);
+    // §426b: Java opens AF_INET6 dual-stack sockets, so a 4-byte (IPv4) address must be sent as an
+    // IPv4-MAPPED v6 address (::ffff:a.b.c.d). Handing a sockaddr_in to an AF_INET6 socket fails
+    // with EINVAL — that was the "connect(35.94.160.101:443) = -1 Invalid argument".
+    int domain = AF_INET6;
+    {
+        int d = 0; socklen_t dl = sizeof(d);
+        if (getsockopt(fd, SOL_SOCKET, 39 /*SO_DOMAIN*/, &d, &dl) == 0 && d != 0) domain = d;
+    }
+    int rc;
+    if (n == 4 && domain == AF_INET) {
+        struct sockaddr_in a; memset(&a, 0, sizeof(a));
+        a.sin_family = AF_INET; a.sin_port = htons((uint16_t)port);
+        memcpy(&a.sin_addr, raw, 4);
+        rc = connect(fd, (struct sockaddr*)&a, sizeof(a));
+    } else if (n == 4) {
+        struct sockaddr_in6 a; memset(&a, 0, sizeof(a));
+        a.sin6_family = AF_INET6; a.sin6_port = htons((uint16_t)port);
+        a.sin6_addr.s6_addr[10] = 0xff; a.sin6_addr.s6_addr[11] = 0xff;
+        memcpy(&a.sin6_addr.s6_addr[12], raw, 4);
+        rc = connect(fd, (struct sockaddr*)&a, sizeof(a));
+    } else {
+        struct sockaddr_in6 a; memset(&a, 0, sizeof(a));
+        a.sin6_family = AF_INET6; a.sin6_port = htons((uint16_t)port);
+        memcpy(&a.sin6_addr, raw, 16);
+        rc = connect(fd, (struct sockaddr*)&a, sizeof(a));
+    }
+    fprintf(stderr, "[WESTLAKE-427] connect(fd=%d, %u bytes, port=%d, domain=%d) = %d%s%s\n",
+            fd, (unsigned)n, (int)port, domain, rc,
+            rc < 0 ? " errno=" : "", rc < 0 ? strerror(errno) : "");
+    fflush(stderr);
+    // §428: throw on EINPROGRESS TOO. AOSP's Linux_connect reports every failure, and
+    // IoBridge.connectErrno relies on catching EINPROGRESS to then poll() for completion.
+    // Swallowing it made Java believe a non-blocking connect had already finished, so it used a
+    // socket whose handshake was still in flight.
+    if (rc < 0) wl_throw_errno(env, "connect", errno);
+}
+
+static void WL_Linux_shutdown(JNIEnv* env, jobject, jobject jfd, jint how) {
+    int fd = wl_fd_of(env, jfd);
+    if (shutdown(fd, how) < 0 && errno != ENOTCONN) wl_throw_errno(env, "shutdown", errno);
+}
+
+static jobject WL_Linux_getsockname(JNIEnv* env, jobject, jobject jfd) {
+    int fd = wl_fd_of(env, jfd);
+    struct sockaddr_storage ss; memset(&ss, 0, sizeof(ss));
+    socklen_t len = sizeof(ss);
+    if (getsockname(fd, (struct sockaddr*)&ss, &len) < 0) { wl_throw_errno(env, "getsockname", errno); return nullptr; }
+    const unsigned char* raw = nullptr; int rawLen = 0, port = 0;
+    if (ss.ss_family == AF_INET) {
+        struct sockaddr_in* a = (struct sockaddr_in*)&ss;
+        raw = (const unsigned char*)&a->sin_addr; rawLen = 4; port = ntohs(a->sin_port);
+    } else if (ss.ss_family == AF_INET6) {
+        struct sockaddr_in6* a = (struct sockaddr_in6*)&ss;
+        raw = (const unsigned char*)&a->sin6_addr; rawLen = 16; port = ntohs(a->sin6_port);
+    } else {
+        return nullptr;
+    }
+    jclass iaCls = env->FindClass("java/net/InetAddress");
+    jmethodID byAddr = iaCls ? env->GetStaticMethodID(iaCls, "getByAddress", "([B)Ljava/net/InetAddress;") : nullptr;
+    if (!byAddr) { if (env->ExceptionCheck()) env->ExceptionClear(); return nullptr; }
+    jbyteArray ba = env->NewByteArray(rawLen);
+    env->SetByteArrayRegion(ba, 0, rawLen, (const jbyte*)raw);
+    jobject ia = env->CallStaticObjectMethod(iaCls, byAddr, ba);
+    if (env->ExceptionCheck()) { env->ExceptionClear(); return nullptr; }
+    jclass isaCls = env->FindClass("java/net/InetSocketAddress");
+    jmethodID ctor = isaCls ? env->GetMethodID(isaCls, "<init>", "(Ljava/net/InetAddress;I)V") : nullptr;
+    if (!ctor) { if (env->ExceptionCheck()) env->ExceptionClear(); return nullptr; }
+    return env->NewObject(isaCls, ctor, ia, (jint)port);
+}
+
+// §429: libcore.io.Linux.poll — IoBridge.connectErrno catches the EINPROGRESS thrown by connect()
+// and then poll()s the fd for writability to learn when the handshake finished. Without it the
+// non-blocking connect can never be completed.
+static jint WL_Linux_poll(JNIEnv* env, jobject, jobjectArray jfds, jint timeoutMs) {
+    const jsize n = jfds ? env->GetArrayLength(jfds) : 0;
+    if (n <= 0) return 0;
+    struct pollfd* pfds = (struct pollfd*)calloc((size_t)n, sizeof(struct pollfd));
+    if (pfds == nullptr) { wl_throw_errno(env, "poll", ENOMEM); return -1; }
+
+    jclass pfCls = env->FindClass("android/system/StructPollfd");
+    jfieldID fFd = pfCls ? env->GetFieldID(pfCls, "fd", "Ljava/io/FileDescriptor;") : nullptr;
+    jfieldID fEv = pfCls ? env->GetFieldID(pfCls, "events", "S") : nullptr;
+    jfieldID fRe = pfCls ? env->GetFieldID(pfCls, "revents", "S") : nullptr;
+    if (!fFd || !fEv || !fRe) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        free(pfds); wl_throw_errno(env, "poll", EINVAL); return -1;
+    }
+    for (jsize i = 0; i < n; ++i) {
+        jobject e = env->GetObjectArrayElement(jfds, i);
+        if (e == nullptr) { pfds[i].fd = -1; continue; }
+        jobject fdo = env->GetObjectField(e, fFd);
+        pfds[i].fd = fdo ? wl_fd_of(env, fdo) : -1;
+        pfds[i].events = (short)env->GetShortField(e, fEv);
+        if (fdo) env->DeleteLocalRef(fdo);
+        env->DeleteLocalRef(e);
+    }
+    int rc;
+    do { rc = poll(pfds, (nfds_t)n, (int)timeoutMs); } while (rc < 0 && errno == EINTR);
+    fprintf(stderr, "[WESTLAKE-429] poll(n=%d, timeout=%d) = %d fd0=%d events=0x%x revents=0x%x%s\n",
+            (int)n, (int)timeoutMs, rc, pfds[0].fd, (unsigned)pfds[0].events,
+            (unsigned)pfds[0].revents, rc < 0 ? strerror(errno) : "");
+    fflush(stderr);
+    if (rc < 0) { free(pfds); wl_throw_errno(env, "poll", errno); return -1; }
+    for (jsize i = 0; i < n; ++i) {
+        jobject e = env->GetObjectArrayElement(jfds, i);
+        if (e == nullptr) continue;
+        env->SetShortField(e, fRe, (jshort)pfds[i].revents);
+        env->DeleteLocalRef(e);
+    }
+    free(pfds);
+    return (jint)rc;
+}
+
+// ===================== WESTLAKE §441: REAL TLS (was a passthrough stub) =====================
+// adapter.compat.WestlakeSSLSocketFactory used to hand OkHttp back the *plain* socket, so the app
+// spoke cleartext HTTP to port 443; the server hung up and OkHttp reported
+// "EOFException: \n not found: limit=0". This implements the TLS client at the ABI boundary
+// (the westlake way) on top of OHOS's own OpenSSL 3.x, which ships on the device:
+//   /system/lib64/platformsdk/libssl_openssl.z.so  +  libcrypto_openssl.z.so
+// Certificates are really verified against /etc/ssl/certs/cacert.pem, and the hostname is checked
+// by OpenSSL itself via SSL_set1_host (OkHttp's OkHostnameVerifier then checks it a second time
+// using the leaf certificate we hand back through getPeerCertificates()).
+namespace {
+
+struct WlSslApi {
+    void* libssl = nullptr;
+    void* libcrypto = nullptr;
+    const void* (*TLS_client_method)();
+    void* (*SSL_CTX_new)(const void*);
+    int   (*SSL_CTX_load_verify_locations)(void*, const char*, const char*);
+    void  (*SSL_CTX_set_verify)(void*, int, void*);
+    void* (*SSL_new)(void*);
+    int   (*SSL_set_fd)(void*, int);
+    long  (*SSL_ctrl)(void*, int, long, void*);
+    int   (*SSL_set1_host)(void*, const char*);
+    int   (*SSL_connect)(void*);
+    int   (*SSL_read)(void*, void*, int);
+    int   (*SSL_write)(void*, const void*, int);
+    int   (*SSL_get_error)(const void*, int);
+    long  (*SSL_get_verify_result)(const void*);
+    void* (*SSL_get1_peer_certificate)(const void*);
+    void* (*SSL_get_peer_cert_chain)(const void*);
+    int (*OPENSSL_sk_num)(const void*);
+    void* (*OPENSSL_sk_value)(const void*, int);
+    const char* (*SSL_get_version)(const void*);
+    const void* (*SSL_get_current_cipher)(const void*);
+    const char* (*SSL_CIPHER_get_name)(const void*);
+    int   (*SSL_shutdown)(void*);
+    void  (*SSL_free)(void*);
+    int   (*i2d_X509)(void*, unsigned char**);
+    void  (*X509_free)(void*);
+    void* ctx = nullptr;
+    bool  ready = false;
+    bool  tried = false;
+};
+static WlSslApi g_tls;
+static pthread_mutex_t g_tls_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static const char* kCaFile = "/etc/ssl/certs/cacert.pem";
+
+static void* wl_tls_dlopen(const char* const* names) {
+    for (int i = 0; names[i] != nullptr; i++) {
+        void* h = dlopen(names[i], RTLD_NOW | RTLD_GLOBAL);
+        if (h != nullptr) {
+            fprintf(stderr, "[WESTLAKE-441] dlopen %s OK\n", names[i]);
+            return h;
+        }
+    }
+    return nullptr;
+}
+
+#define WL_TLS_SYM(handle, field)                                                   \
+    do {                                                                            \
+        g_tls.field = reinterpret_cast<decltype(g_tls.field)>(dlsym(handle, #field)); \
+        if (g_tls.field == nullptr) {                                               \
+            fprintf(stderr, "[WESTLAKE-441] MISSING symbol %s\n", #field);          \
+            missing++;                                                              \
+        }                                                                           \
+    } while (0)
+
+static bool wl_tls_init() {
+    pthread_mutex_lock(&g_tls_lock);
+    if (g_tls.tried) { pthread_mutex_unlock(&g_tls_lock); return g_tls.ready; }
+    g_tls.tried = true;
+
+    static const char* kSslNames[] = {
+        "libssl_openssl.z.so",
+        "/system/lib64/platformsdk/libssl_openssl.z.so",
+        "/system/lib64/chipset-sdk/libssl_openssl.z.so", nullptr };
+    static const char* kCryptoNames[] = {
+        "libcrypto_openssl.z.so",
+        "/system/lib64/platformsdk/libcrypto_openssl.z.so",
+        "/system/lib64/chipset-sdk-sp/libcrypto_openssl.z.so", nullptr };
+    g_tls.libssl    = wl_tls_dlopen(kSslNames);
+    g_tls.libcrypto = wl_tls_dlopen(kCryptoNames);
+    if (g_tls.libssl == nullptr || g_tls.libcrypto == nullptr) {
+        fprintf(stderr, "[WESTLAKE-441] dlopen FAILED ssl=%p crypto=%p err=%s\n",
+                g_tls.libssl, g_tls.libcrypto, dlerror());
+        fflush(stderr); pthread_mutex_unlock(&g_tls_lock); return false;
+    }
+
+    int missing = 0;
+    void* s = g_tls.libssl;
+    WL_TLS_SYM(s, TLS_client_method);      WL_TLS_SYM(s, SSL_CTX_new);
+    WL_TLS_SYM(s, SSL_CTX_load_verify_locations); WL_TLS_SYM(s, SSL_CTX_set_verify);
+    WL_TLS_SYM(s, SSL_new);                WL_TLS_SYM(s, SSL_set_fd);
+    WL_TLS_SYM(s, SSL_ctrl);               WL_TLS_SYM(s, SSL_set1_host);
+    WL_TLS_SYM(s, SSL_connect);            WL_TLS_SYM(s, SSL_read);
+    WL_TLS_SYM(s, SSL_write);              WL_TLS_SYM(s, SSL_get_error);
+    WL_TLS_SYM(s, SSL_get_verify_result);  WL_TLS_SYM(s, SSL_get1_peer_certificate);
+    WL_TLS_SYM(s, SSL_get_peer_cert_chain);
+    WL_TLS_SYM(s, SSL_get_version);        WL_TLS_SYM(s, SSL_get_current_cipher);
+    WL_TLS_SYM(s, SSL_CIPHER_get_name);    WL_TLS_SYM(s, SSL_shutdown);
+    WL_TLS_SYM(s, SSL_free);
+    void* c = g_tls.libcrypto;
+    WL_TLS_SYM(c, i2d_X509);               WL_TLS_SYM(c, X509_free);
+    WL_TLS_SYM(c, OPENSSL_sk_num);         WL_TLS_SYM(c, OPENSSL_sk_value);
+    if (missing > 0) {
+        fprintf(stderr, "[WESTLAKE-441] %d symbol(s) missing — TLS unavailable\n", missing);
+        fflush(stderr); pthread_mutex_unlock(&g_tls_lock); return false;
+    }
+
+    g_tls.ctx = g_tls.SSL_CTX_new(g_tls.TLS_client_method());
+    if (g_tls.ctx == nullptr) {
+        fprintf(stderr, "[WESTLAKE-441] SSL_CTX_new FAILED\n");
+        fflush(stderr); pthread_mutex_unlock(&g_tls_lock); return false;
+    }
+    const int loaded = g_tls.SSL_CTX_load_verify_locations(g_tls.ctx, kCaFile, nullptr);
+    // SSL_VERIFY_PEER = 1. Keep verification ON: a silently-insecure client is worse than none.
+    g_tls.SSL_CTX_set_verify(g_tls.ctx, 1, nullptr);
+    fprintf(stderr, "[WESTLAKE-441] SSL_CTX ready ca=%s loaded=%d verify=PEER\n", kCaFile, loaded);
+    fflush(stderr);
+    g_tls.ready = (loaded == 1);
+    if (!g_tls.ready) {
+        fprintf(stderr, "[WESTLAKE-441] CA bundle did NOT load — refusing to run unverified\n");
+        fflush(stderr);
+    }
+    pthread_mutex_unlock(&g_tls_lock);
+    return g_tls.ready;
+}
+
+// §517: throw a NAMED exception. A read that timed out or failed is NOT end-of-stream, and the two
+// must not be reported the same way — see WL_TLS_read.
+static void wl_tls_throw_named(JNIEnv* env, const char* cls, const char* msg) {
+    if (env->ExceptionCheck()) return;   // never mask an exception already in flight
+    jclass c = env->FindClass(cls);
+    if (c == nullptr) { env->ExceptionClear(); c = env->FindClass("java/io/IOException"); }
+    if (c != nullptr) { env->ThrowNew(c, msg); env->DeleteLocalRef(c); }
+}
+
+static void wl_tls_throw_io(JNIEnv* env, const char* what, int err) {
+    char buf[192];
+    snprintf(buf, sizeof(buf), "WestlakeTLS: %s failed (ssl_err=%d)", what, err);
+    jclass ioe = env->FindClass("javax/net/ssl/SSLException");
+    if (ioe == nullptr) { env->ExceptionClear(); ioe = env->FindClass("java/io/IOException"); }
+    if (ioe != nullptr) env->ThrowNew(ioe, buf);
+}
+
+// Drive a would-block SSL op. Returns true to retry, false if it really failed/timed out.
+// §521: tri-state. Collapsing "deadline expired" and "poll() failed" into one boolean made both
+// surface as SocketTimeoutException, which misreports a broken transport as a slow one.
+enum WlWait { WL_WAIT_READY = 0, WL_WAIT_TIMEOUT = 1, WL_WAIT_ERROR = 2 };
+static WlWait wl_tls_wait(int fd, int sslErr, int timeoutMs) {
+    if (sslErr != 2 /*WANT_READ*/ && sslErr != 3 /*WANT_WRITE*/) return WL_WAIT_ERROR;
+    struct pollfd p;
+    p.fd = fd;
+    p.events = (sslErr == 2) ? POLLIN : POLLOUT;
+    p.revents = 0;
+    const int r = poll(&p, 1, timeoutMs);
+    if (r > 0)  return WL_WAIT_READY;
+    if (r == 0) return WL_WAIT_TIMEOUT;
+    return WL_WAIT_ERROR;
+}
+
+// §447: dump the first few HTTP bytes each way so we can see the actual request/response.
+static int g_tls_dump_count = 0;
+static bool wl_tls_is_http_head(const char* op, const jbyte* data, int n) {
+    if (op == nullptr || data == nullptr || n <= 0) return false;
+    const char* p = reinterpret_cast<const char*>(data);
+    if (strncmp(op, "-->", 3) == 0) {
+        static const char* const kMethods[] = {
+            "GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "HEAD ", "OPTIONS "
+        };
+        for (const char* method : kMethods) {
+            const size_t len = strlen(method);
+            if (n >= static_cast<int>(len) && memcmp(p, method, len) == 0) return true;
+        }
+        return false;
+    }
+    return n >= 5 && memcmp(p, "HTTP/", 5) == 0;
+}
+
+static void wl_tls_dump(const char* op, const jbyte* data, int n) {
+    if (n <= 0) return;
+    // §751: opt-in request-line tracing for late, user-driven network paths.  The original
+    // six-chunk cap is consumed during cold start, so it cannot diagnose a request made minutes
+    // later (for example after opening a media tab).  In diagnostic mode log only an HTTP request
+    // or status line -- never a body, cookies, or authorization headers.  With the environment
+    // variable absent, behavior remains exactly the §447 six bounded dumps.
+    const char* httpHeads = getenv("WL_TLS_DUMP_HTTP_HEADS");
+    const bool headsOnly = httpHeads != nullptr && httpHeads[0] != '\0' &&
+                           strcmp(httpHeads, "0") != 0;
+    if (headsOnly) {
+        if (!wl_tls_is_http_head(op, data, n)) return;
+        const int cap = (n < 1024) ? n : 1024;
+        int lineLen = 0;
+        while (lineLen < cap && data[lineLen] != '\r' && data[lineLen] != '\n') lineLen++;
+        std::string line(reinterpret_cast<const char*>(data), static_cast<size_t>(lineLen));
+        fprintf(stderr, "[WESTLAKE-HTTPHEAD-751] %s %s\n", op, line.c_str());
+        fflush(stderr);
+        return;
+    }
+    if (g_tls_dump_count >= 6) return;
+    g_tls_dump_count++;
+    const int cap = (n < 420) ? n : 420;
+    std::string out;
+    out.reserve((size_t)cap + 8);
+    for (int i = 0; i < cap; i++) {
+        const unsigned char c = (unsigned char)data[i];
+        if (c == '\r') { out += "\\r"; }
+        else if (c == '\n') { out += "\\n"; }
+        else if (c >= 32 && c < 127) { out += (char)c; }
+        else { out += '.'; }
+    }
+    fprintf(stderr, "[WESTLAKE-447] %s %d bytes: %s%s\n", op, n, out.c_str(),
+            (n > cap) ? " ...(truncated)" : "");
+    fflush(stderr);
+}
+
+// Opt-in diagnostic for a user-driven Search response. Request/status-line tracing proves only
+// that the server answered; it cannot distinguish an empty response body from data discarded by
+// the Java/JS bridge afterward. Track only connections that send GET /search/ and cap each raw,
+// decrypted capture at 4 MiB. The switch is absent in production launches, and no request headers
+// are written to disk.
+static pthread_mutex_t g_tls_search_dump_mu = PTHREAD_MUTEX_INITIALIZER;
+static std::map<int, size_t>* g_tls_search_dump_fds = nullptr;
+
+static void wl_tls_search_dump_request(int fd, const jbyte* data, int n) {
+    const char* enabled = getenv("WL_TLS_DUMP_SEARCH_BODY");
+    if (enabled == nullptr || enabled[0] == '\0' || strcmp(enabled, "0") == 0 ||
+        data == nullptr || n < 13 || memcmp(data, "GET /search/?", 13) != 0) {
+        return;
+    }
+    pthread_mutex_lock(&g_tls_search_dump_mu);
+    if (g_tls_search_dump_fds == nullptr) {
+        g_tls_search_dump_fds = new std::map<int, size_t>();
+    }
+    (*g_tls_search_dump_fds)[fd] = 0;
+    pthread_mutex_unlock(&g_tls_search_dump_mu);
+
+    char path[160];
+    snprintf(path, sizeof(path), "/data/local/tmp/asx/search-response-%d-fd%d.bin",
+             static_cast<int>(getpid()), fd);
+    FILE* output = fopen(path, "wb");
+    if (output != nullptr) fclose(output);
+    fprintf(stderr, "[WESTLAKE-SEARCHBODY-790] tracking fd=%d path=%s\n", fd, path);
+    fflush(stderr);
+}
+
+static void wl_tls_search_dump_response(int fd, const jbyte* data, int n) {
+    if (data == nullptr || n <= 0) return;
+    constexpr size_t kLimit = 4U * 1024U * 1024U;
+    size_t offset = 0;
+    size_t writeSize = 0;
+    pthread_mutex_lock(&g_tls_search_dump_mu);
+    if (g_tls_search_dump_fds != nullptr) {
+        std::map<int, size_t>::iterator it = g_tls_search_dump_fds->find(fd);
+        if (it != g_tls_search_dump_fds->end() && it->second < kLimit) {
+            offset = it->second;
+            writeSize = static_cast<size_t>(n);
+            if (writeSize > kLimit - offset) writeSize = kLimit - offset;
+            it->second += writeSize;
+        }
+    }
+    pthread_mutex_unlock(&g_tls_search_dump_mu);
+    if (writeSize == 0) return;
+
+    char path[160];
+    snprintf(path, sizeof(path), "/data/local/tmp/asx/search-response-%d-fd%d.bin",
+             static_cast<int>(getpid()), fd);
+    FILE* output = fopen(path, offset == 0 ? "wb" : "ab");
+    if (output != nullptr) {
+        fwrite(data, 1, writeSize, output);
+        fclose(output);
+    }
+}
+
+// §446: bounded I/O tracing so a premature EOF can be told apart from a real one.
+static int g_tls_io_logged = 0;
+static void wl_tls_log_io(const char* op, const char* what, int n, int sslErr, int fd) {
+    const bool interesting = (strcmp(what, "ok") != 0);
+    if (!interesting && g_tls_io_logged >= 12) return;
+    if (g_tls_io_logged >= 200) return;
+    g_tls_io_logged++;
+    fprintf(stderr, "[WESTLAKE-446] tls %s %s fd=%d n=%d ssl_err=%d errno=%s\n",
+            op, what, fd, n, sslErr, (errno != 0) ? strerror(errno) : "-");
+    fflush(stderr);
+}
+
+// ── §604: SSL handle lifetime registry — fixes the use-after-free that made audio impossible ──
+// `WL_TLS_close` used to `SSL_free()` the object while the Java side kept the raw pointer in a
+// jlong, and read/write/peerCert/info took it straight back with only a null check. Any use that
+// raced or followed a close therefore ran OpenSSL on freed memory.
+// Caught on the noice audio path (§604): the freed block had been recycled to hold UTF-16 Java
+// string data, so `BIO_read` dispatched through a function pointer whose value WAS TEXT —
+// `pc=0x6f006900640075` == `"udio"` (from an "audio/…" string) → SIGBUS, child dead.
+// That is why tapping play produced no sound: the crash lands while fetching the MP3 segment, so
+// everything downstream (MediaCodec → AudioTrack → OH_AudioRenderer) was never reached. The media
+// pipeline was never at fault.
+//
+// Every live SSL gets an entry with an in-flight refcount. `close` marks it dead immediately, so no
+// NEW user can pin it, and defers SSL_shutdown/SSL_free to the last in-flight user — a blocking
+// read already inside OpenSSL therefore keeps operating on valid memory instead of faulting.
+struct WlTlsEnt { int refs; bool closed; };
+static pthread_mutex_t g_tls_reg_mu = PTHREAD_MUTEX_INITIALIZER;
+static std::map<void*, WlTlsEnt>* g_tls_reg = nullptr;  // intentionally never torn down
+
+static void wl_tls_reg_add(void* ssl) {
+    if (ssl == nullptr) return;
+    pthread_mutex_lock(&g_tls_reg_mu);
+    if (g_tls_reg == nullptr) g_tls_reg = new std::map<void*, WlTlsEnt>();
+    WlTlsEnt e; e.refs = 0; e.closed = false;
+    (*g_tls_reg)[ssl] = e;
+    pthread_mutex_unlock(&g_tls_reg_mu);
+}
+
+// Validate + pin. Returns nullptr for a handle that is closed, unknown, or never ours.
+static void* wl_tls_pin(jlong handle) {
+    void* ssl = (void*)(uintptr_t)handle;
+    if (ssl == nullptr) return nullptr;
+    void* out = nullptr;
+    pthread_mutex_lock(&g_tls_reg_mu);
+    if (g_tls_reg != nullptr) {
+        std::map<void*, WlTlsEnt>::iterator it = g_tls_reg->find(ssl);
+        if (it != g_tls_reg->end() && !it->second.closed) { it->second.refs++; out = ssl; }
+    }
+    pthread_mutex_unlock(&g_tls_reg_mu);
+    if (out == nullptr) {
+        fprintf(stderr, "[WESTLAKE-604] rejected stale TLS handle %p (use after close)\n", ssl);
+        fflush(stderr);
+    }
+    return out;
+}
+
+static void wl_tls_unpin(void* ssl) {
+    if (ssl == nullptr) return;
+    bool reap = false;
+    pthread_mutex_lock(&g_tls_reg_mu);
+    if (g_tls_reg != nullptr) {
+        std::map<void*, WlTlsEnt>::iterator it = g_tls_reg->find(ssl);
+        if (it != g_tls_reg->end()) {
+            if (it->second.refs > 0) it->second.refs--;
+            if (it->second.closed && it->second.refs == 0) { g_tls_reg->erase(it); reap = true; }
+        }
+    }
+    pthread_mutex_unlock(&g_tls_reg_mu);
+    if (reap) { g_tls.SSL_shutdown(ssl); g_tls.SSL_free(ssl); }
+}
+
+// RAII pin, so the many early returns in read/write cannot leak a reference.
+struct WlTlsUse {
+    void* ssl;
+    explicit WlTlsUse(jlong h) : ssl(wl_tls_pin(h)) {}
+    ~WlTlsUse() { if (ssl != nullptr) wl_tls_unpin(ssl); }
+    WlTlsUse(const WlTlsUse&) = delete;
+    WlTlsUse& operator=(const WlTlsUse&) = delete;
+};
+
+static jlong WL_TLS_handshake(JNIEnv* env, jclass, jint fd, jstring jhost, jint timeoutMs) {
+    if (!wl_tls_init()) { wl_tls_throw_io(env, "init", 0); return 0; }
+    const char* host = (jhost != nullptr) ? env->GetStringUTFChars(jhost, nullptr) : nullptr;
+
+    void* ssl = g_tls.SSL_new(g_tls.ctx);
+    if (ssl == nullptr) {
+        if (host) env->ReleaseStringUTFChars(jhost, host);
+        wl_tls_throw_io(env, "SSL_new", 0); return 0;
+    }
+    g_tls.SSL_set_fd(ssl, (int)fd);
+    if (host != nullptr) {
+        // SNI: SSL_CTRL_SET_TLSEXT_HOSTNAME=55, TLSEXT_NAMETYPE_host_name=0
+        g_tls.SSL_ctrl(ssl, 55, 0, const_cast<char*>(host));
+        g_tls.SSL_set1_host(ssl, host);   // OpenSSL-side hostname verification
+    }
+
+    const int deadline = (timeoutMs > 0) ? timeoutMs : 30000;
+    int rc;
+    for (;;) {
+        rc = g_tls.SSL_connect(ssl);
+        if (rc == 1) break;
+        const int e = g_tls.SSL_get_error(ssl, rc);
+        if (wl_tls_wait((int)fd, e, deadline) != WL_WAIT_READY) {
+            fprintf(stderr, "[WESTLAKE-441] handshake FAILED host=%s rc=%d ssl_err=%d errno=%s\n",
+                    host ? host : "?", rc, e, strerror(errno));
+            fflush(stderr);
+            g_tls.SSL_free(ssl);
+            if (host) env->ReleaseStringUTFChars(jhost, host);
+            wl_tls_throw_io(env, "handshake", e);
+            return 0;
+        }
+    }
+    const long vr = g_tls.SSL_get_verify_result(ssl);
+    if (vr != 0 /*X509_V_OK*/) {
+        fprintf(stderr, "[WESTLAKE-441] CERT VERIFY FAILED host=%s result=%ld\n",
+                host ? host : "?", vr);
+        fflush(stderr);
+        g_tls.SSL_free(ssl);
+        if (host) env->ReleaseStringUTFChars(jhost, host);
+        wl_tls_throw_io(env, "certificate verification", (int)vr);
+        return 0;
+    }
+    const char* ver = g_tls.SSL_get_version(ssl);
+    const void* cip = g_tls.SSL_get_current_cipher(ssl);
+    fprintf(stderr, "[WESTLAKE-441] HANDSHAKE OK host=%s proto=%s cipher=%s verify=OK\n",
+            host ? host : "?", ver ? ver : "?",
+            cip ? g_tls.SSL_CIPHER_get_name(cip) : "?");
+    fflush(stderr);
+    if (host) env->ReleaseStringUTFChars(jhost, host);
+    wl_tls_reg_add(ssl);   // §604: from here on the handle is validatable
+    return (jlong)(uintptr_t)ssl;
+}
+
+static jint WL_TLS_read(JNIEnv* env, jclass, jlong handle, jint fd, jbyteArray buf,
+                        jint off, jint len, jint timeoutMs) {
+    WlTlsUse use(handle);            // §604: reject a stale handle instead of faulting on freed memory
+    void* ssl = use.ssl;
+    if (ssl == nullptr || buf == nullptr) return -1;
+    if (len <= 0) return 0;
+    jbyte* tmp = (jbyte*)malloc((size_t)len);
+    if (tmp == nullptr) return -1;
+    const int deadline = (timeoutMs > 0) ? timeoutMs : 60000;
+    int n;
+    for (;;) {
+        errno = 0;
+        n = g_tls.SSL_read(ssl, tmp, len);
+        if (n > 0) break;
+        const int e = g_tls.SSL_get_error(ssl, n);
+        if (e == 6 /*SSL_ERROR_ZERO_RETURN*/) {          // peer closed cleanly
+            wl_tls_log_io("read", "peer closed (ZERO_RETURN)", n, e, fd);
+            free(tmp); return -1;
+        }
+        if (e == 2 /*WANT_READ*/ || e == 3 /*WANT_WRITE*/) {
+            const WlWait w = wl_tls_wait((int)fd, e, deadline);
+            if (w != WL_WAIT_READY) {
+                // §517: was `return -1`, which Java reports to the caller as END-OF-STREAM. A
+                // timeout mid-body then looks like a clean EOF: OkHttp raises "unexpected end of
+                // stream" and abandons the partially written cache entry. That is exactly how a
+                // 1,392,045-byte CDN body ended up frozen as a 1,056,459-byte .tmp, stalling
+                // playback after one segment. Report it as what it is.
+                wl_tls_log_io("read", (w == WL_WAIT_TIMEOUT) ? "poll timeout" : "poll error", n, e, fd);
+                free(tmp);
+                wl_tls_throw_named(env,
+                    (w == WL_WAIT_TIMEOUT) ? "java/net/SocketTimeoutException"
+                                           : "javax/net/ssl/SSLException",
+                    (w == WL_WAIT_TIMEOUT) ? "WestlakeTLS: read timed out"
+                                           : "WestlakeTLS: poll failed during read");
+                return -1;
+            }
+            continue;
+        }
+        // §446: SSL_ERROR_SYSCALL with a retryable errno is NOT end-of-stream. Treating it as EOF
+        // is what produced OkHttp's "EOFException: \n not found: limit=0" on a healthy connection.
+        if (e == 5 /*SSL_ERROR_SYSCALL*/ && n < 0 &&
+            (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+            const WlWait w2 = wl_tls_wait((int)fd, 2 /*poll readable*/, deadline);
+            if (w2 != WL_WAIT_READY) {
+                wl_tls_log_io("read", "poll after EAGAIN failed", n, e, fd);
+                free(tmp);
+                wl_tls_throw_named(env,
+                    (w2 == WL_WAIT_TIMEOUT) ? "java/net/SocketTimeoutException"
+                                            : "javax/net/ssl/SSLException",
+                    "WestlakeTLS: read failed after EAGAIN");
+                return -1;
+            }
+            continue;
+        }
+        // §521 (corrects §517): SSL_ERROR_SYSCALL with n==0 and no errno is precisely how OpenSSL
+        // reports an *UNEXPECTED* EOF — the peer vanished WITHOUT close_notify. It is NOT clean end
+        // of stream; only SSL_ERROR_ZERO_RETURN is. Returning -1 here reinstated the exact silent
+        // truncation §517 set out to remove: a body cut short mid-transfer looked to Java like a
+        // stream that had ended normally. Report it as the transport failure it is and let the
+        // caller decide (OkHttp surfaces "unexpected end of stream" and can retry).
+        if (e == 5 /*SSL_ERROR_SYSCALL*/ && n == 0 && errno == 0) {
+            wl_tls_log_io("read", "unexpected EOF (no close_notify)", n, e, fd);
+            free(tmp);
+            wl_tls_throw_named(env, "javax/net/ssl/SSLProtocolException",
+                               "WestlakeTLS: connection closed without close_notify");
+            return -1;
+        }
+        wl_tls_log_io("read", "fatal", n, e, fd);
+        free(tmp);
+        wl_tls_throw_named(env, "javax/net/ssl/SSLException", "WestlakeTLS: read failed");
+        return -1;
+    }
+    env->SetByteArrayRegion(buf, off, n, tmp);
+    wl_tls_dump("<-- recv", tmp, n);
+    wl_tls_search_dump_response(fd, tmp, n);
+    free(tmp);
+    wl_tls_log_io("read", "ok", n, 0, fd);
+    return n;
+}
+
+static jint WL_TLS_write(JNIEnv* env, jclass, jlong handle, jint fd, jbyteArray buf,
+                         jint off, jint len, jint timeoutMs) {
+    WlTlsUse use(handle);            // §604
+    void* ssl = use.ssl;
+    if (ssl == nullptr || buf == nullptr) return -1;
+    if (len <= 0) return 0;
+    jbyte* tmp = (jbyte*)malloc((size_t)len);
+    if (tmp == nullptr) return -1;
+    env->GetByteArrayRegion(buf, off, len, tmp);
+    wl_tls_dump("--> send", tmp, len);
+    wl_tls_search_dump_request(fd, tmp, len);
+    const int deadline = (timeoutMs > 0) ? timeoutMs : 60000;
+    int done = 0;
+    while (done < len) {
+        errno = 0;
+        const int n = g_tls.SSL_write(ssl, tmp + done, len - done);
+        if (n > 0) { done += n; continue; }
+        const int e = g_tls.SSL_get_error(ssl, n);
+        if (e == 2 /*WANT_READ*/ || e == 3 /*WANT_WRITE*/) {
+            const WlWait w = wl_tls_wait((int)fd, e, deadline);
+            if (w != WL_WAIT_READY) {
+                wl_tls_log_io("write", "poll timeout/error", n, e, fd);
+                free(tmp); return -1;
+            }
+            continue;
+        }
+        if (e == 5 /*SSL_ERROR_SYSCALL*/ && n < 0 &&
+            (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+            if (!wl_tls_wait((int)fd, 3 /*poll writable*/, deadline)) {
+                wl_tls_log_io("write", "poll after EAGAIN failed", n, e, fd);
+                free(tmp); return -1;
+            }
+            continue;
+        }
+        wl_tls_log_io("write", "fatal", n, e, fd);
+        free(tmp); return -1;
+    }
+    free(tmp);
+    wl_tls_log_io("write", "ok", done, 0, fd);
+    return done;
+}
+
+static jbyteArray WL_TLS_peerCert(JNIEnv* env, jclass, jlong handle) {
+    WlTlsUse use(handle);            // §604
+    void* ssl = use.ssl;
+    if (ssl == nullptr) return nullptr;
+    void* x = g_tls.SSL_get1_peer_certificate(ssl);
+    if (x == nullptr) return nullptr;
+    const int n = g_tls.i2d_X509(x, nullptr);
+    jbyteArray out = nullptr;
+    if (n > 0 && n <= 1024 * 1024) {
+        std::vector<unsigned char> der(static_cast<size_t>(n));
+        unsigned char* cursor = der.data();
+        if (g_tls.i2d_X509(x, &cursor) != n) { g_tls.X509_free(x); return nullptr; }
+        out = env->NewByteArray(n);
+        if (out != nullptr) env->SetByteArrayRegion(out, 0, n, (const jbyte*)der.data());
+    }
+    g_tls.X509_free(x);
+    return out;
+}
+
+// Client-side OpenSSL returns the peer-sent chain with the leaf first. The
+// root is normally not sent and must not be invented or trusted here. Keep the
+// live-handle pin until all borrowed X509 objects have been DER-encoded.
+static jbyteArray WL_TLS_peerChain(JNIEnv* env, jclass, jlong handle) {
+    WlTlsUse use(handle);
+    if (!use.ssl) {
+        wl_tls_throw_named(env, "javax/net/ssl/SSLPeerUnverifiedException", "TLS session is closed");
+        return nullptr;
+    }
+    void* chain = g_tls.SSL_get_peer_cert_chain(use.ssl);
+    const int count = chain ? g_tls.OPENSSL_sk_num(chain) : 0;
+    if (count <= 0 || count > 64) {
+        wl_tls_throw_named(env, "javax/net/ssl/SSLPeerUnverifiedException", "Peer certificate chain unavailable");
+        return nullptr;
+    }
+    std::vector<unsigned char> encoded;
+    for (int i = 0; i < count; ++i) {
+        void* cert = g_tls.OPENSSL_sk_value(chain, i);
+        const int size = cert ? g_tls.i2d_X509(cert, nullptr) : 0;
+        if (size <= 0 || size > 1024 * 1024 || encoded.size() + size > 4U * 1024U * 1024U) {
+            wl_tls_throw_named(env, "javax/net/ssl/SSLPeerUnverifiedException", "Invalid peer certificate encoding");
+            return nullptr;
+        }
+        const size_t offset = encoded.size();
+        encoded.resize(offset + size);
+        unsigned char* cursor = encoded.data() + offset;
+        if (g_tls.i2d_X509(cert, &cursor) != size) {
+            wl_tls_throw_named(env, "javax/net/ssl/SSLPeerUnverifiedException", "Peer certificate encoding failed");
+            return nullptr;
+        }
+    }
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(encoded.size()));
+    if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(encoded.size()),
+                                      reinterpret_cast<const jbyte*>(encoded.data()));
+    return result;
+}
+
+static jstring WL_TLS_info(JNIEnv* env, jclass, jlong handle, jint which) {
+    WlTlsUse use(handle);            // §604
+    void* ssl = use.ssl;
+    if (ssl == nullptr) return nullptr;
+    if (which == 0) {
+        const char* v = g_tls.SSL_get_version(ssl);
+        return v ? env->NewStringUTF(v) : nullptr;
+    }
+    const void* c = g_tls.SSL_get_current_cipher(ssl);
+    const char* n = c ? g_tls.SSL_CIPHER_get_name(c) : nullptr;
+    return n ? env->NewStringUTF(n) : nullptr;
+}
+
+static void WL_TLS_close(JNIEnv*, jclass, jlong handle) {
+    // §604: mark dead under the lock so no NEW user can pin it, but only free once nobody is
+    // in flight — otherwise a concurrent SSL_read is left reading freed memory (the SIGBUS).
+    // An unknown or already-closed handle is now ignored, so double close is harmless too.
+    void* ssl = (void*)(uintptr_t)handle;
+    if (ssl == nullptr) return;
+    bool reap = false;
+    pthread_mutex_lock(&g_tls_reg_mu);
+    if (g_tls_reg != nullptr) {
+        std::map<void*, WlTlsEnt>::iterator it = g_tls_reg->find(ssl);
+        if (it != g_tls_reg->end() && !it->second.closed) {
+            it->second.closed = true;
+            if (it->second.refs == 0) { g_tls_reg->erase(it); reap = true; }
+        }
+    }
+    pthread_mutex_unlock(&g_tls_reg_mu);
+    if (reap) {
+        g_tls.SSL_shutdown(ssl);
+        g_tls.SSL_free(ssl);
+    }
+}
+
+}  // namespace
+
+
+// WESTLAKE §442: OkHttp's DiskLruCache rejected a perfectly legal cache key
+//   IllegalArgumentException: keys must match regex [a-z0-9_-]{1,120}: "61d4dfc9...ae1b"
+// which can only happen if Matcher.matches() lies. Characterise java.util.regex here so we know
+// whether the engine is broken in general or only for some construct.
+static void wl_probe_regex(JNIEnv* env) {
+    jclass pat = env->FindClass("java/util/regex/Pattern");
+    if (pat == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-442] java/util/regex/Pattern NOT FOUND\n"); fflush(stderr); return; }
+    jmethodID matches = env->GetStaticMethodID(pat, "matches",
+        "(Ljava/lang/String;Ljava/lang/CharSequence;)Z");
+    if (matches == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-442] Pattern.matches NOT FOUND\n"); fflush(stderr); return; }
+    struct { const char* re; const char* in; int expect; } cases[] = {
+        {"[a-z0-9_-]{1,120}", "61d4dfc91e8f736cb250faa8afd1ae1b", 1},  // the real failing key
+        {"[a-z0-9_-]+",       "61d4dfc91e8f736cb250faa8afd1ae1b", 1},  // same class, unbounded
+        {"[a-z0-9]{1,120}",   "61d4dfc91e8f736cb250faa8afd1ae1b", 1},  // no '-' in the class
+        {"[a-z0-9_-]{1,120}", "abc",                              1},  // short input
+        {"a{1,3}",            "aa",                               1},  // bounded quantifier alone
+        {"[a-z]+",            "abc",                              1},  // plain class
+        {"[a-z]+",            "ABC",                              0},  // must NOT match
+        {"abc",               "abc",                              1},  // pure literal
+        {"a",                 "a",                                1},  // single literal char
+        {"a+",                "aa",                               1},  // greedy on a literal
+        {".",                 "a",                                1},  // any-char
+        {"[a]",               "a",                                1},  // single-member class
+        {"\\d+",              "123",                              1},  // predefined class
+    };
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
+        jstring re = env->NewStringUTF(cases[i].re);
+        jstring in = env->NewStringUTF(cases[i].in);
+        jboolean r = env->CallStaticBooleanMethod(pat, matches, re, in);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        fprintf(stderr, "[WESTLAKE-442] /%s/ =~ \"%s\" -> %d (expect %d)%s\n",
+                cases[i].re, cases[i].in, (int)r, cases[i].expect,
+                ((int)r == cases[i].expect) ? "" : "   <<<< WRONG");
+        env->DeleteLocalRef(re); env->DeleteLocalRef(in);
+    }
+    // Narrow it down: is the pattern wrong, or does Matcher think the input is empty?
+    jmethodID compile = env->GetStaticMethodID(pat, "compile",
+        "(Ljava/lang/String;)Ljava/util/regex/Pattern;");
+    jmethodID matcherOf = env->GetMethodID(pat, "matcher",
+        "(Ljava/lang/CharSequence;)Ljava/util/regex/Matcher;");
+    jclass mat = env->FindClass("java/util/regex/Matcher");
+    if (compile && matcherOf && mat) {
+        jstring re = env->NewStringUTF("[a-z]+");
+        jstring in = env->NewStringUTF("abc");
+        jobject pobj = env->CallStaticObjectMethod(pat, compile, re);
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        jobject mobj = pobj ? env->CallObjectMethod(pobj, matcherOf, in) : nullptr;
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        if (mobj != nullptr) {
+            jmethodID regionEnd = env->GetMethodID(mat, "regionEnd", "()I");
+            jmethodID regionStart = env->GetMethodID(mat, "regionStart", "()I");
+            jmethodID find = env->GetMethodID(mat, "find", "()Z");
+            jint rs = regionStart ? env->CallIntMethod(mobj, regionStart) : -1;
+            jint re2 = regionEnd ? env->CallIntMethod(mobj, regionEnd) : -1;
+            jboolean f = find ? env->CallBooleanMethod(mobj, find) : 0;
+            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+            fprintf(stderr, "[WESTLAKE-442] matcher(\"abc\") regionStart=%d regionEnd=%d "
+                    "(expect 0..3)  find=%d (expect 1)\n", (int)rs, (int)re2, (int)f);
+        }
+        // §404 recipe: does the class merely have un-run static initialisers?
+        jmethodID clinit = env->GetStaticMethodID(pat, "<clinit>", "()V");
+        if (clinit != nullptr) {
+            env->CallStaticVoidMethod(pat, clinit);
+            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+            jstring re3 = env->NewStringUTF("[a-z]+");
+            jstring in3 = env->NewStringUTF("abc");
+            jboolean r = env->CallStaticBooleanMethod(pat, matches, re3, in3);
+            if (env->ExceptionCheck()) { env->ExceptionClear(); }
+            fprintf(stderr, "[WESTLAKE-442] after forcing Pattern.<clinit>: /[a-z]+/ =~ \"abc\" -> %d\n",
+                    (int)r);
+        } else {
+            env->ExceptionClear();
+            fprintf(stderr, "[WESTLAKE-442] Pattern has no reachable <clinit>\n");
+        }
+    }
+    // §442b: same logic through four call shapes, from a BCP dex, to isolate desugared lambdas.
+    jclass probe = env->FindClass("adapter/compat/WlProbe");
+    if (probe == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-442] adapter/compat/WlProbe NOT FOUND\n"); }
+    else {
+        jmethodID run = env->GetStaticMethodID(probe, "run", "()Ljava/lang/String;");
+        if (run != nullptr) {
+            jstring r = (jstring)env->CallStaticObjectMethod(probe, run);
+            if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+            if (r != nullptr) {
+                const char* c = env->GetStringUTFChars(r, nullptr);
+                fprintf(stderr, "[WESTLAKE-442] BCP dispatch: %s\n", c ? c : "(null)");
+                if (c) env->ReleaseStringUTFChars(r, c);
+            }
+        } else { env->ExceptionClear(); fprintf(stderr, "[WESTLAKE-442] WlProbe.run NOT FOUND\n"); }
+        env->DeleteLocalRef(probe);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(pat);
+}
+
+// ==================== WESTLAKE §443: a REAL java.util.regex ====================
+// libart ships a bring-up stub for the ICU regex natives (`Westlake_PatternNative_compileImpl`
+// just stores the pattern STRING; `WestlakeRegexFind` is a literal substring search), so the whole
+// of java.util.regex behaved as if every pattern were compiled with UREGEX_LITERAL:
+//   /abc/ =~ "abc" -> true      but   /[abc]/ =~ "[abc]" -> true, groupCount("(a)(b)") -> 0
+// That silently breaks anything relying on regex — it surfaced as OkHttp's DiskLruCache rejecting
+// a perfectly legal cache key, which killed noice's sound-library fetch.
+//
+// libart is not rebuildable from source (§435), so we override the natives here instead:
+// RegisterNatives is last-wins and the bridge registers after libart. The implementation mirrors
+// AOSP's android_icu_util_regex_{Pattern,Matcher}Native.cpp on ICU's uregex_* API, taken from the
+// libicui18n.so we already ship (symbols carry the ICU-66 `_66` suffix).
+namespace {
+
+// The first implementation dlopened Android's Bionic-built ICU 66 into this musl process.
+// Simple matches worked, but a real Toutiao search pattern expanded ICU's backtracking vector
+// and crashed in musl realloc: the object graph had crossed allocator/stdlib boundaries.  Keep
+// the Android JNI contract, but create every regex object with the board's native OHOS ICU 74.
+// The bridge and libhmicu* both use the OHOS libc++ ABI, so allocation and destruction remain on
+// one side of the boundary.
+struct WlRePattern {
+    icu::RegexPattern* pattern = nullptr;
+    uintptr_t pattern_vtable = 0;
+};
+
+struct WlReMatcher {
+    icu::RegexMatcher* matcher = nullptr;
+    uintptr_t matcher_vtable = 0;
+    icu::UnicodeString text;  // RegexMatcher aliases its input; this must outlive reset/match.
+    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+};
+
+static pthread_mutex_t g_re_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+static std::set<WlRePattern*> g_re_patterns;
+static std::set<WlReMatcher*> g_re_matchers;
+
+static bool wl_re_init() {
+    static bool logged = false;
+    if (!logged) {
+        logged = true;
+        fprintf(stderr, "[WESTLAKE-443] OHOS-native ICU regex active (no Bionic ICU objects)\n");
+        fflush(stderr);
+    }
+    return true;
+}
+
+static void wl_re_pattern_release(WlRePattern* pattern) {
+    if (pattern == nullptr) return;
+    // NativeAllocationRegistry finalizers may be delivered after recovered foreign-code faults
+    // have damaged an ICU object. Calling a C++ virtual destructor through that stale vtable
+    // turns an otherwise recoverable app fault into a process-ending crash. The registry makes
+    // the wrapper release exactly-once; only invoke ICU when the object's vtable is the one
+    // captured at construction.
+    const uintptr_t current_vtable = pattern->pattern == nullptr
+            ? 0 : *reinterpret_cast<uintptr_t*>(pattern->pattern);
+    if (pattern->pattern != nullptr && current_vtable == pattern->pattern_vtable) {
+        delete pattern->pattern;
+    } else if (pattern->pattern != nullptr) {
+        fprintf(stderr,
+                "[WESTLAKE-REGEX-FINALIZER] quarantine Pattern=%p vtable=%p expected=%p\n",
+                pattern->pattern, reinterpret_cast<void*>(current_vtable),
+                reinterpret_cast<void*>(pattern->pattern_vtable));
+        fflush(stderr);
+        // The ICU object and its adjacent holder may have been damaged together. Do not pass
+        // the holder to musl free either; the retired registry handle cannot be invoked again.
+        return;
+    }
+    delete pattern;
+}
+
+static WlReMatcher* wl_re_matcher_lock(jlong addr) {
+    WlReMatcher* matcher = reinterpret_cast<WlReMatcher*>((uintptr_t)addr);
+    if (matcher == nullptr) return nullptr;
+    pthread_mutex_lock(&g_re_registry_lock);
+    if (g_re_matchers.find(matcher) == g_re_matchers.end()) {
+        pthread_mutex_unlock(&g_re_registry_lock);
+        return nullptr;
+    }
+    pthread_mutex_lock(&matcher->lock);
+    pthread_mutex_unlock(&g_re_registry_lock);
+    return matcher;
+}
+
+static void wl_re_matcher_unlock(WlReMatcher* matcher) {
+    if (matcher != nullptr) pthread_mutex_unlock(&matcher->lock);
+}
+
+static void wl_re_pattern_free(void* pointer) {
+    WlRePattern* pattern = reinterpret_cast<WlRePattern*>(pointer);
+    if (pattern == nullptr) return;
+    pthread_mutex_lock(&g_re_registry_lock);
+    const bool live = g_re_patterns.erase(pattern) != 0;
+    pthread_mutex_unlock(&g_re_registry_lock);
+    if (live) wl_re_pattern_release(pattern);
+}
+
+static void wl_re_matcher_free(void* pointer) {
+    WlReMatcher* matcher = reinterpret_cast<WlReMatcher*>(pointer);
+    if (matcher == nullptr) return;
+    pthread_mutex_lock(&g_re_registry_lock);
+    if (g_re_matchers.erase(matcher) == 0) {
+        pthread_mutex_unlock(&g_re_registry_lock);
+        return;
+    }
+    pthread_mutex_lock(&matcher->lock);
+    pthread_mutex_unlock(&g_re_registry_lock);
+    const uintptr_t current_vtable = matcher->matcher == nullptr
+            ? 0 : *reinterpret_cast<uintptr_t*>(matcher->matcher);
+    if (matcher->matcher != nullptr && current_vtable == matcher->matcher_vtable) {
+        delete matcher->matcher;
+    } else if (matcher->matcher != nullptr) {
+        fprintf(stderr,
+                "[WESTLAKE-REGEX-FINALIZER] quarantine Matcher=%p vtable=%p expected=%p\n",
+                matcher->matcher, reinterpret_cast<void*>(current_vtable),
+                reinterpret_cast<void*>(matcher->matcher_vtable));
+        fflush(stderr);
+        pthread_mutex_unlock(&matcher->lock);
+        // As with Pattern above, retire the registry handle but quarantine the complete native
+        // allocation.  Its owner reference is deliberately retained with it.
+        return;
+    }
+    pthread_mutex_unlock(&matcher->lock);
+    pthread_mutex_destroy(&matcher->lock);
+    delete matcher;
+}
+
+static void wl_re_offsets(JNIEnv* env, WlReMatcher* holder, jintArray offsets) {
+    if (offsets == nullptr || holder == nullptr || holder->matcher == nullptr) return;
+    const int32_t groupCount = holder->matcher->groupCount();
+    const jsize len = env->GetArrayLength(offsets);
+    std::vector<jint> values(static_cast<size_t>(len), -1);
+    for (int32_t group = 0; group <= groupCount && (2 * group + 1) < len; ++group) {
+        UErrorCode status = U_ZERO_ERROR;
+        values[2 * group] = holder->matcher->start(group, status);
+        status = U_ZERO_ERROR;
+        values[2 * group + 1] = holder->matcher->end(group, status);
+    }
+    env->SetIntArrayRegion(offsets, 0, len, values.data());
+}
+
+static jlong WL_Pattern_compileImpl(JNIEnv* env, jclass, jstring pattern, jint flags) {
+    if (pattern == nullptr) return 0;
+    const jchar* chars = env->GetStringChars(pattern, nullptr);
+    if (chars == nullptr) return 0;
+    const jsize len = env->GetStringLength(pattern);
+    const icu::UnicodeString expression(
+            reinterpret_cast<const UChar*>(chars), static_cast<int32_t>(len));
+    UErrorCode status = U_ZERO_ERROR;
+    UParseError parseError{};
+    icu::RegexPattern* compiled = icu::RegexPattern::compile(
+            expression, static_cast<uint32_t>(flags), parseError, status);
+    env->ReleaseStringChars(pattern, chars);
+    if (U_FAILURE(status) || compiled == nullptr) {
+        jclass ex = env->FindClass("java/util/regex/PatternSyntaxException");
+        if (ex != nullptr) {
+            jmethodID constructor = env->GetMethodID(
+                    ex, "<init>", "(Ljava/lang/String;Ljava/lang/String;I)V");
+            if (constructor != nullptr) {
+                jobject object = env->NewObject(ex, constructor,
+                        env->NewStringUTF("ICU compile failed"), pattern,
+                        static_cast<jint>(parseError.offset));
+                if (object != nullptr) env->Throw(reinterpret_cast<jthrowable>(object));
+            } else {
+                env->ExceptionClear();
+            }
+        } else {
+            env->ExceptionClear();
+        }
+        return 0;
+    }
+    WlRePattern* holder = new WlRePattern();
+    holder->pattern = compiled;
+    holder->pattern_vtable = *reinterpret_cast<uintptr_t*>(compiled);
+    pthread_mutex_lock(&g_re_registry_lock);
+    g_re_patterns.insert(holder);
+    pthread_mutex_unlock(&g_re_registry_lock);
+    return static_cast<jlong>(reinterpret_cast<uintptr_t>(holder));
+}
+
+static jlong WL_Pattern_openMatcherImpl(JNIEnv*, jclass, jlong addr) {
+    WlRePattern* pattern = reinterpret_cast<WlRePattern*>((uintptr_t)addr);
+    if (pattern == nullptr) return 0;
+    pthread_mutex_lock(&g_re_registry_lock);
+    if (g_re_patterns.find(pattern) == g_re_patterns.end()) {
+        pthread_mutex_unlock(&g_re_registry_lock);
+        return 0;
+    }
+    pthread_mutex_unlock(&g_re_registry_lock);
+
+    WlReMatcher* holder = new WlReMatcher();
+    UErrorCode status = U_ZERO_ERROR;
+    holder->matcher = pattern->pattern->matcher(holder->text, status);
+    if (U_FAILURE(status) || holder->matcher == nullptr) {
+        delete holder;
+        return 0;
+    }
+    holder->matcher_vtable = *reinterpret_cast<uintptr_t*>(holder->matcher);
+    pthread_mutex_lock(&g_re_registry_lock);
+    g_re_matchers.insert(holder);
+    pthread_mutex_unlock(&g_re_registry_lock);
+    return static_cast<jlong>(reinterpret_cast<uintptr_t>(holder));
+}
+
+static jint WL_Pattern_getMatchedGroupIndexImpl(JNIEnv* env, jclass, jlong addr, jstring name) {
+    WlRePattern* pattern = reinterpret_cast<WlRePattern*>((uintptr_t)addr);
+    if (pattern == nullptr || name == nullptr) return -1;
+    const jchar* chars = env->GetStringChars(name, nullptr);
+    if (chars == nullptr) return -1;
+    const jsize len = env->GetStringLength(name);
+    const icu::UnicodeString groupName(
+            reinterpret_cast<const UChar*>(chars), static_cast<int32_t>(len));
+    pthread_mutex_lock(&g_re_registry_lock);
+    if (g_re_patterns.find(pattern) == g_re_patterns.end()) {
+        pthread_mutex_unlock(&g_re_registry_lock);
+        env->ReleaseStringChars(name, chars);
+        return -1;
+    }
+    UErrorCode status = U_ZERO_ERROR;
+    const int32_t index = pattern->pattern->groupNumberFromName(groupName, status);
+    pthread_mutex_unlock(&g_re_registry_lock);
+    env->ReleaseStringChars(name, chars);
+    return U_FAILURE(status) ? -1 : static_cast<jint>(index);
+}
+
+static jlong WL_Pattern_getNativeFinalizer(JNIEnv*, jclass) {
+    return (jlong)(uintptr_t)&wl_re_pattern_free;
+}
+
+static jlong WL_Matcher_getNativeFinalizer(JNIEnv*, jclass) {
+    return (jlong)(uintptr_t)&wl_re_matcher_free;
+}
+
+static void WL_Matcher_setInputImpl(JNIEnv* env, jclass, jlong addr, jstring text,
+                                    jint start, jint end) {
+    if (text == nullptr) return;
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return;
+    const jchar* chars = env->GetStringChars(text, nullptr);
+    if (chars != nullptr) {
+        const jsize len = env->GetStringLength(text);
+        holder->text.setTo(reinterpret_cast<const UChar*>(chars), static_cast<int32_t>(len));
+        env->ReleaseStringChars(text, chars);
+        UErrorCode status = U_ZERO_ERROR;
+        holder->matcher->reset(holder->text);
+        holder->matcher->region(start, end, status);
+    }
+    wl_re_matcher_unlock(holder);
+}
+
+static jboolean WL_Matcher_matchesImpl(JNIEnv* env, jclass, jlong addr, jintArray offsets) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return JNI_FALSE;
+    UErrorCode status = U_ZERO_ERROR;
+    const bool matched = holder->matcher->matches(status) && U_SUCCESS(status);
+    if (matched) wl_re_offsets(env, holder, offsets);
+    wl_re_matcher_unlock(holder);
+    return matched ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean WL_Matcher_lookingAtImpl(JNIEnv* env, jclass, jlong addr, jintArray offsets) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return JNI_FALSE;
+    UErrorCode status = U_ZERO_ERROR;
+    const bool matched = holder->matcher->lookingAt(status) && U_SUCCESS(status);
+    if (matched) wl_re_offsets(env, holder, offsets);
+    wl_re_matcher_unlock(holder);
+    return matched ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean WL_Matcher_findImpl(JNIEnv* env, jclass, jlong addr, jint startIndex,
+                                    jintArray offsets) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return JNI_FALSE;
+    UErrorCode status = U_ZERO_ERROR;
+    const bool matched = holder->matcher->find(startIndex, status) && U_SUCCESS(status);
+    if (matched) wl_re_offsets(env, holder, offsets);
+    wl_re_matcher_unlock(holder);
+    return matched ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean WL_Matcher_findNextImpl(JNIEnv* env, jclass, jlong addr, jintArray offsets) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return JNI_FALSE;
+    UErrorCode status = U_ZERO_ERROR;
+    const bool matched = holder->matcher->find(status) && U_SUCCESS(status);
+    if (matched) wl_re_offsets(env, holder, offsets);
+    wl_re_matcher_unlock(holder);
+    return matched ? JNI_TRUE : JNI_FALSE;
+}
+
+static jint WL_Matcher_groupCountImpl(JNIEnv*, jclass, jlong addr) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return 0;
+    const jint count = static_cast<jint>(holder->matcher->groupCount());
+    wl_re_matcher_unlock(holder);
+    return count;
+}
+
+static jboolean WL_Matcher_hitEndImpl(JNIEnv*, jclass, jlong addr) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return JNI_FALSE;
+    const bool hit = holder->matcher->hitEnd();
+    wl_re_matcher_unlock(holder);
+    return hit ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean WL_Matcher_requireEndImpl(JNIEnv*, jclass, jlong addr) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return JNI_FALSE;
+    const bool required = holder->matcher->requireEnd();
+    wl_re_matcher_unlock(holder);
+    return required ? JNI_TRUE : JNI_FALSE;
+}
+
+static void WL_Matcher_useAnchoringBoundsImpl(JNIEnv*, jclass, jlong addr, jboolean value) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return;
+    holder->matcher->useAnchoringBounds(value ? true : false);
+    wl_re_matcher_unlock(holder);
+}
+
+static void WL_Matcher_useTransparentBoundsImpl(JNIEnv*, jclass, jlong addr, jboolean value) {
+    WlReMatcher* holder = wl_re_matcher_lock(addr);
+    if (holder == nullptr) return;
+    holder->matcher->useTransparentBounds(value ? true : false);
+    wl_re_matcher_unlock(holder);
+}
+
+}  // namespace
+
+
+// WESTLAKE §444: java.lang.String arrives marked initialised with NULL statics — the §202/§404
+// pattern again. OkHttp's Headers sorts header names with String.CASE_INSENSITIVE_ORDER, so the
+// library fetch died on "NullPointerException: CASE_INSENSITIVE_ORDER must not be null".
+// ⚠️Do NOT force String.<clinit> to repair this (§404's recipe): re-running it kills the child at
+// startup — A/B proven, the app never reaches a frame. Construct the comparator and assign it.
+// Only acts when the field really is null, so it is a no-op on a healthy runtime.
+// WESTLAKE §450: a native log sink the APP can call. Android routes System.err to the log
+// framework, so an injected printStackTrace() never reaches our child stderr; and libart's
+// SCTHROW probe caps at 40 throws and is saturated by benign ones (28 Gson ctor probes etc.),
+// which is exactly why noice's real failure was invisible.
+static void WL_Probe_nativeLog(JNIEnv* env, jclass, jstring s) {
+    if (s == nullptr) return;
+    const char* c = env->GetStringUTFChars(s, nullptr);
+    if (c != nullptr) {
+        fprintf(stderr, "[WESTLAKE-450] APP THROWABLE:\n%s\n", c);
+        fflush(stderr);
+        env->ReleaseStringUTFChars(s, c);
+    }
+}
+
+// WESTLAKE §454: replace §416's bare `new Binder()` for "shortcut" with a real local
+// IShortcutService. A bare Binder satisfies Stub.asInterface() but every call then transacts into
+// nothing and returns a null ParceledListSlice, which NPE'd
+// ShortcutManager.getDynamicShortcuts() and killed noice's PresetsFragment.onViewCreated before it
+// could query the preset table ("No Presets" with 4 presets sitting in the DB).
+// WESTLAKE §458: wire bindService to the in-process service creator (the audio "in-app bind" gate).
+// AppSpawnXInit's IActivityManager stub returns a type default, so bindServiceInstance() answers 0
+// and noice's SoundPlaybackService is never created — tapping play does nothing. The adapter already
+// has adapter.activity.InProcessServiceBinder (instantiate + attach + onCreate + onBind + connected);
+// this just routes the bind through it. Must run AFTER AppSpawnXInit installs its stub.
+static void wl_install_ams_bind(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WlAmsBind");
+    if (cls == nullptr) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-458] adapter/compat/WlAmsBind NOT FOUND\n");
+        fflush(stderr);
+        return;
+    }
+    jmethodID m = env->GetStaticMethodID(cls, "install", "()Ljava/lang/String;");
+    if (m == nullptr) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-458] WlAmsBind.install not found\n");
+        fflush(stderr);
+        env->DeleteLocalRef(cls);
+        return;
+    }
+    jstring r = (jstring) env->CallStaticObjectMethod(cls, m);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    if (r != nullptr) {
+        const char* c = env->GetStringUTFChars(r, nullptr);
+        fprintf(stderr, "[WESTLAKE-458] ams bind: %s\n", c ? c : "(null)");
+        if (c) env->ReleaseStringUTFChars(r, c);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+// WESTLAKE §459: grant audio focus (gate 2). AudioManager.sService is a Proxy stub returning 0 =
+// AUDIOFOCUS_REQUEST_FAILED, so the player never starts.
+static void wl_install_audio_focus(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WlAudioFocus");
+    if (cls == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-459] WlAudioFocus NOT FOUND\n"); fflush(stderr); return; }
+    jmethodID m = env->GetStaticMethodID(cls, "install", "()Ljava/lang/String;");
+    if (m == nullptr) { env->ExceptionClear(); env->DeleteLocalRef(cls); return; }
+    jstring r = (jstring) env->CallStaticObjectMethod(cls, m);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    if (r != nullptr) {
+        const char* c = env->GetStringUTFChars(r, nullptr);
+        fprintf(stderr, "[WESTLAKE-459] audio focus: %s\n", c ? c : "(null)");
+        if (c) env->ReleaseStringUTFChars(r, c);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+// WESTLAKE §467: provide "media_session". noice's SoundPlaybackService creates a MediaSession and
+// MediaSessionManager's ISessionManager was null -> NPE inside onStartCommand.
+// WESTLAKE §468: implement the two audio-policy list natives.
+// Both are UNBOUND here, and AudioAttributes.setLegacyStreamType reaches
+// AudioProductStrategy.initializeAudioProductStrategies -> native_list_audio_product_strategies,
+// so the throw aborted com.github.ashutoshgngwr.noice.engine.SoundPlayerManager.<clinit> half-way
+// and left its two AudioAttributesCompat statics NULL (§466). AOSP semantics: return a status int
+// and fill the caller's ArrayList; an EMPTY list plus SUCCESS(0) is exactly what a device with no
+// audio-policy engine should report.
+static jint WL_AudioPolicy_listEmpty(JNIEnv*, jclass, jobject /*ArrayList*/) {
+    return 0;   // AudioSystem.SUCCESS — leave the list empty
+}
+
+// WESTLAKE §678: AudioPortEventHandler is the callback half of Android's
+// audio-policy service.  On a platform with no Android audio-policy daemon,
+// setup succeeds but there are no port-list or service-death callbacks to
+// deliver.  A no-op lifecycle is therefore the boundary-consistent companion
+// to §468's successful empty port/policy lists.
+static void WL_AudioPortEventHandler_setup(JNIEnv*, jobject, jobject) {}
+static void WL_AudioPortEventHandler_finalize(JNIEnv*, jobject) {}
+
+static jint WL_AudioSystem_listEmpty(
+        JNIEnv* env, jclass, jobject /*ArrayList*/, jintArray generation) {
+    // AudioManager compares the generations returned by listAudioPorts and
+    // listAudioPatches and retries while they differ.  Publish one stable,
+    // non-zero generation for both empty inventories.
+    if (generation != nullptr && env->GetArrayLength(generation) > 0) {
+        const jint value = 1;
+        env->SetIntArrayRegion(generation, 0, 1, &value);
+    }
+    return 0;  // AudioSystem.SUCCESS
+}
+
+static void wl_register_audiopolicy_natives(JNIEnv* env) {
+    struct Entry { const char* cls; const char* name; };
+    static const Entry kEntries[] = {
+        {"android/media/audiopolicy/AudioProductStrategy", "native_list_audio_product_strategies"},
+        {"android/media/audiopolicy/AudioVolumeGroup",     "native_list_audio_volume_groups"},
+    };
+    for (const Entry& e : kEntries) {
+        jclass cls = env->FindClass(e.cls);
+        if (cls == nullptr || env->ExceptionCheck()) {
+            env->ExceptionClear();
+            fprintf(stderr, "[WESTLAKE-468] %s not found\n", e.cls);
+            continue;
+        }
+        const JNINativeMethod m[] = {
+            {e.name, "(Ljava/util/ArrayList;)I", reinterpret_cast<void*>(WL_AudioPolicy_listEmpty)},
+        };
+        const jint rc = env->RegisterNatives(cls, m, 1);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-468] RegisterNatives(%s.%s) rc=%d\n", e.cls, e.name, (int)rc);
+        env->DeleteLocalRef(cls);
+    }
+
+    jclass eventHandler = env->FindClass("android/media/AudioPortEventHandler");
+    if (eventHandler == nullptr || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-678] AudioPortEventHandler not found\n");
+    } else {
+        static const JNINativeMethod methods[] = {
+            {"native_setup", "(Ljava/lang/Object;)V",
+             reinterpret_cast<void*>(WL_AudioPortEventHandler_setup)},
+            {"native_finalize", "()V",
+             reinterpret_cast<void*>(WL_AudioPortEventHandler_finalize)},
+        };
+        const jint rc = env->RegisterNatives(
+                eventHandler, methods,
+                static_cast<jint>(sizeof(methods) / sizeof(methods[0])));
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        fprintf(stderr,
+                "[WESTLAKE-678] RegisterNatives(AudioPortEventHandler setup/finalize) rc=%d\n",
+                static_cast<int>(rc));
+        env->DeleteLocalRef(eventHandler);
+    }
+
+    jclass audioSystem = env->FindClass("android/media/AudioSystem");
+    if (audioSystem == nullptr || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-679] AudioSystem not found\n");
+    } else {
+        static const JNINativeMethod methods[] = {
+            {"listAudioPorts", "(Ljava/util/ArrayList;[I)I",
+             reinterpret_cast<void*>(WL_AudioSystem_listEmpty)},
+            {"listAudioPatches", "(Ljava/util/ArrayList;[I)I",
+             reinterpret_cast<void*>(WL_AudioSystem_listEmpty)},
+        };
+        const jint rc = env->RegisterNatives(
+                audioSystem, methods,
+                static_cast<jint>(sizeof(methods) / sizeof(methods[0])));
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        fprintf(stderr,
+                "[WESTLAKE-679] RegisterNatives(AudioSystem empty ports/patches) rc=%d\n",
+                static_cast<int>(rc));
+        env->DeleteLocalRef(audioSystem);
+    }
+    fflush(stderr);
+}
+
+static void wl_install_media_session(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WlMediaSession");
+    if (cls == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-467] WlMediaSession NOT FOUND\n"); fflush(stderr); return; }
+    jmethodID m = env->GetStaticMethodID(cls, "install", "()Ljava/lang/String;");
+    if (m == nullptr) { env->ExceptionClear(); env->DeleteLocalRef(cls); return; }
+    jstring r = (jstring) env->CallStaticObjectMethod(cls, m);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    if (r != nullptr) {
+        const char* c = env->GetStringUTFChars(r, nullptr);
+        fprintf(stderr, "[WESTLAKE-467] media session: %s\n", c ? c : "(null)");
+        if (c) env->ReleaseStringUTFChars(r, c);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+// §476: seed "power" + "thermalservice" so SystemServiceRegistry can build a PowerManager. Without
+// them SoundPlaybackService's wakeLock lazy throws "Required value was null." and playback never
+// starts. Same shape as the media-session installer.
+static void wl_install_system_services(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WlSystemServices");
+    if (cls == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-476] WlSystemServices NOT FOUND\n"); fflush(stderr); return; }
+    jmethodID m = env->GetStaticMethodID(cls, "install", "()Ljava/lang/String;");
+    if (m == nullptr) { env->ExceptionClear(); env->DeleteLocalRef(cls); return; }
+    jstring r = (jstring) env->CallStaticObjectMethod(cls, m);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    if (r != nullptr) {
+        const char* c = env->GetStringUTFChars(r, nullptr);
+        fprintf(stderr, "[WESTLAKE-476] system services: %s\n", c ? c : "(null)");
+        if (c) env->ReleaseStringUTFChars(r, c);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+static void wl_install_shortcut_service(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WlShortcutService");
+    if (cls == nullptr) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-454] adapter/compat/WlShortcutService NOT FOUND\n");
+        fflush(stderr);
+        return;
+    }
+    jmethodID m = env->GetStaticMethodID(cls, "install", "()Ljava/lang/String;");
+    if (m == nullptr) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-454] WlShortcutService.install not found\n");
+        fflush(stderr);
+        env->DeleteLocalRef(cls);
+        return;
+    }
+    jstring r = (jstring) env->CallStaticObjectMethod(cls, m);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    if (r != nullptr) {
+        const char* c = env->GetStringUTFChars(r, nullptr);
+        fprintf(stderr, "[WESTLAKE-454] shortcut service: %s\n", c ? c : "(null)");
+        if (c) env->ReleaseStringUTFChars(r, c);
+    }
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+static void wl_register_probe_log(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WlProbe");
+    if (cls == nullptr) { env->ExceptionClear(); return; }
+    static const JNINativeMethod m[] = {
+        {"nativeLog", "(Ljava/lang/String;)V", reinterpret_cast<void*>(WL_Probe_nativeLog)},
+    };
+    const jint rc = env->RegisterNatives(cls, m, 1);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fprintf(stderr, "[WESTLAKE-450] RegisterNatives(WlProbe.nativeLog) rc=%d\n", (int)rc);
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+static void wl_repair_string_statics(JNIEnv* env) {
+    jclass cls = env->FindClass("java/lang/String");
+    if (cls == nullptr) { env->ExceptionClear(); return; }
+    jfieldID fid = env->GetStaticFieldID(cls, "CASE_INSENSITIVE_ORDER", "Ljava/util/Comparator;");
+    if (fid == nullptr) { env->ExceptionClear(); env->DeleteLocalRef(cls); return; }
+    jobject v = env->GetStaticObjectField(cls, fid);
+    if (v != nullptr) {
+        env->DeleteLocalRef(v); env->DeleteLocalRef(cls);
+        return;   // healthy runtime: nothing to do
+    }
+    jclass cmp = env->FindClass("java/lang/String$CaseInsensitiveComparator");
+    jmethodID ctor = (cmp != nullptr) ? env->GetMethodID(cmp, "<init>", "()V") : nullptr;
+    jobject obj = (ctor != nullptr) ? env->NewObject(cmp, ctor) : nullptr;
+    if (obj == nullptr) {
+        if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+        fprintf(stderr, "[WESTLAKE-444] could not build String$CaseInsensitiveComparator\n");
+        fflush(stderr);
+        if (cmp != nullptr) env->DeleteLocalRef(cmp);
+        env->DeleteLocalRef(cls);
+        return;
+    }
+    env->SetStaticObjectField(cls, fid, obj);
+    if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+    v = env->GetStaticObjectField(cls, fid);
+    fprintf(stderr, "[WESTLAKE-444] String.CASE_INSENSITIVE_ORDER repaired -> %s\n",
+            v != nullptr ? "SET" : "STILL NULL");
+    if (v != nullptr) env->DeleteLocalRef(v);
+    env->DeleteLocalRef(obj); env->DeleteLocalRef(cmp); env->DeleteLocalRef(cls);
+    fflush(stderr);
+}
+
+// =============== WESTLAKE §451: a REAL charset converter (was a Latin-1 stub) ===============
+// libart's stubs/icu_jni_stub.c implements com.android.icu.charset.NativeConverter.decode/encode as
+// a byte<->char 1:1 copy AND writes ABSOLUTE offsets back into data[]. AOSP writes DELTAS (bytes
+// consumed / chars produced), so CharsetDecoderICU kept advancing the buffer positions by the whole
+// absolute offset each round:
+//     java.nio.charset.CoderMalfunctionError:
+//       java.lang.IllegalArgumentException: newPosition > limit: (15360 > 8192)
+// Short ASCII strings survive (1:1 is right and one round is enough); a 565KB UTF-8 JSON stream does
+// not — which is what killed noice's sound-library parse.
+// libart is not rebuildable, so we override the natives here (RegisterNatives is last-wins), backed
+// by the real ICU converter API from the libicuuc.so we already ship.
+namespace {
+
+struct WlCnvApi {
+    void* lib = nullptr;
+    void* (*open)(const char*, int*);
+    void  (*close)(void*);
+    void  (*toUnicode)(void*, uint16_t**, const uint16_t*, const char**, const char*, int*, int8_t, int*);
+    void  (*fromUnicode)(void*, char**, const char*, const uint16_t**, const uint16_t*, int*, int8_t, int*);
+    int8_t (*getMaxCharSize)(const void*);
+    int8_t (*getMinCharSize)(const void*);
+    void  (*resetToUnicode)(void*);
+    void  (*resetFromUnicode)(void*);
+    bool ok = false;
+    bool tried = false;
+};
+static WlCnvApi g_cnv;
+
+// §470: the child SIGSEGVs inside ucnv_fromUnicode_66 at addr=0x5c. Root cause, from the ordering in
+// the zygote log: libart's own icu_jni stub registers com.android.icu.charset.NativeConverter FIRST
+// (its JNI_OnLoad, log line ~337) and we re-register the same class much later (~2131). Anything that
+// opens a charset in between gets a handle from the STUB's openConverter -- which returns a fake
+// handle, `index + 1` into its private CHARSETS table, i.e. the integer 1. That value is cached inside
+// the Java Charset/CharsetEncoder, so once our real encode() takes over it is handed 0x1 and passes it
+// straight to ICU as a UConverter* -> deref at a tiny address -> SIGSEGV at 0x5c.
+//
+// RegisterNatives is last-wins per method, so we cannot rely on winning the race. Instead we ADOPT the
+// stub's handles: its table is fixed and libart is a non-rebuildable binary here, so index->charset is
+// stable. A foreign small-integer handle is mapped to the charset it denotes and backed by a real ICU
+// converter, opened once and cached. ★A standalone probe (native-tools/wlicu.c) proved real converters
+// stay valid across fork, so genuine pointers -- including ones the parent opened pre-fork -- are
+// simply accepted; do NOT invalidate on pid change.
+static pthread_mutex_t g_cnv_lk = PTHREAD_MUTEX_INITIALIZER;
+static std::set<uintptr_t> g_cnv_live;      // handles WL_Cnv_open issued
+static std::map<uintptr_t, void*> g_cnv_stub;  // libart fake handle -> real converter we opened for it
+static std::atomic<int> g_cnv_open_logs{0};
+
+// libart/stubs/icu_jni_stub.c CHARSETS[], in order. Handle value is (index + 1).
+static const char* const kStubCharsets[] = {
+    "UTF-8", "US-ASCII", "ISO-8859-1", "UTF-16", "UTF-16BE", "UTF-16LE",
+    "UTF-32", "UTF-32BE", "UTF-32LE",
+};
+static const size_t kStubCharsetCount = sizeof(kStubCharsets) / sizeof(kStubCharsets[0]);
+
+// Anything at or above this is a real mapped address on this target; below it can only be a fake
+// handle. Real ICU converters live on the heap, far above the first page.
+static const uintptr_t kMinRealPointer = 0x10000;
+
+static void wl_cnv_track(void* c) {
+    pthread_mutex_lock(&g_cnv_lk);
+    g_cnv_live.insert((uintptr_t)c);
+    pthread_mutex_unlock(&g_cnv_lk);
+}
+static void wl_cnv_untrack(void* c) {
+    pthread_mutex_lock(&g_cnv_lk);
+    g_cnv_live.erase((uintptr_t)c);
+    pthread_mutex_unlock(&g_cnv_lk);
+}
+
+// Turn whatever Java handed us into a usable UConverter*, or nullptr if it cannot be resolved.
+static void* wl_cnv_resolve(jlong h, const char* who) {
+    const uintptr_t v = (uintptr_t)h;
+    if (v == 0 || !g_cnv.ok) return nullptr;
+    if (v >= kMinRealPointer) return (void*)v;      // a real converter (ours, or inherited pre-fork)
+
+    if (v > kStubCharsetCount) {
+        fprintf(stderr, "[WESTLAKE-470] %s: handle %p is neither a pointer nor a known stub handle\n",
+                who, (void*)v);
+        fflush(stderr);
+        return nullptr;
+    }
+    pthread_mutex_lock(&g_cnv_lk);
+    auto it = g_cnv_stub.find(v);
+    if (it != g_cnv_stub.end()) { void* c = it->second; pthread_mutex_unlock(&g_cnv_lk); return c; }
+    pthread_mutex_unlock(&g_cnv_lk);
+
+    const char* name = kStubCharsets[v - 1];
+    int st = 0;
+    void* real = g_cnv.open(name, &st);
+    if (real == nullptr || st > 0) {
+        fprintf(stderr, "[WESTLAKE-470] %s: cannot back stub handle %p (%s) st=%d\n",
+                who, (void*)v, name, st);
+        fflush(stderr);
+        return nullptr;
+    }
+    pthread_mutex_lock(&g_cnv_lk);
+    auto ins = g_cnv_stub.emplace(v, real);
+    void* winner = ins.first->second;
+    bool we_won = ins.second;
+    pthread_mutex_unlock(&g_cnv_lk);
+    if (!we_won) { g_cnv.close(real); return winner; }   // lost a race; keep the first one
+    fprintf(stderr, "[WESTLAKE-470] adopted libart stub handle %p as %s -> real converter %p\n",
+            (void*)v, name, real);
+    fflush(stderr);
+    return winner;
+}
+
+static void* wl_cnv_sym(void* h, const char* base) {
+    static const char* kSuffix[] = { "", "_66", "_74", "_72", "_70", nullptr };
+    char buf[128];
+    for (int i = 0; kSuffix[i] != nullptr; i++) {
+        snprintf(buf, sizeof(buf), "%s%s", base, kSuffix[i]);
+        void* p = dlsym(h, buf);
+        if (p != nullptr) return p;
+    }
+    return nullptr;
+}
+
+#define WL_CNV_SYM(field, name)                                                        \
+    do {                                                                               \
+        g_cnv.field = reinterpret_cast<decltype(g_cnv.field)>(wl_cnv_sym(g_cnv.lib, name)); \
+        if (g_cnv.field == nullptr) { fprintf(stderr, "[WESTLAKE-451] MISSING %s\n", name); missing++; } \
+    } while (0)
+
+static bool wl_cnv_init() {
+    if (g_cnv.tried) return g_cnv.ok;
+    g_cnv.tried = true;
+    static const char* kNames[] = { "libicuuc.so", "/data/local/tmp/asx/libicuuc.so",
+                                    "/system/lib64/platformsdk/libhmicuuc.z.so", nullptr };
+    for (int i = 0; kNames[i] != nullptr && g_cnv.lib == nullptr; i++)
+        g_cnv.lib = dlopen(kNames[i], RTLD_NOW | RTLD_GLOBAL);
+    if (g_cnv.lib == nullptr) {
+        fprintf(stderr, "[WESTLAKE-451] no libicuuc — charset stays stubbed\n"); fflush(stderr);
+        return false;
+    }
+    int missing = 0;
+    WL_CNV_SYM(open, "ucnv_open");                 WL_CNV_SYM(close, "ucnv_close");
+    WL_CNV_SYM(toUnicode, "ucnv_toUnicode");       WL_CNV_SYM(fromUnicode, "ucnv_fromUnicode");
+    WL_CNV_SYM(getMaxCharSize, "ucnv_getMaxCharSize");
+    WL_CNV_SYM(getMinCharSize, "ucnv_getMinCharSize");
+    WL_CNV_SYM(resetToUnicode, "ucnv_resetToUnicode");
+    WL_CNV_SYM(resetFromUnicode, "ucnv_resetFromUnicode");
+    if (missing > 0) { fflush(stderr); return false; }
+    g_cnv.ok = true;
+    fprintf(stderr, "[WESTLAKE-451] ICU charset converter bound\n"); fflush(stderr);
+    return true;
+}
+
+// This is handed to Java as the NativeAllocationRegistry finalizer (getNativeFinalizer), so the GC
+// calls it with whatever handle the Java object holds -- including one of libart's fake integers.
+// ucnv_close(0x1) would fault exactly like the encode path did, on a GC thread. Only ever close a
+// real converter, and route a stub handle to the converter we adopted for it.
+static void wl_cnv_free(void* p) {
+    if (p == nullptr || !g_cnv.ok) return;
+    const uintptr_t v = (uintptr_t)p;
+    if (v >= kMinRealPointer) { wl_cnv_untrack(p); g_cnv.close(p); return; }
+    pthread_mutex_lock(&g_cnv_lk);
+    auto it = g_cnv_stub.find(v);
+    void* real = (it == g_cnv_stub.end()) ? nullptr : it->second;
+    if (it != g_cnv_stub.end()) g_cnv_stub.erase(it);
+    pthread_mutex_unlock(&g_cnv_lk);
+    if (real != nullptr) g_cnv.close(real);
+}
+
+static jlong WL_Cnv_open(JNIEnv* env, jclass, jstring jname) {
+    if (!wl_cnv_init() || jname == nullptr) return 0;
+    const char* name = env->GetStringUTFChars(jname, nullptr);
+    int st = 0;
+    void* c = g_cnv.open(name, &st);
+    if (st > 0 || c == nullptr) {
+        fprintf(stderr, "[WESTLAKE-451] ucnv_open(%s) FAILED st=%d\n", name ? name : "?", st);
+        fflush(stderr);
+        env->ReleaseStringUTFChars(jname, name);
+        return 0;
+    }
+    // Converter creation is routine (Toutiao opens thousands). Keep enough evidence to prove
+    // that the real ICU boundary is active without making stderr I/O part of the hot path.
+    if (g_cnv_open_logs.fetch_add(1, std::memory_order_relaxed) < 8) {
+        fprintf(stderr, "[WESTLAKE-470] ucnv_open(%s) -> %p pid=%d\n", name, c, (int)getpid());
+        fflush(stderr);
+    }
+    env->ReleaseStringUTFChars(jname, name);
+    wl_cnv_track(c);
+    return (jlong)(uintptr_t)c;
+}
+
+static void WL_Cnv_close(JNIEnv*, jclass, jlong h) {
+    wl_cnv_untrack((void*)(uintptr_t)h); wl_cnv_free((void*)(uintptr_t)h);
+}
+
+// decode(long, byte[] in, int inEnd, char[] out, int outEnd, int[] data, boolean flush)
+static jint WL_Cnv_decode(JNIEnv* env, jclass, jlong h, jbyteArray in, jint inEnd,
+                          jcharArray out, jint outEnd, jintArray data, jboolean flush) {
+    void* cnv = (void*)(uintptr_t)h;
+    if (cnv == nullptr || !g_cnv.ok) return 1;   // CoderResult error
+    cnv = wl_cnv_resolve(h, "decode");
+    if (cnv == nullptr) return 1;
+    jbyte* src = env->GetByteArrayElements(in, nullptr);
+    jchar* dst = env->GetCharArrayElements(out, nullptr);
+    jint*  d   = env->GetIntArrayElements(data, nullptr);
+    const jint inPos = d[0], outPos = d[1];
+
+    const char* mySource      = reinterpret_cast<const char*>(src) + inPos;
+    const char* mySourceLimit = reinterpret_cast<const char*>(src) + inEnd;
+    uint16_t* myTarget        = reinterpret_cast<uint16_t*>(dst) + outPos;
+    const uint16_t* myTargetLimit = reinterpret_cast<uint16_t*>(dst) + outEnd;
+
+    int st = 0;
+    g_cnv.toUnicode(cnv, &myTarget, myTargetLimit, &mySource, mySourceLimit,
+                    nullptr, flush ? 1 : 0, &st);
+    // ★AOSP semantics: data[] receives DELTAS, not absolute offsets. The stub's absolute write-back
+    // is exactly what produced "newPosition > limit".
+    d[0] = (jint)((mySource - reinterpret_cast<const char*>(src)) - inPos);
+    d[1] = (jint)((myTarget - reinterpret_cast<uint16_t*>(dst)) - outPos);
+
+    env->ReleaseIntArrayElements(data, d, 0);
+    env->ReleaseCharArrayElements(out, dst, 0);
+    env->ReleaseByteArrayElements(in, src, JNI_ABORT);
+    if (st == 15 /*U_BUFFER_OVERFLOW_ERROR*/) return 0;   // OVERFLOW -> caller loops
+    return (st > 0) ? 1 : 0;
+}
+
+// encode(long, char[] in, int inEnd, byte[] out, int outEnd, int[] data, boolean flush)
+static jint WL_Cnv_encode(JNIEnv* env, jclass, jlong h, jcharArray in, jint inEnd,
+                          jbyteArray out, jint outEnd, jintArray data, jboolean flush) {
+    void* cnv = (void*)(uintptr_t)h;
+    if (cnv == nullptr || !g_cnv.ok) return 1;
+    cnv = wl_cnv_resolve(h, "encode");
+    if (cnv == nullptr) return 1;
+    jchar* src = env->GetCharArrayElements(in, nullptr);
+    jbyte* dst = env->GetByteArrayElements(out, nullptr);
+    jint*  d   = env->GetIntArrayElements(data, nullptr);
+    const jint inPos = d[0], outPos = d[1];
+
+    const uint16_t* mySource      = reinterpret_cast<uint16_t*>(src) + inPos;
+    const uint16_t* mySourceLimit = reinterpret_cast<uint16_t*>(src) + inEnd;
+    char* myTarget                = reinterpret_cast<char*>(dst) + outPos;
+    const char* myTargetLimit     = reinterpret_cast<char*>(dst) + outEnd;
+
+    int st = 0;
+    g_cnv.fromUnicode(cnv, &myTarget, myTargetLimit, &mySource, mySourceLimit,
+                      nullptr, flush ? 1 : 0, &st);
+    d[0] = (jint)((mySource - reinterpret_cast<uint16_t*>(src)) - inPos);
+    d[1] = (jint)((myTarget - reinterpret_cast<char*>(dst)) - outPos);
+
+    env->ReleaseIntArrayElements(data, d, 0);
+    env->ReleaseByteArrayElements(out, dst, 0);
+    env->ReleaseCharArrayElements(in, src, JNI_ABORT);
+    if (st == 15) return 0;
+    return (st > 0) ? 1 : 0;
+}
+
+static jint  WL_Cnv_maxBytes(JNIEnv*, jclass, jlong h) {
+    void* c=(void*)(uintptr_t)h; return ((c = wl_cnv_resolve(h,"maxBytes")) != nullptr) ? (jint)g_cnv.getMaxCharSize(c) : 1;
+}
+static jfloat WL_Cnv_aveBytes(JNIEnv*, jclass, jlong h) {
+    void* c=(void*)(uintptr_t)h; return ((c = wl_cnv_resolve(h,"aveBytes")) != nullptr) ? (jfloat)g_cnv.getMaxCharSize(c) : 1.0f;
+}
+static jfloat WL_Cnv_aveChars(JNIEnv*, jclass, jlong h) {
+    void* c=(void*)(uintptr_t)h;
+    c = wl_cnv_resolve(h, "aveChars");
+    if (!c) return 1.0f;
+    const int8_t mn = g_cnv.getMinCharSize(c);
+    return (mn > 0) ? (1.0f / (jfloat)mn) : 1.0f;
+}
+static void WL_Cnv_resetToUni(JNIEnv*, jclass, jlong h) {
+    void* c=(void*)(uintptr_t)h; if ((c = wl_cnv_resolve(h,"resetToUni")) != nullptr) g_cnv.resetToUnicode(c);
+}
+static void WL_Cnv_resetFromUni(JNIEnv*, jclass, jlong h) {
+    void* c=(void*)(uintptr_t)h; if ((c = wl_cnv_resolve(h,"resetFromUni")) != nullptr) g_cnv.resetFromUnicode(c);
+}
+static jbyteArray WL_Cnv_substBytes(JNIEnv* env, jclass, jlong) {
+    jbyteArray a = env->NewByteArray(1);
+    if (a != nullptr) { const jbyte q = '?'; env->SetByteArrayRegion(a, 0, 1, &q); }
+    return a;
+}
+static jlong WL_Cnv_finalizer(JNIEnv*, jclass) { return (jlong)(uintptr_t)&wl_cnv_free; }
+static void WL_Cnv_cbDecode(JNIEnv*, jclass, jlong, jint, jint, jstring) {}
+static void WL_Cnv_cbEncode(JNIEnv*, jclass, jlong, jint, jint, jbyteArray) {}
+
+}  // namespace
+
+static void wl_register_charset_natives(JNIEnv* env) {
+    if (!wl_cnv_init()) return;   // leave the stub rather than half-break charsets
+    jclass cls = env->FindClass("com/android/icu/charset/NativeConverter");
+    if (cls == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-451] NativeConverter not found\n"); fflush(stderr); return; }
+    static const JNINativeMethod m[] = {
+        {"openConverter", "(Ljava/lang/String;)J", reinterpret_cast<void*>(WL_Cnv_open)},
+        {"closeConverter", "(J)V", reinterpret_cast<void*>(WL_Cnv_close)},
+        {"decode", "(J[BI[CI[IZ)I", reinterpret_cast<void*>(WL_Cnv_decode)},
+        {"encode", "(J[CI[BI[IZ)I", reinterpret_cast<void*>(WL_Cnv_encode)},
+        {"getMaxBytesPerChar", "(J)I", reinterpret_cast<void*>(WL_Cnv_maxBytes)},
+        {"getAveBytesPerChar", "(J)F", reinterpret_cast<void*>(WL_Cnv_aveBytes)},
+        {"getAveCharsPerByte", "(J)F", reinterpret_cast<void*>(WL_Cnv_aveChars)},
+        {"resetByteToChar", "(J)V", reinterpret_cast<void*>(WL_Cnv_resetToUni)},
+        {"resetCharToByte", "(J)V", reinterpret_cast<void*>(WL_Cnv_resetFromUni)},
+        {"getSubstitutionBytes", "(J)[B", reinterpret_cast<void*>(WL_Cnv_substBytes)},
+        {"getNativeFinalizer", "()J", reinterpret_cast<void*>(WL_Cnv_finalizer)},
+        {"setCallbackDecode", "(JIILjava/lang/String;)V", reinterpret_cast<void*>(WL_Cnv_cbDecode)},
+        {"setCallbackEncode", "(JII[B)V", reinterpret_cast<void*>(WL_Cnv_cbEncode)},
+    };
+    const jint rc = env->RegisterNatives(cls, m, 13);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fprintf(stderr, "[WESTLAKE-451] RegisterNatives(NativeConverter) rc=%d (real ICU charsets)\n",
+            (int)rc);
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+static void wl_register_regex_natives(JNIEnv* env) {
+    if (!wl_re_init()) return;   // leave libart's stub in place rather than break regex further
+    jclass pn = env->FindClass("com/android/icu/util/regex/PatternNative");
+    if (pn == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-443] PatternNative not found\n"); fflush(stderr); return; }
+    static const JNINativeMethod pm[] = {
+        {"compileImpl", "(Ljava/lang/String;I)J", reinterpret_cast<void*>(WL_Pattern_compileImpl)},
+        {"openMatcherImpl", "(J)J", reinterpret_cast<void*>(WL_Pattern_openMatcherImpl)},
+        {"getMatchedGroupIndexImpl", "(JLjava/lang/String;)I",
+         reinterpret_cast<void*>(WL_Pattern_getMatchedGroupIndexImpl)},
+        {"getNativeFinalizer", "()J", reinterpret_cast<void*>(WL_Pattern_getNativeFinalizer)},
+    };
+    const jint rc1 = env->RegisterNatives(pn, pm, 4);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(pn);
+
+    jclass mn = env->FindClass("com/android/icu/util/regex/MatcherNative");
+    if (mn == nullptr) { env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-443] MatcherNative not found\n"); fflush(stderr); return; }
+    static const JNINativeMethod mm[] = {
+        {"setInputImpl", "(JLjava/lang/String;II)V", reinterpret_cast<void*>(WL_Matcher_setInputImpl)},
+        {"matchesImpl", "(J[I)Z", reinterpret_cast<void*>(WL_Matcher_matchesImpl)},
+        {"lookingAtImpl", "(J[I)Z", reinterpret_cast<void*>(WL_Matcher_lookingAtImpl)},
+        {"findImpl", "(JI[I)Z", reinterpret_cast<void*>(WL_Matcher_findImpl)},
+        {"findNextImpl", "(J[I)Z", reinterpret_cast<void*>(WL_Matcher_findNextImpl)},
+        {"groupCountImpl", "(J)I", reinterpret_cast<void*>(WL_Matcher_groupCountImpl)},
+        {"hitEndImpl", "(J)Z", reinterpret_cast<void*>(WL_Matcher_hitEndImpl)},
+        {"requireEndImpl", "(J)Z", reinterpret_cast<void*>(WL_Matcher_requireEndImpl)},
+        {"useAnchoringBoundsImpl", "(JZ)V",
+         reinterpret_cast<void*>(WL_Matcher_useAnchoringBoundsImpl)},
+        {"useTransparentBoundsImpl", "(JZ)V",
+         reinterpret_cast<void*>(WL_Matcher_useTransparentBoundsImpl)},
+        {"getNativeFinalizer", "()J", reinterpret_cast<void*>(WL_Matcher_getNativeFinalizer)},
+    };
+    const jint rc2 = env->RegisterNatives(mn, mm, 11);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(mn);
+    fprintf(stderr, "[WESTLAKE-443] RegisterNatives Pattern=%d Matcher=%d (ICU regex ACTIVE)\n",
+            (int)rc1, (int)rc2);
+    fflush(stderr);
+}
+
+static void wl_register_tls_natives(JNIEnv* env) {
+    jclass cls = env->FindClass("adapter/compat/WestlakeSSLSocket");
+    if (cls == nullptr || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-441] adapter/compat/WestlakeSSLSocket NOT FOUND — TLS off\n");
+        fflush(stderr);
+        return;
+    }
+    static const JNINativeMethod m[] = {
+        {"nativeHandshake", "(ILjava/lang/String;I)J", reinterpret_cast<void*>(WL_TLS_handshake)},
+        {"nativeRead",  "(JI[BIII)I", reinterpret_cast<void*>(WL_TLS_read)},
+        {"nativeWrite", "(JI[BIII)I", reinterpret_cast<void*>(WL_TLS_write)},
+        {"nativePeerCert", "(J)[B",   reinterpret_cast<void*>(WL_TLS_peerCert)},
+        {"nativePeerChain", "(J)[B",  reinterpret_cast<void*>(WL_TLS_peerChain)},
+        {"nativeInfo", "(JI)Ljava/lang/String;", reinterpret_cast<void*>(WL_TLS_info)},
+        {"nativeClose", "(J)V",       reinterpret_cast<void*>(WL_TLS_close)},
+    };
+    const jint rc = env->RegisterNatives(cls, m, sizeof(m) / sizeof(m[0]));
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fprintf(stderr, "[WESTLAKE-441] RegisterNatives(WestlakeSSLSocket) rc=%d\n", (int)rc);
+    fflush(stderr);
+    env->DeleteLocalRef(cls);
+}
+
+#if defined(WESTLAKE_ENABLE_DIAGNOSTICS)
+// WESTLAKE §624 — bridge-side ART thread dumper (replaces the forbidden `kill -3`).
+// SIGQUIT is a hard-rule NO on this stack: §621 re-verified it — the child has a "Signal Catcher"
+// thread but SIGQUIT still kills it with ZERO dump bytes. So we call ART's own dump directly:
+//   art::Runtime::Current()  +  art::Runtime::DumpForSigQuit(std::ostream&)   (both exported)
+// ★Safe to pass std::ostringstream across the boundary: libart and this bridge are built by the
+// same OHOS clang and both use the `std::__h` libc++ inline namespace (verified by nm).
+// TRIGGER = a FILE, deliberately not a signal — Toutiao's NPTH installs its own signal handlers and
+// we must not fight them. Gated on WESTLAKE_TDUMP=1 so noice/catalog are completely unaffected.
+//   usage:  touch /data/local/tmp/asx/DUMPNOW   ->  /data/local/tmp/asx/threaddump.txt
+extern "C" void wl_dump_threads_now(const char* outpath) {
+    using CurFn  = void* (*)();
+    using DumpFn = void  (*)(void*, std::ostream&);
+    auto cur  = reinterpret_cast<CurFn>(dlsym(RTLD_DEFAULT, "_ZN3art7Runtime7CurrentEv"));
+    auto dump = reinterpret_cast<DumpFn>(dlsym(RTLD_DEFAULT,
+        "_ZN3art7Runtime14DumpForSigQuitERNSt3__h13basic_ostreamIcNS1_11char_traitsIcEEEE"));
+    if (cur == nullptr || dump == nullptr) {
+        fprintf(stderr, "[WESTLAKE-624] symbols missing cur=%p dump=%p\n",
+                reinterpret_cast<void*>(cur), reinterpret_cast<void*>(dump));
+        fflush(stderr);
+        return;
+    }
+    void* rt = cur();
+    if (rt == nullptr) { fprintf(stderr, "[WESTLAKE-624] no Runtime\n"); fflush(stderr); return; }
+    // Attach so ART sees a real Thread* (its own SignalCatcher dumps from an attached thread).
+    JavaVM* vm = nullptr; jsize nvms = 0;
+    if (JNI_GetCreatedJavaVMs(&vm, 1, &nvms) == JNI_OK && vm != nullptr && nvms > 0) {
+        JNIEnv* env = nullptr;
+        vm->AttachCurrentThreadAsDaemon(&env, nullptr);
+    }
+    fprintf(stderr, "[WESTLAKE-624] dumping…\n"); fflush(stderr);
+    std::ostringstream os;
+    dump(rt, os);                       // ⚠️may itself block if the runtime is wedged — that is
+    const std::string s = os.str();     //   ITSELF a finding (partial/na dump = ART-level deadlock)
+    FILE* f = fopen(outpath, "w");
+    if (f != nullptr) { fwrite(s.data(), 1, s.size(), f); fclose(f); }
+    fprintf(stderr, "[WESTLAKE-624] thread dump %zu bytes -> %s\n", s.size(), outpath);
+    fflush(stderr);
+}
+// WESTLAKE §626 — SIGPROF PC sampler for threads that SPIN IN USERSPACE.
+// §625 proved a Java dump is impossible while livelocked (DumpForSigQuit needs SuspendAll, and
+// suspension is exactly what does not converge). The spinners never enter a syscall, so /proc
+// cannot show where they are. Signal them instead and read the PC out of the ucontext — that is
+// the only way to see a thread that refuses to reach a safepoint.
+//   trigger:  echo <tid> > /data/local/tmp/asx/SAMPLETID     -> /data/local/tmp/asx/sample.txt
+static volatile sig_atomic_t wl_smp_hits = 0;
+static uintptr_t wl_smp_pc[16];
+static void wl_sigprof_handler(int, siginfo_t*, void* ctx) {
+    if (wl_smp_hits < 16 && ctx != nullptr) {
+        auto* uc = static_cast<ucontext_t*>(ctx);
+        wl_smp_pc[wl_smp_hits] = static_cast<uintptr_t>(uc->uc_mcontext.pc);  // arm64
+        wl_smp_hits = wl_smp_hits + 1;
+    }
+}
+extern "C" void wl_sample_tid(int tid, const char* outpath) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = wl_sigprof_handler;
+    sa.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigaction(SIGPROF, &sa, nullptr);
+    wl_smp_hits = 0;
+    for (int i = 0; i < 12; i++) {                  // 12 samples ~ 1.2 s
+        syscall(SYS_tgkill, getpid(), tid, SIGPROF);
+        usleep(100000);
+    }
+    FILE* f = fopen(outpath, "w");
+    if (f != nullptr) {
+        fprintf(f, "tid=%d samples=%d\n", tid, (int)wl_smp_hits);
+        for (int i = 0; i < wl_smp_hits; i++) fprintf(f, "pc=0x%lx\n", (unsigned long)wl_smp_pc[i]);
+        fclose(f);
+    }
+    fprintf(stderr, "[WESTLAKE-626] sampled tid=%d hits=%d -> %s\n", tid, (int)wl_smp_hits, outpath);
+    fflush(stderr);
+}
+static void* wl_dump_watch(void*) {
+    for (;;) {
+        struct stat st;
+        if (stat("/data/local/tmp/asx/DUMPNOW", &st) == 0) {
+            unlink("/data/local/tmp/asx/DUMPNOW");
+            wl_dump_threads_now("/data/local/tmp/asx/threaddump.txt");
+        }
+        if (stat("/data/local/tmp/asx/SAMPLETID", &st) == 0) {
+            FILE* f = fopen("/data/local/tmp/asx/SAMPLETID", "r");
+            int tid = 0;
+            if (f != nullptr) { if (fscanf(f, "%d", &tid) != 1) tid = 0; fclose(f); }
+            unlink("/data/local/tmp/asx/SAMPLETID");
+            if (tid > 0) wl_sample_tid(tid, "/data/local/tmp/asx/sample.txt");
+        }
+        usleep(500000);
+    }
+    return nullptr;
+}
+__attribute__((constructor)) static void wl_start_dump_watch() {
+    // A constructor thread exists in the persistent appspawn parent and violates
+    // ART's kernel-level single-thread requirement for nativePreFork(). It also
+    // disappears in the child, so it cannot provide child diagnostics anyway.
+    // Retain an explicit parent-only bring-up switch, but keep production and
+    // performance launches fork-safe by default.
+    const char* enabled = getenv("WESTLAKE_TDUMP_PARENT");
+    if (enabled == nullptr || strcmp(enabled, "1") != 0) {
+        return;
+    }
+    pthread_t t;
+    if (pthread_create(&t, nullptr, wl_dump_watch, nullptr) == 0) pthread_detach(t);
+}
+#endif  // WESTLAKE_ENABLE_DIAGNOSTICS
+
+// WESTLAKE §618 — ByteDance "Flipped" free-reflection native (Toutiao / any Mira app).
+// `com.bytedance.mira.plugin.hook.flipped.compat.FlippedV2Impl.getDeclaredMethod` is a
+// PRIVATE NATIVE whose real impl is registered from a Mira .so under non-standard mangling,
+// so ART's dlsym(RTLD_DEFAULT, "Java_...") finds nothing and DelegateApp.attachBaseCtx dies.
+// Flipped exists only to reach Class.getDeclaredMethod WITHOUT tripping Android's hidden-API
+// blocklist — a restriction this imageless port does not implement — so plain JNI reflection
+// is a semantically complete answer. Exported here (not RegisterNatives) precisely because
+// ART's own resolution path is dlsym-based; same pattern as §424/§611d.
+extern "C" jobject
+Java_com_bytedance_mira_plugin_hook_flipped_compat_FlippedV2Impl_getDeclaredMethod(
+    JNIEnv* env, jobject /*thiz*/, jobject target, jstring name, jobjectArray params) {
+    if (env == nullptr || target == nullptr) return nullptr;
+    jclass classCls = env->FindClass("java/lang/Class");
+    if (classCls == nullptr) { env->ExceptionClear(); return nullptr; }
+    // target is normally the Class to search; tolerate an instance by taking its class.
+    jobject holder = target;
+    jobject derived = nullptr;
+    if (!env->IsInstanceOf(target, classCls)) {
+        derived = reinterpret_cast<jobject>(env->GetObjectClass(target));
+        holder = derived;
+    }
+    jmethodID gdm = env->GetMethodID(
+        classCls, "getDeclaredMethod",
+        "(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;");
+    jobject result = nullptr;
+    if (gdm != nullptr) {
+        result = env->CallObjectMethod(holder, gdm, name, params);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); result = nullptr; }
+    } else {
+        env->ExceptionClear();
+    }
+    static int wl_flip_log = 0;
+    if (wl_flip_log < 8) {
+        wl_flip_log++;
+        fprintf(stderr, "[WESTLAKE-618] Flipped.getDeclaredMethod -> %s\n",
+                result ? "ok" : "null");
+        fflush(stderr);
+    }
+    if (derived != nullptr) env->DeleteLocalRef(derived);
+    env->DeleteLocalRef(classCls);
+    return result;
+}
+
+// WESTLAKE §636 (2026-08-15) — three Class-1 natives Toutiao reaches that were never bound.
+// ART resolves natives with dlsym(RTLD_DEFAULT, "Java_..."), so a plain exported symbol wins:
+// no RegisterNatives, no timing dependency. Same mechanism as §424 / §611d / §618.
+//
+// ★The symptom on this port is NOT UnsatisfiedLinkError. A reflective call to an unbound native
+// goes Method.invoke -> ArtMethod::Invoke -> EnterInterpreterFromInvoke and enters
+// ExecuteSwitchImplCpp with a NULL instruction pointer, faulting at `ldrh w25,[x28]` with
+// addr=0. So "SIGSEGV at addr=0 in the switch interpreter" should be read as
+// "an unbound native was invoked", and `grep -a JNIMISS` names it.
+
+// WESTLAKE §742 (2026-08-20) — optional ByteDance process-tuning/diagnostic
+// natives whose Android libraries are unavailable on OHOS.
+//
+// §741 proved that these UnsatisfiedLinkErrors escape Looper.loop() and kill
+// otherwise permanent HandlerThreads. Neither method implements application
+// data or Android framework behavior: the first only tunes ART's heap policy,
+// and the second starts an optional native ANR profiler. Preserve the feature's
+// unavailable semantics at the native boundary: ignore the tuning hint and
+// return the conventional null handle for the profiler. Add no speculative
+// siblings; JNIMISS/LOOPEREXIT evidence must name each boundary gap.
+extern "C" void
+Java_com_bytedance_platform_godzilla_sysopt_MinFreeHeapOptNative_nativeSetMinFreeHeapPecent(
+    JNIEnv*, jclass, jdouble percent) {
+    static int log_count = 0;
+    if (log_count++ < 8) {
+        fprintf(stderr,
+                "[WESTLAKE-OPTIONALJNI-742] MinFreeHeap percent=%.4f ignored on OHOS\n",
+                static_cast<double>(percent));
+        fflush(stderr);
+    }
+}
+
+extern "C" jlong
+Java_com_bytedance_crash_jni_NativeBridge_nAnrNativeProfilerStart(JNIEnv*, jclass) {
+    static int log_count = 0;
+    if (log_count++ < 8) {
+        fprintf(stderr,
+                "[WESTLAKE-OPTIONALJNI-742] ANR native profiler unavailable; handle=0\n");
+        fflush(stderr);
+    }
+    return 0;
+}
+
+// Mira probes the host ABI to pick which plugin .so to load. This build is arm64-v8a only.
+// ⚠️The method name does not state its polarity; read as is64Bit(), which is what a
+// single-ABI arm64 host should answer. If Mira loads 32-bit plugin libraries after this,
+// invert it.
+extern "C" jboolean
+Java_com_bytedance_mira_plugin_core_utils_HostAbiUtils_native_1get_1host_1abi(
+    JNIEnv*, jobject) {
+    return (sizeof(void*) == 8) ? JNI_TRUE : JNI_FALSE;
+}
+
+// sun.nio.ch.FileChannelImpl.position0(FileDescriptor fd, long offset)
+// A negative offset means "report the current position"; otherwise seek, then report.
+extern "C" jlong
+Java_sun_nio_ch_FileChannelImpl_position0(JNIEnv* env, jobject, jobject fdObj, jlong offset) {
+    const int fd = wl_fd_of(env, fdObj);
+    if (fd < 0) return -1;
+    const off_t r = (offset < 0) ? ::lseek(fd, 0, SEEK_CUR)
+                                 : ::lseek(fd, static_cast<off_t>(offset), SEEK_SET);
+    return static_cast<jlong>(r);
+}
+
+// WESTLAKE §611d — libcore.io.Linux.memfd_create was never bound (same §424 class:
+// libjavacore isn't loaded on this stack). First caller found: Material Catalog startup
+// via android.os.SharedMemory. Straight syscall; null return on failure matches the
+// file's existing convention (callers treat it as an ErrnoException-shaped failure).
+static jobject WL_Linux_memfd_create(JNIEnv* env, jobject, jstring jname, jint flags) {
+    const char* name = jname ? env->GetStringUTFChars(jname, nullptr) : nullptr;
+    const int fd = static_cast<int>(::syscall(__NR_memfd_create,
+                                              name ? name : "wl_memfd",
+                                              static_cast<unsigned>(flags)));
+    const int err = errno;
+    if (jname && name) env->ReleaseStringUTFChars(jname, name);
+    if (fd < 0) {
+        fprintf(stderr, "[WESTLAKE-611] memfd_create failed errno=%d\n", err);
+        fflush(stderr);
+        return nullptr;
+    }
+    return wl_new_fd(env, fd);
+}
+
+static void wl_register_dns_native(JNIEnv* env) {
+    jclass linuxCls = env->FindClass("libcore/io/Linux");
+    if (!linuxCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-423] libcore/io/Linux not found — DNS native NOT installed\n");
+        fflush(stderr);
+        return;
+    }
+    static const JNINativeMethod m[] = {
+        {"android_getaddrinfo",
+         "(Ljava/lang/String;Landroid/system/StructAddrinfo;I)[Ljava/net/InetAddress;",
+         reinterpret_cast<void*>(WL_Linux_android_getaddrinfo)},
+        {"socket", "(III)Ljava/io/FileDescriptor;", reinterpret_cast<void*>(WL_Linux_socket)},
+        {"gettid", "()I", reinterpret_cast<void*>(WL_Linux_gettid)},
+        {"statvfs", "(Ljava/lang/String;)Landroid/system/StructStatVfs;",
+         reinterpret_cast<void*>(WL_Linux_statvfs)},
+        {"getifaddrs", "()[Landroid/system/StructIfaddrs;",
+         reinterpret_cast<void*>(WL_Linux_getifaddrs)},
+        {"if_nametoindex", "(Ljava/lang/String;)I",
+         reinterpret_cast<void*>(WL_Linux_if_nametoindex)},
+        {"if_indextoname", "(I)Ljava/lang/String;",
+         reinterpret_cast<void*>(WL_Linux_if_indextoname)},
+        {"getnameinfo", "(Ljava/net/InetAddress;I)Ljava/lang/String;",
+         reinterpret_cast<void*>(WL_Linux_getnameinfo)},
+        {"getsockoptInt", "(Ljava/io/FileDescriptor;II)I",
+         reinterpret_cast<void*>(WL_Linux_getsockoptInt)},
+        {"getsockoptLinger", "(Ljava/io/FileDescriptor;II)Landroid/system/StructLinger;",
+         reinterpret_cast<void*>(WL_Linux_getsockoptLinger)},
+        {"setsockoptInt", "(Ljava/io/FileDescriptor;III)V",
+         reinterpret_cast<void*>(WL_Linux_setsockoptInt)},
+        {"socketpair", "(IIILjava/io/FileDescriptor;Ljava/io/FileDescriptor;)V",
+         reinterpret_cast<void*>(WL_Linux_socketpair)},
+        {"fcntlInt", "(Ljava/io/FileDescriptor;II)I",
+         reinterpret_cast<void*>(WL_Linux_fcntlInt)},
+        {"connect", "(Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)V",
+         reinterpret_cast<void*>(WL_Linux_connect)},
+        {"shutdown", "(Ljava/io/FileDescriptor;I)V", reinterpret_cast<void*>(WL_Linux_shutdown)},
+        {"getsockname", "(Ljava/io/FileDescriptor;)Ljava/net/SocketAddress;",
+         reinterpret_cast<void*>(WL_Linux_getsockname)},
+        {"poll", "([Landroid/system/StructPollfd;I)I", reinterpret_cast<void*>(WL_Linux_poll)},
+        {"memfd_create", "(Ljava/lang/String;I)Ljava/io/FileDescriptor;",
+         reinterpret_cast<void*>(WL_Linux_memfd_create)},
+    };
+    const jint rc = env->RegisterNatives(linuxCls, m, 18);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fprintf(stderr, "[WESTLAKE-423] RegisterNatives(Linux.android_getaddrinfo) rc=%d\n", (int)rc);
+    fflush(stderr);
+    env->DeleteLocalRef(linuxCls);
+}
+
+static void wl_install_exit_guard(JNIEnv* env) {
+    jclass rtCls = env->FindClass("java/lang/Runtime");
+    if (!rtCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-412] java/lang/Runtime not found — exit guard NOT installed\n");
+        return;
+    }
+    static const JNINativeMethod m[] = {
+        {"nativeExit", "(I)V", reinterpret_cast<void*>(WL_Runtime_nativeExit)},
+    };
+    const jint rc = env->RegisterNatives(rtCls, m, 1);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    fprintf(stderr, "[WESTLAKE-412] exit guard RegisterNatives(Runtime.nativeExit) rc=%d\n", (int)rc);
+    fflush(stderr);
+    env->DeleteLocalRef(rtCls);
+}
+
+// ============================================================
+// WESTLAKE §677 — SystemSensorManager boundary for sensorless OH boards
+// ============================================================
+// AOSP constructs SystemSensorManager lazily when OrientationEventListener is
+// first used.  The RK3568 development board has no Android sensor-service
+// backend, so leaving these framework natives unregistered turns an ordinary
+// "no sensors present" condition into UnsatisfiedLinkError.  In Toutiao that
+// error escaped while a feed video holder was being bound and unwound the
+// Android UI looper.
+//
+// Keep the Android framework untouched and answer at the platform boundary:
+// expose an empty sensor inventory and return the normal unsupported/error
+// result for operations that require a real sensor or event queue.  The
+// manager token is deliberately opaque and non-zero; it is consumed only by
+// the methods registered below and is never dereferenced.
+static void WL_Sensor_nativeClassInit(JNIEnv*, jclass) {}
+
+static jlong WL_Sensor_nativeCreate(JNIEnv*, jclass, jstring) {
+    return static_cast<jlong>(1);
+}
+
+static jboolean WL_Sensor_nativeGetSensorAtIndex(
+        JNIEnv*, jclass, jlong, jobject, jint) {
+    return JNI_FALSE;
+}
+
+static void WL_Sensor_nativeGetDynamicSensors(JNIEnv*, jclass, jlong, jobject) {}
+
+static void WL_Sensor_nativeGetRuntimeSensors(JNIEnv*, jclass, jlong, jint, jobject) {}
+
+static jboolean WL_Sensor_nativeIsDataInjectionEnabled(JNIEnv*, jclass, jlong) {
+    return JNI_FALSE;
+}
+
+static jint WL_Sensor_nativeCreateDirectChannel(
+        JNIEnv*, jclass, jlong, jint, jlong, jint, jint, jobject) {
+    return -1;
+}
+
+static void WL_Sensor_nativeDestroyDirectChannel(JNIEnv*, jclass, jlong, jint) {}
+
+static jint WL_Sensor_nativeConfigDirectChannel(
+        JNIEnv*, jclass, jlong, jint, jint, jint) {
+    return -1;
+}
+
+static jint WL_Sensor_nativeSetOperationParameter(
+        JNIEnv*, jclass, jlong, jint, jint, jfloatArray, jintArray) {
+    return -1;
+}
+
+static jlong WL_Sensor_nativeInitBaseEventQueue(
+        JNIEnv*, jclass, jlong, jobject, jobject, jstring, jint, jstring, jstring) {
+    return static_cast<jlong>(0);
+}
+
+static jint WL_Sensor_nativeEnableSensor(JNIEnv*, jclass, jlong, jint, jint, jint) {
+    return -1;
+}
+
+static jint WL_Sensor_nativeDisableSensor(JNIEnv*, jclass, jlong, jint) {
+    return -1;
+}
+
+static void WL_Sensor_nativeDestroySensorEventQueue(JNIEnv*, jclass, jlong) {}
+
+static jint WL_Sensor_nativeFlushSensor(JNIEnv*, jclass, jlong) {
+    return -1;
+}
+
+static jint WL_Sensor_nativeInjectSensorData(
+        JNIEnv*, jclass, jlong, jint, jfloatArray, jint, jlong) {
+    return -1;
+}
+
+static void wl_register_sensor_natives(JNIEnv* env) {
+    jclass manager = env->FindClass("android/hardware/SystemSensorManager");
+    if (manager == nullptr || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr, "[WESTLAKE-677] SystemSensorManager not found; sensor boundary inactive\n");
+        return;
+    }
+
+    static const JNINativeMethod managerMethods[] = {
+        {"nativeClassInit", "()V", reinterpret_cast<void*>(WL_Sensor_nativeClassInit)},
+        {"nativeCreate", "(Ljava/lang/String;)J", reinterpret_cast<void*>(WL_Sensor_nativeCreate)},
+        {"nativeGetSensorAtIndex", "(JLandroid/hardware/Sensor;I)Z",
+         reinterpret_cast<void*>(WL_Sensor_nativeGetSensorAtIndex)},
+        {"nativeGetDynamicSensors", "(JLjava/util/List;)V",
+         reinterpret_cast<void*>(WL_Sensor_nativeGetDynamicSensors)},
+        {"nativeGetRuntimeSensors", "(JILjava/util/List;)V",
+         reinterpret_cast<void*>(WL_Sensor_nativeGetRuntimeSensors)},
+        {"nativeIsDataInjectionEnabled", "(J)Z",
+         reinterpret_cast<void*>(WL_Sensor_nativeIsDataInjectionEnabled)},
+        {"nativeCreateDirectChannel", "(JIJIILandroid/hardware/HardwareBuffer;)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeCreateDirectChannel)},
+        {"nativeDestroyDirectChannel", "(JI)V",
+         reinterpret_cast<void*>(WL_Sensor_nativeDestroyDirectChannel)},
+        {"nativeConfigDirectChannel", "(JIII)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeConfigDirectChannel)},
+        {"nativeSetOperationParameter", "(JII[F[I)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeSetOperationParameter)},
+    };
+    const jint managerRc = env->RegisterNatives(
+            manager, managerMethods,
+            static_cast<jint>(sizeof(managerMethods) / sizeof(managerMethods[0])));
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(manager);
+
+    jclass queue = env->FindClass("android/hardware/SystemSensorManager$BaseEventQueue");
+    if (queue == nullptr || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        fprintf(stderr,
+                "[WESTLAKE-677] BaseEventQueue not found; managerRc=%d queue boundary inactive\n",
+                static_cast<int>(managerRc));
+        return;
+    }
+    static const JNINativeMethod queueMethods[] = {
+        {"nativeInitBaseEventQueue",
+         "(JLjava/lang/ref/WeakReference;Landroid/os/MessageQueue;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)J",
+         reinterpret_cast<void*>(WL_Sensor_nativeInitBaseEventQueue)},
+        {"nativeEnableSensor", "(JIII)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeEnableSensor)},
+        {"nativeDisableSensor", "(JI)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeDisableSensor)},
+        {"nativeDestroySensorEventQueue", "(J)V",
+         reinterpret_cast<void*>(WL_Sensor_nativeDestroySensorEventQueue)},
+        {"nativeFlushSensor", "(J)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeFlushSensor)},
+        {"nativeInjectSensorData", "(JI[FIJ)I",
+         reinterpret_cast<void*>(WL_Sensor_nativeInjectSensorData)},
+    };
+    const jint queueRc = env->RegisterNatives(
+            queue, queueMethods,
+            static_cast<jint>(sizeof(queueMethods) / sizeof(queueMethods[0])));
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(queue);
+
+    fprintf(stderr,
+            "[WESTLAKE-677] sensorless SystemSensorManager boundary managerRc=%d queueRc=%d\n",
+            static_cast<int>(managerRc), static_cast<int>(queueRc));
+    fflush(stderr);
+}
+
+int AndroidRuntime::startReg(JNIEnv* env) {
+    wl_icu_early_init();   // WESTLAKE §258 -- before ANY module registers
+    fprintf(stderr, "[liboh_android_runtime] startReg entering (%zu modules)\n",
+            kRegJNICount);
+
+    // Cache JavaVM so AOSP-ported sources (ApkAssets.cpp et al.) can call
+    // AndroidRuntime::getJNIEnv() from background threads.
+    JavaVM* vm = nullptr;
+    if (env->GetJavaVM(&vm) == JNI_OK) {
+        setJavaVM(vm);
+        fprintf(stderr, "[liboh_android_runtime] cached JavaVM=%p\n", (void*)vm);
+    }
+
+    // Core ICU Java classes are used while framework/HWUI registration is
+    // still in progress (FontVariationAxis is the first observed caller).
+    // Bind their real ICU implementations at the ICU boundary before loading
+    // any framework module; registering these at the end of startReg is too
+    // late and leaves PatternNative.<clinit> permanently erroneous.
+    wl_register_charset_natives(env);
+    wl_register_regex_natives(env);
+
+    // Registration auditing is intentionally opt-in. It patches the live JNI
+    // function table and is useful for diagnosis, but must not sit on the
+    // normal interpreter or JIT execution path.
+    if (getenv("ASX_REGISTER_NATIVES_AUDIT") != nullptr) {
+        install_register_natives_hook(env);
+    }
+
+    // 2026-05-02 G2.14r: bootstrap libjavacore.so by invoking its JNI_OnLoad
+    // ONCE before our own kRegJNI loop runs.  Adapter never calls
+    // System.loadLibrary("javacore") on the Java side, so absent this hook
+    // libjavacore's 12 register_libcore_* / register_sun_misc_Unsafe /
+    // register_java_lang_invoke_* / register_android_system_OsConstants
+    // never run, leaving the corresponding native methods unbound.  ART can
+    // intrinsify some (sun.misc.Unsafe atomics) but not e.g.
+    // NativeAllocationRegistry.applyFreeFunction — first GC cycle calls it
+    // and SEGV pc=0 follows (G2.14r root cause).  Calling JNI_OnLoad here
+    // restores the canonical AOSP init flow once for the parent process;
+    // child forks inherit the registrations.
+    {
+        void* libjc = dlopen("libjavacore.so", RTLD_NOW);
+        if (libjc != nullptr) {
+            using OnLoadFn = jint (*)(JavaVM*, void*);
+            OnLoadFn onload = reinterpret_cast<OnLoadFn>(
+                dlsym(libjc, "JNI_OnLoad"));
+            if (onload != nullptr && vm != nullptr) {
+                jint rc = onload(vm, nullptr);
+                fprintf(stderr,
+                    "[liboh_android_runtime] libjavacore JNI_OnLoad rc=0x%x %s\n",
+                    rc, (rc == JNI_VERSION_1_6) ? "(OK)" : "(unexpected)");
+                if (env->ExceptionCheck()) {
+                    fprintf(stderr,
+                        "[liboh_android_runtime] libjavacore JNI_OnLoad raised exception:\n");
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                }
+            } else {
+                fprintf(stderr,
+                    "[liboh_android_runtime] libjavacore JNI_OnLoad symbol missing or vm=null\n");
+            }
+        } else {
+            fprintf(stderr,
+                "[liboh_android_runtime] libjavacore.so dlopen FAILED: %s\n",
+                dlerror() ? dlerror() : "(null)");
+        }
+    }
+
+    // Bound a local-ref frame generously; each register_* may create a handful
+    // of class / method references that won't be released until frame pop.
+    if (env->PushLocalFrame(200) < 0) {
+        fprintf(stderr, "[liboh_android_runtime] PushLocalFrame failed\n");
+        return -1;
+    }
+
+    // 2026-07-11: do NOT bail on the first module failure. A single non-essential
+    // module (e.g. register_android_view_MotionEvent, which fails on arm64) must not
+    // block the registration of every module AFTER it — notably android.os.MessageQueue
+    // (Looper core) and android.content.res.ApkAssets, whose absence kills
+    // ActivityThread.main with UnsatisfiedLinkError. Skip the failed one (clearing any
+    // pending JNI exception so it doesn't poison the next registration) and continue.
+    int failures = 0;
+    for (size_t i = 0; i < kRegJNICount; ++i) {
+        int rc = kRegJNI[i].proc(env);
+        // 2026-07-11: log WHY a module failed (its pending exception) before clearing, so
+        // missing-class / missing-field / signature-mismatch registration failures are
+        // diagnosable instead of silently skipped.
+        if (env->ExceptionCheck()) {
+            jthrowable exc = env->ExceptionOccurred();
+            env->ExceptionClear();
+            if (exc != nullptr) {
+                jclass excCls = env->GetObjectClass(exc);
+                jmethodID toStr = env->GetMethodID(excCls,
+                    "toString", "()Ljava/lang/String;");
+                jstring js = toStr ? (jstring)env->CallObjectMethod(exc, toStr) : nullptr;
+                if (env->ExceptionCheck()) env->ExceptionClear();
+                const char* cs = js ? env->GetStringUTFChars(js, nullptr) : "<no msg>";
+                fprintf(stderr, "[liboh_android_runtime]   %s EXC: %s\n", kRegJNI[i].name, cs);
+                if (js) env->ReleaseStringUTFChars(js, cs);
+            }
+            if (rc >= 0) rc = -1;  // an exception means failure regardless of returned rc
+        }
+        if (rc < 0) {
+            fprintf(stderr, "[liboh_android_runtime] %s failed (rc=%d) — skipping, continuing\n",
+                    kRegJNI[i].name, rc);
+            ++failures;
+            continue;
+        }
+        fprintf(stderr, "[liboh_android_runtime]   ok %s\n", kRegJNI[i].name);
+    }
+    fprintf(stderr, "[liboh_android_runtime] kRegJNI loop done: %zu ok, %d failed\n",
+            kRegJNICount - failures, failures);
+
+    env->PopLocalFrame(nullptr);
+
+    // ============================================================
+    // Phase 2 (r27) — dlopen real libhwui.so + invoke its 27 register_X
+    // functions to register Paint/Canvas/RenderNode/HardwareRenderer/...
+    // graphics natives with REAL Skia-backed implementations.  No stubs.
+    //
+    // libhwui.so is OH-cross-built (DT_NEEDED: liboh_hwui_shim.so /
+    // liboh_skia_rtti_shim.so / libskia_canvaskit.z.so / libEGL.so
+    // / libGLESv3.so / libutils.so etc., all available on device).
+    // Earlier r15 diag confirmed libhwui dlopen alone succeeds in JVM ctx.
+    // ============================================================
+    if (env->PushLocalFrame(50) >= 0) {
+        const char* kHwuiPaths[] = {
+            "/system/android/lib/libhwui.so",
+            "libhwui.so",
+        };
+        void* hwui = nullptr;
+        for (const char* p : kHwuiPaths) {
+            hwui = dlopen(p, RTLD_NOW | RTLD_GLOBAL);
+            if (hwui) {
+                fprintf(stderr, "[liboh_android_runtime] dlopen %s OK\n", p);
+                break;
+            } else {
+                fprintf(stderr, "[liboh_android_runtime] dlopen %s FAIL: %s\n",
+                        p, dlerror());
+            }
+        }
+        if (hwui) {
+            // 45 register_X mangled symbol names extracted from libhwui.so
+            // dynsym table (`llvm-readelf --dyn-syms ... | grep register_android`).
+            // Mangled names use Itanium C++ ABI:
+            //   - `_Z<len>register_android_*P7_JNIEnv` for global-namespace fns
+            //   - `_ZN7android<len>register_android_*EP7_JNIEnv` for android:: fns
+            using RegFn = int (*)(JNIEnv*);
+            struct HwuiReg { const char* name; const char* sym; };
+            static const HwuiReg kHwuiRegFns[] = {
+                // 2026-05-07 G2.14s: Graphics is registered below, AFTER ColorSpace,
+                // matching AOSP frameworks/base/libs/hwui/apex/jni_runtime.cpp:104-109
+                // canonical order (Canvas, ColorSpace, Graphics, Bitmap, ...).
+                // History blame for the prior SKIP: see the larger comment at the
+                // ColorSpace → Graphics block below.
+                {"BitmapFactory",                "_Z39register_android_graphics_BitmapFactoryP7_JNIEnv"},
+                {"Matrix",                       "_ZN7android32register_android_graphics_MatrixEP7_JNIEnv"},
+                {"BitmapRegionDecoder",          "_Z45register_android_graphics_BitmapRegionDecoderP7_JNIEnv"},
+                {"Interpolator",                 "_Z38register_android_graphics_InterpolatorP7_JNIEnv"},
+                {"CreateJavaOutputStreamAdaptor","_Z55register_android_graphics_CreateJavaOutputStreamAdaptorP7_JNIEnv"},
+                {"PathMeasure",                  "_ZN7android37register_android_graphics_PathMeasureEP7_JNIEnv"},
+                {"GraphicsStatsService",         "_Z46register_android_graphics_GraphicsStatsServiceP7_JNIEnv"},
+                {"Picture",                      "_ZN7android33register_android_graphics_PictureEP7_JNIEnv"},
+                {"ColorFilter",                  "_ZN7android37register_android_graphics_ColorFilterEP7_JNIEnv"},
+                {"Camera",                       "_Z32register_android_graphics_CameraP7_JNIEnv"},
+                {"Gainmap",                      "_ZN7android33register_android_graphics_GainmapEP7_JNIEnv"},
+                {"Region",                       "_ZN7android32register_android_graphics_RegionEP7_JNIEnv"},
+                {"Paint",                        "_ZN7android31register_android_graphics_PaintEP7_JNIEnv"},
+                {"DisplayListCanvas",            "_ZN7android39register_android_view_DisplayListCanvasEP7_JNIEnv"},
+                {"ByteBufferStreamAdaptor",      "_Z49register_android_graphics_ByteBufferStreamAdaptorP7_JNIEnv"},
+                {"Movie",                        "_Z31register_android_graphics_MovieP7_JNIEnv"},
+                {"Mesh",                         "_ZN7android30register_android_graphics_MeshEP7_JNIEnv"},
+                {"ThreadedRenderer",             "_ZN7android38register_android_view_ThreadedRendererEP7_JNIEnv"},
+                {"PathIterator",                 "_ZN7android38register_android_graphics_PathIteratorEP7_JNIEnv"},
+                // 2026-04-30 G2.4 (graphics_jni_inventory §3.3): ColorSpace
+                // must register BEFORE ImageDecoder/Bitmap/HardwareBufferRenderer.
+                // ImageDecoder's register_X caches a jfieldID for ColorSpace
+                // static field (e.g. SRGB).  If ColorSpace class isn't loaded
+                // when ImageDecoder.cpp does GetStaticFieldID, the cached fid
+                // stays null → first nGetColorSpace call CheckJNI-aborts with
+                // "JNI DETECTED ERROR IN APPLICATION: fid == null".
+                // (Was previously after ImageDecoder; moved up here.)
+                {"ColorSpace",                   "_ZN7android36register_android_graphics_ColorSpaceEP7_JNIEnv"},
+                // 2026-05-07 G2.14s: Graphics MUST be registered here — after ColorSpace
+                // (which Graphics's register fn reads via gColorSpace_Named_class for
+                // SRGB/EXTENDED_SRGB/etc fields) and before ANY Paint/Bitmap/Region/
+                // Canvas native gets first invoked at runtime.
+                //
+                // register_android_graphics_Graphics initializes the file-static
+                // globals gFontMetricsInt_class / gFontMetrics_class / gRect_class /
+                // gRectF_class / gPoint_class / gPointF_class / gBitmapConfig_class /
+                // gCanvas_class / gPicture_class / gRegion_class / gByte_class /
+                // gVMRuntime_class / gColorSpace_class / gColorSpaceRGB_class /
+                // gTransferParameters_class plus their associated fieldIDs in
+                // libhwui's own translation units.  Paint.cpp's nGetFontMetricsInt
+                // does `IsInstanceOf(metrics, gFontMetricsInt_class)` and SetIntField
+                // on gFontMetricsInt_top/ascent/descent/bottom/leading — without this
+                // call those globals stay NULL → JNI DETECTED ERROR aborts in CheckJNI.
+                //
+                // History blame: 2026-05-06 SKIPPED on the false-attribution theory
+                // that adding Graphics required a boot image rebuild, which itself
+                // had failed with `Class mismatch String objectSize 467 vs 459`
+                // dex2oat ABI mismatch.  That ABI mismatch is an INDEPENDENT issue
+                // (ART build flags drift vs device libart) and has nothing to do
+                // with whether libhwui's register_X is invoked at startReg time.
+                // Verification (2026-05-07):
+                //   nm -D libhwui.so | grep register_android_graphics_Graphics
+                //   → 000dedcd T _Z34register_android_graphics_GraphicsP7_JNIEnv
+                // The symbol IS exported; dlsym at startReg succeeds; the call
+                // initializes Graphics's LOCAL g_* globals (LOCAL is fine — same .so
+                // internal access, see jni_Graphics.o objdump showing 'b' BSS for
+                // _ZL18gFontMetrics_class etc).  Paint native then sees init'd globals.
+                {"Graphics",                     "_Z34register_android_graphics_GraphicsP7_JNIEnv"},
+                {"AnimatedImageDrawable",        "_Z56register_android_graphics_drawable_AnimatedImageDrawableP7_JNIEnv"},
+                {"PathParser",                   "_ZN7android32register_android_util_PathParserEP7_JNIEnv"},
+                {"TextureLayer",                 "_ZN7android38register_android_graphics_TextureLayerEP7_JNIEnv"},
+                {"AnimatedVectorDrawable",       "_ZN7android57register_android_graphics_drawable_AnimatedVectorDrawableEP7_JNIEnv"},
+                {"NativeInterpolatorFactory",    "_ZN7android61register_android_graphics_animation_NativeInterpolatorFactoryEP7_JNIEnv"},
+                {"ImageDecoder",                 "_Z38register_android_graphics_ImageDecoderP7_JNIEnv"},
+                {"RenderNode",                   "_ZN7android32register_android_view_RenderNodeEP7_JNIEnv"},
+                {"DrawFilter",                   "_ZN7android36register_android_graphics_DrawFilterEP7_JNIEnv"},
+                {"RenderEffect",                 "_Z38register_android_graphics_RenderEffectP7_JNIEnv"},
+                {"NinePatch",                    "_Z35register_android_graphics_NinePatchP7_JNIEnv"},
+                {"Canvas",                       "_ZN7android32register_android_graphics_CanvasEP7_JNIEnv"},
+                {"HardwareBufferRenderer",       "_ZN7android48register_android_graphics_HardwareBufferRendererEP7_JNIEnv"},
+                {"Bitmap",                       "_Z32register_android_graphics_BitmapP7_JNIEnv"},
+                {"HardwareRendererObserver",     "_ZN7android50register_android_graphics_HardwareRendererObserverEP7_JNIEnv"},
+                {"Path",                         "_ZN7android30register_android_graphics_PathEP7_JNIEnv"},
+                {"Shader",                       "_Z32register_android_graphics_ShaderP7_JNIEnv"},
+                {"VectorDrawable",               "_ZN7android49register_android_graphics_drawable_VectorDrawableEP7_JNIEnv"},
+                {"MaskFilter",                   "_Z36register_android_graphics_MaskFilterP7_JNIEnv"},
+                {"PathEffect",                   "_Z36register_android_graphics_PathEffectP7_JNIEnv"},
+                {"RenderNodeAnimator",           "_ZN7android54register_android_graphics_animation_RenderNodeAnimatorEP7_JNIEnv"},
+                {"CanvasProperty",               "_ZN7android40register_android_graphics_CanvasPropertyEP7_JNIEnv"},
+                {"YuvImage",                     "_Z34register_android_graphics_YuvImageP7_JNIEnv"},
+                {"FontFamily",                   "_ZN7android36register_android_graphics_FontFamilyEP7_JNIEnv"},
+                {"MeshSpecification",            "_ZN7android43register_android_graphics_MeshSpecificationEP7_JNIEnv"},
+                // 2026-05-02 G2.14r: NEW font API (android.graphics.fonts.*)
+                // — required by AOSP SystemFonts.buildSystemFallback chain.
+                // Without these, Font$Builder.nInitBuilder() throws
+                // UnsatisfiedLinkError → setSystemFontMap NPE → handleBindApplication
+                // fails → mInitialApplication = null → ConfigurationController NPE.
+                // libhwui exports them via fonts/Font.cpp + fonts/FontFamily.cpp
+                // (compiled into libhwui.so in G2.14q Path A).
+                {"fonts.Font",                   "_ZN7android36register_android_graphics_fonts_FontEP7_JNIEnv"},
+                {"fonts.FontFamily",             "_ZN7android42register_android_graphics_fonts_FontFamilyEP7_JNIEnv"},
+                // 2026-05-07 G2.14t: text/* register fns required by AOSP
+                // apex/jni_runtime.cpp:149-152.  Order kept identical to AOSP
+                // (MeasuredText → LineBreaker → TextShaper → GraphemeBreak).
+                //
+                // Without these registered, HelloWorld TextView.onMeasure path
+                // → StaticLayout.generate → LineBreaker$Builder.build →
+                // LineBreaker.<clinit>:450 → nGetReleaseFunc() throws
+                // UnsatisfiedLinkError (No implementation found for ...) →
+                // ART runtime exception → AMS schedulerDied → kill -9 child.
+                //
+                // Build dependency: build/compile_libhwui_jni.sh must compile
+                // frameworks/base/libs/hwui/jni/text/*.cpp (4 files); the main
+                // loop in that script globs jni/*.cpp (top level only) so
+                // jni/text/ subdir was previously missed.  G2.14t patched both
+                // sides simultaneously.
+                // mangled name lengths verified against actual nm -D libhwui.so output:
+                //   MeasuredText = 43 chars, LineBreaker = 42, TextShaper = 41, GraphemeBreak = 44
+                {"text.MeasuredText",            "_ZN7android43register_android_graphics_text_MeasuredTextEP7_JNIEnv"},
+                {"text.LineBreaker",             "_ZN7android42register_android_graphics_text_LineBreakerEP7_JNIEnv"},
+                {"text.TextShaper",              "_ZN7android41register_android_graphics_text_TextShaperEP7_JNIEnv"},
+                {"text.GraphemeBreak",           "_ZN7android44register_android_graphics_text_GraphemeBreakEP7_JNIEnv"},
+                // 2026-05-01 G2.14n: Typeface real-impl from libhwui DEFERRED
+                // — libhwui register_android_graphics_Typeface aborts during
+                // startReg (SIGABRT in parent appspawn-x).  Likely needs
+                // init_FontUtils / GraphicsJNI prior init that we haven't wired.
+                // Keep stub for now; revisit after addressing init path.
+            };
+            int hwui_ok = 0, hwui_fail = 0;
+            for (const auto& r : kHwuiRegFns) {
+                RegFn fn = reinterpret_cast<RegFn>(dlsym(hwui, r.sym));
+                if (!fn) {
+                    fprintf(stderr, "[liboh_android_runtime]   dlsym %s FAIL: %s\n",
+                            r.name, dlerror());
+                    hwui_fail++;
+                    continue;
+                }
+                int rc = fn(env);
+                if (env->ExceptionCheck()) {
+                    env->ExceptionDescribe();
+                    env->ExceptionClear();
+                    hwui_fail++;
+                    continue;
+                }
+                if (rc == 0) {
+                    fprintf(stderr, "[liboh_android_runtime]   libhwui:register_%s OK\n", r.name);
+                    hwui_ok++;
+                } else {
+                    fprintf(stderr, "[liboh_android_runtime]   libhwui:register_%s rc=%d\n", r.name, rc);
+                    hwui_fail++;
+                }
+            }
+            fprintf(stderr, "[liboh_android_runtime] libhwui register: %d ok / %d fail\n",
+                    hwui_ok, hwui_fail);
+        } else {
+            fprintf(stderr, "[liboh_android_runtime] WARN: libhwui not loaded — graphics natives unbound\n");
+        }
+
+        // G2.4 (2026-04-30): apply graphics JNI compat shim — last-wins
+        // RegisterNatives that override libhwui impls known to abort
+        // (e.g., ImageDecoder.nGetColorSpace fid==null) and fill in
+        // framework JNI methods we don't have a real libandroid_runtime
+        // for (Surface / BLASTBufferQueue / DisplayEventReceiver).
+        // MUST run AFTER libhwui's register loop above so our overrides win.
+        register_android_graphics_compat_shim(env);
+
+        env->PopLocalFrame(nullptr);
+    }
+
+    // WESTLAKE §404: repair java.lang.invoke statics AFTER libjavacore's
+    // register_java_lang_invoke_* natives are bound (they run in its JNI_OnLoad above) and after
+    // every module is registered, but still before any app code runs.
+    wl_repair_invoke_classes(env);
+    wl_register_sensor_natives(env); // WESTLAKE §677 — sensorless OH platform boundary
+    wl_install_exit_guard(env);   // WESTLAKE §412 — last-wins override of Runtime.nativeExit
+    wl_install_proxy_props(env);  // WESTLAKE §413 — outbound HTTP(S) via the hdc reverse tunnel
+    wl_register_keyevent_natives(env);  // WESTLAKE §414 — KeyEvent.nativeNextId (BACK key)
+    wl_seed_service_manager_cache(env); // WESTLAKE §416 — non-null UserManager for the Settings page
+    wl_register_dns_native(env);        // WESTLAKE §423 — DNS: libcore.io.Linux.android_getaddrinfo
+    wl_repair_os_constants(env);        // WESTLAKE §425 — OsConstants statics were all zero
+    wl_register_tls_natives(env);       // WESTLAKE §441 — real TLS over OHOS OpenSSL
+    wl_register_probe_log(env);         // WESTLAKE §450 — native log sink for app code
+    wl_register_audiopolicy_natives(env); // WESTLAKE §468 — unblock AudioAttributes/<clinit>
+    // §494: the MediaCodec/MediaCodecList shim was fully implemented in
+    // framework/core/jni/oh_mediacodec_shim.cpp but only wired into adapter_bridge.cpp's JNI_OnLoad,
+    // which does NOT run in the appspawn-x CHILD architecture -- none of that function's other
+    // registrations appear in the child log either. So MediaCodecList's natives stayed unbound and
+    // ExoPlayer ABORTED the process inside MediaCodecList.getSupportedTypes while building its codec
+    // list. Register it here, where every working fix in this port registers.
+    {
+        int rc = register_MediaCodec_shim(env);
+        fprintf(stderr, "[WESTLAKE-494] register_MediaCodec_shim rc=%d\n", rc);
+        fflush(stderr);
+    }
+    wl_install_media_session(env);       // WESTLAKE §467 — media_session for MediaSession
+    wl_install_shortcut_service(env);   // WESTLAKE §454 — real IShortcutService (Presets page)
+    wl_repair_string_statics(env);      // WESTLAKE §444 — String.CASE_INSENSITIVE_ORDER was null
+    wl_probe_regex(env);                // WESTLAKE §442 — verify the regex engine
+
+    fprintf(stderr, "[liboh_android_runtime] startReg exiting (ok)\n");
+    return 0;
+}
+
+// These framework adapters create Java worker threads.  AndroidRuntime::startReg()
+// runs in the AppSpawn parent, where starting them violates ART's zygote rule that
+// only the forking thread may remain after ZygoteHooks.preFork().  Install them in
+// each specialized child, after the stock post-fork hooks have restarted ART's own
+// daemons.  Keep this at the framework/native boundary: ART must not know about
+// individual Android services or applications.
+extern "C" __attribute__((visibility("default")))
+void wl_install_post_fork_framework_services(JNIEnv* env) {
+    if (env == nullptr) {
+        return;
+    }
+    // Do not start framework worker threads in the AppSpawn parent. They are
+    // installed by wl_install_post_fork_framework_services() after every child
+    // has completed ART's stock post-fork hooks. Starting them here leaves
+    // three Java-attached threads in the zygote and makes the next
+    // Runtime::PreZygoteFork() correctly abort its single-thread invariant.
+}
+
+}  // namespace android
