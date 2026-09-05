@@ -137,6 +137,13 @@ nlohmann::json ActivityToAbilityJson(
     j["name"] = activity.name;
     j["bundleName"] = packageName;
     j["visible"] = activity.exported;
+    // android:theme was already decoded by ApkManifestParser (ActivityData::theme)
+    // but never reached Java, so ActivityInfo.theme arrived 0 and ActivityThread
+    // resolved a bare framework theme. Every AppCompatActivity then died in
+    // setContentView with "You need to use a Theme.AppCompat theme (or
+    // descendant) with this activity". Carry it across; PackageInfoBuilder
+    // validates it and applies the <application> fall-back.
+    j["theme"] = activity.theme;
     j["launchMode"] = activity.launchMode == 2 || activity.launchMode == 3
             ? "SINGLETON" : "STANDARD";
     switch (activity.screenOrientation) {

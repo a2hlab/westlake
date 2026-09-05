@@ -138,7 +138,7 @@ public class PackageInfoBuilder {
             pi.activities = new ActivityInfo[abilities.length()];
             for (int i = 0; i < abilities.length(); i++) {
                 pi.activities[i] = buildActivityInfo(
-                    abilities.getJSONObject(i), pi.packageName);
+                    abilities.getJSONObject(i), pi.packageName, pi.applicationInfo);
             }
         }
 
@@ -279,9 +279,16 @@ public class PackageInfoBuilder {
         ai.logo = 0;          // PackageItemInfo.logo (inherited)
         ai.labelRes = 0;      // PackageItemInfo.labelRes (inherited)
         ai.descriptionRes = 0;
-        ai.theme = 0;
+        // theme is deliberately NOT in the blanket-zero list above. Those fields
+        // are zeroed because OH iconId/labelId carry type byte 0x00, which is not
+        // a usable Android resource ID. The theme, by contrast, comes from the
+        // APK's own binary AndroidManifest.xml via ApkManifestParser, so it is a
+        // real Android ID -- and it is the one field an AppCompatActivity cannot
+        // start without. Validate rather than discard.
+        ai.theme = validThemeId(ohApp.optInt("theme", 0));
         System.err.println("[G2.5-PIB] ApplicationInfo " + packageName
-                + " icon/iconRes/labelRes/theme zeroed");
+                + " icon/iconRes/labelRes zeroed, theme=0x"
+                + Integer.toHexString(ai.theme));
 
         int flags = ApplicationInfo.FLAG_HAS_CODE
                 | ApplicationInfo.FLAG_INSTALLED
@@ -317,8 +324,25 @@ public class PackageInfoBuilder {
         }
     }
 
+    /**
+     * An Android resource ID, or 0 if the value cannot be one.
+     *
+     * A resource ID is packed as 0xPPTTEEEE: package, type, entry. Only two
+     * package bytes are meaningful to us -- 0x7f for the application's own
+     * resources and 0x01 for the framework's. Anything else (in practice 0x00,
+     * which is what OH's own iconId/labelId carry) is not addressable by
+     * Resources.getTheme() and would throw NotFoundException at setContentView,
+     * so it is rejected here rather than at the crash site.
+     */
+    private static int validThemeId(int id) {
+        int packageId = (id >>> 24) & 0xFF;
+        return (packageId == 0x7F || packageId == 0x01) ? id : 0;
+    }
+
     private static ActivityInfo buildActivityInfo(JSONObject abilityJson,
-                                                   String packageName) throws JSONException {
+                                                   String packageName,
+                                                   ApplicationInfo applicationInfo)
+            throws JSONException {
         ActivityInfo ai = new ActivityInfo();
         String abilityName = abilityJson.getString("name");
 
@@ -333,6 +357,28 @@ public class PackageInfoBuilder {
             ai.launchMode = ActivityInfo.LAUNCH_SINGLE_TASK;
         } else {
             ai.launchMode = ActivityInfo.LAUNCH_MULTIPLE;
+        }
+
+        // Theme.
+        //
+        // AOSP's rule when an <activity> declares no android:theme is to inherit
+        // the <application> theme, so do exactly that. Leaving this at 0 is what
+        // made ActivityThread resolve a bare framework theme and kill every
+        // AppCompatActivity in setContentView:
+        //
+        //   RuntimeException: themeId:0xnull themeResources:0x103013f
+        //   Caused by: IllegalStateException: You need to use a Theme.AppCompat
+        //              theme (or descendant) with this activity.
+        //
+        // Validated on DAYU200 / OpenHarmony 6.1.0.31; see the frontline
+        // ROOT-CAUSES record for the original diagnosis.
+        ai.theme = validThemeId(abilityJson.optInt("theme", 0));
+        if (ai.theme == 0 && applicationInfo != null) {
+            ai.theme = validThemeId(applicationInfo.theme);
+        }
+        if (ai.theme == 0) {
+            System.err.println("[WESTLAKE-PM] no theme for " + ai.name
+                    + "; an AppCompatActivity will fail in setContentView");
         }
 
         // Orientation reverse mapping
