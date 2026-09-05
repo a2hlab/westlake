@@ -147,6 +147,14 @@ extern int register_android_view_KeyCharacterMap(JNIEnv* env);
 // to avoid pulling libinput.so / libui.so / ui::Transform / HmacKeyManager /
 // IInputConstants AIDL chain into liboh_android_runtime.
 extern int register_android_view_MotionEvent(JNIEnv* env);
+// WESTLAKE frontline merge: android.view.VelocityTracker's seven natives.
+// framework.jar declares them and nothing implemented them, so the first touch
+// to reach any scrolling container threw UnsatisfiedLinkError inside
+// ViewRootImpl's input stage -- which swallows it, making touch look delivered
+// but inert.  Registered here rather than from an app-side .so because
+// VelocityTracker is a boot-classpath class and this adapter's libnativeloader
+// will not admit a new library to the boot namespace.
+extern int register_android_view_VelocityTracker(JNIEnv* env);
 // WESTLAKE §700: stock android.graphics.SurfaceTexture Java lifecycle backed by an
 // OHOS in-process consumer/producer surface pair at the native boundary.
 extern int register_android_graphics_SurfaceTexture_oh(JNIEnv* env);
@@ -223,6 +231,7 @@ static const RegJNIRec kRegJNI[] = {
     // android_view_MotionEvent_aosp.cpp (replaces AOSP direct-reference
     // MotionEvent.cpp; class layout under adapter control, no ABI drift).
     { "register_android_view_MotionEvent",    register_android_view_MotionEvent },
+    { "register_android_view_VelocityTracker", register_android_view_VelocityTracker },
     { "register_android_view_InputEventReceiver", register_android_view_InputEventReceiver },
     { "register_android_content_AssetManager", register_android_content_AssetManager },
     { "register_android_os_MessageQueue",     register_android_os_MessageQueue },
