@@ -109,6 +109,16 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // configured AOSP provider at this service boundary. WebViewFactory
             // itself remains untouched and performs its normal verification,
             // context creation, native load, and provider instantiation.
+            // The mount stub this framework would otherwise expose returns an
+            // empty StorageVolume[], which makes
+            // Environment.getExternalStorageDirectory() throw
+            // ArrayIndexOutOfBoundsException from inside whichever <clinit>
+            // touched it first -- poisoning that class for the life of the
+            // process. Report the primary emulated volume instead.
+            case "mount": {
+                StorageManagerAdapter storage = StorageManagerAdapter.getInstance();
+                return storage != null ? storage.asBinder() : null;
+            }
             case "webviewupdate":
                 return WebViewUpdateServiceAdapter.isAvailable()
                         ? WebViewUpdateServiceAdapter.getInstance().asBinder()
