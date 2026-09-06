@@ -1,5 +1,5 @@
 """Resolve literal Blueprint filegroups for the source framework build."""
-import json,re
+import ast,json,re
 from pathlib import Path
 # Remove comments without altering quoted strings; retain nesting boundaries.
 lex=re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/|[A-Za-z_][A-Za-z_0-9.]*|\d+|[^\s]',re.S)
@@ -20,7 +20,7 @@ def value(ts,i):
    x,i=expr(ts,i+1);out[key]=x
    if ts[i]==',':i+=1
   return out,i+1
- if t.startswith('"'):return json.loads(t),i+1
+ if t.startswith('"'):return ast.literal_eval(t),i+1
  if t in ('true','false'):return t=='true',i+1
  if t.isdigit():return int(t),i+1
  if i+1<len(ts) and ts[i+1]=='(':
