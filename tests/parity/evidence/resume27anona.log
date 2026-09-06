@@ -1,0 +1,56 @@
+nullptr W 09-06 07:44:52 27789 27789 jit_memory_region.cc:152] [WESTLAKE-OH-JIT] memfd RX denied (13); using ART anonymous cache with RWX updates permitted by caller
+nullptr I 09-06 07:44:52 27789 27793 jit.cc:446] [WESTLAKE-JIT-BOOT] result=1 byte[] java.util.Arrays.copyOf(byte[], int) kind=CompilationKind(1)
+nullptr I 09-06 07:44:53 27789 27793 jit.cc:446] [WESTLAKE-JIT-BOOT] result=1 int java.util.HashMap.hash(java.lang.Object) kind=CompilationKind(1)
+[GAP_BENCH] CONFIG width=1200 density=360 html_chars=10979
+[GAP_BENCH] PAGE sample=0 load_finished_ms=141 visual_ready_ms=191
+[BENCH_PHASE] sample=0 end_uptime=8883676 cpu_ms=2181 focus=true visibility=0
+[GAP_BENCH] PAGE sample=1 load_finished_ms=82 visual_ready_ms=95
+[BENCH_PHASE] sample=1 end_uptime=8883973 cpu_ms=2502 focus=true visibility=0
+[GAP_BENCH] PAGE sample=2 load_finished_ms=85 visual_ready_ms=99
+[BENCH_PHASE] sample=2 end_uptime=8884273 cpu_ms=2693 focus=true visibility=0
+[GAP_BENCH] PAGE sample=3 load_finished_ms=88 visual_ready_ms=101
+[BENCH_PHASE] sample=3 end_uptime=8884574 cpu_ms=2879 focus=true visibility=0
+[GAP_BENCH] PAGE sample=4 load_finished_ms=135 visual_ready_ms=151
+[BENCH_PHASE] sample=4 end_uptime=8884934 cpu_ms=3242 focus=true visibility=0
+[GAP_BENCH] PAGE sample=5 load_finished_ms=91 visual_ready_ms=101
+[BENCH_PHASE] sample=5 end_uptime=8885237 cpu_ms=3461 focus=true visibility=0
+[GAP_BENCH] PAGE sample=6 load_finished_ms=84 visual_ready_ms=95
+[BENCH_PHASE] sample=6 end_uptime=8885534 cpu_ms=3638 focus=true visibility=0
+[GAP_BENCH] PAGE sample=7 load_finished_ms=87 visual_ready_ms=94
+[BENCH_PHASE] sample=7 end_uptime=8885828 cpu_ms=3826 focus=true visibility=0
+[GAP_BENCH] PAGE sample=8 load_finished_ms=82 visual_ready_ms=95
+[BENCH_PHASE] sample=8 end_uptime=8886124 cpu_ms=4003 focus=true visibility=0
+[GAP_BENCH] PAGE sample=9 load_finished_ms=89 visual_ready_ms=106
+[BENCH_PHASE] sample=9 end_uptime=8886431 cpu_ms=4204 focus=true visibility=0
+[GAP_BENCH] PAGE sample=10 load_finished_ms=253 visual_ready_ms=332
+[BENCH_PHASE] sample=10 end_uptime=8886965 cpu_ms=4705 focus=true visibility=0
+[GAP_BENCH] PAGE sample=11 load_finished_ms=244 visual_ready_ms=309
+[BENCH_PHASE] sample=11 end_uptime=8887475 cpu_ms=5214 focus=true visibility=0
+[GAP_BENCH] PAGE_COMPLETE samples=12 warmup=2
+nullptr I 09-06 07:44:59 27789 27793 jit.cc:446] [WESTLAKE-JIT-BOOT] result=1 int java.util.HashMap.hash(java.lang.Object) kind=CompilationKind(2)
+[GAP_BENCH] INPUT sample=1 event_to_click_ms=64
+[GAP_BENCH] INPUT_FRAME sample=1 event_to_frame_callback_ms=68
+[GAP_BENCH] INPUT sample=2 event_to_click_ms=45
+[GAP_BENCH] INPUT_FRAME sample=2 event_to_frame_callback_ms=49
+nullptr I 09-06 07:45:00 27789 27793 jit.cc:446] [WESTLAKE-JIT-BOOT] result=1 java.lang.Object[] java.util.Arrays.copyOf(java.lang.Object[], int, java.lang.Class) kind=CompilationKind(1)
+[GAP_BENCH] INPUT sample=3 event_to_click_ms=6
+[GAP_BENCH] INPUT_FRAME sample=3 event_to_frame_callback_ms=12
+nullptr I 09-06 07:45:00 27789 27793 jit.cc:446] [WESTLAKE-JIT-BOOT] result=1 java.lang.Object[] java.util.Arrays.copyOf(java.lang.Object[], int) kind=CompilationKind(1)
+[GAP_BENCH] INPUT sample=4 event_to_click_ms=13
+[GAP_BENCH] INPUT_FRAME sample=4 event_to_frame_callback_ms=25
+[GAP_BENCH] INPUT sample=5 event_to_click_ms=6
+[GAP_BENCH] INPUT_FRAME sample=5 event_to_frame_callback_ms=13
+[GAP_BENCH] INPUT sample=6 event_to_click_ms=11
+[GAP_BENCH] INPUT_FRAME sample=6 event_to_frame_callback_ms=25
+[GAP_BENCH] INPUT sample=7 event_to_click_ms=8
+[GAP_BENCH] INPUT_FRAME sample=7 event_to_frame_callback_ms=22
+[GAP_BENCH] INPUT sample=8 event_to_click_ms=7
+[GAP_BENCH] INPUT_FRAME sample=8 event_to_frame_callback_ms=12
+[GAP_BENCH] INPUT sample=9 event_to_click_ms=10
+[GAP_BENCH] INPUT_FRAME sample=9 event_to_frame_callback_ms=23
+[GAP_BENCH] INPUT sample=10 event_to_click_ms=7
+[GAP_BENCH] INPUT_FRAME sample=10 event_to_frame_callback_ms=12
+[GAP_BENCH] INPUT sample=11 event_to_click_ms=7
+[GAP_BENCH] INPUT_FRAME sample=11 event_to_frame_callback_ms=12
+[GAP_BENCH] INPUT sample=12 event_to_click_ms=7
+[GAP_BENCH] INPUT_FRAME sample=12 event_to_frame_callback_ms=15

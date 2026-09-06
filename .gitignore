@@ -10,3 +10,12 @@ __pycache__/
 *.key
 *.log
 *.jsonl
+
+# Reviewed synthetic benchmark and native contract fixtures.
+!tests/parity/evidence/resume27filea.log
+!tests/parity/evidence/resume27fileb.log
+!tests/parity/evidence/resume27anona.log
+!tests/parity/evidence/resume27anonb.log
+!tests/parity/evidence/resume24-popen-*.log
+!tests/parity/evidence/oneplus23-popen-v2-*.log
+!tests/parity/evidence/oneplus24-popen-stress.log

@@ -1,0 +1,4 @@
+read denied=1 got=0 text= status=32512
+fclose status=32512
+POPEN_CONTRACT denied=1 failures=0
+PROBE_EXIT=0
