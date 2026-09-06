@@ -37,6 +37,7 @@
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
 #include <net/if.h>
+#include "oh_network_interfaces.h"
 #include <sys/statvfs.h>
 #include <sys/syscall.h>
 #include <sys/inotify.h>
@@ -1145,7 +1146,7 @@ static jint WL_Linux_if_nametoindex(JNIEnv* env, jobject, jstring jname) {
     if (jname == nullptr) return 0;
     const char* name = env->GetStringUTFChars(jname, nullptr);
     if (name == nullptr) return 0;
-    const unsigned index = ::if_nametoindex(name);
+    const unsigned index = oh_network::interfaceIndex(name);
     env->ReleaseStringUTFChars(jname, name);
     fprintf(stderr, "[WESTLAKE-769] if_nametoindex -> %u\n", index);
     fflush(stderr);
@@ -1154,7 +1155,7 @@ static jint WL_Linux_if_nametoindex(JNIEnv* env, jobject, jstring jname) {
 
 static jstring WL_Linux_if_indextoname(JNIEnv* env, jobject, jint index) {
     char name[IF_NAMESIZE] = {};
-    if (::if_indextoname(static_cast<unsigned>(index), name) == nullptr) return nullptr;
+    if (index <= 0 || oh_network::interfaceName(static_cast<unsigned>(index), name) == nullptr) return nullptr;
     return env->NewStringUTF(name);
 }
 

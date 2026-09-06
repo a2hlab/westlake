@@ -122,6 +122,7 @@ ohos_shared_library("oh_adapter_bridge") {
 
     # window: WMS/WindowSession bridges, input event bridging
     "../window/jni/oh_window_manager_client.cpp",
+    "../window/jni/oh_window_policy.cpp",
     "../window/jni/oh_anativewindow_shim.cpp",
     "../window/jni/oh_input_bridge.cpp",
     # G2.14v (2026-05-07): control-plane bridge for IInputManager (peer to

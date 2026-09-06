@@ -36,6 +36,8 @@
 
 namespace android {
 
+int register_android_os_ProcessCpuTime(JNIEnv* env);
+
 namespace {
 
 void JNICALL
@@ -154,7 +156,7 @@ int register_android_os_Process(JNIEnv* env) {
     jint rc = env->RegisterNatives(clazz, kProcessMethods,
                                     sizeof(kProcessMethods) / sizeof(kProcessMethods[0]));
     env->DeleteLocalRef(clazz);
-    return rc == JNI_OK ? 0 : -1;
+    return rc == JNI_OK ? register_android_os_ProcessCpuTime(env) : -1;
 }
 
 }  // namespace android

@@ -5,16 +5,22 @@ Android16 platform. Canonical bridge sources are under `framework/`.
 `historical/` preserves the prior experiment scripts and reports; those scripts
 are not a portable full-build entrypoint and may contain epoch-specific PIDs.
 
-Portable targets live in `tools/`. `build_native.py` rebuilds the four public-SDK
-networking, startup-order, IME and TLS boundary libraries from source, with no
+Portable targets live in `tools/`. `build_native.py` rebuilds six public-SDK
+networking, startup-order, IME, TLS, process-stream and CPU-time boundary libraries from source, with no
 candidate runtime, frozen object, boot image or generated Ninja prerequisites.
 Use the companion `a2hlab/manifest` lock/bootstrap for SDK/source verification.
 The tool requires a new output directory and fails on every compile/link error.
 
-No claim of full stack reproducibility or Toutiao/native parity is made merely
-by publishing this repo. The full-build and live acceptance gates remain in the
-manifest workstream status. Candidate13's real Toutiao IME attach regression
-remains unaccepted; candidate05's recorded baseline is preserved separately.
+The [Android-reference reproduction guide](docs/parity/REPRODUCE.md) covers the
+generic JIT/cache correction, native worker fix, CPU-time API and window power
+policy. It includes deterministic control APK builds, stock Android/OH native
+probes, the exact window header closure and benchmark sample verification.
+Historical candidate13 failures remain in the earlier evidence; candidate26/v27
+passed the isolated device checks described in the follow-up report.
+
+Full source-stack reproduction and general native performance parity remain
+open in the manifest workstream. The repository-built components and the
+historical device-validated payload have separately recorded provenance.
 
 Component license headers and third-party attribution apply. `third_party/jni`
 contains the Apache-2.0 AOSP libnativehelper JNI header, unchanged from the

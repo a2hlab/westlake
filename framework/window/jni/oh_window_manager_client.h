@@ -228,6 +228,10 @@ public:
 
     bool isConnected() const { return connected_; }
 
+    // Session property path for direct SceneBoard sessions, absent from the
+    // public Rosen Window cache.
+    int32_t setKeepScreenOn(int32_t sessionId, bool enabled);
+
 private:
     OHWindowManagerClient() = default;
     ~OHWindowManagerClient() = default;

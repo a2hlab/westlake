@@ -488,6 +488,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      */
     @Override
     public void remove(IWindow window) throws RemoteException {
+        OhWindowPolicy.remove(window);
         OhInsetsBridge.remove(window);
         logBridged("remove", "-> OH ISession.Disconnect");
 
@@ -550,6 +551,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // full-screen Activity (observed when opening Toutiao search results).  Preserve
         // measured dimensions for WRAP_CONTENT/fixed-size windows, but resolve
         // MATCH_PARENT at this WMS boundary from the session's display-sized frame.
+        OhWindowPolicy.update(this, window, attrs, requestedWidth, requestedHeight, viewVisibility);
         int width = resolveRelayoutDimension(
                 attrs != null ? attrs.width : 0, requestedWidth, sessionInfo[3]);
         int height = resolveRelayoutDimension(
@@ -751,6 +753,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     public void relayoutAsync(IWindow window, WindowManager.LayoutParams attrs,
             int requestedWidth, int requestedHeight, int viewVisibility,
             int flags, int seq, int lastSyncSeqId) throws RemoteException {
+        OhWindowPolicy.update(this, window, attrs, requestedWidth, requestedHeight, viewVisibility);
         logBridged("relayoutAsync", "-> OH ISession.UpdateSessionRect (async)");
         // TODO: Phase 2 - call native bridge async
     }

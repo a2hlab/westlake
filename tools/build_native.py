@@ -73,6 +73,8 @@ def build(sdk, output):
         ('liboh_webview_startup_order.so', ROOT / 'framework/android-runtime/src/oh_webview_startup_order.cpp', ['-ldl']),
         ('liboh_ime_helper_capi.so', ROOT / 'framework/window/jni/oh_ime_helper_capi.cpp', ['-lohinputmethod', '-ldl']),
         ('liboh_tls_boundary.so', generated, ['-ldl']),
+        ('liboh_popen_boundary.so', ROOT / 'framework/android-runtime/src/oh_popen_boundary.cpp', ['-ldl']),
+        ('liboh_process_cpu_time.so', ROOT / 'framework/android-runtime/src/oh_process_cpu_time.cpp', ['-DOH_PROCESS_CPU_OVERLAY', '-ldl']),
     ]
     artifacts = {}
     for name, source, libraries in entries:

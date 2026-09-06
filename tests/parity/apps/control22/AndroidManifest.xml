@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.westlake.gapcontrol">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application android:label="Westlake gap control" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="true">
+    <activity android:name=".WebActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+    </activity>
+<activity android:name=".ImeActivity" android:exported="true" android:windowSoftInputMode="adjustResize" />
+<activity android:name=".ImeEdgeActivity" android:exported="true" android:windowSoftInputMode="adjustResize" />
+<activity android:name=".BenchmarkActivity" android:exported="true" />
+<activity android:name=".NetworkCloseActivity" android:exported="true" /></application>
+</manifest>

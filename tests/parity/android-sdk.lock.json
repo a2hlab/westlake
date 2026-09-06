@@ -1,0 +1,55 @@
+{
+  "distributed": false,
+  "build_tools": "34.0.0",
+  "api": 34,
+  "files": {
+    "build-tools/34.0.0/NOTICE.txt": {
+      "sha256": "cb4f54f1b0f849d20a3aae5a5dfd193fb15c24a9bc20241deba5b75a521f2ca7",
+      "bytes": 1069352
+    },
+    "build-tools/34.0.0/aapt2": {
+      "sha256": "760aa057e89e3940c3e944e6bec61eda864ade42fd9c0a3113735e329657705f",
+      "bytes": 6076216
+    },
+    "build-tools/34.0.0/apksigner": {
+      "sha256": "b47549e373b895ce6ca620d0c7887e674d9615ffa837a86ac601dcfd04adb0f0",
+      "bytes": 2959
+    },
+    "build-tools/34.0.0/core-lambda-stubs.jar": {
+      "sha256": "f0404cf634498aec268ad9a3967b5ae8f0005280de0504e264a2a65b8f19745e",
+      "bytes": 15149
+    },
+    "build-tools/34.0.0/d8": {
+      "sha256": "b773a721be3d4988dea9660815a9e441b76100e5b0f5c72b5893cfadadc76c6f",
+      "bytes": 2678
+    },
+    "build-tools/34.0.0/lib/apksigner.jar": {
+      "sha256": "eefdd6aed9db9fb849e4c98a50d8741e19d1b674ba6547220bcb9c3ed152123a",
+      "bytes": 1034092
+    },
+    "build-tools/34.0.0/lib/d8.jar": {
+      "sha256": "d43c8a94c9b1f1da1a7cc49c32b81e8cee1708b37ee8b530a81a0688222b42c0",
+      "bytes": 14929869
+    },
+    "build-tools/34.0.0/renderscript/lib/androidx-rs.jar": {
+      "sha256": "174eb53df52a9cca7bf9c396ba93bf4ac0262a48f2a1375f626efddf405d4666",
+      "bytes": 155117
+    },
+    "build-tools/34.0.0/renderscript/lib/renderscript-v8.jar": {
+      "sha256": "2b03606a16921f0b5a7fcba011aeb6259a699c05699a5a5bd7180eb3c0a765b0",
+      "bytes": 156575
+    },
+    "build-tools/34.0.0/source.properties": {
+      "sha256": "c727885baf3695c8fe4fbe566f092e8e114c6cee35ecb9fa95a7ff2ef058de04",
+      "bytes": 63
+    },
+    "build-tools/34.0.0/zipalign": {
+      "sha256": "f3d6af57b3fed5759de2b6dd9c8cc8ecd16d4b35a2c363d7250a7bb0cd97a089",
+      "bytes": 267320
+    },
+    "platforms/android-34/android.jar": {
+      "sha256": "6cea1df3efb77103ac3e2beb9bf4718964b0e0869ab16d39d29d5cbae1c147ad",
+      "bytes": 26361808
+    }
+  }
+}

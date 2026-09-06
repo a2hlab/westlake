@@ -1,0 +1,8 @@
+{
+  "objects": 454,
+  "changed": [
+    "runtime/jit/jit_memory_region.o"
+  ],
+  "baseline_sha256": "1d92245bf3fcd28197b7384e8d0920a1012ef7aaf5269f90360c44ab0f8b907c",
+  "candidate_sha256": "ef0a243315860997aa21ec67005b58b5a798e6bd215ea81895acb4c026f57ee9"
+}
