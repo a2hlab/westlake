@@ -1292,6 +1292,43 @@
       "linkflags": [
         "-Wl,--exclude-libs,ALL"
       ]
+    },
+    "libicu_jni.so": {
+      "sources": [
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/IcuUtilities.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/JniConstants.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/MatcherState.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/Register.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_i18n_timezone_internal_Memory.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_i18n_util_Log.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_charset_NativeConverter.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_text_TimeZoneNamesNative.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_util_CaseMapperNative.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_util_ICU4CMetadata.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_util_LocaleNative.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_util_UResourceBundleNative.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_util_regex_MatcherNative.cpp",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native/com_android_icu_util_regex_PatternNative.cpp",
+        "android-source/libcore/luni/src/main/native/libcore_icu_ICU.cpp",
+        "westlake/native/src/icu_art_entry.cpp"
+      ],
+      "deps": [
+        "libicuuc.so",
+        "libicui18n.so",
+        "libnativehelper.so",
+        "libbase.so",
+        "liblog.so"
+      ],
+      "includes": [
+        "android-source/icu/icu4c/source/common",
+        "android-source/icu/icu4c/source/i18n",
+        "android-source/icu/android_icu4j/libcore_bridge/src/native"
+      ],
+      "defines": [
+        "U_USING_ICU_NAMESPACE=0",
+        "JNI_OnLoad=JNI_OnLoad_icu_bridge"
+      ],
+      "scope": "Android ICU JNI; unique bootstrap entry name prevents JNI_OnLoad interposition among ART boundary DSOs"
     }
   }
 }
