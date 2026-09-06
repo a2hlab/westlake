@@ -99,6 +99,40 @@ class PortableBuildTests(unittest.TestCase):
             self.assertEqual(duplicates, [])
             self.assertIn('a.b.Thing', owned)
 
+    def test_adapter_runtime_refuses_reused_output(self):
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            with self.assertRaisesRegex(ValueError, 'NEW directory'):
+                module('build_adapter_runtime').build(Path(tmp), classes_only=True)
+
+    def test_adapter_runtime_requires_a_dexer_for_a_jar(self):
+        """Emitting a jar with no dex in it would look like success."""
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            with self.assertRaisesRegex(ValueError, '--d8 is required'):
+                module('build_adapter_runtime').build(Path(tmp) / 'out')
+
+    def test_adapter_runtime_ships_an_explicit_inventory(self):
+        """The jar's contents are a named list, not a directory sweep."""
+        builder = module('build_adapter_runtime')
+        for source in builder.sources():
+            self.assertTrue(source.is_file(), source)
+        shipped = {p.name for p in builder.sources()}
+        # westlake.tls belongs to wl-tls-min.jar and must not be compiled in.
+        self.assertNotIn('TlsBootstrap.java', shipped)
+        self.assertIn('ActivityManagerRouting.java', shipped)
+        self.assertIn('SSLSockets.java', shipped)
+
+    def test_adapter_runtime_jar_is_deterministic(self):
+        builder = module('build_adapter_runtime')
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            first, second = Path(tmp) / 'a.jar', Path(tmp) / 'b.jar'
+            builder.archive(first, {'z': b'last', 'a': b'first'})
+            builder.archive(second, {'a': b'first', 'z': b'last'})
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with zipfile.ZipFile(first) as jar:
+                self.assertEqual(jar.namelist(), ['a', 'z'])
+                self.assertTrue(all(i.date_time == (1980, 1, 1, 0, 0, 0)
+                                    for i in jar.infolist()))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,39 +1,37 @@
 #!/bin/bash
-# ============================================================================
-# compile_oh_adapter_runtime.sh — SLIM VARIANT (Scope B Phase 2)
-# ============================================================================
+# compile_oh_adapter_runtime.sh -- thin wrapper over tools/build_adapter_runtime.py
 #
-# Scope B (2026-05-24): AppSpawnXInit + AppSchedulerBridge moved to
-# adapter-runtime-bcp.jar (BCP). This jar is now slim — contains only
-# ScopeBSlimMarker — so the JNI PathClassLoader Step 1 probe in
-# appspawnx_runtime.cpp succeeds (resolves the marker), then Step 2
-# fallback FindClass() against bootstrap finds the BCP AppSpawnXInit.
+# This script used to delegate to $WORKDIR/build/build_oh_adapter_runtime_slim.sh
+# with WORKDIR defaulting to /home/dspfac/bridge-build: a path on one person's
+# machine, running a script that was never in this repository. It could not work
+# for anyone else, and the jar it produced started from a byte-patched
+# classes.dex nobody could regenerate.
 #
-# This script delegates to build_oh_adapter_runtime_slim.sh in workdir
-# and copies the produced jar to the canonical ADAPTER_OUT path expected
-# by build_aosp_fw.sh / gen_boot_image.sh.
-# ============================================================================
-set -o pipefail
-ADAPTER_ROOT="${ADAPTER_ROOT:-$HOME/adapter}"
-AOSP_ROOT="${AOSP_ROOT:-$HOME/aosp}"
-WORKDIR="${WORKDIR:-/home/dspfac/bridge-build}"
+# The real builder is tools/build_adapter_runtime.py. It compiles every class it
+# ships, takes no absolute paths, and fails closed rather than emitting a jar
+# with no dex in it. This wrapper exists only so the historical entry point
+# still leads somewhere.
+#
+#   D8          path to d8            (required for a jar; not in the locked
+#                                      toolchain set, so you supply it)
+#   FRAMEWORK   adapter framework.jar (required for a deployable jar)
+#   OUT         new output directory  (default: ./out/adapter-runtime)
+#   JAVA_HOME   a JDK 11+
+#
+# With neither D8 nor FRAMEWORK set this runs the compile/type-check pass, which
+# is what CI and a developer checking a change actually need.
+set -euo pipefail
 
-SLIM_BUILDER="$WORKDIR/build/build_oh_adapter_runtime_slim.sh"
-if [ ! -x "$SLIM_BUILDER" ]; then
-    echo "ERROR: slim builder missing: $SLIM_BUILDER" >&2
-    exit 1
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
+OUT="${OUT:-$PWD/out/adapter-runtime}"
+
+args=(--out "$OUT")
+if [ -n "${D8:-}" ] && [ -n "${FRAMEWORK:-}" ]; then
+    args+=(--d8 "$D8" --framework "$FRAMEWORK")
+else
+    echo "note: D8 and FRAMEWORK not both set -- compile/type-check only, no jar" >&2
+    args+=(--classes-only)
 fi
 
-echo "compile_oh_adapter_runtime.sh: delegating to slim builder"
-ADAPTER_ROOT="$ADAPTER_ROOT" AOSP_ROOT="$AOSP_ROOT" WORKDIR="$WORKDIR" \
-    bash "$SLIM_BUILDER" "$@" || exit $?
-
-SLIM_JAR="$WORKDIR/out/oh-adapter-runtime.slim.jar"
-OUT_DIR="$ADAPTER_ROOT/out/adapter"
-OUT_JAR="$OUT_DIR/oh-adapter-runtime.jar"
-mkdir -p "$OUT_DIR"
-cp -f "$SLIM_JAR" "$OUT_JAR"
-JAR_MD5=$(md5sum "$OUT_JAR" | cut -d " " -f 1)
-JAR_SIZE=$(stat -c%s "$OUT_JAR")
-echo "OK: oh-adapter-runtime.jar (slim) installed at $OUT_JAR"
-echo "    size=$JAR_SIZE bytes  md5=$JAR_MD5"
+exec python3 "$ROOT/tools/build_adapter_runtime.py" "${args[@]}"
