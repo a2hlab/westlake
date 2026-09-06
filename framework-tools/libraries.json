@@ -1,0 +1,291 @@
+{
+  "schema": 1,
+  "libraries": {
+    "libprotobuf.a": {
+      "kind": "static",
+      "targets": [
+        "host"
+      ],
+      "sources": [
+        "android-source/protobuf/src/google/protobuf/any_lite.cc",
+        "android-source/protobuf/src/google/protobuf/arena.cc",
+        "android-source/protobuf/src/google/protobuf/arenastring.cc",
+        "android-source/protobuf/src/google/protobuf/arenaz_sampler.cc",
+        "android-source/protobuf/src/google/protobuf/extension_set.cc",
+        "android-source/protobuf/src/google/protobuf/generated_enum_util.cc",
+        "android-source/protobuf/src/google/protobuf/generated_message_tctable_lite.cc",
+        "android-source/protobuf/src/google/protobuf/generated_message_util.cc",
+        "android-source/protobuf/src/google/protobuf/implicit_weak_message.cc",
+        "android-source/protobuf/src/google/protobuf/inlined_string_field.cc",
+        "android-source/protobuf/src/google/protobuf/io/coded_stream.cc",
+        "android-source/protobuf/src/google/protobuf/io/io_win32.cc",
+        "android-source/protobuf/src/google/protobuf/io/strtod.cc",
+        "android-source/protobuf/src/google/protobuf/io/zero_copy_stream.cc",
+        "android-source/protobuf/src/google/protobuf/io/zero_copy_stream_impl.cc",
+        "android-source/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.cc",
+        "android-source/protobuf/src/google/protobuf/map.cc",
+        "android-source/protobuf/src/google/protobuf/message_lite.cc",
+        "android-source/protobuf/src/google/protobuf/parse_context.cc",
+        "android-source/protobuf/src/google/protobuf/repeated_field.cc",
+        "android-source/protobuf/src/google/protobuf/repeated_ptr_field.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/bytestream.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/common.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/int128.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/status.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/statusor.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/stringpiece.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/stringprintf.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/structurally_valid.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/strutil.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/time.cc",
+        "android-source/protobuf/src/google/protobuf/wire_format_lite.cc",
+        "android-source/protobuf/src/google/protobuf/any.cc",
+        "android-source/protobuf/src/google/protobuf/any.pb.cc",
+        "android-source/protobuf/src/google/protobuf/api.pb.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/importer.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/parser.cc",
+        "android-source/protobuf/src/google/protobuf/descriptor.cc",
+        "android-source/protobuf/src/google/protobuf/descriptor.pb.cc",
+        "android-source/protobuf/src/google/protobuf/descriptor_database.cc",
+        "android-source/protobuf/src/google/protobuf/duration.pb.cc",
+        "android-source/protobuf/src/google/protobuf/dynamic_message.cc",
+        "android-source/protobuf/src/google/protobuf/empty.pb.cc",
+        "android-source/protobuf/src/google/protobuf/extension_set_heavy.cc",
+        "android-source/protobuf/src/google/protobuf/field_mask.pb.cc",
+        "android-source/protobuf/src/google/protobuf/generated_message_bases.cc",
+        "android-source/protobuf/src/google/protobuf/generated_message_reflection.cc",
+        "android-source/protobuf/src/google/protobuf/generated_message_tctable_full.cc",
+        "android-source/protobuf/src/google/protobuf/io/gzip_stream.cc",
+        "android-source/protobuf/src/google/protobuf/io/printer.cc",
+        "android-source/protobuf/src/google/protobuf/io/tokenizer.cc",
+        "android-source/protobuf/src/google/protobuf/map_field.cc",
+        "android-source/protobuf/src/google/protobuf/message.cc",
+        "android-source/protobuf/src/google/protobuf/reflection_ops.cc",
+        "android-source/protobuf/src/google/protobuf/service.cc",
+        "android-source/protobuf/src/google/protobuf/source_context.pb.cc",
+        "android-source/protobuf/src/google/protobuf/struct.pb.cc",
+        "android-source/protobuf/src/google/protobuf/stubs/substitute.cc",
+        "android-source/protobuf/src/google/protobuf/text_format.cc",
+        "android-source/protobuf/src/google/protobuf/timestamp.pb.cc",
+        "android-source/protobuf/src/google/protobuf/type.pb.cc",
+        "android-source/protobuf/src/google/protobuf/unknown_field_set.cc",
+        "android-source/protobuf/src/google/protobuf/util/delimited_message_util.cc",
+        "android-source/protobuf/src/google/protobuf/util/field_comparator.cc",
+        "android-source/protobuf/src/google/protobuf/util/field_mask_util.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/datapiece.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/default_value_objectwriter.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/error_listener.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/field_mask_utility.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/json_escaping.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/json_objectwriter.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/json_stream_parser.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/object_writer.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/proto_writer.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/protostream_objectsource.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/protostream_objectwriter.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/type_info.cc",
+        "android-source/protobuf/src/google/protobuf/util/internal/utility.cc",
+        "android-source/protobuf/src/google/protobuf/util/json_util.cc",
+        "android-source/protobuf/src/google/protobuf/util/message_differencer.cc",
+        "android-source/protobuf/src/google/protobuf/util/time_util.cc",
+        "android-source/protobuf/src/google/protobuf/util/type_resolver_util.cc",
+        "android-source/protobuf/src/google/protobuf/wire_format.cc",
+        "android-source/protobuf/src/google/protobuf/wrappers.pb.cc"
+      ],
+      "includes": [
+        "android-source/protobuf/src",
+        "android-source/protobuf/android",
+        "upstream/aosp-11/external/zlib"
+      ],
+      "defines": [
+        "GOOGLE_PROTOBUF_CMAKE_BUILD",
+        "HAVE_ZLIB=1"
+      ],
+      "deps": [
+        "libz.so"
+      ]
+    },
+    "libprotoc.a": {
+      "kind": "static",
+      "targets": [
+        "host"
+      ],
+      "sources": [
+        "android-source/protobuf/src/google/protobuf/compiler/code_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/command_line_interface.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/enum.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/enum_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/extension.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/file.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/helpers.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/map_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/message.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/message_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/padding_optimizer.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/parse_function_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/primitive_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/service.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/cpp/string_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_doc_comment.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_enum.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_enum_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_field_base.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_helpers.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_map_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_message.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_message_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_primitive_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_reflection_class.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_repeated_enum_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_repeated_message_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_repeated_primitive_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_source_generator_base.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/csharp/csharp_wrapper_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/context.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/doc_comment.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/enum.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/enum_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/enum_field_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/enum_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/extension.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/extension_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/file.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/generator_factory.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/helpers.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/kotlin_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/map_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/map_field_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/message.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/message_builder.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/message_builder_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/message_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/message_field_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/message_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/name_resolver.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/primitive_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/primitive_field_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/service.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/shared_code_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/string_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/java/string_field_lite.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_enum_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_extension.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_file.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_helpers.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_map_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_message.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_message_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_oneof.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/objectivec/objectivec_primitive_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/php/php_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/plugin.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/plugin.pb.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/python/generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/python/helpers.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/python/pyi_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/ruby/ruby_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/subprocess.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/zip_writer.cc"
+      ],
+      "includes": [
+        "android-source/protobuf/src",
+        "android-source/protobuf/android"
+      ],
+      "defines": [
+        "GOOGLE_PROTOBUF_CMAKE_BUILD"
+      ],
+      "deps": [
+        "libprotobuf.a"
+      ]
+    },
+    "protoc": {
+      "kind": "executable",
+      "targets": [
+        "host"
+      ],
+      "sources": [
+        "android-source/protobuf/src/google/protobuf/compiler/main.cc"
+      ],
+      "includes": [
+        "android-source/protobuf/src",
+        "android-source/protobuf/android"
+      ],
+      "deps": [
+        "libprotoc.a",
+        "libprotobuf.a",
+        "libz.so"
+      ],
+      "linkflags": [
+        "-Wl,-rpath,$ORIGIN"
+      ]
+    },
+    "protoc-gen-javastream": {
+      "kind": "executable",
+      "targets": [
+        "host"
+      ],
+      "sources": [
+        "android-source/frameworks-base/tools/streaming_proto/Errors.cpp",
+        "android-source/frameworks-base/tools/streaming_proto/stream_proto_utils.cpp",
+        "android-source/frameworks-base/tools/streaming_proto/string_utils.cpp",
+        "android-source/frameworks-base/tools/streaming_proto/java/java_proto_stream_code_generator.cpp",
+        "android-source/frameworks-base/tools/streaming_proto/java/main.cpp"
+      ],
+      "includes": [
+        "android-source/protobuf/src",
+        "android-source/frameworks-base/tools/streaming_proto",
+        "android-source/protobuf/android"
+      ],
+      "deps": [
+        "libprotoc.a",
+        "libprotobuf.a",
+        "libz.so"
+      ],
+      "defines": [
+        "STATIC_ANDROIDFW_FOR_TOOLS"
+      ],
+      "linkflags": [
+        "-Wl,-rpath,$ORIGIN"
+      ]
+    },
+    "protoc-gen-javanano": {
+      "kind": "executable",
+      "targets": [
+        "host"
+      ],
+      "sources": [
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_enum.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_enum_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_extension.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_file.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_generator.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_helpers.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_main.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_map_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_message.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_message_field.cc",
+        "android-source/protobuf/src/google/protobuf/compiler/javanano/javanano_primitive_field.cc"
+      ],
+      "includes": [
+        "android-source/protobuf/src"
+      ],
+      "deps": [
+        "libprotoc.a",
+        "libprotobuf.a",
+        "libz.so"
+      ],
+      "linkflags": [
+        "-Wl,-rpath,$ORIGIN"
+      ]
+    }
+  }
+}

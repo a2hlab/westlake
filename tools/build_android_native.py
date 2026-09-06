@@ -25,11 +25,23 @@ def main():
     parser.add_argument('--target', choices=['ohos', 'host'], default='ohos')
     parser.add_argument('--jobs', type=int, default=6)
     parser.add_argument('--library', action='append')
+    parser.add_argument('--extra-inventory', type=Path)
     args = parser.parse_args()
     workspace, output = args.workspace.resolve(), args.out.absolute()
     if output.exists() or args.jobs < 1:
         parser.error('--out must be new and --jobs positive')
     inventory = json.loads((ROOT / 'native/libraries.json').read_text())
+    extra_hash = None
+    if args.extra_inventory:
+        extra_path = args.extra_inventory.resolve()
+        if not extra_path.is_relative_to(ROOT):
+            raise ValueError('Additional inventory must be part of the Westlake source checkout')
+        extra = json.loads(extra_path.read_text())
+        if set(extra['libraries']) & set(inventory['libraries']):
+            raise ValueError('Additional inventory redefines a native library')
+        inventory['libraries'].update(extra['libraries'])
+        inventory['includes'] += extra.get('includes', [])
+        extra_hash = sha(extra_path)
     libraries = inventory['libraries']
     requested = args.library or list(libraries)
     selected = []
@@ -39,6 +51,8 @@ def main():
             return
         if name not in libraries:
             raise ValueError('Unknown library: ' + name)
+        if args.target not in libraries[name].get('targets', ['ohos', 'host']):
+            raise ValueError('Unsupported target for ' + name)
         for dependency in libraries[name].get('deps', []):
             visit(dependency)
         selected.append(name)
@@ -61,7 +75,8 @@ def main():
     else:
         cpp += ['-isystem', str(sdk / 'llvm/include/c++/v1'),
                 '-isystem', str(sdk / 'llvm/include/x86_64-unknown-linux-gnu/c++/v1')]
-        cpp_runtime = [sdk / 'llvm/lib/libc++.a', sdk / 'llvm/lib/libc++abi.a']
+        cpp_runtime = [sdk / 'llvm/lib/x86_64-unknown-linux-gnu/libc++.a',
+                       sdk / 'llvm/lib/x86_64-unknown-linux-gnu/libc++abi.a']
     for relative in inventory['includes']:
         path = workspace / relative
         if not path.is_dir():
@@ -72,6 +87,7 @@ def main():
     record = {'target': args.target, 'scope': 'source Android native support; device acceptance is separate',
               'artifacts': {}, 'inputs': {}, 'commands': [], 'objects': {}, 'device_accepted': False,
               'inventory_sha256': sha(ROOT / 'native/libraries.json'),
+              'extra_inventory_sha256': extra_hash,
               'compiler_sha256': sha(cc), 'headers': {},
               'compiler_runtimes': {p.name: sha(p) for p in cpp_runtime}}
     env = dict(os.environ, SOURCE_DATE_EPOCH='1772755200', TZ='UTC', LC_ALL='C')
@@ -139,7 +155,9 @@ def main():
         if spec.get('kind') == 'static':
             command = [sdk / 'llvm/bin/llvm-ar', 'rcsD', artifact, *objects]
         else:
-            command = [cxx, *flags, *linkflags, '-Wl,-soname,' + name,
+            shared = spec.get('kind') != 'executable'
+            library_flags = linkflags if shared else [f for f in linkflags if f != '-shared']
+            command = [cxx, *flags, *library_flags, *(['-Wl,-soname,' + name] if shared else []),
                        *spec.get('linkflags', []), *objects, *dependencies,
                        *cpp_runtime, *spec.get('libraries', []),
                        '-ldl', '-lpthread', '-lm', '-o', artifact]
