@@ -1,10 +1,16 @@
 import importlib.util
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# build_native imports build_sqlite as a sibling. Running the tool as a script
+# puts tools/ on sys.path automatically; loading it by file path here does not.
+if str(ROOT / 'tools') not in sys.path:
+    sys.path.insert(0, str(ROOT / 'tools'))
 
 
 def module(name):

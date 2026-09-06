@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 
+import build_sqlite
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -87,6 +89,28 @@ def build(sdk, output):
         (output / (name + '.symbols.txt')).write_text(symbols)
         artifacts[name] = {'sha256': sha(output / name), 'bytes': (output / name).stat().st_size}
         print('BUILT', name, artifacts[name]['sha256'], flush=True)
+
+    # libwlsqlite.so does not fit the one-source-one-library loop above: it is
+    # eight translation units with their own SQLITE_* option set, include paths
+    # and version script. build_sqlite.py already owns all of that and is
+    # exercised by tests/, so call it rather than restating any of it here.
+    #
+    # This builds the OHOS/musl variant, which is what this workspace can verify
+    # offline. It proves the source closes -- every symbol resolves, no platform
+    # header is missing -- and it is NOT the artifact to load into the adapter's
+    # app process; that one is bionic-linked and needs an NDK the operator
+    # supplies. build_sqlite.py records which ABI it produced in its own
+    # artifacts.json, and the flag is repeated here so a consumer of this record
+    # cannot mistake one for the other.
+    sqlite = build_sqlite.build(output / 'sqlite', sdk=sdk)
+    artifacts['libwlsqlite.so'] = {
+        'sha256': sqlite['sha256'],
+        'bytes': sqlite['bytes'],
+        'path': 'sqlite/libwlsqlite.so',
+        'abi': sqlite['abi'],
+        'deployable': sqlite['deployable'],
+    }
+
     (output / 'artifacts.json').write_text(json.dumps(artifacts, sort_keys=True, indent=2) + '\n')
     return artifacts
 

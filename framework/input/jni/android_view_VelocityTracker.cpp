@@ -50,6 +50,15 @@
 // anything here needs yet. When that becomes necessary, this file is the place:
 // nativeAddMovement already receives the MotionEvent.
 //
+// Location
+// --------
+// framework/input/jni/, per the architecture blueprint's §5.2 mapping table.
+// The registration entry stays in framework/android-runtime's kRegJNI[] table,
+// because that is the table liboh_android_runtime's startReg() walks -- the
+// blueprint's requirement is that this be built into the system native library
+// with no app-side JNI_OnLoad, and that is what the table entry achieves. The
+// source file's directory and its registration point are separate choices.
+//
 // Ported from toutiao-repro/native/veltrack/wl_veltrack.c, validated on
 // DAYU200 / OpenHarmony 6.1.0.31.
 // ============================================================================

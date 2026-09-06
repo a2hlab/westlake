@@ -154,6 +154,7 @@ extern int register_android_view_MotionEvent(JNIEnv* env);
 // but inert.  Registered here rather than from an app-side .so because
 // VelocityTracker is a boot-classpath class and this adapter's libnativeloader
 // will not admit a new library to the boot namespace.
+// Source: framework/input/jni/android_view_VelocityTracker.cpp
 extern int register_android_view_VelocityTracker(JNIEnv* env);
 // WESTLAKE §700: stock android.graphics.SurfaceTexture Java lifecycle backed by an
 // OHOS in-process consumer/producer surface pair at the native boundary.
