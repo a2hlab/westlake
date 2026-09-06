@@ -116,12 +116,21 @@ TYPE_RE = re.compile(
     r'(?:class|interface|enum|@interface|record)\s+(\w+)', re.M)
 
 
-def source_classes(roots):
-    """Map binary class name -> source file, for every .java under `roots`."""
+def source_classes(roots, exclude=()):
+    """Map binary class name -> source file, for every .java under `roots`.
+
+    `exclude` drops whole subtrees. Compile-only stub directories belong there:
+    a stand-in legitimately declares the same class as the real source, so
+    scanning both reports a duplicate owner that is not a defect and would make
+    a --require-complete gate unusable.
+    """
+    excluded = [Path(e).resolve() for e in exclude]
     owned = {}
     duplicates = []
     for root in roots:
         for java in sorted(Path(root).rglob('*.java')):
+            if any(java.resolve().is_relative_to(e) for e in excluded):
+                continue
             text = java.read_text(encoding='utf-8', errors='replace')
             package = PACKAGE_RE.search(text)
             prefix = (package.group(1) + '.') if package else ''
@@ -146,6 +155,8 @@ def main():
                         help='Shipped adapter runtime .jar or .dex to inventory against')
     parser.add_argument('--source', type=Path, action='append', required=True,
                         help='Directory of .java sources (repeatable)')
+    parser.add_argument('--exclude', type=Path, action='append', default=[],
+                        help='Subtree to skip, e.g. a compile-only stub directory (repeatable)')
     parser.add_argument('--out', type=Path, help='Write the inventory as JSON here')
     parser.add_argument('--require-complete', action='store_true',
                         help='Exit non-zero while any reference class lacks a source owner')
@@ -155,7 +166,7 @@ def main():
     if len(reference) != len(set(reference)):
         seen, repeated = set(), sorted({c for c in reference if c in seen or seen.add(c)})
         raise ValueError('Reference DEX defines a class twice: ' + ', '.join(repeated))
-    owned, duplicates = source_classes(args.source)
+    owned, duplicates = source_classes(args.source, exclude=args.exclude)
 
     reference_set = set(reference)
     # Nested types never appear as their own source file; attribute them to the

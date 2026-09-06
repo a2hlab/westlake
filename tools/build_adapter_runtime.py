@@ -18,15 +18,27 @@ it directly.
 
 Toolchain
 ---------
-javac comes from JAVA_HOME or PATH. d8 does not ship with a JDK and is not in
-the locked toolchain set, so the operator supplies it with --d8, and this fails
-closed without one rather than emitting a jar with no dex in it.
+javac comes from JAVA_HOME or PATH. A dexer does not ship with a JDK and is not
+in the locked toolchain set, so the operator supplies one: --r8 <r8.jar> (run
+through java, which is how Google publishes it) or --d8 <executable>. Without
+either this fails closed rather than emitting a jar with no dex in it. The
+dexer's SHA256 and self-reported version go into build.json, because it is a
+build input whose identity is not otherwise pinned anywhere.
 
-Pass --framework <adapter framework.jar> to compile against the real platform
-classes. Without it the compile-only stand-ins under framework/activity/stubs
-are used, which is enough to type-check the sources but not to produce a jar
-you should deploy -- so --d8 and --framework are both required for a packaging
-run, and --classes-only is the mode that needs neither.
+About --framework
+-----------------
+It exists, and today nothing can satisfy it. The adapter's framework.jar is a
+*dex* archive -- classes.dex, classes2.dex, classes3.dex -- and javac cannot
+compile against dex. That is not an inconvenience to work around; it is exactly
+the cold-start dependency cycle full-build-gaps.json records, seen from the
+compile side.
+
+So the compile-only stand-ins under framework/activity/stubs are not a shortcut
+taken for speed, they are the only available path, and they are the path the
+frontline validated on hardware. Five platform types are involved, and bytecode
+references them by name and descriptor, so a stand-in that declares the same
+shape produces the same constant-pool entries as the real class would. build.json
+records which classpath was used so nobody has to infer it.
 """
 import argparse
 import hashlib
@@ -114,18 +126,27 @@ def archive(path, entries):
             jar.writestr(info, entries[name])
 
 
-def build(output, d8=None, framework=None, javac=None, classes_only=False, release='11'):
+def build(output, d8=None, r8=None, framework=None, javac=None, classes_only=False,
+          release='11'):
     output = output.absolute()
     if output.exists():
         raise ValueError('Build output must be a NEW directory: ' + str(output))
-    if not classes_only and not d8:
-        raise ValueError('--d8 is required to produce a jar; use --classes-only to '
-                         'compile and type-check without one')
+    if not classes_only and not (d8 or r8):
+        raise ValueError('a dexer is required to produce a jar: pass --r8 <r8.jar> or '
+                         '--d8 <executable>, or use --classes-only')
+    if d8 and r8:
+        raise ValueError('Choose one dexer: --r8 or --d8, not both')
 
     compiler = java_tool('javac', javac)
-    dexer = Path(d8) if d8 else None
-    if dexer is not None and not dexer.is_file():
-        raise ValueError('No such d8: ' + str(dexer))
+    dexer = None
+    if r8:
+        dexer = Path(r8)
+        if not dexer.is_file():
+            raise ValueError('No such r8 jar: ' + str(dexer))
+    elif d8:
+        dexer = Path(d8)
+        if not dexer.is_file():
+            raise ValueError('No such d8: ' + str(dexer))
 
     output.mkdir(parents=True)
     classes = output / 'classes'
@@ -172,9 +193,11 @@ def build(output, d8=None, framework=None, javac=None, classes_only=False, relea
     record = {
         'sources': len(java_sources),
         'classes': len(emitted),
-        'classpath': 'framework.jar' if framework else 'compile-only stubs',
-        'deployable': bool(framework and dexer),
+        'classpath': str(framework) if framework else 'compile-only stubs',
+        'compiled_against_real_framework': bool(framework),
     }
+    if framework:
+        record['framework_sha256'] = sha(Path(framework))
     print('COMPILED', len(java_sources), 'sources ->', len(emitted), 'classes', flush=True)
 
     if classes_only:
@@ -185,9 +208,23 @@ def build(output, d8=None, framework=None, javac=None, classes_only=False, relea
     dex_dir.mkdir()
     class_list = output / 'classes.txt'
     class_list.write_text('\n'.join(str(p) for p in emitted) + '\n')
-    subprocess.run([str(dexer), '--release', '--min-api', '30',
-                    '--output', str(dex_dir), '@' + str(class_list)],
-                   check=True, env=env)
+    if r8:
+        java = java_tool('java')
+        invoke = [str(java), '-cp', str(dexer), 'com.android.tools.r8.D8']
+    else:
+        invoke = [str(dexer)]
+    subprocess.run(invoke + ['--release', '--min-api', '30', '--output', str(dex_dir),
+                             '@' + str(class_list)], check=True, env=env)
+
+    # The dexer is a build input whose identity nothing else pins. Record it.
+    # `invoke` is the bare command with no build arguments appended, so asking it
+    # for its version cannot accidentally re-run a dex.
+    try:
+        version = subprocess.check_output(invoke + ['--version'], text=True,
+                                          stderr=subprocess.STDOUT).strip()
+    except Exception as error:
+        version = '<unavailable: %s>' % error
+    record['dexer'] = {'path': str(dexer), 'sha256': sha(dexer), 'version': version}
 
     dexes = sorted(p for p in dex_dir.glob('classes*.dex'))
     if not dexes:
@@ -211,12 +248,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--d8', help='Path to d8 (not part of the locked toolchain set)')
+    parser.add_argument('--d8', help='Path to a d8 executable (not in the locked toolchain set)')
+    parser.add_argument('--r8', help='Path to r8.jar, run through java (Google publishes D8 this way)')
     parser.add_argument('--framework', help='Adapter framework.jar to compile against')
     parser.add_argument('--javac', help='Override the javac used')
     parser.add_argument('--release', default='11', help='javac --release (default 11)')
     parser.add_argument('--classes-only', action='store_true',
                         help='Compile and type-check only; needs neither d8 nor framework.jar')
     args = parser.parse_args()
-    build(args.out, d8=args.d8, framework=args.framework, javac=args.javac,
+    build(args.out, d8=args.d8, r8=args.r8, framework=args.framework, javac=args.javac,
           classes_only=args.classes_only, release=args.release)

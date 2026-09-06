@@ -107,8 +107,15 @@ class PortableBuildTests(unittest.TestCase):
     def test_adapter_runtime_requires_a_dexer_for_a_jar(self):
         """Emitting a jar with no dex in it would look like success."""
         with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
-            with self.assertRaisesRegex(ValueError, '--d8 is required'):
+            with self.assertRaisesRegex(ValueError, 'a dexer is required'):
                 module('build_adapter_runtime').build(Path(tmp) / 'out')
+
+    def test_adapter_runtime_refuses_two_dexers(self):
+        """Silently preferring one would make build.json's provenance a lie."""
+        with tempfile.TemporaryDirectory(prefix='a2hlab-test-') as tmp:
+            with self.assertRaisesRegex(ValueError, 'Choose one dexer'):
+                module('build_adapter_runtime').build(
+                    Path(tmp) / 'out', d8='/nonexistent/d8', r8='/nonexistent/r8.jar')
 
     def test_adapter_runtime_ships_an_explicit_inventory(self):
         """The jar's contents are a named list, not a directory sweep."""
