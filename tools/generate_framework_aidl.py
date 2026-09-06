@@ -20,7 +20,16 @@ def main():
     parser.add_argument('--aidl', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--jobs', type=int, default=8)
+    parser.add_argument('--java-module', action='append', default=[])
+    parser.add_argument('--aidl-interface', action='append', default=[])
+    parser.add_argument('--profile', type=Path)
     args = parser.parse_args()
+    if args.profile:
+        profile = json.loads(args.profile.read_text())
+        if profile['schema'] != 1:
+            parser.error('Unsupported Java profile schema')
+        args.java_module = list(dict.fromkeys(profile['java_modules'] + args.java_module))
+        args.aidl_interface = list(dict.fromkeys(profile['aidl_interfaces'] + args.aidl_interface))
     workspace, output = args.workspace.resolve(), args.out.absolute()
     root = workspace / 'android-source'
     if output.exists():
@@ -45,8 +54,17 @@ def main():
         if module['kind'] == 'platform_filegroup':
             # This stack includes crash recovery in the platform framework.
             patterns = fields['soong_config_variables']['crashrecovery_files_in_platform']['srcs']
-        elif module['kind'] == 'filegroup':
+        elif module['kind'] in {'filegroup', 'java_library', 'java_library_static', 'java_sdk_library', 'java_defaults'}:
             patterns = evaluate(fields.get('srcs', []), module['environment'])
+            for dependency in fields.get('defaults', []):
+                collect(dependency)
+            for key in ['static_libs', 'impl_only_static_libs']:
+                for dependency in evaluate(fields.get(key, []), module['environment']):
+                    collect(dependency)
+            android = fields.get('target', {}).get('android', {})
+            patterns += evaluate(android.get('srcs', []), module['environment'])
+            for dependency in evaluate(android.get('static_libs', []), module['environment']):
+                collect(dependency)
         else:
             generated[name] = module
             return
@@ -62,22 +80,35 @@ def main():
         selected.update(own)
 
     collect('framework-non-updatable-sources')
+    for name in args.java_module:
+        collect(name)
     versions = {}
     interfaces = {}
     pending = [n.removesuffix('-java-source') for n in generated if n.endswith('-java-source')]
+    for name in generated:
+        if not name.endswith('-java'):
+            continue
+        interface = name.removesuffix('-java')
+        base = re.sub(r'-V[0-9]+$', '', interface)
+        choices = modules.get(base, [])
+        if len(choices) == 1 and choices[0]['kind'] == 'aidl_interface':
+            pending.append(interface)
+    pending += args.aidl_interface
     while pending:
         request = pending.pop(0)
         match = re.fullmatch(r'(.+)-V([0-9]+)', request)
         name, version = (match[1], int(match[2])) if match else (request, 0)
-        if name in versions and versions[name] >= version:
-            continue
         module = groups.module(name)
         if module['kind'] != 'aidl_interface':
             raise ValueError('Expected AIDL interface: ' + name)
         fields = module['fields']
         base = root / Path(module['file']).parent
         if not version and not fields.get('unstable'):
-            raise ValueError('Stable interface requires an explicit version: ' + name)
+            # AIDL's unversioned import aliases its next source version.
+            version = max([int(v['version']) for v in fields.get('versions_with_info', [])] +
+                          [int(v) for v in fields.get('versions', [])] + [0]) + 1
+        if name in versions and versions[name] >= version:
+            continue
         frozen = next((v for v in fields.get('versions_with_info', []) if int(v['version']) == version), None)
         legacy_frozen = str(version) in fields.get('versions', [])
         if frozen or legacy_frozen:
@@ -170,10 +201,32 @@ def main():
     output.mkdir(parents=True)
     (output / 'java').mkdir()
     (output / 'logs').mkdir()
+    # SDK-style preprocessed parcelable declarations also resolve the legacy
+    # short type names used by framework module interfaces without imports.
+    declarations = []
+    for path in sorted(units):
+        text = re.sub(r'/\*.*?\*/|//[^\n]*', '', path.read_text(), flags=re.S)
+        if 'parcelable ' in text and '{' not in text:
+            declarations.append(path)
+    preprocessed = output / 'framework.aidl'
+    preprocess_command = [str(args.aidl.resolve()), *['-I' + str(p) for p in sorted(include_roots)],
+                          '--preprocess', str(preprocessed), *map(str, declarations)]
+    with (output / 'preprocess.log').open('x') as log:
+        subprocess.run(preprocess_command, stdout=log, stderr=subprocess.STDOUT, check=True)
+    # Android 15 preprocess.cpp's Visit(AidlParcelable) writes these already
+    # unquoted AST strings verbatim. Restore the string literals required by
+    # the AIDL grammar, without changing any type or header value.
+    raw_preprocessed = preprocessed.read_text()
+    (output / 'framework.aidl.raw').write_text(raw_preprocessed)
+    normalized = re.sub(r'\b(cpp_header|ndk_header|rust_type) ([A-Za-z0-9_./:+-]+)',
+                        lambda m: m[1] + ' ' + json.dumps(m[2]), raw_preprocessed)
+    preprocessed.write_text(normalized)
     commands = []
     for i, (path, spec) in enumerate(sorted(units.items())):
         command = [str(args.aidl.resolve()), '--lang=java', '--min_sdk_version=35', '--transaction_names',
                    '-o' + str(output / 'java')]
+        if not spec:
+            command += ['-p' + str(preprocessed)]
         if spec:
             command += ['--structured']
             if spec['version']:
@@ -201,7 +254,13 @@ def main():
               'generated': {p.relative_to(output).as_posix(): sha(p) for p in sorted((output / 'java').rglob('*.java'))},
               'commands': [c for c, _ in commands], 'errors': errors,
               'remaining_generators': {n: v for n, v in generated.items() if not n.endswith('-java-source')},
-              'full_framework_accepted': False}
+              'preprocess_command': preprocess_command, 'framework_aidl_sha256': sha(preprocessed),
+              'framework_aidl_raw_sha256': sha(output / 'framework.aidl.raw'),
+              'java_modules': args.java_module, 'aidl_interfaces': args.aidl_interface,
+              'collected_modules': sorted(seen),
+              'declaration_only_outputs': [str(p.relative_to(output)) for p in sorted((output / 'java').rglob('*.java'))
+                                           if not p.stat().st_size],
+              'aidl_use_unfrozen': True, 'full_framework_accepted': False}
     (output / 'artifacts.json').write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
     print('FRAMEWORK_AIDL', len(units), 'generated', len(record['generated']), 'errors', len(errors))
     raise SystemExit(bool(errors))

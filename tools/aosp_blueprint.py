@@ -47,8 +47,11 @@ def evaluate(x,env):
 
 def index(root):
  modules={};fail=[]
- for path in sorted(root.glob('*/**/*.bp')):
-  if '.git' in path.parts:continue
+ pending=sorted(root.glob('*/**/Android.bp'));seen=set()
+ while pending:
+  path=pending.pop(0)
+  if '.git' in path.parts or path in seen:continue
+  seen.add(path)
   try:
    ts=tokens(path.read_text());i=0;env={}
    while i<len(ts):
@@ -60,6 +63,14 @@ def index(root):
     elif op=='+' and ts[i]=='=':
      x,i=expr(ts,i+1);env[name]={'add':[env[name],x]}
     else:raise ValueError('Unexpected top-level token '+op)
+   # Blueprint reads Android.bp plus its explicit build includes. Files such
+   # as *_Android.bp under test-data directories are parser fixtures, not
+   # active module declarations.
+   for pattern in evaluate(env.get('build',[]),env):
+    if Path(pattern).is_absolute() or '..' in Path(pattern).parts:raise ValueError('Build include escapes source directory')
+    included=sorted(path.parent.glob(pattern))
+    if not included:raise ValueError('Missing Blueprint build include '+pattern)
+    pending.extend(included)
   except Exception as e:fail.append((str(path.relative_to(root)),str(e)))
  return modules,fail
 
