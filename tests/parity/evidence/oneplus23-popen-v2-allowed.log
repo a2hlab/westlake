@@ -1,0 +1,3 @@
+read denied=0 got=1 text=PIPE_OK status=1792
+fclose status=2304
+POPEN_CONTRACT denied=0 failures=0

@@ -1,6 +1,6 @@
 /* Missing libcore datagram operations at the OHOS POSIX boundary.
  * No ART internals, Bionic structures, or application-specific behavior.
- * This extension registers only natives absent from the pinned runtime.
+ * This extension fills missing natives and replaces incomplete POSIX bindings.
  */
 #include <jni.h>
 #include <sys/socket.h>
@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "oh_async_close.h"
+#include "oh_network_interfaces.h"
 
 namespace {
 jclass bytesClass, inetClass, inet6Class, errorClass;
@@ -28,6 +29,20 @@ jfieldID secondsField, microsField, groupIndexField, groupAddressField;
 jfieldID pollFdField, pollEventsField, pollReventsField;
 using oh_network::CloseMonitor;
 bool initialized = false;
+
+jint interfaceIndex(JNIEnv* env, jobject, jstring value) {
+    if (!value) return 0;
+    const char* name = env->GetStringUTFChars(value, nullptr);
+    if (!name) return 0;
+    const unsigned index = oh_network::interfaceIndex(name);
+    env->ReleaseStringUTFChars(value, name);
+    return static_cast<jint>(index);
+}
+jstring interfaceName(JNIEnv* env, jobject, jint index) {
+    char name[IF_NAMESIZE] = {};
+    if (index <= 0 || !oh_network::interfaceName(static_cast<unsigned>(index), name)) return nullptr;
+    return env->NewStringUTF(name);
+}
 
 void error(JNIEnv* env, const char* operation, int number) {
     if (env->ExceptionCheck()) return;
@@ -431,6 +446,8 @@ extern "C" int westlake_network_child_register(JNIEnv* env) {
     if (!monitorClass || env->RegisterNatives(monitorClass, monitorMethods, 1) != JNI_OK) return 0;
     jclass linuxClass = env->FindClass("libcore/io/Linux");
     JNINativeMethod methods[] = {
+        {const_cast<char*>("if_nametoindex"), const_cast<char*>("(Ljava/lang/String;)I"), reinterpret_cast<void*>(interfaceIndex)},
+        {const_cast<char*>("if_indextoname"), const_cast<char*>("(I)Ljava/lang/String;"), reinterpret_cast<void*>(interfaceName)},
         {const_cast<char*>("bind"), const_cast<char*>("(Ljava/io/FileDescriptor;Ljava/net/InetAddress;I)V"), reinterpret_cast<void*>(bindSocket)},
         {const_cast<char*>("sendtoBytes"), const_cast<char*>("(Ljava/io/FileDescriptor;Ljava/lang/Object;IIILjava/net/InetAddress;I)I"), reinterpret_cast<void*>(sendDatagram)},
         {const_cast<char*>("recvfromBytes"), const_cast<char*>("(Ljava/io/FileDescriptor;Ljava/lang/Object;IIILjava/net/InetSocketAddress;)I"), reinterpret_cast<void*>(receive)},

@@ -23,7 +23,7 @@ time.sleep(.3)
 log=device.save(a.run+'-measure.log','cat '+remote)
 assert len(re.findall(r'\[GAP_BENCH\] INPUT sample=',log))==12
 assert len(re.findall(r'\[GAP_BENCH\] INPUT_FRAME sample=',log))==12
-metadata={'run':a.run,'process':s,'control_sha256':hashlib.sha256((device.ROOT/'control-out/control.apk').read_bytes()).hexdigest(),
+metadata={'run':a.run,'process':s,'control_sha256':s.get('control_sha256') or hashlib.sha256((device.ROOT/'control-out/control.apk').read_bytes()).hexdigest(),
  'page_samples':12,'page_warmup_excluded':2,'input_samples':12,
  'input_protocol':'uinput -T -d 600 160 -i 30 -u 600 160',
  'limitations':['WebView visual callback is not physical presentation','Injected input is not touch to photon','Not live Toutiao']}

@@ -224,38 +224,56 @@ static bool wl_join_process_cgroup(const char* path) {
     return true;
 }
 
-// Finish Android-app privilege specialization only after the OH access token
-// and SELinux context have been installed.  applyDac() changes uid/gid early,
-// but OH appspawn preserves the parent's capabilities across that transition
-// so setcon can still run.  Until now those capabilities were never cleared:
-// an ordinary adapter child ran as an app uid with a nearly full CapEff mask
-// and RLIMIT_NICE=40.  Chromium could consequently make CrBrowserMain nice
-// -20, and a single Toutiao process starved the launcher/system UI.
-//
-// Android app processes are sandboxed after specialization.  Mirror that
-// boundary here: remove the capability bounding/permitted/effective sets and
-// allow only the display-class nice value (-4).  RenderThread can retain the
-// latency it needs, while app SDK/background workers cannot claim -8/-16/-20
-// in the absence of Android's cgroup/task-profile containment.
+// Task-profile placement belongs to the privileged spawn phase.  After the
+// app UID and SELinux domain are installed, a normal app must not need write
+// access to the system-owned cgroup controls.  That access can disappear on
+// reboot even when a previous development session happened to allow it.
+static int wl_prepare_app_cpu_profile() {
+    if (getenv("WL_NO_DROP_UID") != nullptr) return 0;
+    if (!wl_join_process_cgroup("/dev/cpuset/top-app/cgroup.procs") ||
+        !wl_join_process_cgroup("/dev/cpuctl/top-app/cgroup.procs")) {
+        fflush(stderr);
+        return -1;
+    }
+    fprintf(stderr, "[WESTLAKE-APP-PRIV] cpuProfile=top-app before app credentials uid=%d\n",
+            static_cast<int>(getuid()));
+    return 0;
+}
+
+// Split specialization around credential changes: privileged cgroup placement
+// and bounding-set removal happen first; the finalizer verifies capabilities
+// are gone after UID/GID and SELinux setup. Retain the display-class nice floor
+// (-4), without allowing app background workers to claim -8/-16/-20.
+static int wl_bounding_dropped = 0;
+
+// Bounding-set removal requires CAP_SETPCAP and must precede setresuid().
+// Removing a bounding bit does not remove current effective capabilities, so
+// the remaining UID/GID and SELinux specialization can still finish.
+static int wl_drop_capability_bounding_set() {
+    for (int capability = 0; ; ++capability) {
+        errno = 0;
+        const int present = prctl(PR_CAPBSET_READ, capability, 0, 0, 0);
+        if (present < 0) {
+            if (errno == EINVAL) return 0;
+            return -1;
+        }
+        if (present != 0) {
+            if (prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0) {
+                fprintf(stderr, "[WESTLAKE-APP-PRIV] privileged bounding drop(%d) failed: %s\n",
+                        capability, strerror(errno));
+                return -1;
+            }
+            ++wl_bounding_dropped;
+        }
+    }
+}
+
 static int wl_finalize_app_privileges() {
     if (getenv("WL_NO_DROP_UID") != nullptr) {
         fprintf(stderr,
                 "[WESTLAKE-APP-PRIV] skipped because WL_NO_DROP_UID is set\n");
         fflush(stderr);
         return 0;
-    }
-
-    // The bridge used to leave every child in the root CPU and cpuset
-    // cgroups.  Hundreds of runnable app/WebView workers then competed as
-    // independent root scheduler entities and could consume all eight CPUs,
-    // starving the launcher and input pipeline.  Android appspawn places a
-    // newly-visible application in the top-app task profile at specialization
-    // time.  Do the same while the child still has DAC override capability;
-    // all post-fork ART and application threads inherit these groups.
-    if (!wl_join_process_cgroup("/dev/cpuset/top-app/cgroup.procs") ||
-        !wl_join_process_cgroup("/dev/cpuctl/top-app/cgroup.procs")) {
-        fflush(stderr);
-        return -1;
     }
 
     // This board's v1 cpu controller has shares/uclamp but no CFS bandwidth
@@ -338,7 +356,6 @@ static int wl_finalize_app_privileges() {
         return -1;
     }
 
-    int boundingDropped = 0;
     for (int capability = 0; ; ++capability) {
         errno = 0;
         const int present = prctl(PR_CAPBSET_READ, capability, 0, 0, 0);
@@ -351,14 +368,9 @@ static int wl_finalize_app_privileges() {
             return -1;
         }
         if (present != 0) {
-            if (prctl(PR_CAPBSET_DROP, capability, 0, 0, 0) != 0) {
-                fprintf(stderr,
-                        "[WESTLAKE-APP-PRIV] PR_CAPBSET_DROP(%d) failed: %s\n",
-                        capability, strerror(errno));
-                fflush(stderr);
-                return -1;
-            }
-            ++boundingDropped;
+            fprintf(stderr, "[WESTLAKE-APP-PRIV] capability %d remains in bounding set\n",
+                    capability);
+            return -1;
         }
     }
 
@@ -395,7 +407,7 @@ static int wl_finalize_app_privileges() {
     fprintf(stderr,
             "[WESTLAKE-APP-PRIV] finalized uid=%d CapEff=%#llx CapPrm=%#llx "
             "boundingDropped=%d niceFloor=-4 cpuProfile=top-app\n",
-            static_cast<int>(getuid()), effective, permitted, boundingDropped);
+            static_cast<int>(getuid()), effective, permitted, wl_bounding_dropped);
     fflush(stderr);
     return (effective == 0 && permitted == 0) ? 0 : -1;
 }
@@ -1224,6 +1236,14 @@ static void wl_name_java_method(void* ctx) {
         _exit(13);
     }
 
+    // Join the task profile before DAC/SELinux specialization; all later ART
+    // and application threads inherit it without app access to cgroup files.
+    ret = wl_prepare_app_cpu_profile();
+    if (ret != 0) {
+        LOGE("wl_prepare_app_cpu_profile failed, ret=%d – aborting child", ret);
+        _exit(15);
+    }
+
     // Step 2: Apply DAC credentials (must be done early, before sandbox)
     ret = applyDac(msg);
     if (ret != 0) {
@@ -1614,6 +1634,10 @@ int ChildMain::applyDac(const SpawnMsg& msg) {
         fflush(stderr);
         return 0;
     }
+
+    // Any privileged helper exec is complete. Drop the bounding set while
+    // CAP_SETPCAP is still effective, before setresuid clears capabilities.
+    if (wl_drop_capability_bounding_set() != 0) return -1;
 
     // Set primary GID (must be done before setuid to avoid permission issues)
     if (msg.gid >= 0) {

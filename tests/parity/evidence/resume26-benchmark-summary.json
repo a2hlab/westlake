@@ -1,0 +1,562 @@
+{
+  "resume26bencha": {
+    "visual_ready_ms": {
+      "samples": [
+        110,
+        91,
+        135,
+        99,
+        95,
+        105,
+        96,
+        92,
+        352,
+        241
+      ],
+      "median": 102.0,
+      "p90": 241
+    },
+    "event_to_click_ms": {
+      "samples": [
+        57,
+        24,
+        9,
+        11,
+        7,
+        11,
+        11,
+        9,
+        5,
+        10,
+        8,
+        8
+      ],
+      "median": 9.5,
+      "p90": 24
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        61,
+        26,
+        16,
+        20,
+        13,
+        18,
+        20,
+        23,
+        17,
+        21,
+        12,
+        10
+      ],
+      "median": 19.0,
+      "p90": 26
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 7981578,
+        "cpu_ms": 2213,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 7981882,
+        "cpu_ms": 2552,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 7982193,
+        "cpu_ms": 2771,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 7982485,
+        "cpu_ms": 2959,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 7982835,
+        "cpu_ms": 3292,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 7983137,
+        "cpu_ms": 3525,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 7983432,
+        "cpu_ms": 3716,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 7983737,
+        "cpu_ms": 3911,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 7984033,
+        "cpu_ms": 4100,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 7984326,
+        "cpu_ms": 4274,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 7984883,
+        "cpu_ms": 4819,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 7985328,
+        "cpu_ms": 5238,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  },
+  "resume26benchb": {
+    "visual_ready_ms": {
+      "samples": [
+        95,
+        101,
+        153,
+        95,
+        93,
+        110,
+        90,
+        91,
+        360,
+        229
+      ],
+      "median": 98.0,
+      "p90": 229
+    },
+    "event_to_click_ms": {
+      "samples": [
+        58,
+        8,
+        4,
+        8,
+        12,
+        7,
+        8,
+        9,
+        11,
+        10,
+        10,
+        15
+      ],
+      "median": 9.5,
+      "p90": 15
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        62,
+        18,
+        18,
+        18,
+        16,
+        17,
+        19,
+        16,
+        19,
+        19,
+        17,
+        25
+      ],
+      "median": 18.0,
+      "p90": 25
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 8009384,
+        "cpu_ms": 2199,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 8009676,
+        "cpu_ms": 2512,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 8009972,
+        "cpu_ms": 2705,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 8010274,
+        "cpu_ms": 2889,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 8010638,
+        "cpu_ms": 3239,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 8010935,
+        "cpu_ms": 3438,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 8011230,
+        "cpu_ms": 3617,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 8011542,
+        "cpu_ms": 3839,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 8011832,
+        "cpu_ms": 4006,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 8012124,
+        "cpu_ms": 4181,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 8012687,
+        "cpu_ms": 4735,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 8013117,
+        "cpu_ms": 5066,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  },
+  "oneplus24a": {
+    "visual_ready_ms": {
+      "samples": [
+        146,
+        135,
+        133,
+        115,
+        126,
+        125,
+        111,
+        105,
+        129,
+        119
+      ],
+      "median": 125.5,
+      "p90": 135
+    },
+    "event_to_click_ms": {
+      "samples": [
+        27,
+        13,
+        24,
+        14,
+        16,
+        23,
+        17,
+        24,
+        15,
+        14,
+        21,
+        26
+      ],
+      "median": 19.0,
+      "p90": 26
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        40,
+        23,
+        39,
+        26,
+        28,
+        36,
+        30,
+        36,
+        28,
+        27,
+        34,
+        38
+      ],
+      "median": 32.0,
+      "p90": 39
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 92796125,
+        "cpu_ms": 508,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 92796468,
+        "cpu_ms": 645,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 92796816,
+        "cpu_ms": 744,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 92797163,
+        "cpu_ms": 980,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 92797498,
+        "cpu_ms": 1091,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 92797815,
+        "cpu_ms": 1190,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 92798142,
+        "cpu_ms": 1304,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 92798469,
+        "cpu_ms": 1414,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 92798782,
+        "cpu_ms": 1502,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 92799090,
+        "cpu_ms": 1595,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 92799420,
+        "cpu_ms": 1700,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 92799741,
+        "cpu_ms": 1796,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  },
+  "oneplus24b": {
+    "visual_ready_ms": {
+      "samples": [
+        118,
+        117,
+        142,
+        125,
+        143,
+        121,
+        98,
+        116,
+        121,
+        152
+      ],
+      "median": 121.0,
+      "p90": 143
+    },
+    "event_to_click_ms": {
+      "samples": [
+        30,
+        24,
+        24,
+        10,
+        21,
+        12,
+        18,
+        10,
+        17,
+        10,
+        17,
+        24
+      ],
+      "median": 17.5,
+      "p90": 24
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        35,
+        38,
+        36,
+        24,
+        33,
+        26,
+        29,
+        23,
+        29,
+        23,
+        29,
+        36
+      ],
+      "median": 29.0,
+      "p90": 36
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 92808363,
+        "cpu_ms": 546,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 92808708,
+        "cpu_ms": 714,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 92809028,
+        "cpu_ms": 825,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 92809358,
+        "cpu_ms": 1020,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 92809702,
+        "cpu_ms": 1115,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 92810031,
+        "cpu_ms": 1241,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 92810375,
+        "cpu_ms": 1353,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 92810698,
+        "cpu_ms": 1446,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 92810998,
+        "cpu_ms": 1531,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 92811317,
+        "cpu_ms": 1624,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 92811640,
+        "cpu_ms": 1718,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 92811995,
+        "cpu_ms": 1847,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  }
+}

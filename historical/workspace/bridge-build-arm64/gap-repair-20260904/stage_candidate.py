@@ -14,6 +14,8 @@ if (OUT/'runtime/liboh_egl_boundary.so').exists():
     common=common.replace('export LD_PRELOAD=','export LD_PRELOAD=$RUNTIME/liboh_egl_boundary.so:')
 if (OUT/'runtime/liboh_ime_geometry.so').exists():
     common=common.replace('export LD_PRELOAD=','export LD_PRELOAD=$RUNTIME/liboh_ime_geometry.so:')
+if (OUT/'runtime/liboh_process_cpu_time.so').exists():
+    common=common.replace('export LD_PRELOAD=','export LD_PRELOAD=$RUNTIME/liboh_process_cpu_time.so:')
 (OUT/'run-common.sh').write_text(common)
 manifest=json.loads((OUT/'manifest.json').read_text());checks=[];paths=[]
 for name,sha in manifest.items():
@@ -39,6 +41,7 @@ export WESTLAKE_IME_METADATA_PATH=$BASE/runtime/liboh_ime_metadata.so
 export WESTLAKE_NET_HELPER_PATH=$BASE/runtime/liboh_network_jni.so
 export WESTLAKE_TLS_HELPER_PATH=$BASE/runtime/liboh_tls_boundary.so
 export WESTLAKE_PERMISSION_HELPER_PATH=$BASE/runtime/liboh_permission_queries.so
+export WESTLAKE_WINDOW_POLICY_PATH=$BASE/runtime/liboh_window_policy.so
 export WESTLAKE_CHILD_REBIND_PORTABLE_TIMEZONE=1
 export WESTLAKE_CHILD_DEOPT_BOOT=0 WESTLAKE_CHILD_SWITCH_BOOT=0
 export WESTLAKE_JIT_APP_ONLY=1 WESTLAKE_JIT_BOOT_PARSER=1 WESTLAKE_JIT_BOOT_NATIVE_STUBS=1

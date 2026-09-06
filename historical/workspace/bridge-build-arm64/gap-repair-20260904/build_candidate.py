@@ -16,7 +16,7 @@ for part in ('fw','runtime'):
     for p in (BASE/part).iterdir():
         if p.is_file():shutil.copy2(p,OUT/part/p.name)
 classes=OUT/'classes';classes.mkdir(exist_ok=True)
-sources=[SRC/'window/java'/ (name+'.java') for name in ('OhImeBridge','OhImeMetadata','OhInputMethodSession','InputMethodManagerAdapter','OhInsetsBridge','OhWebViewBridge','OHTouchInjector','SessionStageBridge','WindowCallbackBridge')]
+sources=[SRC/'window/java'/ (name+'.java') for name in ('OhImeBridge','OhImeMetadata','OhInputMethodSession','InputMethodManagerAdapter','OhInsetsBridge','OhWindowPolicy','OhWebViewBridge','OHTouchInjector','SessionStageBridge','WindowCallbackBridge')]
 sources+=list((SRC/'appspawn-x/java/adapter/security').glob('*.java'))
 sources.append(SRC/'appspawn-x/java/adapter/compat/WestlakeSecureRandomSpi.java')
 sources += [SRC/'package-manager/java'/name for name in ('PermissionManagerAdapter.java', 'PermissionMapper.java')]
@@ -26,7 +26,7 @@ run('/home/dspfac/android-sdk/build-tools/34.0.0/d8','--min-api','30','--output'
 decode(OUT/'dex/classes.dex',OUT/'overlay')
 # Only intentional replacements, not every class javac compiled as a dependency.
 selected={str(p.relative_to(OUT/'overlay')):p for p in (OUT/'overlay').rglob('*.smali')
-    if p.name.startswith(('OhImeBridge','OhImeMetadata','OhInputMethodSession','InputMethodManagerAdapter','OhInsetsBridge','OhWebViewBridge','OHTouchInjector','SessionStageBridge','WindowCallbackBridge','OhTrustBridge','OhPeerCertificates','WestlakeSecureRandomSpi','PermissionManagerAdapter','PermissionMapper'))}
+    if p.name.startswith(('OhImeBridge','OhImeMetadata','OhInputMethodSession','InputMethodManagerAdapter','OhInsetsBridge','OhWindowPolicy','OhWebViewBridge','OHTouchInjector','SessionStageBridge','WindowCallbackBridge','OhTrustBridge','OhPeerCertificates','WestlakeSecureRandomSpi','PermissionManagerAdapter','PermissionMapper'))}
 targets=[p[:-6] for p in selected]+['adapter/window/WindowSessionAdapter','android/webkit/WebView','adapter/core/OHServiceManager','adapter/compat/WestlakeSSLSocket']
 changed={}
 for jar in (BASE/'fw').glob('*.jar'):
@@ -44,7 +44,7 @@ for jar in (BASE/'fw').glob('*.jar'):
                 if dest.exists():shutil.copy2(source,dest);edits.append(name)
             if jar.name=='oh-adapter-framework.jar' and entry=='classes.dex':
                 for name,source in selected.items():
-                    if name.startswith(('adapter/window/OhImeBridge','adapter/window/OhImeMetadata','adapter/window/OhInputMethodSession','adapter/window/OhInsetsBridge','adapter/window/OhWebViewBridge','adapter/packagemanager/PermissionManagerAdapter','adapter/security/OhPeerCertificates')):
+                    if name.startswith(('adapter/window/OhImeBridge','adapter/window/OhImeMetadata','adapter/window/OhInputMethodSession','adapter/window/OhInsetsBridge','adapter/window/OhWindowPolicy','adapter/window/OhWebViewBridge','adapter/packagemanager/PermissionManagerAdapter','adapter/security/OhPeerCertificates')):
                         (tree/name).parent.mkdir(parents=True,exist_ok=True)
                         shutil.copy2(source,tree/name);edits.append(name)
             if jar.name=='adapter-runtime-bcp.jar' and entry=='classes.dex':
@@ -118,9 +118,12 @@ for jar in (BASE/'fw').glob('*.jar'):
                 peer.write_text(text[:begin]+method+text[end:]);edits.append('tls-standard-full-chain')
             if session.exists():
                 text=session.read_text()
+                async_needle='.method public relayoutAsync(Landroid/view/IWindow;Landroid/view/WindowManager$LayoutParams;IIIIII)V\n    .registers 9'
+                assert text.count(async_needle)==1
+                text=text.replace(async_needle,async_needle+'\n    invoke-static/range {p0 .. p5}, Ladapter/window/OhWindowPolicy;->update(Ljava/lang/Object;Landroid/view/IWindow;Landroid/view/WindowManager$LayoutParams;III)V')
                 needle='.method public remove(Landroid/view/IWindow;)V\n    .registers 5'
                 assert text.count(needle)==1
-                text=text.replace(needle,needle+'\n    invoke-static {p1}, Ladapter/window/OhInsetsBridge;->remove(Landroid/view/IWindow;)V')
+                text=text.replace(needle,needle+'\n    invoke-static {p1}, Ladapter/window/OhWindowPolicy;->remove(Landroid/view/IWindow;)V\n    invoke-static {p1}, Ladapter/window/OhInsetsBridge;->remove(Landroid/view/IWindow;)V')
                 # Preserve all pinned window/surface behavior; replace only
                 # empty server-insets assignments, using method p1=IWindow.
                 pattern=r'    invoke-virtual \{(v\d+|p\d+), (v\d+)\}, Landroid/view/InsetsState;->set\(Landroid/view/InsetsState;\)V'
@@ -130,6 +133,7 @@ for jar in (BASE/'fw').glob('*.jar'):
                 methods=text.split('.method ')
                 for i,method in enumerate(methods):
                     if 'relayout(' not in method.split('\n')[0]:continue
+                    method=re.sub(r'(    \.registers \d+\n)',r'\1    invoke-static/range {p0 .. p5}, Ladapter/window/OhWindowPolicy;->update(Ljava/lang/Object;Landroid/view/IWindow;Landroid/view/WindowManager$LayoutParams;III)V\n',method,count=1)
                     # Pinned D8 register allocation: v16/v17 are dead until
                     # the immediately following resized argument setup.
                     needle='    invoke-direct/range {v20 .. v20}, Landroid/view/InsetsState;-><init>()V'
@@ -163,6 +167,9 @@ common=[sdk/'llvm/bin/clang++','--target=aarch64-linux-ohos','--sysroot='+str(sd
 run(*common,SRC/'window/jni/oh_ime_helper_capi.cpp','-lohinputmethod','-ldl','-o',OUT/'runtime/liboh_ime_helper_capi.so')
 run(*common,SRC/'android-runtime/src/oh_network_jni.cpp','-o',OUT/'runtime/liboh_network_jni.so')
 run(*common,SRC/'android-runtime/src/oh_webview_startup_order.cpp','-ldl','-o',OUT/'runtime/liboh_webview_startup_order.so')
+from build_window_policy import build as build_window_policy
+build_window_policy(OUT/'runtime/liboh_window_policy.so')
+run(*common,'-DOH_PROCESS_CPU_OVERLAY',SRC/'android-runtime/src/oh_process_cpu_time.cpp','-ldl','-o',OUT/'runtime/liboh_process_cpu_time.so')
 platform_common=common.copy()
 platform_common[0]=Path('/home/dspfac/openharmony/prebuilts/clang/ohos/linux-x86_64/15.0.4/llvm/bin/clang++')
 run(*platform_common,SRC/'package-manager/jni/oh_permission_queries.cpp','-L'+str(ARM/'out/board_libs'),'-lability_access_control','-ldl','-o',OUT/'runtime/liboh_permission_queries.so')

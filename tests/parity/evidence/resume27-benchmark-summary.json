@@ -1,0 +1,562 @@
+{
+  "resume27filea": {
+    "visual_ready_ms": {
+      "samples": [
+        93,
+        114,
+        157,
+        94,
+        114,
+        98,
+        94,
+        92,
+        95,
+        100
+      ],
+      "median": 96.5,
+      "p90": 114
+    },
+    "event_to_click_ms": {
+      "samples": [
+        41,
+        6,
+        8,
+        11,
+        5,
+        6,
+        8,
+        10,
+        13,
+        5,
+        8,
+        6
+      ],
+      "median": 8.0,
+      "p90": 13
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        46,
+        21,
+        18,
+        22,
+        10,
+        9,
+        10,
+        19,
+        15,
+        8,
+        12,
+        11
+      ],
+      "median": 13.5,
+      "p90": 22
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 8856189,
+        "cpu_ms": 2169,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 8856495,
+        "cpu_ms": 2506,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 8856790,
+        "cpu_ms": 2695,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 8857106,
+        "cpu_ms": 2902,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 8857467,
+        "cpu_ms": 3244,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 8857763,
+        "cpu_ms": 3476,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 8858079,
+        "cpu_ms": 3680,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 8858379,
+        "cpu_ms": 3871,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 8858673,
+        "cpu_ms": 4047,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 8858966,
+        "cpu_ms": 4222,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 8859261,
+        "cpu_ms": 4435,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 8859564,
+        "cpu_ms": 4634,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  },
+  "resume27anona": {
+    "visual_ready_ms": {
+      "samples": [
+        99,
+        101,
+        151,
+        101,
+        95,
+        94,
+        95,
+        106,
+        332,
+        309
+      ],
+      "median": 101.0,
+      "p90": 309
+    },
+    "event_to_click_ms": {
+      "samples": [
+        64,
+        45,
+        6,
+        13,
+        6,
+        11,
+        8,
+        7,
+        10,
+        7,
+        7,
+        7
+      ],
+      "median": 7.5,
+      "p90": 45
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        68,
+        49,
+        12,
+        25,
+        13,
+        25,
+        22,
+        12,
+        23,
+        12,
+        12,
+        15
+      ],
+      "median": 18.5,
+      "p90": 49
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 8883676,
+        "cpu_ms": 2181,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 8883973,
+        "cpu_ms": 2502,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 8884273,
+        "cpu_ms": 2693,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 8884574,
+        "cpu_ms": 2879,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 8884934,
+        "cpu_ms": 3242,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 8885237,
+        "cpu_ms": 3461,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 8885534,
+        "cpu_ms": 3638,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 8885828,
+        "cpu_ms": 3826,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 8886124,
+        "cpu_ms": 4003,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 8886431,
+        "cpu_ms": 4204,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 8886965,
+        "cpu_ms": 4705,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 8887475,
+        "cpu_ms": 5214,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  },
+  "resume27fileb": {
+    "visual_ready_ms": {
+      "samples": [
+        105,
+        94,
+        151,
+        90,
+        92,
+        92,
+        91,
+        100,
+        103,
+        96
+      ],
+      "median": 95.0,
+      "p90": 105
+    },
+    "event_to_click_ms": {
+      "samples": [
+        63,
+        10,
+        5,
+        7,
+        7,
+        8,
+        7,
+        10,
+        9,
+        12,
+        8,
+        9
+      ],
+      "median": 8.5,
+      "p90": 12
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        66,
+        24,
+        6,
+        15,
+        22,
+        12,
+        12,
+        17,
+        17,
+        22,
+        15,
+        21
+      ],
+      "median": 17.0,
+      "p90": 24
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 8912744,
+        "cpu_ms": 2170,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 8913042,
+        "cpu_ms": 2497,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 8913349,
+        "cpu_ms": 2687,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 8913644,
+        "cpu_ms": 2868,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 8914006,
+        "cpu_ms": 3219,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 8914296,
+        "cpu_ms": 3406,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 8914589,
+        "cpu_ms": 3586,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 8914883,
+        "cpu_ms": 3772,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 8915174,
+        "cpu_ms": 3945,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 8915475,
+        "cpu_ms": 4148,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 8915779,
+        "cpu_ms": 4369,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 8916076,
+        "cpu_ms": 4579,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  },
+  "resume27anonb": {
+    "visual_ready_ms": {
+      "samples": [
+        91,
+        91,
+        152,
+        105,
+        95,
+        111,
+        90,
+        100,
+        264,
+        261
+      ],
+      "median": 102.5,
+      "p90": 261
+    },
+    "event_to_click_ms": {
+      "samples": [
+        7,
+        12,
+        8,
+        13,
+        8,
+        8,
+        5,
+        10,
+        5,
+        7,
+        5,
+        7
+      ],
+      "median": 7.5,
+      "p90": 12
+    },
+    "event_to_frame_callback_ms": {
+      "samples": [
+        10,
+        23,
+        16,
+        19,
+        17,
+        19,
+        14,
+        23,
+        11,
+        17,
+        9,
+        11
+      ],
+      "median": 16.5,
+      "p90": 23
+    },
+    "phases": [
+      {
+        "sample": 0,
+        "uptime": 8939614,
+        "cpu_ms": 2186,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 1,
+        "uptime": 8939913,
+        "cpu_ms": 2489,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 2,
+        "uptime": 8940205,
+        "cpu_ms": 2676,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 3,
+        "uptime": 8940497,
+        "cpu_ms": 2865,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 4,
+        "uptime": 8940864,
+        "cpu_ms": 3240,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 5,
+        "uptime": 8941170,
+        "cpu_ms": 3458,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 6,
+        "uptime": 8941468,
+        "cpu_ms": 3637,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 7,
+        "uptime": 8941779,
+        "cpu_ms": 3847,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 8,
+        "uptime": 8942070,
+        "cpu_ms": 4017,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 9,
+        "uptime": 8942372,
+        "cpu_ms": 4213,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 10,
+        "uptime": 8942837,
+        "cpu_ms": 4646,
+        "focus": "true",
+        "visibility": 0
+      },
+      {
+        "sample": 11,
+        "uptime": 8943300,
+        "cpu_ms": 5076,
+        "focus": "true",
+        "visibility": 0
+      }
+    ]
+  }
+}

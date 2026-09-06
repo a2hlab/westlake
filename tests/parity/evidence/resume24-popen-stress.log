@@ -1,0 +1,2 @@
+POPEN_STRESS operations=64 concurrent_forks=12 fds_before=5 fds_after=5 failures=0
+PROBE_EXIT=0
