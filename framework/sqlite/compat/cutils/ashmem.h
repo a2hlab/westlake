@@ -1,10 +1,17 @@
 /* Stand-in for AOSP system/core/libcutils/include/cutils/ashmem.h.
  *
- * OpenHarmony has no ashmem: there is no /dev/ashmem and no ASHMEM_SET_SIZE
- * ioctl, so every one of these calls would fail on the board regardless of how
- * it was implemented.  They are therefore declared here and defined in
- * wl_compat.cpp to fail immediately, which is not a degradation but the
- * documented path through the callers:
+ * This header used to say "OpenHarmony has no ashmem". That was wrong, and the
+ * parity27 OH header closure is what showed it: the pinned OHOS native SDK
+ * sysroot ships linux/ashmem.h with ASHMEM_NAME_DEF, ASHMEM_SET_NAME and
+ * ASHMEM_SET_SIZE, and OH's commonlibrary/c_utils publishes AshmemCreate on top
+ * of it.  wl_compat.cpp therefore now implements these for real -- but behind
+ * WESTLAKE_OH_ASHMEM=1, because a header proves the interface exists and says
+ * nothing about whether the board's kernel enables the driver or lets an app
+ * sandbox open the device, and nobody has run it on hardware yet.
+ *
+ * With the flag unset -- the shipped default -- these still fail immediately,
+ * which remains the verified behaviour and the documented path through the
+ * callers:
  *
  *   - CursorWindow::maybeInflate() treats a negative fd as "goto heap_fallback"
  *     and grows the window with malloc instead (Westlake §453).  Nothing hands

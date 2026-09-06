@@ -14,10 +14,15 @@
 
 #include <jni.h>
 
+#include <fcntl.h>
+#include <linux/ashmem.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "android-base/logging.h"
 #include "android-base/stringprintf.h"
@@ -279,12 +284,109 @@ int RegisterMethodsOrDie(JNIEnv* env, const char* className,
 
 extern "C" {
 
-int ashmem_create_region(const char*, size_t) { errno = ENOSYS; return -1; }
-int ashmem_set_prot_region(int, int)          { errno = ENOSYS; return -1; }
-int ashmem_pin_region(int, size_t, size_t)    { errno = ENOSYS; return -1; }
-int ashmem_unpin_region(int, size_t, size_t)  { errno = ENOSYS; return -1; }
-int ashmem_get_size_region(int)               { errno = ENOSYS; return -1; }
-int ashmem_valid(int)                         { return 0; }
+/*
+ * ashmem
+ *
+ * These were unconditional ENOSYS stubs, on the stated grounds that
+ * "OpenHarmony has no ashmem: there is no /dev/ashmem and no ASHMEM_SET_SIZE
+ * ioctl". That premise does not survive contact with the platform's own
+ * headers. The pinned OHOS native SDK sysroot ships linux/ashmem.h --
+ * ASHMEM_NAME_DEF "dev/ashmem", ASHMEM_SET_NAME, ASHMEM_SET_SIZE, the lot --
+ * and OH's commonlibrary/c_utils publishes AshmemCreate/AshmemSetProt/
+ * AshmemGetSize on top of it (see third_party/oh61-window-headers).
+ *
+ * A header is not a running kernel, though. Whether the board's OH build has
+ * the driver enabled, and whether an app sandbox may open /dev/ashmem, are
+ * facts about a device -- and the workstation that wrote this has no device.
+ *
+ * So: the real implementation is here, and it is off unless
+ * WESTLAKE_OH_ASHMEM=1 is set. Unset is the shipped default and behaves exactly
+ * as the verified build did -- ENOSYS, and CursorWindow::maybeInflate() takes
+ * its malloc path. Turning that path off on the strength of a header we found,
+ * without a board to check it against, is precisely the sort of untested change
+ * this tree exists to stop shipping. When someone can run it on hardware, one
+ * environment variable is the whole experiment; if ashmem works, CursorWindow
+ * gets real shared memory instead of a heap buffer capped by process RAM.
+ */
+
+static bool wl_ashmem_opt_in() {
+    const char* opt = getenv("WESTLAKE_OH_ASHMEM");
+    return opt != nullptr && opt[0] == '1' && opt[1] == '\0';
+}
+
+int ashmem_create_region(const char* name, size_t size) {
+    if (!wl_ashmem_opt_in()) {
+        errno = ENOSYS;
+        return -1;
+    }
+    int fd = open("/" ASHMEM_NAME_DEF, O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        return -1;
+    }
+    if (name != nullptr) {
+        // The ioctl reads a fixed-size buffer, so give it one that is always
+        // NUL-terminated rather than passing the caller's pointer straight in.
+        char buffer[ASHMEM_NAME_LEN];
+        memset(buffer, 0, sizeof(buffer));
+        strncpy(buffer, name, sizeof(buffer) - 1);
+        if (ioctl(fd, ASHMEM_SET_NAME, buffer) < 0) {
+            const int saved = errno;
+            close(fd);
+            errno = saved;
+            return -1;
+        }
+    }
+    if (ioctl(fd, ASHMEM_SET_SIZE, size) < 0) {
+        const int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
+int ashmem_set_prot_region(int fd, int prot) {
+    if (!wl_ashmem_opt_in()) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return ioctl(fd, ASHMEM_SET_PROT_MASK, prot);
+}
+
+int ashmem_pin_region(int fd, size_t offset, size_t len) {
+    if (!wl_ashmem_opt_in()) {
+        errno = ENOSYS;
+        return -1;
+    }
+    struct ashmem_pin pin = { static_cast<uint32_t>(offset), static_cast<uint32_t>(len) };
+    return ioctl(fd, ASHMEM_PIN, &pin);
+}
+
+int ashmem_unpin_region(int fd, size_t offset, size_t len) {
+    if (!wl_ashmem_opt_in()) {
+        errno = ENOSYS;
+        return -1;
+    }
+    struct ashmem_pin pin = { static_cast<uint32_t>(offset), static_cast<uint32_t>(len) };
+    return ioctl(fd, ASHMEM_UNPIN, &pin);
+}
+
+int ashmem_get_size_region(int fd) {
+    if (!wl_ashmem_opt_in()) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return ioctl(fd, ASHMEM_GET_SIZE, NULL);
+}
+
+/* Answering "is this an ashmem fd" by asking the driver for its size is what
+ * AOSP's own libcutils settled on; there is no cheaper reliable probe. */
+int ashmem_valid(int fd) {
+    if (!wl_ashmem_opt_in()) {
+        return 0;
+    }
+    return ioctl(fd, ASHMEM_GET_SIZE, NULL) >= 0;
+}
 
 int jniThrowException(JNIEnv* env, const char* className, const char* msg) {
     if (env->ExceptionCheck()) env->ExceptionClear();
