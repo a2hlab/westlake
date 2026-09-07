@@ -142,12 +142,14 @@ class PortableBuildTests(unittest.TestCase):
 
     def test_replacement_guard_refuses_a_jar_that_drops_classes(self):
         checker = module('check_runtime_replacement')
-        original = checker.defined
+        original, original_strings = checker.defined, checker.dex_strings
+        self.addCleanup(setattr, checker, 'dex_strings', original_strings)
         try:
             # AppSpawnXInit is the child bootstrap entry point: losing it means
             # nothing on the board starts, and the failure lands at app launch.
             checker.defined = lambda p: ({'a.B', 'a.B$1'} if 'new' in str(p)
                                          else {'a.B', 'com.android.internal.os.AppSpawnXInit'})
+            checker.dex_strings = lambda p: set()
             result = checker.compare(Path('new.jar'), Path('old.jar'))
             self.assertFalse(result['safe'])
             self.assertIn('com.android.internal.os.AppSpawnXInit', result['removed'])
@@ -156,9 +158,11 @@ class PortableBuildTests(unittest.TestCase):
 
     def test_replacement_guard_allows_a_superset(self):
         checker = module('check_runtime_replacement')
-        original = checker.defined
+        original, original_strings = checker.defined, checker.dex_strings
+        self.addCleanup(setattr, checker, 'dex_strings', original_strings)
         try:
             checker.defined = lambda p: ({'a.B', 'a.C'} if 'new' in str(p) else {'a.B'})
+            checker.dex_strings = lambda p: set()
             result = checker.compare(Path('new.jar'), Path('old.jar'))
             self.assertTrue(result['safe'])
             self.assertEqual(result['added'], ['a.C'])
@@ -169,6 +173,21 @@ class PortableBuildTests(unittest.TestCase):
         checker = module('check_runtime_replacement')
         self.assertEqual(checker.top_level({'a.B', 'a.B$1', 'a.B$C', 'a.D-IA'}),
                          ['a.B', 'a.D'])
+
+    def test_replacement_guard_catches_method_level_regression(self):
+        """A clean superset by class can still be a step backwards by method."""
+        checker = module('check_runtime_replacement')
+        d, s = checker.defined, checker.dex_strings
+        self.addCleanup(setattr, checker, 'defined', d)
+        self.addCleanup(setattr, checker, 'dex_strings', s)
+        # Identical class lists; the deployed jar simply knows a method the
+        # candidate does not.
+        checker.defined = lambda p: {'a.B'}
+        checker.dex_strings = lambda p: ({'a.B'} if 'new' in str(p)
+                                         else {'a.B', 'onBackPressed'})
+        result = checker.compare(Path('new.jar'), Path('old.jar'))
+        self.assertEqual(result['removed'], [])          # class-level: clean
+        self.assertIn('onBackPressed', result['missing_identifiers'])
 
 
 if __name__ == '__main__':
