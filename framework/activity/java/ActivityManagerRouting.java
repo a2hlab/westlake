@@ -2795,6 +2795,9 @@ public class ActivityManagerRouting extends ActivityManagerAdapter {
                 throw e.getCause() != null ? e.getCause() : e;
             }
             String name = method.getName();
+            if (name.startsWith("get") || name.startsWith("query")) {
+                try { enrichPmResult(result, 0); } catch (Throwable ignored) { }
+            }
             if (name.startsWith("query") || name.startsWith("resolve")
                     || name.startsWith("get")) {
                 try {
@@ -3617,6 +3620,1388 @@ public class ActivityManagerRouting extends ActivityManagerAdapter {
         String dir = appNativeLibDir();
         if (dir == null) return null;
         return dir + "/" + so;
+    }
+
+
+    // ====================================================================
+    // Frontline union -- grafted from ActivityManagerRouting.java
+    //
+    // These are members the device's runtime has and this file did not. They
+    // arrived by tools/merge_frontline_members.py rather than by hand, and
+    // tools/java_member_diff.py against the same source is what proves nothing
+    // was left behind.
+    //
+    // They are frontline code and read like it. Tidying them is a separate
+    // change from making the two trees agree, and doing both at once would make
+    // it impossible to review either.
+    // ====================================================================
+
+
+    private static final String REDIRECT_FLAG = "/data/local/tmp/wl-launch-activity";
+
+    private static final String TAP_FLAG = "/data/local/tmp/wl-tap";
+
+    private static final String WCDB_PROBE =
+            "com.tencent.wcdb.database.WCDBInitializationProbe";
+
+    private static final String WCDB_SKIP_FLAG = "/data/local/tmp/wl-wcdb-skip";
+
+    private static Object buildPrimaryVolume() {
+        try {
+            Class<?> svc = Class.forName("android.os.storage.StorageVolume");
+            java.io.File path = new java.io.File("/storage/emulated/0");
+            Class<?> uh = Class.forName("android.os.UserHandle");
+            Object owner = Class.forName("android.os.Process")
+                    .getMethod("myUserHandle").invoke(null);
+            java.lang.reflect.Constructor<?> c = svc.getDeclaredConstructor(
+                    String.class, java.io.File.class, java.io.File.class, String.class,
+                    boolean.class, boolean.class, boolean.class, boolean.class,
+                    boolean.class, long.class, uh, java.util.UUID.class,
+                    String.class, String.class);
+            c.setAccessible(true);
+            return c.newInstance("primary", path, path, "Internal shared storage",
+                    true, false, true, false, false, 0L, owner, null, null, "mounted");
+        } catch (Throwable t) {
+            System.err.println("[WL-STORAGE] buildPrimaryVolume failed: " + t);
+            return null;
+        }
+    }
+
+    private static void dispatchTap(String spec) throws Exception {
+        String[] parts = spec.split("[ ,]+");
+        final float x = Float.parseFloat(parts[0]);
+        final float y = Float.parseFloat(parts[1]);
+        Class<?> at = Class.forName("android.app.ActivityThread");
+        Object cur = at.getMethod("currentActivityThread").invoke(null);
+        Object map = readFieldValue(cur, "mActivities");
+        if (map == null) { System.err.println("[WL-TAP] no activities"); return; }
+        Object values = map.getClass().getMethod("values").invoke(map);
+        Object activity = null;
+        for (Object rec : (java.util.Collection<?>) values) {
+            Object a = readFieldValue(rec, "activity");
+            if (a != null) activity = a;                         // last one wins: the visible one
+        }
+        if (activity == null) { System.err.println("[WL-TAP] no activity instance"); return; }
+        final Object act = activity;
+        Class<?> actCls = Class.forName("android.app.Activity");
+        Method runOnUi = actCls.getMethod("runOnUiThread", Runnable.class);
+        runOnUi.invoke(act, new Runnable() {
+            @Override public void run() {
+                try {
+                    Object w = act.getClass().getMethod("getWindow").invoke(act);
+                    Object decor = w.getClass().getMethod("getDecorView").invoke(w);
+                    Class<?> me = Class.forName("android.view.MotionEvent");
+                    Class<?> clock = Class.forName("android.os.SystemClock");
+                    long now = ((Long) clock.getMethod("uptimeMillis").invoke(null)).longValue();
+                    Method obtain = me.getMethod("obtain", long.class, long.class, int.class,
+                            float.class, float.class, int.class);
+                    Method dispatch = decor.getClass()
+                            .getMethod("dispatchTouchEvent", me);
+                    Object down = obtain.invoke(null, now, now, 0, x, y, 0);       // ACTION_DOWN
+                    Object r1 = dispatch.invoke(decor, down);
+                    Object up = obtain.invoke(null, now, now + 90, 1, x, y, 0);    // ACTION_UP
+                    Object r2 = dispatch.invoke(decor, up);
+                    me.getMethod("recycle").invoke(down);
+                    me.getMethod("recycle").invoke(up);
+                    System.err.println("[WL-TAP] dispatched (" + x + "," + y + ") on "
+                            + act.getClass().getName() + " handled down=" + r1 + " up=" + r2);
+                } catch (Throwable e) {
+                    System.err.println("[WL-TAP] dispatch on UI thread failed: " + e);
+                }
+            }
+        });
+    }
+
+    private static void dumpActivities(int atMs) throws Exception {
+        Class<?> at = Class.forName("android.app.ActivityThread");
+        Object cur = at.getMethod("currentActivityThread").invoke(null);
+        if (cur == null) return;
+        Object map = readFieldValue(cur, "mActivities");
+        if (map == null) { System.err.println("[WL-ACT] no mActivities"); return; }
+        Object values = map.getClass().getMethod("values").invoke(map);
+        int n = 0;
+        for (Object rec : (java.util.Collection<?>) values) {
+            n++;
+            Object activity = readFieldValue(rec, "activity");
+            if (activity == null) { System.err.println("[WL-ACT] record with null activity"); continue; }
+            StringBuilder sb = new StringBuilder("[WL-ACT T=" + atMs + "ms] ");
+            sb.append(activity.getClass().getName());
+            try {
+                Object paused = readFieldValue(rec, "paused");
+                Object stopped = readFieldValue(rec, "stopped");
+                sb.append(" paused=").append(paused).append(" stopped=").append(stopped);
+            } catch (Throwable ignored) { }
+            try {   // what the Activity itself was launched with
+                Object it = activity.getClass().getMethod("getIntent").invoke(activity);
+                Object comp = it == null ? null
+                        : it.getClass().getMethod("getComponent").invoke(it);
+                sb.append(" intentComp=").append(comp);
+                Object ai = readFieldValue(rec, "activityInfo");
+                if (ai != null) sb.append(" recInfoName=").append(readFieldValue(ai, "name"));
+            } catch (Throwable ignored) { }
+            try {
+                Object w = activity.getClass().getMethod("getWindow").invoke(activity);
+                Object decor = w.getClass().getMethod("getDecorView").invoke(w);
+                Object content = decor.getClass()
+                        .getMethod("findViewById", int.class).invoke(decor, 0x01020002);
+                sb.append(" decor=").append(decor == null ? "null" : "yes");
+                if (content == null) {
+                    sb.append(" content=null");
+                } else {
+                    Object cc = content.getClass().getMethod("getChildCount").invoke(content);
+                    sb.append(" contentChildren=").append(cc);
+                    System.err.println(sb);
+                    System.err.println("[WL-VIEWTREE] --- activity content at T="
+                            + atMs + "ms ---");
+                    dumpView(content, 0, 0);   // full tree, so post-click changes show
+                    continue;
+                }
+            } catch (Throwable e) {
+                sb.append(" window-inspect-failed=").append(e);
+            }
+            System.err.println(sb);
+        }
+        if (n == 0) System.err.println("[WL-ACT T=" + atMs + "ms] no activity records");
+        if (atMs >= 12000 && atMs <= 25000) {
+            // The main thread parks in WeChat's plugin lifecycle transit waiting on a
+            // ForkJoin task; print the pool workers so the task that never finishes is
+            // identifiable rather than inferred.
+            java.util.Map<Thread, StackTraceElement[]> all = Thread.getAllStackTraces();
+            for (java.util.Map.Entry<Thread, StackTraceElement[]> e : all.entrySet()) {
+                String nm = e.getKey().getName();
+                if (nm == null) continue;
+                if (nm.indexOf("ForkJoin") < 0 && nm.indexOf("wc_") < 0
+                        && nm.indexOf("Plugin") < 0) continue;
+                StackTraceElement[] st = e.getValue();
+                System.err.println("[WL-THR T=" + atMs + "ms] " + nm + " state="
+                        + e.getKey().getState() + " frames=" + st.length);
+                for (int k = 0; k < st.length && k < 8; k++) {
+                    System.err.println("[WL-THR]     at " + st[k]);
+                }
+            }
+        }
+        if (atMs <= 6000) {
+            // Does the app's ClassLoader hand back a different class than asked for?
+            // That is the remaining explanation for SplashHackActivity showing up when
+            // both the intent and the ActivityInfo name the account UI.
+            ClassLoader cl = appClassLoader();
+            String[] probe = {
+                "com.tencent.mm.plugin.account.ui.WelcomeActivity",
+                "com.tencent.mm.ui.LauncherUI",
+            };
+            for (int i = 0; i < probe.length; i++) {
+                try {
+                    Class<?> c = cl == null ? null : cl.loadClass(probe[i]);
+                    System.err.println("[WL-CLS] loadClass(" + probe[i] + ") -> "
+                            + (c == null ? "null" : c.getName())
+                            + (c == null ? "" : " super=" + (c.getSuperclass() == null
+                                    ? "?" : c.getSuperclass().getName())));
+                } catch (Throwable e) {
+                    System.err.println("[WL-CLS] loadClass(" + probe[i] + ") failed: " + e);
+                }
+            }
+        }
+    }
+
+    private static void ensureMountVolumeShim() {
+        if (sMountShimmed) return;
+        try {
+            Class<?> sm = Class.forName("android.os.ServiceManager");
+            Field cacheF = sm.getDeclaredField("sCache");
+            cacheF.setAccessible(true);
+            Object cacheObj = cacheF.get(null);
+            if (!(cacheObj instanceof Map)) return;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> cache = (Map<String, Object>) cacheObj;
+            Object realBinder = cache.get("mount");
+            if (realBinder != null
+                    && Proxy.isProxyClass(realBinder.getClass())
+                    && Proxy.getInvocationHandler(realBinder) instanceof MountHandler) {
+                sMountShimmed = true; return;
+            }
+            Class<?> ismClass = Class.forName("android.os.storage.IStorageManager");
+            // Delegate to the framework's real stub when present; otherwise
+            // pre-register our own (called from attachApplication before the
+            // framework registers 'mount', so the VFS's early getVolumeList sees
+            // a volume instead of an empty array).
+            Object realIface = null;
+            if (realBinder != null) {
+                try {
+                    Class<?> stub = Class.forName("android.os.storage.IStorageManager$Stub");
+                    realIface = stub.getMethod("asInterface", Class.forName("android.os.IBinder"))
+                            .invoke(null, realBinder);
+                } catch (Throwable t) { realIface = null; }
+            }
+
+            Object vol = buildPrimaryVolume();
+            if (vol == null) return;
+            Object volArr = java.lang.reflect.Array.newInstance(
+                    Class.forName("android.os.storage.StorageVolume"), 1);
+            java.lang.reflect.Array.set(volArr, 0, vol);
+
+            ClassLoader cl = ismClass.getClassLoader();
+            Class<?> binderClass = Class.forName("android.os.IBinder");
+            final Object[] holder = new Object[2];
+            MountHandler ih = new MountHandler(realIface, volArr, holder);
+            Object iface = Proxy.newProxyInstance(cl, new Class<?>[] { ismClass }, ih);
+            Object binder = Proxy.newProxyInstance(cl, new Class<?>[] { binderClass },
+                    new MountHandler(null, null, holder));
+            holder[0] = binder; holder[1] = iface;
+            cache.put("mount", binder);
+            if (realIface != null) sMountShimmed = true;  // wrapped real stub: final
+            System.err.println("[WL-STORAGE] mount shim installed (delegate="
+                    + (realIface != null) + "); getVolumeList -> /storage/emulated/0");
+        } catch (Throwable t) {
+            System.err.println("[WL-STORAGE] mount shim failed: " + t);
+        }
+    }
+
+    private static boolean forceWcdbProbe(ClassLoader cl) {
+        try {
+            Field f = wcdbProbeField(cl);
+            if (!f.getBoolean(null)) f.setBoolean(null, true);
+            return f.getBoolean(null);
+        } catch (Throwable t) {
+            System.err.println("[WL-WCDB] probe not settable: " + t);
+            return false;
+        }
+    }
+
+    private static void installActivityDump() {
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                int[] atMs = { 6000, 12000, 25000, 40000, 55000, 70000, 90000 };
+                long start = System.currentTimeMillis();
+                for (int i = 0; i < atMs.length; i++) {
+                    try {
+                        long wait = atMs[i] - (System.currentTimeMillis() - start);
+                        if (wait > 0) Thread.sleep(wait);
+                    } catch (InterruptedException e) { return; }
+                    try { dumpActivities(atMs[i]); } catch (Throwable e) {
+                        System.err.println("[WL-ACT] dump failed: " + e);
+                    }
+                }
+            }
+        }, "wl-actdump");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void installActivityRedirect() {
+        if (sRedirectInstalled) return;
+        String spec = readTrimmedFile(REDIRECT_FLAG);
+        if (spec == null || spec.isEmpty()) return;             // opt-in only
+        // "<class>" or "<class> <themeHex>": the adapter's PackageInfoBuilder zeroes
+        // ActivityInfo.theme, which drops WeChat's UI onto the bare platform theme --
+        // an AppCompat-based screen then cannot inflate and the content frame stays
+        // empty even though the Activity called setContentView.  Restoring the theme
+        // the manifest declares is what makes its layout come up.
+        final String target;
+        int themeTmp = 0;
+        int sp = spec.indexOf(' ');
+        if (sp > 0) {
+            target = spec.substring(0, sp).trim();
+            try {
+                String t = spec.substring(sp + 1).trim();
+                themeTmp = (int) Long.parseLong(t.startsWith("0x") ? t.substring(2) : t, 16);
+            } catch (Throwable ignored) { }
+        } else {
+            target = spec;
+        }
+        final int theme = themeTmp;
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object cur = at.getMethod("currentActivityThread").invoke(null);
+            if (cur == null) return;
+            java.lang.reflect.Field mHf = at.getDeclaredField("mH");
+            mHf.setAccessible(true);
+            final Object mH = mHf.get(cur);
+            if (mH == null) return;
+            Class<?> handlerCls = Class.forName("android.os.Handler");
+            java.lang.reflect.Field cbF = handlerCls.getDeclaredField("mCallback");
+            cbF.setAccessible(true);
+            if (cbF.get(mH) != null) {
+                System.err.println("[WL-REDIR] mH already has a callback; leaving it alone");
+                return;
+            }
+            Class<?> cbI = Class.forName("android.os.Handler$Callback");
+            Object cb = Proxy.newProxyInstance(handlerCls.getClassLoader(),
+                    new Class<?>[] { cbI },
+                    new InvocationHandler() {
+                        @Override public Object invoke(Object proxy, Method m, Object[] a) {
+                            if ("handleMessage".equals(m.getName()) && a != null && a.length == 1) {
+                                try { rewriteLaunch(a[0], target, theme); } catch (Throwable ignored) { }
+                                return Boolean.FALSE;      // always fall through to ActivityThread
+                            }
+                            if ("toString".equals(m.getName())) return "WLActivityRedirect";
+                            if ("hashCode".equals(m.getName())) return System.identityHashCode(proxy);
+                            if ("equals".equals(m.getName())) return proxy == (a != null ? a[0] : null);
+                            return null;
+                        }
+                    });
+            cbF.set(mH, cb);
+            sRedirectInstalled = true;
+            System.err.println("[WL-REDIR] launch redirect armed -> " + target);
+        } catch (Throwable t) {
+            System.err.println("[WL-REDIR] install failed: " + t);
+        }
+    }
+
+    private static void installCrashTap() {
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                Thread.UncaughtExceptionHandler ours = null;
+                for (int i = 0; i < 240; i++) {                  // ~2 min of watching
+                    try {
+                        final Thread.UncaughtExceptionHandler prev =
+                                Thread.getDefaultUncaughtExceptionHandler();
+                        if (prev != ours) {
+                            final Thread.UncaughtExceptionHandler chain = prev;
+                            ours = new Thread.UncaughtExceptionHandler() {
+                                @Override public void uncaughtException(Thread th, Throwable e) {
+                                    System.err.println("[WL-CRASHTAP] uncaught on '"
+                                            + th.getName() + "': " + e);
+                                    e.printStackTrace();
+                                    if (chain != null) chain.uncaughtException(th, e);
+                                }
+                            };
+                            Thread.setDefaultUncaughtExceptionHandler(ours);
+                            System.err.println("[WL-CRASHTAP] wrapped handler "
+                                    + (chain == null ? "(none)" : chain.getClass().getName()));
+                        }
+                    } catch (Throwable ignored) { }
+                    try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                }
+            }
+        }, "wl-crashtap");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void installTapDispatcher() {
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                for (int i = 0; i < 600; i++) {                  // ~5 min of watching
+                    try {
+                        String spec = readTrimmedFile(TAP_FLAG);
+                        if (spec != null && spec.length() > 0) {
+                            new java.io.File(TAP_FLAG).delete();
+                            dispatchTap(spec);
+                        }
+                    } catch (Throwable e) {
+                        System.err.println("[WL-TAP] failed: " + e);
+                    }
+                    try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                }
+            }
+        }, "wl-tap");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void prewarmWcdb(final ClassLoader cl) {
+        if (sWcdbTried) return;
+        sWcdbTried = true;
+        if (!isWeChat()) return;                       // toutiao must not change at all
+        final String path = curAppShim("libWCDB.so");
+        if (path == null) return;
+        final boolean skip = new java.io.File(WCDB_SKIP_FLAG).exists();
+        if (!skip) {
+            java.io.File f = new java.io.File(path);
+            if (!f.isFile() || !f.canRead()) {
+                System.err.println("[WL-WCDB] not deployed at " + path);
+                return;
+            }
+        }
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                long t0 = System.currentTimeMillis();
+                if (skip) {
+                    System.err.println("[WL-WCDB] skip flag set; asserting probe only");
+                    System.err.println("[WL-WCDB] probe forced=" + forceWcdbProbe(cl));
+                    return;
+                }
+                System.err.println("[WL-WCDB] loading " + path);
+                String err = nativeLoad(path, cl);
+                long ms = System.currentTimeMillis() - t0;
+                System.err.println("[WL-WCDB] load " + (err == null ? "OK" : "FAILED: " + err)
+                        + " in " + ms + "ms probe=" + readWcdbProbe(cl));
+                if (err == null) {
+                    System.err.println("[WL-WCDB] probe forced=" + forceWcdbProbe(cl));
+                }
+            }
+        }, "wl-wcdb");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static String readTrimmedFile(String path) {
+        java.io.BufferedReader r = null;
+        try {
+            java.io.File f = new java.io.File(path);
+            if (!f.isFile() || !f.canRead()) return null;
+            r = new java.io.BufferedReader(new java.io.FileReader(f));
+            String line = r.readLine();
+            return line == null ? null : line.trim();
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (r != null) { try { r.close(); } catch (Throwable ignored) { } }
+        }
+    }
+
+    private static String readWcdbProbe(ClassLoader cl) {
+        try {
+            return String.valueOf(wcdbProbeField(cl).getBoolean(null));
+        } catch (Throwable t) {
+            return "unavailable(" + t + ")";
+        }
+    }
+
+    private static void rewriteLaunch(Object msg, String target, int theme) throws Exception {
+        Object obj = readFieldValue(msg, "obj");
+        if (obj == null || obj.getClass().getName().indexOf("ClientTransaction") < 0) return;
+        Object list;
+        try {
+            Method g = obj.getClass().getMethod("getCallbacks");
+            g.setAccessible(true);
+            list = g.invoke(obj);
+        } catch (Throwable t) {
+            list = readFieldValue(obj, "mActivityCallbacks");
+        }
+        if (!(list instanceof java.util.List)) return;
+        for (Object item : (java.util.List<?>) list) {
+            if (item == null || item.getClass().getName().indexOf("LaunchActivityItem") < 0) continue;
+            Object intent = readFieldValue(item, "mIntent");
+            if (intent == null) continue;
+            Object comp = intent.getClass().getMethod("getComponent").invoke(intent);
+            if (comp == null) continue;
+            String cls = (String) comp.getClass().getMethod("getClassName").invoke(comp);
+            String pkg = (String) comp.getClass().getMethod("getPackageName").invoke(comp);
+            // target may equal the launched class: that is "theme only" mode, used to
+            // restore the manifest theme the adapter zeroes without changing the class.
+            if (!target.equals(cls)) {
+                Class<?> cn = Class.forName("android.content.ComponentName");
+                Object newComp = cn.getConstructor(String.class, String.class)
+                        .newInstance(pkg, target);
+                intent.getClass().getMethod("setComponent", cn).invoke(intent, newComp);
+            }
+            // ActivityInfo.name feeds ActivityThread's bookkeeping; keep it in step.
+            Object info = readFieldValue(item, "mInfo");
+            int appliedTheme = 0;
+            String hadTarget = null;
+            if (info != null) {
+                try {
+                    java.lang.reflect.Field nf = info.getClass().getField("name");
+                    nf.set(info, target);
+                } catch (Throwable ignored) { }
+                // ActivityThread prefers ActivityInfo.targetActivity (the activity-alias
+                // path) over the intent's component when deciding what to instantiate,
+                // which is how the launch kept landing on SplashHackActivity even after
+                // the component was rewritten.  Clear it so the component wins.
+                try {
+                    java.lang.reflect.Field tgt = info.getClass().getField("targetActivity");
+                    Object prev = tgt.get(info);
+                    hadTarget = prev == null ? null : prev.toString();
+                    tgt.set(info, null);
+                } catch (Throwable ignored) { }
+                if (theme != 0) {
+                    try {
+                        java.lang.reflect.Field tf = info.getClass().getField("theme");
+                        tf.setInt(info, theme);
+                        appliedTheme = theme;
+                    } catch (Throwable ignored) { }
+                    try {   // the Activity falls back to this when its own theme is 0
+                        Object ai = readFieldValue(info, "applicationInfo");
+                        if (ai != null) ai.getClass().getField("theme").setInt(ai, theme);
+                    } catch (Throwable ignored) { }
+                }
+            }
+            System.err.println("[WL-REDIR] launch " + cls + " -> " + target
+                    + (appliedTheme != 0 ? " theme=0x" + Integer.toHexString(appliedTheme) : "")
+                    + (hadTarget != null ? " clearedTargetActivity=" + hadTarget : ""));
+        }
+    }
+
+    private static volatile boolean sMountShimmed;
+
+    private static volatile boolean sRedirectInstalled;
+
+    private static volatile boolean sWcdbTried;
+
+    private static Field wcdbProbeField(ClassLoader cl) throws Exception {
+        // initialize=false: running the probe's own <clinit> is neither needed nor
+        // wanted this early, and the field carries no static initialiser anyway.
+        Class<?> c = Class.forName(WCDB_PROBE, false, cl);
+        Field f = c.getDeclaredField("libLoaded");
+        f.setAccessible(true);
+        return f;
+    }
+
+
+    // ====================================================================
+    // Frontline union -- grafted from ActivityManagerRouting.all.java
+    //
+    // These are members the device's runtime has and this file did not. They
+    // arrived by tools/merge_frontline_members.py rather than by hand, and
+    // tools/java_member_diff.py against the same source is what proves nothing
+    // was left behind.
+    //
+    // They are frontline code and read like it. Tidying them is a separate
+    // change from making the two trees agree, and doing both at once would make
+    // it impossible to review either.
+    // ====================================================================
+
+
+    private static final int ANDROID_R_ID_CONTENT = 0x01020002;
+
+    private static final int KEYCODE_BACK = 4;
+
+    private static Object activityForWindow(Object vri) {
+        Object rec = recordForWindow(vri, null);
+        Object act = rec == null ? null : readFieldValue(rec, "activity");
+        return act != null ? act : topActivity();
+    }
+
+    private static void clearWindowStopped(Object token) {
+        try {
+            Class<?> wmg = Class.forName("android.view.WindowManagerGlobal");
+            Object inst = wmg.getMethod("getInstance").invoke(null);
+            Method m = findMethod(wmg, "setStoppedState",
+                    Class.forName("android.os.IBinder"), boolean.class);
+            if (m == null) return;
+            m.setAccessible(true);
+            m.invoke(inst, token, false);
+            System.err.println("[WL-BACK] setStoppedState(false)");
+        } catch (Throwable t) {
+            System.err.println("[WL-BACK] setStoppedState failed: " + t);
+        }
+    }
+
+    private static void collectHits(Object v, int x, int y, int depth, List<Object> out) {
+        if (v == null || depth > 26 || out.size() > 400) return;
+        try {
+            Class<?> viewCls = Class.forName("android.view.View");
+            if (((Integer) viewCls.getMethod("getVisibility").invoke(v)).intValue() != 0) return;
+            int[] loc = new int[] { 0, 0 };
+            viewCls.getMethod("getLocationOnScreen", int[].class).invoke(v, (Object) loc);
+            int w = ((Integer) viewCls.getMethod("getWidth").invoke(v)).intValue();
+            int h = ((Integer) viewCls.getMethod("getHeight").invoke(v)).intValue();
+            if (x < loc[0] || x >= loc[0] + w || y < loc[1] || y >= loc[1] + h) return;
+            Class<?> vg = Class.forName("android.view.ViewGroup");
+            if (vg.isInstance(v)) {
+                int n = ((Integer) vg.getMethod("getChildCount").invoke(v)).intValue();
+                Method getChildAt = vg.getMethod("getChildAt", int.class);
+                for (int i = n - 1; i >= 0; i--) {
+                    collectHits(getChildAt.invoke(v, Integer.valueOf(i)), x, y, depth + 1, out);
+                }
+            }
+            out.add(v);   // children first, so the list is deepest-first
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void dumpFragments() {
+        try {
+            Object vri = topInputTarget();
+            Object act = vri == null ? null : activityForWindow(vri);
+            if (act == null) { System.err.println("[WL-MOUNT] no host activity"); return; }
+            System.err.println("[WL-MOUNT] host=" + act.getClass().getName());
+
+            Object decor = readFieldValue(vri, "mView");
+            Object content = decor == null ? null : findViewById(decor, ANDROID_R_ID_CONTENT);
+            System.err.println("[WL-MOUNT] android.R.id.content = "
+                    + (content == null ? "null" : content.getClass().getName()
+                       + " children=" + viewChildCount(content)));
+
+            Object fm = fragmentManager(act);
+            if (fm == null) { System.err.println("[WL-MOUNT] no fragment manager"); return; }
+            System.err.println("[WL-MOUNT] fm=" + fm.getClass().getName()
+                    + " backStack=" + intMethod(fm, "getBackStackEntryCount"));
+            Method get = findMethod(fm.getClass(), "getFragments");
+            if (get != null) {
+                get.setAccessible(true);
+                Object list = get.invoke(fm);
+                if (list instanceof List) {
+                    List<?> l = (List<?>) list;
+                    System.err.println("[WL-MOUNT] " + l.size() + " fragment(s)");
+                    for (Object f : l) {
+                        if (f == null) continue;
+                        System.err.println("[WL-MOUNT]   " + f.getClass().getName()
+                                + " id=" + readFieldValue(f, "mFragmentId")
+                                + " container=" + readFieldValue(f, "mContainerId")
+                                + " added=" + readFieldValue(f, "mAdded"));
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            System.err.println("[WL-MOUNT] frags failed: " + t);
+        }
+    }
+
+    private static void dumpWindowFocus() {
+        try {
+            Class<?> wmg = Class.forName("android.view.WindowManagerGlobal");
+            Object inst = wmg.getMethod("getInstance").invoke(null);
+            List<?> roots = (List<?>) readField(wmg, inst, "mRoots");
+            if (roots == null) { System.err.println("[WL-FOCUS] no mRoots"); return; }
+            System.err.println("[WL-FOCUS] ==== " + roots.size() + " root(s) ====");
+            for (int i = 0; i < roots.size(); i++) {
+                Object vri = roots.get(i);
+                if (vri == null) continue;
+                Object ai = readFieldValue(vri, "mAttachInfo");
+                System.err.println("[WL-FOCUS] [" + i + "] " + describeTarget(vri)
+                        + " hasWindowFocus=" + readFieldValue(ai, "mHasWindowFocus")
+                        + " windowVisibility=" + readFieldValue(ai, "mWindowVisibility")
+                        + " added=" + readFieldValue(vri, "mAdded")
+                        + " stopped=" + readFieldValue(vri, "mStopped")
+                        + " pausedForTransition="
+                        + readFieldValue(vri, "mPausedForTransition"));
+            }
+        } catch (Throwable t) {
+            System.err.println("[WL-FOCUS] dump failed: " + t);
+        }
+    }
+
+    private static void escalateBack(Object vri, final Object act) {
+        final Object decor = readFieldValue(vri, "mView");
+        if (decor != null) {
+            runOnMainSync(new Runnable() {
+                @Override public void run() {
+                    try {
+                        Class<?> ke = Class.forName("android.view.KeyEvent");
+                        java.lang.reflect.Constructor<?> c = ke.getConstructor(
+                                long.class, long.class, int.class, int.class, int.class);
+                        long t = uptimeMillis();
+                        Object d = c.newInstance(t, t, ACTION_DOWN, KEYCODE_BACK, 0);
+                        Object u = c.newInstance(t, uptimeMillis(), ACTION_UP, KEYCODE_BACK, 0);
+                        setSource(ke, d, 0x00000101);
+                        setSource(ke, u, 0x00000101);
+                        Method dk = findMethod(decor.getClass(), "dispatchKeyEvent", ke);
+                        dk.setAccessible(true);
+                        Object r1 = dk.invoke(decor, d);
+                        Object r2 = dk.invoke(decor, u);
+                        System.err.println("[WL-BACK] decor.dispatchKeyEvent down=" + r1
+                                + " up=" + r2);
+                    } catch (Throwable t) {
+                        System.err.println("[WL-BACK] decor dispatch failed: " + t);
+                    }
+                }
+            }, 3000);
+            if (waitFinishing(act, 1200)) {
+                System.err.println("[WL-BACK] decor path finished "
+                        + act.getClass().getName());
+                return;
+            }
+        }
+        runOnMainSync(new Runnable() {
+            @Override public void run() {
+                try {
+                    Method m = findMethod(act.getClass(), "onBackPressed");
+                    m.setAccessible(true);
+                    m.invoke(act);
+                    System.err.println("[WL-BACK] onBackPressed() returned");
+                } catch (Throwable t) {
+                    System.err.println("[WL-BACK] onBackPressed() failed: " + t
+                            + "; calling finish()");
+                    try {
+                        Method f = findMethod(act.getClass(), "finish");
+                        f.setAccessible(true);
+                        f.invoke(act);
+                    } catch (Throwable t2) {
+                        System.err.println("[WL-BACK] finish() failed: " + t2);
+                    }
+                }
+            }
+        }, 3000);
+        System.err.println("[WL-BACK] after escalation " + act.getClass().getName()
+                + " finishing=" + isFinishing(act));
+    }
+
+    private static Object findViewById(Object view, int id) {
+        try {
+            Method m = findMethod(view.getClass(), "findViewById", int.class);
+            if (m == null) return null;
+            m.setAccessible(true);
+            return m.invoke(view, Integer.valueOf(id));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void focusOnly(Object target) {
+        try {
+            Class<?> wmg = Class.forName("android.view.WindowManagerGlobal");
+            Object inst = wmg.getMethod("getInstance").invoke(null);
+            List<?> roots = (List<?>) readField(wmg, inst, "mRoots");
+            if (roots == null) return;
+            for (int i = 0; i < roots.size(); i++) {
+                Object vri = roots.get(i);
+                if (vri == null) continue;
+                setWindowFocus(vri, vri == target);
+            }
+        } catch (Throwable t) {
+            System.err.println("[WL-FOCUS] failed: " + t);
+        }
+    }
+
+    private static Object fragmentManager(Object act) {
+        Method m = findMethod(act.getClass(), "getSupportFragmentManager");
+        if (m == null) m = findMethod(act.getClass(), "getFragmentManager");
+        if (m == null) return null;
+        try {
+            m.setAccessible(true);
+            return m.invoke(act);
+        } catch (Throwable t) {
+            System.err.println("[WL-MOUNT] fragment manager unavailable: " + t);
+            return null;
+        }
+    }
+
+    private static boolean hasWindowFocus(Object vri) {
+        Object ai = readFieldValue(vri, "mAttachInfo");
+        Object v = readFieldValue(ai, "mHasWindowFocus");
+        return v instanceof Boolean && ((Boolean) v).booleanValue();
+    }
+
+    private static Object inertWebSettings(Class<?> want) {
+        if (sWebSettingsFailed) return null;
+        try {
+            if (!"android.webkit.WebSettings".equals(want.getName())) return null;
+            Object s = sWebSettings;
+            if (s == null) {
+                synchronized (ActivityManagerRouting.class) {
+                    s = sWebSettings;
+                    if (s == null) {
+                        s = Class.forName("westlake.webview.InertWebSettings")
+                                .getDeclaredConstructor().newInstance();
+                        sWebSettings = s;
+                        System.err.println("[WL-WEBVIEW] InertWebSettings installed"
+                                + " for WebViewProvider.getSettings()");
+                    }
+                }
+            }
+            return s;
+        } catch (Throwable t) {
+            sWebSettingsFailed = true;
+            System.err.println("[WL-WEBVIEW] InertWebSettings unavailable: " + t);
+            return null;
+        }
+    }
+
+    private static int intMethod(Object target, String name) {
+        try {
+            Method m = findMethod(target.getClass(), name);
+            if (m == null) return -1;
+            m.setAccessible(true);
+            return ((Integer) m.invoke(target)).intValue();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    private static boolean isFinishing(Object act) {
+        try {
+            Method m = findMethod(act.getClass(), "isFinishing");
+            m.setAccessible(true);
+            return ((Boolean) m.invoke(act)).booleanValue();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void mountFragment(final String fqcn, final String[] kv) {
+        final Object vri;
+        final Object act;
+        try {
+            vri = topInputTarget();
+            act = vri == null ? null : activityForWindow(vri);
+        } catch (Throwable t) {
+            System.err.println("[WL-MOUNT] no host: " + t);
+            return;
+        }
+        if (act == null) { System.err.println("[WL-MOUNT] no host activity"); return; }
+        final Object fm = fragmentManager(act);
+        if (fm == null) { System.err.println("[WL-MOUNT] no fragment manager"); return; }
+
+        runOnMainSync(new Runnable() {
+            @Override public void run() {
+                try {
+                    Class<?> fc = Class.forName(fqcn, true, act.getClass().getClassLoader());
+                    Object frag = fc.getDeclaredConstructor().newInstance();
+
+                    if (kv.length > 0) {
+                        Class<?> bundleCls = Class.forName("android.os.Bundle");
+                        Object b = bundleCls.getDeclaredConstructor().newInstance();
+                        Method putL = bundleCls.getMethod("putLong", String.class, long.class);
+                        Method putS = bundleCls.getMethod("putString", String.class, String.class);
+                        for (String pair : kv) {
+                            int eq = pair.indexOf('=');
+                            if (eq <= 0) continue;
+                            String k = pair.substring(0, eq), v = pair.substring(eq + 1);
+                            try {
+                                putL.invoke(b, k, Long.valueOf(Long.parseLong(v)));
+                            } catch (NumberFormatException nfe) {
+                                putS.invoke(b, k, v);
+                            }
+                        }
+                        Method setArgs = findMethod(fc, "setArguments", bundleCls);
+                        if (setArgs != null) { setArgs.setAccessible(true); setArgs.invoke(frag, b); }
+                    }
+
+                    Method begin = findMethod(fm.getClass(), "beginTransaction");
+                    begin.setAccessible(true);
+                    Object tx = begin.invoke(fm);
+
+                    String tag = "wl-mount-" + (++sMountDepth);
+                    Method add = null;
+                    for (Method m : tx.getClass().getMethods()) {
+                        if (!"add".equals(m.getName())) continue;
+                        Class<?>[] p = m.getParameterTypes();
+                        if (p.length == 3 && p[0] == int.class && p[2] == String.class) {
+                            add = m; break;
+                        }
+                    }
+                    if (add == null) { System.err.println("[WL-MOUNT] no add(int,F,String)"); return; }
+                    add.setAccessible(true);
+                    Object tx2 = add.invoke(tx, Integer.valueOf(ANDROID_R_ID_CONTENT), frag, tag);
+                    if (tx2 == null) tx2 = tx;
+
+                    Method back = findMethod(tx2.getClass(), "addToBackStack", String.class);
+                    if (back != null) { back.setAccessible(true); tx2 = orSelf(back.invoke(tx2, tag), tx2); }
+
+                    Method commit = findMethod(tx2.getClass(), "commitAllowingStateLoss");
+                    if (commit == null) commit = findMethod(tx2.getClass(), "commit");
+                    commit.setAccessible(true);
+                    commit.invoke(tx2);
+
+                    Method exec = findMethod(fm.getClass(), "executePendingTransactions");
+                    if (exec != null) { exec.setAccessible(true); exec.invoke(fm); }
+
+                    System.err.println("[WL-MOUNT] mounted " + fqcn + " as " + tag
+                            + " backStack=" + intMethod(fm, "getBackStackEntryCount"));
+                } catch (Throwable t) {
+                    Throwable c = t;
+                    while (c instanceof InvocationTargetException
+                            && ((InvocationTargetException) c).getTargetException() != null) {
+                        c = ((InvocationTargetException) c).getTargetException();
+                    }
+                    System.err.println("[WL-MOUNT] mount " + fqcn + " failed: " + c);
+                    StackTraceElement[] st = c.getStackTrace();
+                    for (int i = 0; i < st.length && i < 12; i++) {
+                        System.err.println("[WL-MOUNT]   at " + st[i]);
+                    }
+                }
+            }
+        }, 8000);
+    }
+
+    private static Object orSelf(Object maybe, Object self) { return maybe != null ? maybe : self; }
+
+    private static void performClickAt(final float x, final float y) throws Exception {
+        Object vri = topInputTarget();
+        if (vri == null) {
+            System.err.println("[WL-INPUT] click dropped: no window");
+            return;
+        }
+        final Object root = readFieldValue(vri, "mView");
+        if (root == null) {
+            System.err.println("[WL-INPUT] click dropped: no decor view");
+            return;
+        }
+        runOnMain(new Runnable() {
+            @Override public void run() {
+                try {
+                    // Collect every view containing the point, deepest-first,
+                    // instead of stopping at the first hit: SSTabHost's last
+                    // child is an empty full-screen FrameLayout that sits over
+                    // the feed, and a naive last-child-first descent never gets
+                    // past it.
+                    List<Object> chain = new ArrayList<Object>();
+                    collectHits(root, (int) x, (int) y, 0, chain);
+                    Object hit = pickClickable(chain);
+                    if (hit == null && !chain.isEmpty()) hit = chain.get(0);
+                    if (hit == null) {
+                        System.err.println("[WL-INPUT] click " + x + "," + y + ": nothing hit");
+                        return;
+                    }
+                    Class<?> viewCls = Class.forName("android.view.View");
+                    Method perform = viewCls.getMethod("performClick");
+                    Method getParent = viewCls.getMethod("getParent");
+                    Object v = hit;
+                    for (int up = 0; up < 12 && v != null; up++) {
+                        Object r = perform.invoke(v);
+                        if (Boolean.TRUE.equals(r)) {
+                            System.err.println("[WL-INPUT] click " + x + "," + y
+                                    + " handled by " + v.getClass().getName()
+                                    + " (" + up + " levels up)");
+                            return;
+                        }
+                        Object p = getParent.invoke(v);
+                        v = viewCls.isInstance(p) ? p : null;
+                    }
+                    System.err.println("[WL-INPUT] click " + x + "," + y
+                            + ": nobody handled it -- hit chain follows");
+                    Object w = hit;
+                    for (int up = 0; up < 14 && w != null; up++) {
+                        int[] loc = new int[] { 0, 0 };
+                        viewCls.getMethod("getLocationOnScreen", int[].class)
+                               .invoke(w, (Object) loc);
+                        System.err.println("[WL-INPUT]   [" + up + "] "
+                                + w.getClass().getName()
+                                + " clk=" + viewCls.getMethod("isClickable").invoke(w)
+                                + " enabled=" + viewCls.getMethod("isEnabled").invoke(w)
+                                + " @" + loc[0] + "," + loc[1]
+                                + " " + viewCls.getMethod("getWidth").invoke(w)
+                                + "x" + viewCls.getMethod("getHeight").invoke(w));
+                        Object p2 = getParent.invoke(w);
+                        w = viewCls.isInstance(p2) ? p2 : null;
+                    }
+                } catch (Throwable t) {
+                    System.err.println("[WL-INPUT] click failed: " + t);
+                }
+            }
+        });
+    }
+
+    private static Object pickClickable(List<Object> chain) {
+        try {
+            Class<?> viewCls = Class.forName("android.view.View");
+            Method isClk = viewCls.getMethod("isClickable");
+            Method isEn = viewCls.getMethod("isEnabled");
+            for (int i = 0; i < chain.size(); i++) {
+                Object v = chain.get(i);
+                if (Boolean.TRUE.equals(isClk.invoke(v)) && Boolean.TRUE.equals(isEn.invoke(v))) {
+                    return v;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static Object recordForWindow(Object vri, Object exclude) {
+        if (vri == null) return null;
+        Object decor = readFieldValue(vri, "mView");
+        if (decor == null) return null;
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object cur = at.getMethod("currentActivityThread").invoke(null);
+            Object map = readField(at, cur, "mActivities");
+            if (!(map instanceof Map)) return null;
+            for (Object rec : ((Map<?, ?>) map).values()) {
+                if (rec == null) continue;
+                Object act = readFieldValue(rec, "activity");
+                if (act == null || act == exclude) continue;
+                Object win = findMethod(act.getClass(), "getWindow").invoke(act);
+                if (win == null) continue;
+                Method peek = findMethod(win.getClass(), "peekDecorView");
+                peek.setAccessible(true);
+                if (peek.invoke(win) == decor) return rec;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static void refocusTop() {
+        try {
+            Object vri = topInputTarget();
+            if (vri != null) focusOnly(vri);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void resumeUnderlyingActivity(Object finished) {
+        for (int waited = 0; waited < 6000; waited += 300) {
+            try { Thread.sleep(300); } catch (InterruptedException ignored) { return; }
+            // Re-query every round: the finished activity's window is torn down
+            // asynchronously, and only once it is out of mRoots does
+            // topInputTarget() name the window that is now on screen.
+            Object rec = recordForWindow(topInputTargetQuiet(), finished);
+            if (rec == null) rec = topActivityRecord(finished);
+            if (rec == null) continue;
+            Object act = readFieldValue(rec, "activity");
+            if (act == null) continue;
+            Object paused = readFieldValue(rec, "paused");
+            Object stopped = readFieldValue(rec, "stopped");
+            boolean asleep = Boolean.TRUE.equals(paused) || Boolean.TRUE.equals(stopped);
+            if (!asleep) {
+                System.err.println("[WL-BACK] " + act.getClass().getName()
+                        + " already resumed");
+                refocusTop();
+                return;
+            }
+            Object token = readFieldValue(rec, "token");
+            if (token == null) {
+                System.err.println("[WL-BACK] no token on " + act.getClass().getName());
+                return;
+            }
+            clearWindowStopped(token);
+            if (scheduleResume(token)) {
+                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                System.err.println("[WL-BACK] resumed " + act.getClass().getName()
+                        + " paused=" + readFieldValue(rec, "paused")
+                        + " stopped=" + readFieldValue(rec, "stopped"));
+                showWindow(act);
+                refocusTop();
+            }
+            return;
+        }
+        System.err.println("[WL-BACK] nothing left to resume");
+    }
+
+    private static void runOnMainSync(final Runnable r, int timeoutMs) {
+        final java.util.concurrent.CountDownLatch done =
+                new java.util.concurrent.CountDownLatch(1);
+        try {
+            runOnMain(new Runnable() {
+                @Override public void run() {
+                    try { r.run(); } finally { done.countDown(); }
+                }
+            });
+            if (!done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                System.err.println("[WL-INPUT] main-thread task timed out after "
+                        + timeoutMs + "ms");
+            }
+        } catch (Throwable t) {
+            System.err.println("[WL-INPUT] runOnMainSync failed: " + t);
+        }
+    }
+
+    private static volatile boolean sInertAbstractReported;
+
+    private static int sMountDepth;
+
+    private static volatile Object sWebSettings;
+
+    private static volatile boolean sWebSettingsFailed;
+
+    private static boolean scheduleResume(Object token) {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object cur = at.getMethod("currentActivityThread").invoke(null);
+            Method getThread = findMethod(at, "getApplicationThread");
+            getThread.setAccessible(true);
+            Object appThread = getThread.invoke(cur);
+
+            Class<?> ctCls = Class.forName("android.app.servertransaction.ClientTransaction");
+            Object ct = null;
+            for (Method m : ctCls.getDeclaredMethods()) {
+                if ("obtain".equals(m.getName()) && m.getParameterTypes().length == 2) {
+                    m.setAccessible(true);
+                    ct = m.invoke(null, appThread, token);
+                    break;
+                }
+            }
+            if (ct == null) {
+                System.err.println("[WL-BACK] ClientTransaction.obtain not found");
+                return false;
+            }
+            Class<?> ri = Class.forName("android.app.servertransaction.ResumeActivityItem");
+            Object item = null;
+            // obtain(isForward) / obtain(isForward, fakeFocus) / obtain(procState, ...)
+            for (Method m : ri.getDeclaredMethods()) {
+                if (!"obtain".equals(m.getName())) continue;
+                Class<?>[] p = m.getParameterTypes();
+                boolean allBool = p.length > 0;
+                for (Class<?> c : p) if (c != boolean.class) allBool = false;
+                if (!allBool) continue;
+                Object[] args = new Object[p.length];
+                for (int i = 0; i < p.length; i++) args[i] = Boolean.valueOf(i == 0);
+                m.setAccessible(true);
+                item = m.invoke(null, args);
+                break;
+            }
+            if (item == null) {
+                System.err.println("[WL-BACK] ResumeActivityItem.obtain not found");
+                return false;
+            }
+            Method set = null;
+            for (Method m : ctCls.getDeclaredMethods()) {
+                if ("setLifecycleStateRequest".equals(m.getName())) { set = m; break; }
+            }
+            if (set == null) {
+                System.err.println("[WL-BACK] setLifecycleStateRequest not found");
+                return false;
+            }
+            set.setAccessible(true);
+            set.invoke(ct, item);
+
+            Method sched = findMethod(at, "scheduleTransaction", ctCls);
+            if (sched == null) {
+                System.err.println("[WL-BACK] scheduleTransaction not found");
+                return false;
+            }
+            sched.setAccessible(true);
+            sched.invoke(cur, ct);
+            System.err.println("[WL-BACK] ResumeActivityItem scheduled");
+            return true;
+        } catch (Throwable t) {
+            System.err.println("[WL-BACK] scheduleResume failed: " + t);
+            return false;
+        }
+    }
+
+    private static void setWindowFocus(Object vri, boolean focused) {
+        if (hasWindowFocus(vri) == focused) return;
+        // API 30 dropped the inTouchMode argument; try both shapes.
+        Method m = findMethod(vri.getClass(), "windowFocusChanged",
+                boolean.class, boolean.class);
+        try {
+            if (m != null) {
+                m.setAccessible(true);
+                m.invoke(vri, focused, /* inTouchMode */ true);
+            } else {
+                m = findMethod(vri.getClass(), "windowFocusChanged", boolean.class);
+                if (m != null) {
+                    m.setAccessible(true);
+                    m.invoke(vri, focused);
+                }
+            }
+        } catch (Throwable t) {
+            m = null;
+            System.err.println("[WL-FOCUS] windowFocusChanged(" + focused + ") threw " + t);
+        }
+        if (m == null) {
+            // No usable entry point: set the field the predicate actually reads.
+            Object ai = readFieldValue(vri, "mAttachInfo");
+            writeBool(ai, "mHasWindowFocus", focused);
+        }
+        // windowFocusChanged() only posts a message; the field flips on the next
+        // main-thread loop.  Give it one.
+        try { Thread.sleep(120); } catch (InterruptedException ignored) {}
+        System.err.println("[WL-FOCUS] " + describeTarget(vri) + " focus -> " + focused
+                + " (now " + hasWindowFocus(vri) + ")");
+    }
+
+    private static void showWindow(Object act) {
+        try {
+            Object win = findMethod(act.getClass(), "getWindow").invoke(act);
+            Object decor = win == null ? null
+                    : findMethod(win.getClass(), "peekDecorView").invoke(win);
+            if (decor == null) { System.err.println("[WL-BACK] no decor to show"); return; }
+            Object vri = null;
+            Class<?> wmg = Class.forName("android.view.WindowManagerGlobal");
+            Object inst = wmg.getMethod("getInstance").invoke(null);
+            List<?> roots = (List<?>) readField(wmg, inst, "mRoots");
+            for (int i = 0; roots != null && i < roots.size(); i++) {
+                if (readFieldValue(roots.get(i), "mView") == decor) { vri = roots.get(i); break; }
+            }
+            if (vri == null) { System.err.println("[WL-BACK] no root for decor"); return; }
+
+            Method m = findMethod(vri.getClass(), "dispatchAppVisibility", boolean.class);
+            if (m != null) {
+                m.setAccessible(true);
+                m.invoke(vri, Boolean.TRUE);
+            } else {
+                writeBool(vri, "mAppVisible", true);
+            }
+            try { Thread.sleep(400); } catch (InterruptedException ignored) {}
+
+            // dispatchAppVisibility only queues the change; make sure the decor
+            // itself is not still GONE and ask for a traversal either way.
+            final Object dv = decor;
+            runOnMainSync(new Runnable() {
+                @Override public void run() {
+                    try {
+                        Method setVis = findMethod(dv.getClass(), "setVisibility", int.class);
+                        setVis.setAccessible(true);
+                        setVis.invoke(dv, Integer.valueOf(0 /* VISIBLE */));
+                        Method rl = findMethod(dv.getClass(), "requestLayout");
+                        rl.setAccessible(true);
+                        rl.invoke(dv);
+                        Method inv = findMethod(dv.getClass(), "invalidate");
+                        inv.setAccessible(true);
+                        inv.invoke(dv);
+                    } catch (Throwable t) {
+                        System.err.println("[WL-BACK] decor refresh failed: " + t);
+                    }
+                }
+            }, 3000);
+            try { Thread.sleep(600); } catch (InterruptedException ignored) {}
+            Object ai = readFieldValue(vri, "mAttachInfo");
+            System.err.println("[WL-BACK] showWindow: appVisible="
+                    + readFieldValue(vri, "mAppVisible")
+                    + " windowVisibility=" + readFieldValue(ai, "mWindowVisibility"));
+        } catch (Throwable t) {
+            System.err.println("[WL-BACK] showWindow failed: " + t);
+        }
+    }
+
+    private static Object topActivity() {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object cur = at.getMethod("currentActivityThread").invoke(null);
+            Object map = readField(at, cur, "mActivities");
+            if (!(map instanceof Map)) return null;
+            Object last = null;
+            Object running = null;
+            for (Object rec : ((Map<?, ?>) map).values()) {
+                if (rec == null) continue;
+                Object act = readFieldValue(rec, "activity");
+                if (act == null) continue;
+                last = act;
+                Object paused = readFieldValue(rec, "paused");
+                if (paused instanceof Boolean && !((Boolean) paused).booleanValue()) {
+                    running = act;
+                }
+            }
+            return running != null ? running : last;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Object topActivityRecord(Object exclude) {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            Object cur = at.getMethod("currentActivityThread").invoke(null);
+            Object map = readField(at, cur, "mActivities");
+            if (!(map instanceof Map)) return null;
+            Object last = null;
+            for (Object rec : ((Map<?, ?>) map).values()) {
+                if (rec == null) continue;
+                Object act = readFieldValue(rec, "activity");
+                if (act == null || act == exclude) continue;
+                last = rec;
+            }
+            return last;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Object topInputTargetQuiet() {
+        try {
+            return topInputTarget();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static boolean unmountFragment() {
+        try {
+            Object vri = topInputTarget();
+            Object act = vri == null ? null : activityForWindow(vri);
+            if (act == null) return false;
+            final Object fm = fragmentManager(act);
+            if (fm == null) return false;
+            int before = intMethod(fm, "getBackStackEntryCount");
+            if (before <= 0) return false;
+
+            final boolean[] popped = new boolean[1];
+            runOnMainSync(new Runnable() {
+                @Override public void run() {
+                    try {
+                        Method pop = findMethod(fm.getClass(), "popBackStackImmediate");
+                        if (pop == null) return;
+                        pop.setAccessible(true);
+                        Object r = pop.invoke(fm);
+                        popped[0] = (r instanceof Boolean) && ((Boolean) r).booleanValue();
+                    } catch (Throwable t) {
+                        System.err.println("[WL-MOUNT] pop failed: " + t);
+                    }
+                }
+            }, 5000);
+
+            int after = intMethod(fm, "getBackStackEntryCount");
+            System.err.println("[WL-MOUNT] pop " + (popped[0] ? "ok" : "no-op")
+                    + " backStack " + before + " -> " + after);
+            return popped[0] || after < before;
+        } catch (Throwable t) {
+            System.err.println("[WL-MOUNT] unmount failed: " + t);
+            return false;
+        }
+    }
+
+    private static int viewChildCount(Object viewGroup) {
+        return intMethod(viewGroup, "getChildCount");
+    }
+
+    private static boolean waitFinishing(Object act, int timeoutMs) {
+        for (int waited = 0; waited < timeoutMs; waited += 100) {
+            if (isFinishing(act)) return true;
+            try { Thread.sleep(100); } catch (InterruptedException ignored) { return false; }
+        }
+        return isFinishing(act);
+    }
+
+    private static void writeBool(Object target, String name, boolean value) {
+        if (target == null) return;
+        Field f = findField(target.getClass(), name);
+        if (f == null) return;
+        try {
+            f.setAccessible(true);
+            f.setBoolean(target, value);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    // Nested class, so tools/java_member_diff.py did not index it and the
+    // union merge missed it -- the compiler caught it. Grafted from the same
+    // frontline source as ensureMountVolumeShim, which is its only caller.
+    /** Binder/interface proxy for 'mount': volume list overridden, rest delegated. */
+    private static final class MountHandler implements InvocationHandler {
+        private final Object mReal;     // real IStorageManager (iface handler only)
+        private final Object mVolArr;   // StorageVolume[]
+        private final Object[] mPair;   // [0]=binder [1]=iface
+        MountHandler(Object real, Object volArr, Object[] pair) {
+            mReal = real; mVolArr = volArr; mPair = pair;
+        }
+        @Override public Object invoke(Object proxy, Method method, Object[] args)
+                throws Throwable {
+            String n = method.getName();
+            if ("queryLocalInterface".equals(n)) return mPair[1];
+            if ("asBinder".equals(n)) return mReal == null ? proxy : mPair[0];
+            if ("isBinderAlive".equals(n) || "pingBinder".equals(n)) return Boolean.TRUE;
+            if ("getVolumeList".equals(n) || "getVolumes".equals(n)) return mVolArr;
+            if ("toString".equals(n)) return "WL-MOUNT-SHIM";
+            if ("hashCode".equals(n)) return Integer.valueOf(System.identityHashCode(proxy));
+            if ("equals".equals(n)) return Boolean.valueOf(proxy == (args == null ? null : args[0]));
+            if (mReal != null) {
+                try { return method.invoke(mReal, args); }
+                catch (InvocationTargetException e) {
+                    throw e.getCause() != null ? e.getCause() : e;
+                }
+            }
+            Class<?> rt = method.getReturnType();
+            if (rt == boolean.class) return Boolean.FALSE;
+            if (rt.isPrimitive()) return rt == void.class ? null : Integer.valueOf(0);
+            return null;
+        }
+    }
+
+    // Missed by the union merge because the member scanner's brace tracking
+    // drifted earlier in the frontline file; the DEX identifier check caught
+    // it. Grafted with its call site in PmHandler.invoke below.
+    /** Walk a PackageManager result, enriching every ApplicationInfo's metaData. */
+    private static void enrichPmResult(Object result, int depth) {
+        if (result == null || depth > 3) return;
+        try {
+            if (result instanceof Object[]) {
+                for (Object o : (Object[]) result) enrichPmResult(o, depth + 1);
+                return;
+            }
+            if (result instanceof List) {
+                for (Object o : (List<?>) result) enrichPmResult(o, depth + 1);
+                return;
+            }
+            String cls = result.getClass().getName();
+            if (cls.indexOf("ParceledListSlice") >= 0) {
+                Object inner = result.getClass().getMethod("getList").invoke(result);
+                enrichPmResult(inner, depth + 1);
+                return;
+            }
+            if (cls.indexOf("ApplicationInfo") >= 0) {
+                enrichAi(result);
+                return;
+            }
+            if (cls.indexOf("PackageInfo") >= 0) {
+                enrichAi(readField(result, "applicationInfo"));
+                return;
+            }
+        } catch (Throwable ignored) { }
     }
 
     private static String currentProcessName() {
