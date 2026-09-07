@@ -72,9 +72,15 @@ JAR_SOURCES = [
     # without probing for it; this adapter's framework.jar has no android.net.ssl
     # at all, so the class has to ride along in the app-side jar.
     'framework/security/java/android/net/ssl/SSLSockets.java',
+    # Network degradation policy and the HPACK decoder it classifies with. Pure
+    # policy plus a decoder -- no I/O and no platform types, so they compile
+    # against the JDK alone.
+    'framework/net/java/adapter/net/WlDegrade.java',
+    'framework/net/java/adapter/net/WlH2Path.java',
 ]
 
-SOURCE_ROOTS = [ROOT / 'framework/activity/java', ROOT / 'framework/security/java']
+SOURCE_ROOTS = [ROOT / 'framework/activity/java', ROOT / 'framework/security/java',
+                ROOT / 'framework/net/java']
 
 # Type-check-only stand-ins for platform classes this tree does not carry. Never
 # dexed: the class list handed to d8 is built from SOURCE_ROOTS alone.
@@ -127,7 +133,7 @@ def archive(path, entries):
 
 
 def build(output, d8=None, r8=None, framework=None, javac=None, classes_only=False,
-          release='11'):
+          release='11', baseline_dex=None):
     output = output.absolute()
     if output.exists():
         raise ValueError('Build output must be a NEW directory: ' + str(output))
@@ -208,13 +214,52 @@ def build(output, d8=None, r8=None, framework=None, javac=None, classes_only=Fal
     dex_dir.mkdir()
     class_list = output / 'classes.txt'
     class_list.write_text('\n'.join(str(p) for p in emitted) + '\n')
+
+    # Transitional fusion.
+    #
+    # The source inventory above does not cover everything the deployed runtime
+    # provides. AppSpawnXInit, AppSchedulerBridge and the rest need platform
+    # classes javac cannot see -- the adapter's framework.jar is dex-only -- and
+    # PmProxy has no source anywhere. Until that closes, a jar built from source
+    # alone is missing the child bootstrap entry point, so it cannot replace the
+    # deployed runtime; check_runtime_replacement.py refuses exactly that swap.
+    #
+    # A baseline dex supplies those classes. This is a step back from "no
+    # prebuilt dex" and is meant to be temporary. Two things keep it honest: the
+    # overlap check below, and build.json listing which classes came from source
+    # and which did not, so nobody has to infer the split later.
+    baseline_inputs = []
+    if baseline_dex:
+        baseline = Path(baseline_dex)
+        if not baseline.is_file():
+            raise ValueError('No such baseline dex: ' + str(baseline))
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from dex_class_inventory import descriptor_to_binary, read_reference
+        baseline_classes = {descriptor_to_binary(d) for d in read_reference(baseline)}
+        from_source = {q.relative_to(classes).with_suffix('').as_posix().replace('/', '.')
+                       for q in emitted}
+        # d8 rejects a duplicate definition with a message that does not say
+        # which input each copy came from. Catch it here, where we can say.
+        clash = sorted(baseline_classes & from_source)
+        if clash:
+            raise ValueError('Baseline dex and compiled sources both define: '
+                             + ', '.join(clash[:8]))
+        baseline_inputs = [str(baseline)]
+        record['baseline_dex'] = {'path': str(baseline), 'sha256': sha(baseline),
+                                  'classes': sorted(baseline_classes)}
+        record['classes_from_source'] = sorted(from_source)
+        record['fully_source_built'] = False
+        print('FUSED baseline', baseline.name, len(baseline_classes), 'classes', flush=True)
+    else:
+        record['fully_source_built'] = True
     if r8:
         java = java_tool('java')
         invoke = [str(java), '-cp', str(dexer), 'com.android.tools.r8.D8']
     else:
         invoke = [str(dexer)]
     subprocess.run(invoke + ['--release', '--min-api', '30', '--output', str(dex_dir),
-                             '@' + str(class_list)], check=True, env=env)
+                             '@' + str(class_list)] + baseline_inputs,
+                   check=True, env=env)
 
     # The dexer is a build input whose identity nothing else pins. Record it.
     # `invoke` is the bare command with no build arguments appended, so asking it
@@ -250,6 +295,9 @@ if __name__ == '__main__':
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--d8', help='Path to a d8 executable (not in the locked toolchain set)')
     parser.add_argument('--r8', help='Path to r8.jar, run through java (Google publishes D8 this way)')
+    parser.add_argument('--baseline-dex',
+                        help='Dex supplying the platform classes not yet buildable from '
+                             'source (transitional; fully recorded in build.json)')
     parser.add_argument('--framework', help='Adapter framework.jar to compile against')
     parser.add_argument('--javac', help='Override the javac used')
     parser.add_argument('--release', default='11', help='javac --release (default 11)')
@@ -257,4 +305,5 @@ if __name__ == '__main__':
                         help='Compile and type-check only; needs neither d8 nor framework.jar')
     args = parser.parse_args()
     build(args.out, d8=args.d8, r8=args.r8, framework=args.framework, javac=args.javac,
-          classes_only=args.classes_only, release=args.release)
+          classes_only=args.classes_only, release=args.release,
+          baseline_dex=args.baseline_dex)

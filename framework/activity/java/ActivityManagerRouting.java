@@ -324,6 +324,7 @@ public class ActivityManagerRouting extends ActivityManagerAdapter {
                         System.err.println("[WL-SHIM] app ClassLoader + nativeLibDir=" + nld
                                 + " after " + (System.currentTimeMillis() - t0) + "ms");
                         loadWlNatives(cl);
+                        installInstrumentationUnhook();
                         ensureProvidersClean();
                         enrichMetaData();
                         loadSqliteShim(cl);
@@ -3535,6 +3536,57 @@ public class ActivityManagerRouting extends ActivityManagerAdapter {
     private static volatile boolean sInitAppSeeded;
 
     private static volatile boolean sOpPkgSet;
+
+    // ------------------------------------------------------------------
+    // S4: Instrumentation unhook.
+    //
+    // Merged from the WeChat bring-up workstream. Kept next to the other S4
+    // contributions rather than folded into them: it watches for a condition
+    // that may never arise and gives up on its own, so it has no ordering
+    // relationship with the bind-data rewrites above.
+    // ------------------------------------------------------------------
+
+    private static void installInstrumentationUnhook() {
+        Thread t = new Thread(new Runnable() {
+            @Override public void run() {
+                for (int i = 0; i < 400; i++) {                 // ~80s of watching
+                    try { if (unhookInstrumentationOnce()) return; } catch (Throwable ignored) { }
+                    try { Thread.sleep(200); } catch (InterruptedException e) { return; }
+                }
+            }
+        }, "wl-instr-unhook");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static boolean unhookInstrumentationOnce() throws Exception {
+        Class<?> at = Class.forName("android.app.ActivityThread");
+        Object cur = at.getMethod("currentActivityThread").invoke(null);
+        if (cur == null) return false;
+        java.lang.reflect.Field f = at.getDeclaredField("mInstrumentation");
+        f.setAccessible(true);
+        Object inst = f.get(cur);
+        if (inst == null) return false;
+        String cn = inst.getClass().getName();
+        if (cn.indexOf("SplashHackInstrumentation") < 0) return false;
+        // find the wrapped original: the only field typed Instrumentation
+        Class<?> instrCls = Class.forName("android.app.Instrumentation");
+        for (Class<?> k = inst.getClass(); k != null && k != instrCls; k = k.getSuperclass()) {
+            java.lang.reflect.Field[] fs = k.getDeclaredFields();
+            for (int i = 0; i < fs.length; i++) {
+                if (!instrCls.isAssignableFrom(fs[i].getType())) continue;
+                fs[i].setAccessible(true);
+                Object inner = fs[i].get(inst);
+                if (inner == null || inner == inst) continue;
+                f.set(cur, inner);
+                System.err.println("[WL-INSTR] replaced " + cn + " with wrapped "
+                        + inner.getClass().getName() + " (field " + fs[i].getName() + ")");
+                return true;
+            }
+        }
+        System.err.println("[WL-INSTR] " + cn + " installed but no wrapped Instrumentation found");
+        return true;
+    }
 
     private static volatile boolean sMetaEnriched;
 
