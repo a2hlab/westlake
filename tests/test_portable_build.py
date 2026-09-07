@@ -140,6 +140,36 @@ class PortableBuildTests(unittest.TestCase):
                 self.assertTrue(all(i.date_time == (1980, 1, 1, 0, 0, 0)
                                     for i in jar.infolist()))
 
+    def test_replacement_guard_refuses_a_jar_that_drops_classes(self):
+        checker = module('check_runtime_replacement')
+        original = checker.defined
+        try:
+            # AppSpawnXInit is the child bootstrap entry point: losing it means
+            # nothing on the board starts, and the failure lands at app launch.
+            checker.defined = lambda p: ({'a.B', 'a.B$1'} if 'new' in str(p)
+                                         else {'a.B', 'com.android.internal.os.AppSpawnXInit'})
+            result = checker.compare(Path('new.jar'), Path('old.jar'))
+            self.assertFalse(result['safe'])
+            self.assertIn('com.android.internal.os.AppSpawnXInit', result['removed'])
+        finally:
+            checker.defined = original
+
+    def test_replacement_guard_allows_a_superset(self):
+        checker = module('check_runtime_replacement')
+        original = checker.defined
+        try:
+            checker.defined = lambda p: ({'a.B', 'a.C'} if 'new' in str(p) else {'a.B'})
+            result = checker.compare(Path('new.jar'), Path('old.jar'))
+            self.assertTrue(result['safe'])
+            self.assertEqual(result['added'], ['a.C'])
+        finally:
+            checker.defined = original
+
+    def test_replacement_guard_collapses_inner_classes(self):
+        checker = module('check_runtime_replacement')
+        self.assertEqual(checker.top_level({'a.B', 'a.B$1', 'a.B$C', 'a.D-IA'}),
+                         ['a.B', 'a.D'])
+
 
 if __name__ == '__main__':
     unittest.main()
