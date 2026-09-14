@@ -551,4 +551,25 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     @Override
     public boolean isRequestedToLaunchInTaskFragment(IBinder activityToken,
             IBinder taskFragmentToken) { return false; }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public int getActivityCallerUid(android.os.IBinder activityToken, android.os.IBinder callerToken) throws android.os.RemoteException {
+        return -1;
+    }
+
+    @Override
+    public java.lang.String getActivityCallerPackage(android.os.IBinder activityToken, android.os.IBinder callerToken) throws android.os.RemoteException {
+        return null;
+    }
+
+    @Override
+    public int checkActivityCallerContentUriPermission(android.os.IBinder activityToken, android.os.IBinder callerToken, android.net.Uri uri, int modeFlags, int userId) throws android.os.RemoteException {
+        return android.content.pm.PackageManager.PERMISSION_DENIED;
+    }
+
+    @Override
+    public void setActivityRecordInputSinkEnabled(android.os.IBinder activityToken, boolean enabled) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony activity input sink is not connected");
+    }
 }

@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "sources": [
+    "westlake/framework/appspawn-x/bionic_compat/src/bionic_assert_compat.c",
+    "westlake/framework/appspawn-x/bionic_compat/src/bionic_stdio_compat.c",
+    "westlake/native/oh_fd_set.c",
+    "android-source/bionic-android15/libc/bionic/__cmsg_nxthdr.cpp",
+    "android-source/bionic-android15/libc/upstream-openbsd/lib/libc/gen/ctype_.c"
+  ],
+  "includes": [
+    "android-source/bionic-android15/libc/upstream-openbsd/lib/libc/include"
+  ],
+  "defines": [
+    "_GNU_SOURCE",
+    "WESTLAKE_EXTERNAL_SYSTEM_PROPERTIES",
+    "__BEGIN_HIDDEN_DECLS=",
+    "__END_HIDDEN_DECLS=",
+    "_CTYPE_U=1",
+    "_CTYPE_L=2",
+    "_CTYPE_N=4",
+    "_CTYPE_S=8",
+    "_CTYPE_P=16",
+    "_CTYPE_C=32",
+    "_CTYPE_X=64",
+    "_CTYPE_B=128"
+  ],
+  "scope": "Android libc ABI entry points over OH musl; property queries retain the existing framework provider",
+  "cpp_flags": [
+    "-fno-exceptions",
+    "-fno-rtti"
+  ],
+  "source_replacements": {
+    "android-source/bionic-android15/libc/bionic/__cmsg_nxthdr.cpp": {
+      "cmsghdr* __cmsg_nxthdr": "extern \"C\" cmsghdr* __cmsg_nxthdr"
+    }
+  }
+}

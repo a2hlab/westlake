@@ -95,4 +95,12 @@ public final class IThermalServiceImpl extends Binder implements IThermalService
     public android.os.IInterface queryLocalInterface(String descriptor) {
         return this;
     }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public float[] getThermalHeadroomThresholds() throws android.os.RemoteException {
+        float[] thresholds = new float[Temperature.THROTTLING_SHUTDOWN + 1];
+        java.util.Arrays.fill(thresholds, Float.NaN);
+        return thresholds;
+    }
 }

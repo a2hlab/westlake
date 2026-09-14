@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "scope": "Original Android 15 TrafficStats JNI; OH socket accounting reports unsupported",
+  "sources": [
+    "android-source/modules-connectivity/framework-t/jni/android_net_TrafficStats.cpp",
+    "android-source/modules-connectivity/framework-t/jni/onload.cpp"
+  ],
+  "includes": [
+    "android-source/libnativehelper/include_jni",
+    "android-source/libnativehelper/include",
+    "android-source/libnativehelper/include_platform",
+    "android-source/frameworks-native/include",
+    "android-source/logging/liblog/include"
+  ],
+  "defines": ["__INTRODUCED_IN(x)="]
+}

@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "scope": "Original libcore Linux JNI, socket conversion and asynchronous close monitor",
+  "sources": [
+    "android-source/libcore/luni/src/main/native/libcore_io_Linux.cpp",
+    "android-source/libcore/luni/src/main/native/AsynchronousCloseMonitor.cpp",
+    "android-source/libcore/luni/src/main/native/ExecStrings.cpp",
+    "android-source/libcore/luni/src/main/native/JniConstants.cpp",
+    "android-source/libcore/luni/src/main/native/JniException.cpp",
+    "android-source/libcore/luni/src/main/native/NetworkUtilities.cpp",
+    "android-source/libcore/luni/src/main/native/libcore_io_AsynchronousCloseMonitor.cpp",
+    "westlake/framework/android-runtime/src/libcore_linux_registration.cpp"
+  ],
+  "includes": [
+    "android-source/libnativehelper/include_jni",
+    "android-source/libnativehelper/header_only_include",
+    "android-source/logging/liblog/include",
+    "android-source/modules-statsd/lib/libstatssocket/include",
+    "android-source/libcore/luni/src/main/native",
+    "android-source/libbase/include",
+    "android-source/fmtlib/include",
+    "android-source/libnativehelper/include",
+    "android-source/libnativehelper/include_platform",
+    "android-source/libnativehelper/include_platform_header_only"
+  ],
+  "defines": [
+    "_GNU_SOURCE",
+    "__OHOS__",
+    "_LIBCPP_PROMOTE_H",
+    "ANDROID_HOST_MUSL"
+  ],
+  "force_includes": [
+    "preserved/runtime-sources/local/libcxx_compat_arm64.h"
+  ],
+  "source_replacements": {
+    "android-source/libcore/luni/src/main/native/libcore_io_Linux.cpp": {
+      "#include <sys/capability.h>": "#include <linux/capability.h>\nextern \"C\" int capget(cap_user_header_t, cap_user_data_t);\nextern \"C\" int capset(cap_user_header_t, const cap_user_data_t);",
+      "#include <linux/rtnetlink.h>": "#include <sys/socket.h>\n#define sockaddr_storage westlake_kernel_sockaddr_storage\n#include <linux/socket.h>\n#undef sockaddr_storage\n#include <linux/rtnetlink.h>\nstatic_assert(sizeof(sockaddr_storage) == 128);"
+    }
+  }
+}

@@ -371,7 +371,7 @@ void SpawnServer::handleConnection(int clientFd) {
     bool isBinary = (probe == OH_SPAWN_MSG_MAGIC);
 
     if (isBinary) {
-        // OH binary TLV: read rest of 280-byte header, then (msgLen - 280) TLV body.
+        // OH binary TLV: read the fixed header, then the remaining TLV body.
         buffer.resize(sizeof(OhAppSpawnMsgHeader));
         memcpy(buffer.data(), &probe, sizeof(probe));
         if (!recvAll(clientFd, buffer.data() + sizeof(probe),
@@ -380,9 +380,11 @@ void SpawnServer::handleConnection(int clientFd) {
             sendOhBinaryResponse(clientFd, 0, "", -1, -1);
             return;
         }
-        auto* hdr = reinterpret_cast<const OhAppSpawnMsgHeader*>(buffer.data());
-        uint32_t msgLen = hdr->msgLen;
-        uint32_t msgId = hdr->msgId;
+        // Keep the header by value: receiving the body may reallocate buffer.
+        OhAppSpawnMsgHeader hdr;
+        memcpy(&hdr, buffer.data(), sizeof(hdr));
+        uint32_t msgLen = hdr.msgLen;
+        uint32_t msgId = hdr.msgId;
         if (msgLen < sizeof(OhAppSpawnMsgHeader) || msgLen > kMaxMessageSize) {
             LOGE("Invalid OH msgLen: %u", msgLen);
             sendOhBinaryResponse(clientFd, msgId, "", -1, -1);
@@ -399,7 +401,7 @@ void SpawnServer::handleConnection(int clientFd) {
             }
         }
         LOGI("OH binary msg received: type=%u len=%u id=%u tlvCount=%u proc=%.32s",
-             hdr->msgType, hdr->msgLen, hdr->msgId, hdr->tlvCount, hdr->processName);
+             hdr.msgType, hdr.msgLen, hdr.msgId, hdr.tlvCount, hdr.processName);
     } else {
         // Legacy adapter protocol: probe was the 4-byte payload length.
         uint32_t payloadLen = probe;

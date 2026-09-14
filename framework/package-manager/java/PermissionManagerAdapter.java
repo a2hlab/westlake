@@ -15,9 +15,9 @@ import java.util.List;
  * grant. Privileged mutations require a real permission-controller workflow.
  */
 public final class PermissionManagerAdapter extends IPermissionManager.Stub {
-    // IPermissionManager.Stub constructs a PermissionEnforcer using the
-    // ActivityThread system context. Proxy permission checks can occur before
-    // that context exists, so defer Binder construction until service lookup.
+    // Explicit OH enforcement avoids the generated constructor's dependency
+    // on ActivityThread's system Context during service bootstrap.
+    private PermissionManagerAdapter() { super(OHPermissionEnforcer.getInstance()); }
     private static final class Holder {
         static final PermissionManagerAdapter INSTANCE = new PermissionManagerAdapter();
     }
@@ -86,7 +86,7 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public List<String> getAutoRevokeExemptionRequestedPackages(int user) { return Collections.emptyList(); }
     public boolean isAutoRevokeExempted(String pkg, int user) { own(pkg,user); return false; }
     public boolean isRegisteredAttributionSource(AttributionSourceState source) { return false; }
-    public void registerAttributionSource(AttributionSourceState source) { throw controllerRequired(); }
+    public android.os.IBinder registerAttributionSource(AttributionSourceState source) { throw controllerRequired(); }
     public void addOnPermissionsChangeListener(IOnPermissionsChangeListener listener) { throw new UnsupportedOperationException("OH permission-change subscription unavailable"); }
     public void removeOnPermissionsChangeListener(IOnPermissionsChangeListener listener) {}
     public boolean addPermission(PermissionInfo permission, boolean async) { throw controllerRequired(); }
@@ -101,4 +101,78 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public boolean setAutoRevokeExempted(String pkg, boolean exempt, int user) { throw controllerRequired(); }
     public void startOneTimePermissionSession(String pkg, int user, long timeout, long killedDelay) { throw controllerRequired(); }
     public void stopOneTimePermissionSession(String pkg, int user) { throw controllerRequired(); }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public int getRegisteredAttributionSourceCount(int uid) throws android.os.RemoteException {
+        return 0;
+    }
+
+    @Override
+    public int checkPermission(java.lang.String packageName, java.lang.String permissionName, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
+        own(packageName, userId);
+        if (!android.companion.virtual.VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT.equals(persistentDeviceId)) return PackageManager.PERMISSION_DENIED;
+        return checkProcessPermission(permissionName, -1, android.os.Process.myUid());
+    }
+
+    @Override
+    public int checkUidPermission(int uid, java.lang.String permissionName, int deviceId) throws android.os.RemoteException {
+        return deviceId == 0 ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED;
+    }
+
+    @Override
+    public int getPermissionFlags(java.lang.String packageName, java.lang.String permissionName, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
+        requireDefaultDevice(persistentDeviceId);
+        return getPermissionFlags(packageName, permissionName, userId);
+    }
+
+    @Override
+    public void updatePermissionFlags(java.lang.String packageName, java.lang.String permissionName, int flagMask, int flagValues, boolean checkAdjustPolicyFlagPermission, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
+        throw controllerRequired();
+    }
+
+    @Override
+    public void grantRuntimePermission(java.lang.String packageName, java.lang.String permissionName, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
+        throw controllerRequired();
+    }
+
+    @Override
+    public void revokeRuntimePermission(java.lang.String packageName, java.lang.String permissionName, java.lang.String persistentDeviceId, int userId, java.lang.String reason) throws android.os.RemoteException {
+        throw controllerRequired();
+    }
+
+    @Override
+    public boolean shouldShowRequestPermissionRationale(java.lang.String packageName, java.lang.String permissionName, int deviceId, int userId) throws android.os.RemoteException {
+        if (deviceId != 0) throw new SecurityException("Unknown OH virtual device");
+        return shouldShowRequestPermissionRationale(packageName, permissionName, userId);
+    }
+
+    @Override
+    public boolean isPermissionRevokedByPolicy(java.lang.String packageName, java.lang.String permissionName, int deviceId, int userId) throws android.os.RemoteException {
+        if (deviceId != 0) throw new SecurityException("Unknown OH virtual device");
+        return isPermissionRevokedByPolicy(packageName, permissionName, userId);
+    }
+
+    @Override
+    public void startOneTimePermissionSession(java.lang.String packageName, int deviceId, int userId, long timeout, long revokeAfterKilledDelay) throws android.os.RemoteException {
+        throw controllerRequired();
+    }
+
+    @Override
+    public java.util.Map<java.lang.String,android.permission.PermissionManager.PermissionState> getAllPermissionStates(java.lang.String packageName, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
+        own(packageName, userId);
+        requireDefaultDevice(persistentDeviceId);
+        java.util.Map<String, android.permission.PermissionManager.PermissionState> states = new java.util.HashMap<>();
+        PackageInfo info = PackageManagerAdapter.getInstance().getPackageInfo(packageName, PackageManager.GET_PERMISSIONS, userId);
+        if (info != null && info.requestedPermissions != null) {
+            for (String permission : info.requestedPermissions) {
+                states.put(permission, new android.permission.PermissionManager.PermissionState(checkProcessPermission(permission, -1, android.os.Process.myUid()) == PackageManager.PERMISSION_GRANTED, getPermissionFlags(packageName, permission, userId)));
+            }
+        }
+        return states;
+    }
+    private static void requireDefaultDevice(String device) {
+        if (!android.companion.virtual.VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT.equals(device))
+            throw new SecurityException("Unknown OH virtual device");
+    }
 }

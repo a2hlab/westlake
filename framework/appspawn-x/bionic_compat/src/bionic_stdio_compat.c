@@ -32,8 +32,12 @@ static FILE* westlake_translate_file(FILE* stream) {
 
 int vfprintf(FILE* stream, const char* format, va_list args) {
     typedef int (*Fn)(FILE*, const char*, va_list);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "vfprintf");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "vfprintf");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream), format, args) : -1;
 }
 
@@ -47,77 +51,121 @@ int fprintf(FILE* stream, const char* format, ...) {
 
 size_t fread(void* buffer, size_t size, size_t count, FILE* stream) {
     typedef size_t (*Fn)(void*, size_t, size_t, FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fread");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fread");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(buffer, size, count, westlake_translate_file(stream)) : 0;
 }
 
 size_t fwrite(const void* buffer, size_t size, size_t count, FILE* stream) {
     typedef size_t (*Fn)(const void*, size_t, size_t, FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fwrite");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fwrite");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(buffer, size, count, westlake_translate_file(stream)) : 0;
 }
 
 int fflush(FILE* stream) {
     typedef int (*Fn)(FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fflush");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fflush");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream)) : EOF;
 }
 
 int fputc(int character, FILE* stream) {
     typedef int (*Fn)(int, FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fputc");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fputc");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(character, westlake_translate_file(stream)) : EOF;
 }
 
 int fputs(const char* value, FILE* stream) {
     typedef int (*Fn)(const char*, FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fputs");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fputs");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(value, westlake_translate_file(stream)) : EOF;
 }
 
 char* fgets(char* buffer, int size, FILE* stream) {
     typedef char* (*Fn)(char*, int, FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fgets");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fgets");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(buffer, size, westlake_translate_file(stream)) : NULL;
 }
 
 int fseek(FILE* stream, long offset, int origin) {
     typedef int (*Fn)(FILE*, long, int);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fseek");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fseek");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream), offset, origin) : -1;
 }
 
 long ftell(FILE* stream) {
     typedef long (*Fn)(FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "ftell");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "ftell");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream)) : -1;
 }
 
 int feof(FILE* stream) {
     typedef int (*Fn)(FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "feof");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "feof");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream)) : 0;
 }
 
 int ferror(FILE* stream) {
     typedef int (*Fn)(FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "ferror");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "ferror");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream)) : 1;
 }
 
 int fclose(FILE* stream) {
     typedef int (*Fn)(FILE*);
-    static Fn real;
-    if (real == NULL) real = (Fn)dlsym(RTLD_NEXT, "fclose");
+    static Fn cached;
+    Fn real = __atomic_load_n(&cached, __ATOMIC_ACQUIRE);
+    if (real == NULL) {
+        real = (Fn)dlsym(RTLD_NEXT, "fclose");
+        if (real != NULL) __atomic_store_n(&cached, real, __ATOMIC_RELEASE);
+    }
     return real != NULL ? real(westlake_translate_file(stream)) : EOF;
 }

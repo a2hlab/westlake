@@ -1,0 +1,33 @@
+# Westlake runs one framework graph in one ART process. Shared implementation
+# libraries therefore have one owner rather than separate copies per APEX.
+# Preserve the Android API packages and isolate dependencies from unchanged APKs.
+# HIDL, Wi-Fi annotations, VCN and modules-utils-build follow framework rules.
+rule android.hidl.** android.internal.hidl.@1
+rule android.net.wifi.WifiAnnotations* android.internal.wifi.WifiAnnotations@1
+rule com.android.server.vcn.util.** com.android.server.vcn.repackaged.util.@1
+rule com.android.modules.utils.build.** android.internal.modules.utils.build.@1
+rule perfetto.protos.** android.internal.perfetto.protos.@1
+
+# Media's private ExoPlayer and Guava names are shared by this process profile.
+rule com.google.android.exoplayer2.** android.media.internal.exo.@1
+rule com.google.common.** android.media.internal.guava_common.@1
+rule com.google.thirdparty.** android.media.internal.guava_thirdparty.@1
+
+# Match the prefix used by Connectivity's Chromium JNI generator.
+rule org.chromium.base.** android.net.connectivity.org.chromium.base.@1
+rule org.chromium.net.** android.net.connectivity.org.chromium.net.@1
+rule org.chromium.build.** android.net.connectivity.org.chromium.build.@1
+rule org.chromium.url.** android.net.connectivity.org.chromium.url.@1
+rule org.jni_zero.** android.net.connectivity.org.jni_zero.@1
+rule org.bouncycastle.** com.android.internal.net.org.bouncycastle.@1
+
+# The source compiler owns the two protobuf-nano variants explicitly. Remove
+# the redundant original definitions before JarJar, then relocate references.
+rule com.google.protobuf.nano.** com.android.framework.protobuf.nano.@1
+
+# Compile-only annotation dependencies follow ExoPlayer's annotation stripping.
+zap androidx.annotation.**
+zap javax.annotation.**
+zap kotlin.annotations.**
+zap org.checkerframework.**
+zap com.google.errorprone.**

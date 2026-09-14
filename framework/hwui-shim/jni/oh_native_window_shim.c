@@ -69,6 +69,15 @@ extern int oh_anw_try_release(ANativeWindow *w);
 extern OHNativeWindow *oh_anw_get_oh(ANativeWindow *w);
 extern ANativeWindow *oh_anw_wrap(OHNativeWindow *oh);
 
+/* Session→window resolution exported by liboh_adapter_bridge.so (which is a
+ * DT_NEEDED of libhwui).  These are the same two calls compat_shim's
+ * sc_to_oh_native_window() and S_nativeGetFromBlastBufferQueue() already use
+ * to recover the bound OHNativeWindow when a Surface handle has not yet been
+ * stamped.  Declared here so ANativeWindow_fromSurface can apply the same
+ * documented fallback instead of reporting "no surface" to hwui. */
+extern int32_t oh_wm_get_last_session(void);
+extern void *oh_wm_get_native_window(int32_t sessionId);
+
 /* Internal: cast Android window pointer to OH window pointer.
  *
  * Pre-G2.14ae (legacy assumption): hwui's ANativeWindow* IS an
@@ -99,20 +108,74 @@ static inline OHNativeWindow *to_oh(ANativeWindow *w) {
  * a stub but the documented unbound state of a Surface object.
  */
 ANativeWindow *ANativeWindow_fromSurface(JNIEnv *env, jobject surface) {
-    if (!env || !surface) return NULL;
+    /* Bounded diagnostic, mirroring the [WESTLAKE-SC2NW] probe in
+     * compat_shim.cpp.  This function decides whether CanvasContext ever gets
+     * a surface, yet it logged nothing, so "returned NULL" and "was never
+     * called" were indistinguishable in a device capture.  HiLog is unreliable
+     * on this board, so mirror to the child's captured stderr. */
+    static int wl_fs_calls = 0;
+    const int wl_log = (wl_fs_calls < 16) ? ++wl_fs_calls : 0;
+
+    if (!env || !surface) {
+        if (wl_log) {
+            fprintf(stderr, "[WESTLAKE-ANWFS] #%d null arg env=%p surface=%p -> NULL\n",
+                    wl_log, (void *)env, (void *)surface);
+            fflush(stderr);
+        }
+        return NULL;
+    }
     jclass cls = (*env)->FindClass(env, "android/view/Surface");
     if (!cls) {
         (*env)->ExceptionClear(env);
+        if (wl_log) {
+            fprintf(stderr, "[WESTLAKE-ANWFS] #%d FindClass(android/view/Surface) failed -> NULL\n",
+                    wl_log);
+            fflush(stderr);
+        }
         return NULL;
     }
     jfieldID fid = (*env)->GetFieldID(env, cls, "mNativeObject", "J");
     (*env)->DeleteLocalRef(env, cls);
     if (!fid) {
         (*env)->ExceptionClear(env);
+        if (wl_log) {
+            fprintf(stderr, "[WESTLAKE-ANWFS] #%d GetFieldID(mNativeObject) failed -> NULL\n",
+                    wl_log);
+            fflush(stderr);
+        }
         return NULL;
     }
     jlong nativeObj = (*env)->GetLongField(env, surface, fid);
-    if (nativeObj == 0) return NULL;
+    if (wl_log) {
+        fprintf(stderr, "[WESTLAKE-ANWFS] #%d mNativeObject=0x%llx\n",
+                wl_log, (unsigned long long)nativeObj);
+        fflush(stderr);
+    }
+    if (nativeObj == 0) {
+        /* §283ab: an unbound Surface here is NOT benign.  DrawFrameTask::
+         * syncFrameState() calls CanvasContext::prepareTree() *before* it
+         * checks hasOutputTarget(), and prepareTree ->
+         * RenderProperties::fitsOnLayer() reads DeviceInfo::maxTextureSize(),
+         * which LOG_ALWAYS_FATALs ("MaxTextureSize has not been initialized
+         * yet.") until a GrContext exists.  The GrContext is only created by
+         * SkiaOpenGLPipeline::setSurface(window) when window != NULL, and by
+         * RenderThread::setGrContext() -> DeviceInfo::setMaxTextureSize().  So
+         * returning NULL here does not merely "skip draw" as the comment below
+         * assumed -- it aborts the RenderThread on the very first frame.
+         * Recover the window the window session has already bound, exactly as
+         * compat_shim's sc_to_oh_native_window() and
+         * S_nativeGetFromBlastBufferQueue() already do for this same race. */
+        const int32_t sid = oh_wm_get_last_session();
+        void *nw = sid ? oh_wm_get_native_window(sid) : NULL;
+        if (wl_log) {
+            fprintf(stderr,
+                    "[WESTLAKE-ANWFS] #%d unbound Surface; last-session=%d -> nw=%p\n",
+                    wl_log, (int)sid, nw);
+            fflush(stderr);
+        }
+        if (!nw) return NULL;
+        nativeObj = (jlong)(intptr_t)nw;
+    }
     /* WESTLAKE §283m — THE nSetSurface HANG.
      * This used to call CreateNativeWindowFromSurface(nativeObj).  That OH API expects the
      * ADDRESS OF AN sptr<Surface>, but in this port Surface.mNativeObject ALREADY HOLDS AN
@@ -129,7 +192,55 @@ ANativeWindow *ANativeWindow_fromSurface(JNIEnv *env, jobject surface) {
      * eglCreateWindowSurface wrapper wants the raw OH handle.  Keep the raw pointer here and
      * instead remove the struct-layout landmine on the other side: libhwui's setBufferCount
      * (see §283z in CanvasContext.cpp). */
-    return (ANativeWindow *)(intptr_t)nativeObj;
+#ifdef WESTLAKE_SOURCE_HWUI15
+    /* §283ac — DOUBLE-WRAP.  OHWindowManagerClient::getOhNativeWindow() already
+     * ends with `oh_anw_wrap(nw)` and caches/returns that AdapterAnw*, and
+     * BBQ_nativeUpdate/BBQ_nativeGetSurface stamp THAT wrapper into
+     * Surface.mNativeObject.  Wrapping it again here handed
+     * OH_NativeWindow_NativeObjectReference() a pointer whose offset 0 holds
+     * AOSP's '_wnd' magic rather than OH's NATIVE_OBJECT_MAGIC_WINDOW ('WIND'),
+     * so OH rejected it (0 is success, non-zero is failure), oh_anw_wrap
+     * returned NULL, and hwui saw "no surface".  That is not benign: with no
+     * window, SkiaOpenGLPipeline::setSurface never calls requireGlContext(), no
+     * GrContext is created, DeviceInfo::setMaxTextureSize() never runs, and the
+     * first DrawFrameTask::syncFrameState -> prepareTree -> fitsOnLayer()
+     * aborts the RenderThread on "MaxTextureSize has not been initialized yet."
+     * Only wrap a genuinely raw OH handle; pass an already-wrapped one through.
+     * This mirrors to_oh()'s existing "unwrap if wrapped, else direct cast"
+     * idiom used by nine other entry points in this file.  No extra reference
+     * is taken here -- hwui's ReliableSurface/ANativeWindow_acquire pairs with
+     * the ANativeWindow_release in android_view_ThreadedRenderer_setSurface. */
+    ANativeWindow *candidate = (ANativeWindow *)(intptr_t)nativeObj;
+    const int wl_prewrapped = (oh_anw_get_oh(candidate) != NULL);
+    ANativeWindow *result;
+    if (wl_prewrapped) {
+        /* AOSP's ANativeWindow_fromSurface contract hands back a +1 reference,
+         * and android_view_ThreadedRenderer_setSurface releases it immediately
+         * after proxy->setSurface().  AOSP's ReliableSurface ctor takes its own
+         * acquire, but this port's override (preserved/runtime-sources/local/
+         * hwui-overrides/renderthread/ReliableSurface.cpp) deliberately does
+         * not.  So without this acquire, that release would drive the
+         * session-cached wrapper's refCount 1 -> 0, run oh_anw_destroy(), and
+         * leave OHWindowManagerClient::sessions_ holding a dangling
+         * ohNativeWindow -- a use-after-free on the first frame.  Take the
+         * reference the contract promises; the session map keeps its own. */
+        oh_anw_try_acquire(candidate);
+        result = candidate;
+    } else {
+        /* A genuinely raw OH handle: oh_anw_wrap() returns refCount == 1, which
+         * is itself the caller's +1, so no extra acquire is needed here. */
+        result = oh_anw_wrap((OHNativeWindow *)(intptr_t)nativeObj);
+    }
+#else
+    ANativeWindow *result = (ANativeWindow *)(intptr_t)nativeObj;
+    const int wl_prewrapped = 0;
+#endif
+    if (wl_log) {
+        fprintf(stderr, "[WESTLAKE-ANWFS] #%d -> ANativeWindow=%p (prewrapped=%d)\n",
+                wl_log, (void *)result, wl_prewrapped);
+        fflush(stderr);
+    }
+    return result;
 }
 
 /* ============================================================ */

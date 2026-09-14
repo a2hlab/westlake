@@ -113,9 +113,17 @@ public final class OHServiceManager extends IServiceManager.Stub {
                 return WebViewUpdateServiceAdapter.isAvailable()
                         ? WebViewUpdateServiceAdapter.getInstance().asBinder()
                         : null;
+            // Real-routed: OH manages the radio/Wi-Fi itself, so the platform does
+            // have connectivity -- only the Android-shaped answer was missing. While
+            // this returned null, ConnectivityFrameworkInitializer built a
+            // ConnectivityManager whose every reachability query failed, so Toutiao
+            // decided it was offline and rendered "network unavailable" on every page
+            // WITHOUT issuing a single request (observed: 19 socket fds, zero
+            // established TCP connections, while the device pinged out normally).
+            case "connectivity":
+                return ConnectivityManagerAdapter.getBinder();
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
-            case "connectivity":
             case "network_management":
             case "content_capture":
             case "game":

@@ -1,0 +1,31 @@
+/* Version assignments from Android 15 bionic/libc/libc.map.txt. */
+LIBC {
+  global:
+    __errno;
+    __open_2;
+    __assert2;
+    __strncpy_chk2;
+    strtoll_l;
+    strtoull_l;
+    android_set_abort_message;
+    __sF;
+    vfprintf;
+    fprintf;
+    fread;
+    fwrite;
+    fflush;
+    fputc;
+    fputs;
+    fgets;
+    fseek;
+    ftell;
+    feof;
+    ferror;
+    fclose;
+    __FD_SET_chk;
+    __FD_CLR_chk;
+    __FD_ISSET_chk;
+    __cmsg_nxthdr;
+    _ctype_;
+  local: *;
+};

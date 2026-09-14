@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "sources": [
+    "android-source/oh-skia/m133/third_party/externals/wuffs/release/c/wuffs-v0.3.c"
+  ],
+  "includes": [],
+  "defines": [
+    "WUFFS_IMPLEMENTATION",
+    "WUFFS_CONFIG__MODULES",
+    "WUFFS_CONFIG__MODULE__BASE",
+    "WUFFS_CONFIG__MODULE__GIF",
+    "WUFFS_CONFIG__MODULE__LZW"
+  ],
+  "scope": "Pinned Skia third_party/wuffs/BUILD.gn GIF implementation and dependencies"
+}

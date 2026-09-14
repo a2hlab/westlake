@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "scope": "Original Android 15 legacy C++ ABI runtime and async-safe logging, using OH fatal-message storage",
+  "sources": [
+    "android-source/bionic-android15/libc/bionic/__cxa_guard.cpp",
+    "android-source/bionic-android15/libc/bionic/__cxa_pure_virtual.cpp",
+    "android-source/bionic-android15/libc/bionic/new.cpp",
+    "android-source/bionic-android15/libc/async_safe/async_safe_log.cpp"
+  ],
+  "includes": [
+    "android-source/bionic-android15/libstdc++/include",
+    "android-source/bionic-android15/libc",
+    "android-source/bionic-android15/libc/async_safe/include",
+    "android-source/bionic-android15/libc/platform",
+    "android-source/logging/liblog/include"
+  ],
+  "defines": [
+    "_GNU_SOURCE",
+    "__printflike(a,b)=__attribute__((format(printf,a,b)))",
+    "__predict_false(x)=__builtin_expect(!!(x),0)",
+    "__LIBC_HIDDEN__=__attribute__((visibility(\"hidden\")))",
+    "__assert(file,line,msg)=__assert_fail(msg,file,line,__func__)"
+  ],
+  "source_replacements": {
+    "android-source/bionic-android15/libc/async_safe/async_safe_log.cpp": {
+      "#include <android/set_abort_message.h>": "#include <info/fatal_message.h>",
+      "android_set_abort_message(msg);": "set_fatal_message(msg);",
+      "#include <linux/net.h>": "// AArch64 uses __NR_socket directly; SYS_SOCKET is only used by i386."
+    }
+  },
+  "cpp_flags": [
+    "-fno-exceptions",
+    "-fno-rtti"
+  ]
+}

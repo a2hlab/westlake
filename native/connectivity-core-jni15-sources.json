@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "scope": "Original Android 15 core framework-connectivity JNI (NetworkUtils); libframework-connectivity-jni.so",
+  "notes": [
+    "TcpRepairWindow is renamed to android.net.connectivity.android.net.TcpRepairWindow by the",
+    "jarjar step that builds this JNI's Java side into the Connectivity APEX, so the pinned",
+    "source hardcodes the relocated name in both FindClass and the JNI registration table.",
+    "Our framework is the un-jarjar'd monolithic build and declares NetworkUtils.getTcpRepairWindow",
+    "as returning android.net.TcpRepairWindow, so RegisterNatives rejected the whole table with",
+    "NoSuchMethodError and NetworkUtils.<clinit> aborted the process. Undoing the APEX rename",
+    "targets the build configuration we actually use; every other entry in the table already matched."
+  ],
+  "sources": [
+    "android-source/modules-connectivity/framework/jni/android_net_NetworkUtils.cpp",
+    "android-source/modules-connectivity/framework/jni/onload.cpp"
+  ],
+  "includes": [
+    "android-source/libnativehelper/include_jni",
+    "android-source/libnativehelper/include",
+    "android-source/libnativehelper/include_platform",
+    "android-source/libnativehelper/header_only_include",
+    "android-source/libnativehelper/include_platform_header_only",
+    "android-source/frameworks-native/include",
+    "android-source/system-core/libutils/include",
+    "android-source/logging/liblog/include",
+    "android-source/libbase/include",
+    "android-source/modules-connectivity/staticlibs/native/bpf_headers/include",
+    "westlake/native/connectivity-compat"
+  ],
+  "defines": [
+    "_GNU_SOURCE",
+    "__OHOS__",
+    "__INTRODUCED_IN(x)="
+  ],
+  "source_replacements": {
+    "android-source/modules-connectivity/framework/jni/android_net_NetworkUtils.cpp": {
+      "#include <linux/tcp.h>": "#include <sys/socket.h>\n#define sockaddr_storage westlake_kernel_sockaddr_storage\n#include <linux/tcp.h>\n#undef sockaddr_storage",
+      "android/net/connectivity/android/net/TcpRepairWindow": "android/net/TcpRepairWindow"
+    }
+  }
+}

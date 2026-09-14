@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "sources": [
+    "westlake/framework/hwui-shim/jni/oh_native_window_shim.c",
+    "westlake/framework/hwui-shim/jni/oh_choreographer_shim.c",
+    "westlake/framework/hwui-shim/jni/oh_hardwarebuffer_shim.c",
+    "westlake/framework/hwui-shim/jni/atrace_compat.c",
+    "westlake/framework/hwui-shim/jni/sync_wait_compat.c",
+    "westlake/framework/hwui-shim/jni/ashmem_compat.c",
+    "westlake/framework/hwui-shim/jni/oh_display_shim.c",
+    "westlake/framework/hwui-shim/jni/wl_gl_trace.c",
+    "westlake/framework/hwui-shim/jni/wl_looper_trace.c",
+    "westlake/framework/hwui-shim/jni/oh_minikin_shim.cpp",
+    "westlake/framework/hwui-shim/jni/oh_skia_ahb_shim.cpp",
+    "westlake/framework/hwui-shim/jni/oh_graphicsstats_shim.cpp",
+    "preserved/runtime-sources/local/overlay/cpp/oh_typeface_init.cpp",
+    "preserved/runtime-sources/local/hwui-overrides/wl_codec_register.cpp",
+    "android-source/oh-skia/m133/src/android/SkAndroidFrameworkUtils.cpp",
+    "android-source/oh-skia/m133/src/codec/SkAndroidCodec.cpp",
+    "android-source/oh-skia/m133/src/android/SkAnimatedImage.cpp",
+    "android-source/oh-skia/m133/src/codec/SkSampledCodec.cpp",
+    "android-source/oh-skia/m133/src/codec/SkAndroidCodecAdapter.cpp",
+    "android-source/oh-skia/m133/src/codec/SkCodec.cpp"
+  ],
+  "rtti_source": "westlake/framework/surface/jni/skia_rtti_shim/skia_rtti_shim.cpp"
+}

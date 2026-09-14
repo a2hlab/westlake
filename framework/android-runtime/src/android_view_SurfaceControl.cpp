@@ -44,6 +44,9 @@
 #include <dlfcn.h>
 #include <jni.h>
 #include <mutex>
+#if WESTLAKE_ANDROID_API >= 35
+#include <android_runtime/android_hardware_OverlayProperties.h>
+#endif
 
 // 2026-05-06 — Per design §5.6 / §9.1 三件套 condition #3:
 //   SurfaceControl property setters and apply() must route to OH RSSurfaceNode
@@ -360,6 +363,10 @@ void SC_nativeApplyTransaction(JNIEnv*, jclass, jlong /*txObj*/, jboolean /*sync
         g_oh_rs_flush_transaction();
     }
 }
+void SC_nativeApplyTransaction35(JNIEnv* env, jclass clazz, jlong tx,
+                                jboolean sync, jboolean /*oneWay*/) {
+    SC_nativeApplyTransaction(env, clazz, tx, sync);
+}
 void SC_nativeMergeTransaction(JNIEnv*, jclass, jlong /*tx*/, jlong /*other*/) { }
 void SC_nativeClearTransaction(JNIEnv*, jclass, jlong /*tx*/) { }
 void SC_nativeSetAnimationTransaction(JNIEnv*, jclass, jlong /*tx*/) { }
@@ -463,7 +470,7 @@ void SC_nativeSetCornerRadiusF(JNIEnv*, jclass, jlong, jlong, jfloat, jfloat, jf
 void SC_nativeSetBlurRegions(JNIEnv*, jclass, jlong, jlong, jobjectArray, jint) { }
 void SC_nativeSetStretchEffect(JNIEnv*, jclass, jlong, jlong, jfloat, jfloat, jfloat, jfloat,
                                 jfloat, jfloat, jfloat, jfloat, jfloat) { }
-void SC_nativeSetTrustedOverlay(JNIEnv*, jclass, jlong, jlong, jboolean) { }
+void SC_nativeSetTrustedOverlay(JNIEnv*, jclass, jlong, jlong, jint) { }
 void SC_nativeSetDropInputMode(JNIEnv*, jclass, jlong, jlong, jint) { }
 void SC_nativeSurfaceFlushJankData(JNIEnv*, jclass, jlong) { }
 
@@ -729,8 +736,18 @@ static jlong SC_nativeCreateJankDataListenerWrapper(JNIEnv*, jclass, jobject /*l
 static jint SC_nativeGetGPUContextPriority(JNIEnv*, jclass) {
     ALOGW("[B-stub] GetGPUContextPriority: 0"); return 0;
 }
-static jobject SC_nativeGetOverlaySupport(JNIEnv*, jclass) {
+static jobject SC_nativeGetOverlaySupport(JNIEnv* env, jclass) {
+#if WESTLAKE_ANDROID_API >= 35
+    // The OH window boundary does not expose Android hardware-overlay
+    // capabilities. Report no advertised combinations, allowing GPU composition
+    // without inventing hardware support or returning an unusable null object.
+    auto* properties = new gui::OverlayProperties();
+    jobject result = android_hardware_OverlayProperties_convertToJavaObject(env, properties);
+    if (!result) delete properties;
+    return result;
+#else
     ALOGW("[B-stub] GetOverlaySupport: null"); return nullptr;
+#endif
 }
 static jboolean SC_nativeGetProtectedContentSupport(JNIEnv*, jclass) {
     ALOGW("[B-stub] GetProtectedContentSupport: false"); return JNI_FALSE;
@@ -777,8 +794,12 @@ const JNINativeMethod kSurfaceControlMethods[] = {
       reinterpret_cast<void*>(SC_nativeCreateTransaction) },
     { "nativeGetTransactionId", "(J)J",
       reinterpret_cast<void*>(SC_nativeGetTransactionId) },
-    { "nativeApplyTransaction", "(JZ)V",
-      reinterpret_cast<void*>(SC_nativeApplyTransaction) },
+#if WESTLAKE_ANDROID_API >= 35
+    { "nativeApplyTransaction", "(JZZ)V",
+      reinterpret_cast<void*>(SC_nativeApplyTransaction35) },
+#else
+    { "nativeApplyTransaction", "(JZ)V", reinterpret_cast<void*>(SC_nativeApplyTransaction) },
+#endif
     { "nativeMergeTransaction", "(JJ)V",
       reinterpret_cast<void*>(SC_nativeMergeTransaction) },
     { "nativeClearTransaction", "(J)V",
@@ -817,7 +838,7 @@ const JNINativeMethod kSurfaceControlMethods[] = {
       reinterpret_cast<void*>(SC_nativeSetShadowRadius) },
     { "nativeSetFrameRate", "(JJFII)V",
       reinterpret_cast<void*>(SC_nativeSetFrameRate) },
-    { "nativeSetTrustedOverlay", "(JJZ)V",
+    { "nativeSetTrustedOverlay", "(JJI)V",
       reinterpret_cast<void*>(SC_nativeSetTrustedOverlay) },
     { "nativeSurfaceFlushJankData", "(J)V",
       reinterpret_cast<void*>(SC_nativeSurfaceFlushJankData) },

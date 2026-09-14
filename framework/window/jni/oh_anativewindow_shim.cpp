@@ -32,6 +32,13 @@
 #include <new>          // std::nothrow
 #include <unordered_map>
 
+#ifdef WESTLAKE_SOURCE_HWUI15
+#include <system/window.h>
+extern "C" int westlake_window_buffer_describe(void*, ANativeWindowBuffer*);
+extern "C" int westlake_android_buffer_format(int);
+extern "C" int westlake_host_buffer_format(int);
+extern "C" uint64_t westlake_host_buffer_usage(uint64_t);
+#else
 // AOSP ANativeWindow + ANativeWindowBuffer + android_native_base_t — byte-exact
 // copy from AOSP frameworks/native/libs/nativewindow/include/system/window.h
 // and frameworks/native/libs/nativebase/include/nativebase/nativebase.h.
@@ -137,6 +144,8 @@ enum {  /* perform 'operation' codes */
 
 }  // extern "C" — AOSP ANativeWindow ABI
 
+#endif
+
 // OH NDK forward decls — copied minimal subset to avoid -I cross-namespace.
 // Source: ~/oh/foundation/graphic/graphic_surface/interfaces/inner_api/surface/external_window.h
 extern "C" {
@@ -186,8 +195,8 @@ int32_t OH_NativeWindow_NativeWindowFlushBuffer(OHNativeWindow* window,
 int32_t OH_NativeWindow_NativeWindowAbortBuffer(OHNativeWindow* window,
                                                  OHNativeWindowBuffer* buffer);
 int32_t OH_NativeWindow_NativeWindowHandleOpt(OHNativeWindow* window, int code, ...);
-int32_t OH_NativeObjectReference(void* obj);    // generic for OH NativeObject
-int32_t OH_NativeObjectUnreference(void* obj);
+int32_t OH_NativeWindow_NativeObjectReference(void* obj);    // generic for OH NativeObject
+int32_t OH_NativeWindow_NativeObjectUnreference(void* obj);
 // 2026-05-12 G2.14aw probe A.2: read producer uniqueId — used to verify
 // hwui's NativeWindow is the same producer ID as the one created in
 // OHWindowManagerClient::getOhNativeWindow.
@@ -236,6 +245,9 @@ struct AdapterAnwBuffer {
     struct ANativeWindowBuffer aosp;       // AOSP ABI face — must be first
     OHNativeWindowBuffer*      oh;          // OH side handle
     uint32_t                   magic;
+#ifdef WESTLAKE_SOURCE_HWUI15
+    std::atomic<int> refs{1};
+#endif
 };
 
 // adapter ANativeWindow bound to an OH window
@@ -250,6 +262,9 @@ struct AdapterAnw {
 };
 
 inline AdapterAnw* as_adapter(struct ANativeWindow* w) {
+#ifdef WESTLAKE_SOURCE_HWUI15
+    if (!w || w->common.magic != ANDROID_NATIVE_WINDOW_MAGIC) return nullptr;
+#endif
     auto* a = reinterpret_cast<AdapterAnw*>(w);
     return (a && a->magic == kAdapterAnwMagic) ? a : nullptr;
 }
@@ -285,6 +300,18 @@ void anw_base_decRef(struct android_native_base_t* base) {
     }
 }
 
+#ifdef WESTLAKE_SOURCE_HWUI15
+void buffer_inc(android_native_base_t* base) {
+    reinterpret_cast<AdapterAnwBuffer*>(base)->refs.fetch_add(1);
+}
+void buffer_dec(android_native_base_t* base) {
+    auto* b = reinterpret_cast<AdapterAnwBuffer*>(base);
+    if (b->refs.fetch_sub(1) == 1) {
+        OH_NativeWindow_NativeObjectUnreference(b->oh);
+        delete b;
+    }
+}
+#endif
 // Buffer wrapping helpers
 AdapterAnwBuffer* wrap_oh_buffer(AdapterAnw* a, OHNativeWindowBuffer* ohBuf) {
     if (!a || !ohBuf) return nullptr;
@@ -301,6 +328,14 @@ AdapterAnwBuffer* wrap_oh_buffer(AdapterAnw* a, OHNativeWindowBuffer* ohBuf) {
     // the magic + handle to round-trip.
     w->oh    = ohBuf;
     w->magic = kAdapterAnwBufMagic;
+#ifdef WESTLAKE_SOURCE_HWUI15
+    if (westlake_window_buffer_describe(ohBuf, &w->aosp) || OH_NativeWindow_NativeObjectReference(ohBuf)) {
+        delete w;
+        return nullptr;
+    }
+    w->aosp.common.incRef = buffer_inc;
+    w->aosp.common.decRef = buffer_dec;
+#endif
     a->bufCache[ohBuf] = w;
     return w;
 }
@@ -382,7 +417,11 @@ int aanw_dequeueBuffer(struct ANativeWindow* w,
         return -EIO;
     }
     AdapterAnwBuffer* wb = wrap_oh_buffer(a, ohBuf);
-    if (!wb) return -ENOMEM;
+    if (!wb) {
+        if (fence >= 0) close(fence);
+        OH_NativeWindow_NativeWindowAbortBuffer(a->oh, ohBuf);
+        return -ENOMEM;
+    }
     *outBuf = &wb->aosp;
     if (outFenceFd) *outFenceFd = fence;
     return 0;
@@ -475,7 +514,11 @@ int aanw_query(const struct ANativeWindow* w, int what, int* value) {
         case NATIVE_WINDOW_FORMAT: {
             int32_t fmt = 1; // R8G8B8A8 default
             OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_GET_FORMAT, &fmt);
+#ifdef WESTLAKE_SOURCE_HWUI15
+            *value = westlake_android_buffer_format(fmt);
+#else
             *value = fmt;
+#endif
             return 0;
         }
         case NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS:
@@ -523,6 +566,9 @@ int aanw_perform(struct ANativeWindow* w, int op, ...) {
         case NATIVE_WINDOW_SET_USAGE: {
             int usage = va_arg(ap, int);
             uint64_t u64 = (uint32_t) usage;
+#ifdef WESTLAKE_SOURCE_HWUI15
+            u64 = westlake_host_buffer_usage(u64);
+#endif
             rc = OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_SET_USAGE, u64);
             break;
         }
@@ -537,13 +583,25 @@ int aanw_perform(struct ANativeWindow* w, int op, ...) {
             }
             rc = OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_SET_BUFFER_GEOMETRY, width, height);
             if (rc == 0 && format > 0) {
-                OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_SET_FORMAT, format);
+                OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_SET_FORMAT,
+#ifdef WESTLAKE_SOURCE_HWUI15
+                        westlake_host_buffer_format(format)
+#else
+                        format
+#endif
+                        );
             }
             break;
         }
         case NATIVE_WINDOW_SET_BUFFERS_FORMAT: {
             int32_t format = va_arg(ap, int);
-            rc = OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_SET_FORMAT, format);
+            rc = OH_NativeWindow_NativeWindowHandleOpt(a->oh, OH_OP_SET_FORMAT,
+#ifdef WESTLAKE_SOURCE_HWUI15
+                        westlake_host_buffer_format(format)
+#else
+                        format
+#endif
+                        );
             break;
         }
         case NATIVE_WINDOW_SET_BUFFERS_TRANSFORM: {
@@ -642,10 +700,16 @@ extern "C" struct ANativeWindow* oh_anw_wrap(OHNativeWindow* oh) {
     // then placement-new the C++ metadata members and write the const fields
     // through const_cast. Memory layout matches a real AdapterAnw and
     // destructors run via oh_anw_destroy.
+#ifdef WESTLAKE_SOURCE_HWUI15
+    if (OH_NativeWindow_NativeObjectReference(oh)) return nullptr;
+    auto* a = new (std::nothrow) AdapterAnw();
+    if (!a) { OH_NativeWindow_NativeObjectUnreference(oh); return nullptr; }
+#else
     void* mem = std::calloc(1, sizeof(AdapterAnw));
     if (!mem) return nullptr;
     auto* a = reinterpret_cast<AdapterAnw*>(mem);
 
+#endif
     // Initialize AOSP face — common.magic/version/reserved/incRef/decRef
     a->aosp.common.magic   = ANDROID_NATIVE_WINDOW_MAGIC;
     a->aosp.common.version = sizeof(struct ANativeWindow);
@@ -661,10 +725,12 @@ extern "C" struct ANativeWindow* oh_anw_wrap(OHNativeWindow* oh) {
     // Slots 0/1/3 get individual LR-tracing probes (phase 1 of G2.14aj).
     // Phase 2 will swap them for real handlers once we know what AOSP
     // function each slot maps to.
+#ifndef WESTLAKE_SOURCE_HWUI15
     a->aosp.common.reserved[0] = (void*) &oh_anw_slot0_probe;
     a->aosp.common.reserved[1] = (void*) &oh_anw_slot1_probe;
     a->aosp.common.reserved[2] = (void*) &aanw_query;
     a->aosp.common.reserved[3] = (void*) &oh_anw_slot3_probe;
+#endif
     a->aosp.common.incRef = anw_base_incRef;
     a->aosp.common.decRef = anw_base_decRef;
 
@@ -691,9 +757,13 @@ extern "C" struct ANativeWindow* oh_anw_wrap(OHNativeWindow* oh) {
     // Adapter face — placement-new the C++ metadata members on the
     // calloc'd memory (their default ctors run; std::atomic gets value 0,
     // std::mutex gets unlocked, unordered_map gets empty).
+#ifdef WESTLAKE_SOURCE_HWUI15
+    a->refCount.store(1);
+#else
     new (&a->refCount) std::atomic<int32_t>(1);
     new (&a->bufCacheLock) std::mutex();
     new (&a->bufCache) std::unordered_map<OHNativeWindowBuffer*, AdapterAnwBuffer*>();
+#endif
     a->oh    = oh;
     a->magic = kAdapterAnwMagic;
 
@@ -715,16 +785,25 @@ extern "C" void oh_anw_destroy(struct ANativeWindow* aosp) {
     {
         std::lock_guard<std::mutex> lock(a->bufCacheLock);
         for (auto& kv : a->bufCache) {
+#ifdef WESTLAKE_SOURCE_HWUI15
+            buffer_dec(&kv.second->aosp.common);
+#else
             delete kv.second;
+#endif
         }
         a->bufCache.clear();
     }
     a->magic = 0;
+#ifdef WESTLAKE_SOURCE_HWUI15
+    OH_NativeWindow_NativeObjectUnreference(a->oh);
+    delete a;
+#else
     // Run dtors on placement-new'd metadata members, then free raw memory.
     a->bufCache.~unordered_map();
     a->bufCacheLock.~mutex();
     a->refCount.~atomic();
     std::free(a);
+#endif
 }
 
 extern "C" OHNativeWindow* oh_anw_get_oh(struct ANativeWindow* aosp) {
@@ -758,13 +837,19 @@ extern "C" OHNativeWindow* oh_anw_get_oh(struct ANativeWindow* aosp) {
 extern "C" int oh_anw_try_acquire(struct ANativeWindow* aosp) {
     auto* a = as_adapter(aosp);
     if (!a) return 0;
-    return 1;  // consumed — no refcount mutation (see comment above)
+#ifdef WESTLAKE_SOURCE_HWUI15
+    anw_base_incRef(&a->aosp.common);
+#endif
+    return 1;
 }
 
 extern "C" int oh_anw_try_release(struct ANativeWindow* aosp) {
     auto* a = as_adapter(aosp);
     if (!a) return 0;
-    return 1;  // consumed — no refcount mutation (see comment above)
+#ifdef WESTLAKE_SOURCE_HWUI15
+    anw_base_decRef(&a->aosp.common);
+#endif
+    return 1;
 }
 
 // ============================================================================
@@ -792,3 +877,10 @@ extern "C" unsigned int eglSwapBuffers(void* dpy, void* surface) {
     }
     return rc;
 }
+
+#ifdef WESTLAKE_SOURCE_HWUI15
+extern "C" void* oh_anw_buffer_get_oh(ANativeWindowBuffer* buffer) {
+    auto* b = as_adapter_buf(buffer);
+    return b ? b->oh : nullptr;
+}
+#endif

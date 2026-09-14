@@ -32,6 +32,7 @@
 #include <jni.h>
 #include <cstring>  // 2026-05-02 G2.14r: std::strncpy / std::strcpy in BBQ alloc
 #include <cstdio>   // WESTLAKE §441: stderr/fprintf were arriving only transitively
+#include <cstdlib>
 
 extern "C" int HiLogPrint(int type, int level, unsigned int domain,
                           const char* tag, const char* fmt, ...)
@@ -439,6 +440,9 @@ jlong BBQ_nativeCreate(JNIEnv* env, jclass, jstring jname, jboolean /*updateDest
     OhBlastBufferQueue* b = alloc_bbq(nameUtf);
     if (jname && nameUtf) env->ReleaseStringUTFChars(jname, nameUtf);
     ALOGI("BBQ.create name=%s ptr=%p", b->name, b);
+    if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {
+        std::fprintf(stderr, "[SOURCE-BLAST] create name=%s ptr=%p\n", b->name, b);
+    }
     return reinterpret_cast<jlong>(b);
 }
 
@@ -536,15 +540,18 @@ static int32_t oh_wm_get_last_session() {
     return g_oh_wm_get_last_session_fn ? g_oh_wm_get_last_session_fn() : 0;
 }
 
+// Keep this entry point byte-for-byte ABI-compatible with the pinned Android
+// 15 BLASTBufferQueue.java declaration. Width and height are long in that API
+// even though the OH native-window boundary ultimately stores 32-bit sizes.
 void BBQ_nativeUpdate(JNIEnv*, jclass, jlong bbqPtr, jlong scPtr,
-                      jint width, jint height, jint format, jlong /*timestamp*/) {
+                      jlong width, jlong height, jint format) {
     auto* b = as_bbq(bbqPtr);
     if (!b) {
         ALOGW("BBQ.update: invalid bbqPtr=%lld", (long long)bbqPtr);
         return;
     }
-    b->width = width;
-    b->height = height;
+    b->width = static_cast<int32_t>(width);
+    b->height = static_cast<int32_t>(height);
     b->format = format;
     int32_t sessionId = oh_sc_get_session(scPtr);
     if (sessionId == 0) {
@@ -564,6 +571,9 @@ void BBQ_nativeUpdate(JNIEnv*, jclass, jlong bbqPtr, jlong scPtr,
     if (sessionId == 0) {
         ALOGW("BBQ.update: no sessionId resolvable (no SC attach + no last hint); "
               "render will use empty Surface");
+        if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {
+            std::fprintf(stderr, "[SOURCE-BLAST] update failed: no session\n");
+        }
         return;
     }
     // Resolve sessionId → OHNativeWindow*.  Cached per-session in
@@ -571,11 +581,21 @@ void BBQ_nativeUpdate(JNIEnv*, jclass, jlong bbqPtr, jlong scPtr,
     void* nw = oh_wm_get_native_window(sessionId);
     if (!nw) {
         ALOGW("BBQ.update: getOhNativeWindow(sessionId=%d) returned null", sessionId);
+        if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {
+            std::fprintf(stderr, "[SOURCE-BLAST] update failed: session=%d has no window\n",
+                         sessionId);
+        }
         return;
     }
     b->ohNativeWindow = nw;
     ALOGI("BBQ.update: sessionId=%d → OHNativeWindow=%p (%dx%d fmt=%d)",
-          sessionId, nw, width, height, format);
+          sessionId, nw, static_cast<int>(width), static_cast<int>(height), format);
+    if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {
+        std::fprintf(stderr,
+                "[SOURCE-BLAST] update session=%d window=%p size=%lldx%lld format=%d\n",
+                sessionId, nw, static_cast<long long>(width),
+                static_cast<long long>(height), format);
+    }
 }
 
 // Forward declaration: AOSP exposes a JNI helper to construct a Java Surface
@@ -656,17 +676,48 @@ jobject BBQ_nativeGetSurface(JNIEnv* env, jclass, jlong bbqPtr,
     env->SetLongField(surface, mNativeObjectFid, reinterpret_cast<jlong>(b->ohNativeWindow));
     ALOGI("BBQ.getSurface: returning Surface with mNativeObject=%p (sessionId=%d)",
           b->ohNativeWindow, b->sessionId);
+    if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {
+        std::fprintf(stderr, "[SOURCE-BLAST] surface session=%d native=%p\n",
+                     b->sessionId, b->ohNativeWindow);
+    }
     env->DeleteLocalRef(surfaceCls);
     return surface;
 }
 
-void BBQ_nativeSetNextTransaction(JNIEnv*, jclass, jlong, jlong) { }
-void BBQ_nativeSetSyncTransaction(JNIEnv*, jclass, jlong, jlong, jboolean) { }
+// Android 15 exposes the sync callback API directly. The OH queue does not
+// have SurfaceFlinger's transaction-acquisition callback, so report that no
+// callback was armed. Callers retain their transaction and can submit it via
+// the ordinary SurfaceControl path.
+jboolean BBQ_nativeSyncNextTransaction(JNIEnv*, jclass, jlong, jobject, jboolean) {
+    return JNI_FALSE;
+}
+void BBQ_nativeStopContinuousSyncTransaction(JNIEnv*, jclass, jlong) { }
+void BBQ_nativeClearSyncTransaction(JNIEnv*, jclass, jlong) { }
 void BBQ_nativeMergeWithNextTransaction(JNIEnv*, jclass, jlong, jlong, jlong) { }
 jlong BBQ_nativeGetLastAcquiredFrameNum(JNIEnv*, jclass, jlong) { return 0; }
-void BBQ_nativeFlushShadowQueue(JNIEnv*, jclass, jlong) { }
 void BBQ_nativeApplyPendingTransactions(JNIEnv*, jclass, jlong, jlong) { }
-jlong BBQ_nativeGatherPendingTransactions(JNIEnv*, jclass, jlong, jlong) { return 0; }
+jobject BBQ_nativeGatherPendingTransactions(JNIEnv* env, jclass, jlong, jlong) {
+    // Match AOSP's ownership contract: return a live Transaction object whose
+    // native state is owned by that Java wrapper. There is no pending SF-side
+    // transaction to merge in the OH implementation.
+    jclass transaction = env->FindClass("android/view/SurfaceControl$Transaction");
+    if (!transaction || env->ExceptionCheck()) {
+        std::fprintf(stderr, "[SOURCE-BLAST] gather FindClass failed exception=%d\n",
+                     env->ExceptionCheck() ? 1 : 0);
+        return nullptr;
+    }
+    jmethodID ctor = env->GetMethodID(transaction, "<init>", "()V");
+    if (!ctor || env->ExceptionCheck()) {
+        std::fprintf(stderr, "[SOURCE-BLAST] gather constructor failed exception=%d\n",
+                     env->ExceptionCheck() ? 1 : 0);
+        env->DeleteLocalRef(transaction);
+        return nullptr;
+    }
+    jobject result = env->NewObject(transaction, ctor);
+    env->DeleteLocalRef(transaction);
+    return result;
+}
+void BBQ_nativeSetTransactionHangCallback(JNIEnv*, jclass, jlong, jobject) { }
 
 // 2026-05-20 R5: BBQ.isSameSurfaceControl — compare by sessionId, not by ptr.
 // AOSP uses SF IBinder handle for stable SC identity; OH has no SF so adapter
@@ -694,26 +745,29 @@ const JNINativeMethod kBlastBufferQueueMethods[] = {
       reinterpret_cast<void*>(BBQ_nativeDestroy) },
     { "nativeGetSurface", "(JZ)Landroid/view/Surface;",
       reinterpret_cast<void*>(BBQ_nativeGetSurface) },
-    { "nativeSetNextTransaction", "(JJ)V",
-      reinterpret_cast<void*>(BBQ_nativeSetNextTransaction) },
-    { "nativeUpdate", "(JJJIIIJ)V",
+    { "nativeSyncNextTransaction", "(JLjava/util/function/Consumer;Z)Z",
+      reinterpret_cast<void*>(BBQ_nativeSyncNextTransaction) },
+    { "nativeStopContinuousSyncTransaction", "(J)V",
+      reinterpret_cast<void*>(BBQ_nativeStopContinuousSyncTransaction) },
+    { "nativeClearSyncTransaction", "(J)V",
+      reinterpret_cast<void*>(BBQ_nativeClearSyncTransaction) },
+    { "nativeUpdate", "(JJJJI)V",
       reinterpret_cast<void*>(BBQ_nativeUpdate) },
-    { "nativeSetSyncTransaction", "(JJZ)V",
-      reinterpret_cast<void*>(BBQ_nativeSetSyncTransaction) },
     { "nativeMergeWithNextTransaction", "(JJJ)V",
       reinterpret_cast<void*>(BBQ_nativeMergeWithNextTransaction) },
     { "nativeGetLastAcquiredFrameNum", "(J)J",
       reinterpret_cast<void*>(BBQ_nativeGetLastAcquiredFrameNum) },
-    { "nativeFlushShadowQueue", "(J)V",
-      reinterpret_cast<void*>(BBQ_nativeFlushShadowQueue) },
     { "nativeApplyPendingTransactions", "(JJ)V",
       reinterpret_cast<void*>(BBQ_nativeApplyPendingTransactions) },
-    { "nativeGatherPendingTransactions", "(JJ)J",
+    { "nativeGatherPendingTransactions", "(JJ)Landroid/view/SurfaceControl$Transaction;",
       reinterpret_cast<void*>(BBQ_nativeGatherPendingTransactions) },
     // 2026-05-20 R5: register IsSameSurfaceControl so BBQ.isSameSurfaceControl
     // routes to adapter (compares by sessionId, not by ptr / SF binder handle).
     { "nativeIsSameSurfaceControl", "(JJ)Z",
       reinterpret_cast<void*>(BBQ_nativeIsSameSurfaceControl) },
+    { "nativeSetTransactionHangCallback",
+      "(JLandroid/graphics/BLASTBufferQueue$TransactionHangCallback;)V",
+      reinterpret_cast<void*>(BBQ_nativeSetTransactionHangCallback) },
 };
 
 // =====================================================================
@@ -811,6 +865,7 @@ int registerOne(JNIEnv* env, const char* className,
 // Public entry called by AndroidRuntime::startReg AFTER libhwui's
 // register_X loop, so our overrides win (last-wins JNI semantics).
 int register_android_graphics_compat_shim(JNIEnv* env) {
+#ifndef WESTLAKE_SOURCE_HWUI15
     registerOne(env, "android/graphics/ImageDecoder",
                 kImageDecoderMethods,
                 sizeof(kImageDecoderMethods) / sizeof(kImageDecoderMethods[0]));
@@ -823,6 +878,7 @@ int register_android_graphics_compat_shim(JNIEnv* env) {
     registerOne(env, "android/graphics/Typeface",
                 kTypefaceMethods,
                 sizeof(kTypefaceMethods) / sizeof(kTypefaceMethods[0]));
+#endif
     registerOne(env, "android/view/Surface",
                 kSurfaceMethods,
                 sizeof(kSurfaceMethods) / sizeof(kSurfaceMethods[0]));
@@ -919,6 +975,7 @@ static inline bool is_sentinel_handle(jlong h) {
     return (magic & 0xFFFFFFF0) == 0xCAFE5C00;
 }
 
+#ifndef WESTLAKE_SOURCE_HWUI15
 extern "C" ANativeWindow* ANativeWindow_fromSurface(JNIEnv* env, jobject surface) {
     fprintf(stderr, "[WESTLAKE-ANW] fromSurface ENTER\n"); fflush(stderr);
     NWFS_INFO("[STAGE0] ENTER env=%{public}p surface=%{public}p",
@@ -997,6 +1054,9 @@ extern "C" int32_t ANativeWindow_getFormat(ANativeWindow* w) {
     return format;
 }
 
+#endif
+
+#ifndef WESTLAKE_SOURCE_HWUI15
 // 2026-07-11: Typeface.nativeGetReleaseFunc via JNI AUTO-RESOLUTION (exported symbol).
 // The compat_shim's RegisterNatives for this didn't stick (libhwui's
 // register_android_graphics_Typeface re-registers Typeface after the shim, or FindClass
@@ -1172,3 +1232,5 @@ extern "C" void Java_libcore_io_Linux_setxattr(void* envv, void* /*thiz*/, void*
 
 // (PackageManagerAdapter JSON queries now live in package-manager/jni/apk_manifest_jni.cpp,
 // where the real manifest parser is available.)
+
+#endif

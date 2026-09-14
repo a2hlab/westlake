@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "sources": [
+    "android-source/frameworks-native/libs/binder/ndk/ibinder.cpp",
+    "android-source/frameworks-native/libs/binder/ndk/libbinder.cpp",
+    "android-source/frameworks-native/libs/binder/ndk/parcel.cpp",
+    "android-source/frameworks-native/libs/binder/ndk/stability.cpp",
+    "android-source/frameworks-native/libs/binder/ndk/status.cpp",
+    "android-source/frameworks-native/libs/binder/ndk/parcel_jni.cpp",
+    "android-source/frameworks-native/libs/binder/ndk/ibinder_jni.cpp",
+    "westlake/native/binder/oh_service_manager.cpp"
+  ],
+  "includes": [
+    "android-source/frameworks-native/libs/binder",
+    "android-source/frameworks-native/libs/binder/include",
+    "android-source/libbase/include",
+    "android-source/system-core/libutils/include",
+    "android-source/system-core/libutils/binder/include",
+    "android-source/system-core/libcutils/include",
+    "android-source/system-core/libsystem/include",
+    "android-source/logging/liblog/include",
+    "android-source/fmtlib/include",
+    "android-source/frameworks-native/libs/binder/ndk/include_ndk",
+    "android-source/frameworks-native/libs/binder/ndk/include_cpp",
+    "android-source/frameworks-native/libs/binder/ndk/include_platform",
+    "android-source/frameworks-native/libs/binder/ndk",
+    "android-source/frameworks-base/core/jni/include",
+    "android-source/libnativehelper/include_jni",
+    "android-source/system-core/libcutils/include/private",
+    "android-source/frameworks-native/libs/android_runtime_lazy/include",
+    "android-source/libnativehelper/include",
+    "android-source/libnativehelper/include_platform",
+    "android-source/libnativehelper/header_only_include",
+    "android-source/libnativehelper/include_platform_header_only",
+    "android-source/system-core/libvendorsupport/include_llndk"
+  ],
+  "defines": [
+    "__OHOS__",
+    "_GNU_SOURCE",
+    "_LIBCPP_PROMOTE_H",
+    "BINDER_ENABLE_LIBLOG_ASSERT",
+    "BINDER_RPC_DEV_SERVERS",
+    "__INTRODUCED_IN(x)=",
+    "__INTRODUCED_IN_32(x)=",
+    "__INTRODUCED_IN_64(x)=",
+    "__INTRODUCED_IN_FUTURE="
+  ],
+  "cpp_flags": [
+    "-std=gnu++20",
+    "-Wno-deprecated-declarations"
+  ],
+  "force_includes": [
+    "preserved/runtime-sources/local/libcxx_compat_arm64.h"
+  ],
+  "scope": "AOSP Binder NDK ownership and serialization with OH discovery through the Java framework service registry",
+  "source_replacements": {
+    "android-source/frameworks-native/libs/binder/ndk/ibinder.cpp": {
+      "mDeathRecipients.emplace_back(recipient, cookie);": "mDeathRecipients.push_back(DeathRecipientInfo{recipient, cookie});"
+    }
+  }
+}

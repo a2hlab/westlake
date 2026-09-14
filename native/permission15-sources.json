@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "scope": "OH process-token permission query JNI; device acceptance pending",
+  "sources": ["westlake/framework/package-manager/jni/oh_permission_queries.cpp"],
+  "includes": ["android-source/libnativehelper/include_jni"]
+}

@@ -22,11 +22,15 @@ def main():
     for name in ['workspace', 'bootstrap', 'host-base', 'out']:
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--jobs', type=int, default=8)
+    parser.add_argument('--catalog', action='store_true', help='Build the source Express metric catalog generator')
+    parser.add_argument('--sysprop-only', action='store_true', help='Build Java and C++ system property generators')
     args = parser.parse_args()
     workspace = args.workspace.resolve()
     output = args.out.absolute()
     if output.exists() or args.jobs < 1:
         parser.error('--out must be new and --jobs positive')
+    if args.catalog and args.sysprop_only:
+        parser.error('--catalog and --sysprop-only are mutually exclusive')
     sdk = workspace / 'toolchains/ohos-sdk/native/llvm'
     source = workspace / 'android-source'
     libraries = {}
@@ -76,8 +80,10 @@ def main():
 
     generated = output / 'generated'
     generated.mkdir()
-    protos = groups.files('libstats_proto_host')
-    protos.append(source / 'system-tools-sysprop/sysprop.proto')
+    protos = ([source / 'frameworks-proto-logging/stats/express/express_config.proto'] if args.catalog
+              else groups.files('libstats_proto_host') + [source / 'system-tools-sysprop/sysprop.proto'])
+    if args.sysprop_only:
+        protos = [source / 'system-tools-sysprop/sysprop.proto']
     pending = [virtual(p) for p in protos]
     consumed = set()
     while pending:
@@ -97,20 +103,35 @@ def main():
     run([libraries['protoc'], '-I' + str(view), '-I' + str(source / 'protobuf/src'),
          '--cpp_out=' + str(generated), *[str(view / virtual(p)) for p in protos]], output / 'protoc.log')
     generated_cpp = [generated / Path(virtual(p)).with_suffix('.pb.cc') for p in protos]
-    stats_cpp = groups.files('stats-log-api-gen')
-    sysprop_cpp = [source / 'system-tools-sysprop' / n for n in ['Common.cpp', 'CodeWriter.cpp', 'JavaGen.cpp', 'JavaMain.cpp']]
+    stats_cpp = [] if args.sysprop_only else groups.files('stats-log-api-gen')
+    sysprop_common = [source / 'system-tools-sysprop' / n for n in ['Common.cpp', 'CodeWriter.cpp']]
     property_root = source / 'system-core/property_service/libpropertyinfoserializer'
     # Common.cpp uses the upstream property-context type validator.
-    sysprop_cpp += groups.files('libpropertyinfoserializer') + groups.files('libpropertyinfoparser')
+    sysprop_common += groups.files('libpropertyinfoserializer') + groups.files('libpropertyinfoparser')
+    sysprop_java = sysprop_common + [source / 'system-tools-sysprop' / n for n in ['JavaGen.cpp', 'JavaMain.cpp']]
+    sysprop_native = sysprop_common + [source / 'system-tools-sysprop' / n for n in ['CppGen.cpp', 'CppMain.cpp']]
+    sysprop_cpp = sysprop_java + sysprop_native
+    if args.catalog:
+        stats_cpp = (groups.files('expresscatalog-codegen') + groups.files('libexpresscatalog') +
+                     groups.files('libtextclassifier_hash_defaults') + groups.files('gflags_defaults'))
+        sysprop_cpp = []
     flags = ['-O2', '-fPIC', '-std=gnu++20', '-D_GNU_SOURCE', '-DNDEBUG', '-DWITH_VENDOR',
              '-Werror=date-time', '-nostdinc++', '-isystem', str(sdk / 'include/c++/v1'),
              '-isystem', str(sdk / 'include/x86_64-unknown-linux-gnu/c++/v1'),
              '-ffile-prefix-map=' + str(workspace) + '=/src',
              '-ffile-prefix-map=' + str(output) + '=/build/framework-generators']
+    if args.catalog:
+        flags += ['-DNAMESPACE_FOR_HASH_FUNCTIONS=farmhash', '-D__STDC_FORMAT_MACROS',
+                  '-DHAVE_INTTYPES_H', '-DHAVE_SYS_STAT_H', '-DHAVE_PTHREAD']
     includes = [generated, source / 'protobuf/src', source / 'libbase/include',
                 source / 'logging/liblog/include', source / 'fmtlib/include', source / 'system-tools-sysprop/include',
                 generated / 'system/tools/sysprop', property_root / 'include',
                 source / 'system-core/property_service/libpropertyinfoparser/include']
+    if args.catalog:
+        express = source / 'frameworks-proto-logging/stats/express'
+        includes += [express / 'libexpresscatalog/include', express / 'libexpresscatalog-utils/include',
+                     generated / 'frameworks/proto_logging/stats/express', source / 'external-gflags/android',
+                     source / 'external-libtextclassifier/native']
     flags += ['-I' + str(p) for p in includes]
     directory = output / 'objects'
     directory.mkdir()
@@ -133,8 +154,13 @@ def main():
                 raise ValueError('Undeclared compiler project header: ' + value)
             record['headers'][str(header.relative_to(workspace))] = sha(header)
     (output / 'bin').mkdir()
-    for name, selected in [('stats-log-api-gen', generated_cpp[:-1] + stats_cpp),
-                           ('sysprop_java', generated_cpp[-1:] + sysprop_cpp)]:
+    targets = ([('expresscatalog-codegen', generated_cpp + stats_cpp)] if args.catalog else
+               [('stats-log-api-gen', generated_cpp[:-1] + stats_cpp),
+                ('sysprop_java', generated_cpp[-1:] + sysprop_java),
+                ('sysprop_cpp', generated_cpp[-1:] + sysprop_native)])
+    if args.sysprop_only:
+        targets = [target for target in targets if target[0].startswith('sysprop_')]
+    for name, selected in targets:
         path = output / 'bin' / name
         command = [sdk / 'bin/clang++', '-fuse-ld=lld', '-nostdlib++', '-Wl,-z,defs', '-Wl,--build-id=sha1',
                    *[object_map[p] for p in selected], libraries['libprotoc.a'], libraries['libprotobuf.a'],

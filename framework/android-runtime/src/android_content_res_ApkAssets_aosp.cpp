@@ -1,4 +1,3 @@
-#include <cstdio>  // WESTLAKE: stderr diagnostics (aosp ALOG is dropped on OHOS)
 /*
  * Copyright (C) 2017 The Android Open Source Project
  *
@@ -17,9 +16,9 @@
 
 #define ATRACE_TAG ATRACE_TAG_RESOURCES
 
-#include <string>
-#include <unistd.h>
 #include <mutex>
+#include <cstdlib>
+#include <string>
 
 #include "signal.h"
 
@@ -77,36 +76,37 @@ enum : format_type_t {
   FORMAT_DIRECTORY = 3,
 };
 
-Guarded<std::unique_ptr<const ApkAssets>>& ApkAssetsFromLong(jlong ptr) {
-    return *reinterpret_cast<Guarded<std::unique_ptr<const ApkAssets>>*>(ptr);
+Guarded<AssetManager2::ApkAssetsPtr>& ApkAssetsFromLong(jlong ptr) {
+  return *reinterpret_cast<Guarded<AssetManager2::ApkAssetsPtr>*>(ptr);
 }
 
-static jlong CreateGuardedApkAssets(std::unique_ptr<const ApkAssets> assets) {
-    auto guarded_assets = new Guarded<std::unique_ptr<const ApkAssets>>(std::move(assets));
-    return reinterpret_cast<jlong>(guarded_assets);
+static jlong CreateGuardedApkAssets(AssetManager2::ApkAssetsPtr assets) {
+  auto guarded_assets = new Guarded<AssetManager2::ApkAssetsPtr>(std::move(assets));
+  return reinterpret_cast<jlong>(guarded_assets);
 }
 
-// §501: `delete &apk_assets` destroys the Guarded wrapper, whose unique_ptr then DELETES the
-// ApkAssets directly. On this board ApkAssets derives from RefBase, and deleting a RefBase object
-// outside sp<>/decStrong trips its own assertion:
-//     RefBase: object 0x... with strong count 1 deleted. Double owned?
-//     -> __android_log_assert -> abort()
-// It fires on the FinalizerDaemon whenever GC collects an ApkAssets, which is why the app was dying
-// at seemingly random points several minutes in, with no crash marker in the child log and no
-// "Runtime aborting" — the abort happens in libutils, below ART. Faultlog frames:
-//     FinalizerDaemon: NativeDestroy -> ApkAssets::~ApkAssets -> RefBase::~RefBase -> abort
-//
-// Release the pointer instead of deleting it. There are only a handful of ApkAssets in a process
-// (framework-res, the app apk, overlays) and they live as long as the process anyway, so leaking
-// them is harmless; aborting the process is not. ★Do NOT "fix" this by calling decStrong either:
-// the object was never incStrong'd here, so that would just move the assert.
-static void DeleteGuardedApkAssets(Guarded<std::unique_ptr<const ApkAssets>>& apk_assets) {
-    {
-        auto scoped = ScopedLock(apk_assets);
-        // hand ownership away without running ~ApkAssets
-        (void)const_cast<std::unique_ptr<const ApkAssets>&>(*scoped).release();
+static void DeleteGuardedApkAssets(Guarded<AssetManager2::ApkAssetsPtr>& apk_assets) {
+  apk_assets.safeDelete([&apk_assets](AssetManager2::ApkAssetsPtr* assets) {
+    if (!assets) {
+      ALOGW("ApkAssets: Double delete of native assets object %p, ignored", &apk_assets);
+    } else if (!*assets) {
+      ALOGW("ApkAssets: Empty native assets pointer in native assets object %p", &apk_assets);
+    } else {
+      // |RefBase| increments |StrongCount| for each |sp<>| instance, and |WeakCount| for
+      // both |sp<>| and |wp<>| instances. This means the actual |wp<>| instance count
+      // is |WeakCount - StrongCount|.
+      const auto useCount = (*assets)->getStrongCount();
+      const auto weakCount = (*assets)->getWeakRefs()->getWeakCount() - useCount;
+      if (useCount > 1) {
+        ALOGW("ApkAssets: Deleting an object '%s' with %d > 1 strong and %d weak references",
+              (*assets)->GetDebugName().c_str(), int(useCount), int(weakCount));
+      } else if (weakCount > 0) {
+        ALOGW("ApkAssets: Deleting an ApkAssets object '%s' with %d weak references",
+              (*assets)->GetDebugName().c_str(), int(weakCount));
+      }
     }
-    delete &apk_assets;
+  });
+  delete &apk_assets;
 }
 
 class LoaderAssetsProvider : public AssetsProvider {
@@ -228,59 +228,37 @@ static jlong NativeLoad(JNIEnv* env, jclass /*clazz*/, const format_type_t forma
     return 0;
   }
 
-  // WESTLAKE (2026-07-11): the appspawn-x child runs in a mount-namespace sandbox
-  // (tmpfs /sandbox/system) that does NOT expose /system/framework, so the stock
-  // system-AssetManager load of /system/framework/framework-res.apk fails →
-  // "Failed to create system AssetManager" kills ActivityThread. Redirect that one
-  // path to the sandbox-visible copy under /data/local/tmp/asx (children provably read
-  // their own APKs from there). Only redirects if the sandbox copy is readable.
-  std::string effPath = path.c_str();
-  // 2026-07-11: redirect ANY framework-res.apk load (the preseed uses
-  // /system/android/framework/framework-res.apk, getSystem uses
-  // /system/framework/framework-res.apk — both hidden in the child sandbox).
-  // 2026-07-23 (§293c): the runtime now also runs INSIDE an OH ability process (not just the
-  // appspawn-x child). There /data/local/tmp is not mounted at all, so the old single-candidate
-  // redirect silently did nothing and the load fell through to the stock path →
-  // "Failed to create system AssetManager" → initChild aborts. Try the app-sandbox copy first,
-  // then the appspawn-x staging dir; pick whichever is actually readable.
-  if (effPath.find("framework-res.apk") != std::string::npos) {
-    static const char* kFrCandidates[] = {
-      "/data/storage/el1/base/asx/framework-res.apk",  // ability process (app sandbox)
-      "/data/local/tmp/asx/framework-res.apk",         // appspawn-x child
-    };
-    for (const char* cand : kFrCandidates) {
-      if (effPath != cand && ::access(cand, R_OK) == 0) {
-        fprintf(stderr, "[WESTLAKE] redirect framework-res load -> %s\n", cand);
-        fflush(stderr);
-        effPath = cand;
-        break;
-      }
-    }
+  // The host sandbox may not expose Android's logical framework path.
+  // Require an explicit staging path; never select an unrelated runtime copy.
+  std::string effective_path = path.c_str();
+  if (effective_path == "/system/framework/framework-res.apk" ||
+      effective_path == "/system/android/framework/framework-res.apk") {
+    const char* staged = std::getenv("WESTLAKE_FRAMEWORK_RES_PATH");
+    if (staged && *staged) effective_path = staged;
   }
-
-  ATRACE_NAME(base::StringPrintf("LoadApkAssets(%s)", effPath.c_str()).c_str());
+  ATRACE_NAME(base::StringPrintf("LoadApkAssets(%s)", effective_path.c_str()).c_str());
 
   auto loader_assets = LoaderAssetsProvider::Create(env, assets_provider);
-  std::unique_ptr<ApkAssets> apk_assets;
+  AssetManager2::ApkAssetsPtr apk_assets;
   switch (format) {
     case FORMAT_APK: {
         auto assets = MultiAssetsProvider::Create(std::move(loader_assets),
-                                                  ZipAssetsProvider::Create(effPath.c_str(),
+                                                  ZipAssetsProvider::Create(effective_path.c_str(),
                                                                             property_flags));
         apk_assets = ApkAssets::Load(std::move(assets), property_flags);
         break;
     }
     case FORMAT_IDMAP:
-      apk_assets = ApkAssets::LoadOverlay(path.c_str(), property_flags);
+      apk_assets = ApkAssets::LoadOverlay(effective_path.c_str(), property_flags);
       break;
     case FORMAT_ARSC:
-      apk_assets = ApkAssets::LoadTable(AssetsProvider::CreateAssetFromFile(path.c_str()),
+      apk_assets = ApkAssets::LoadTable(AssetsProvider::CreateAssetFromFile(effective_path.c_str()),
                                         std::move(loader_assets),
                                         property_flags);
       break;
     case FORMAT_DIRECTORY: {
       auto assets = MultiAssetsProvider::Create(std::move(loader_assets),
-                                                DirectoryAssetsProvider::Create(path.c_str()));
+                                                DirectoryAssetsProvider::Create(effective_path.c_str()));
       apk_assets = ApkAssets::Load(std::move(assets), property_flags);
       break;
     }
@@ -291,7 +269,7 @@ static jlong NativeLoad(JNIEnv* env, jclass /*clazz*/, const format_type_t forma
   }
 
   if (apk_assets == nullptr) {
-    const std::string error_msg = base::StringPrintf("Failed to load asset path %s", path.c_str());
+    const std::string error_msg = base::StringPrintf("Failed to load asset path %s", effective_path.c_str());
     jniThrowException(env, "java/io/IOException", error_msg.c_str());
     return 0;
   }
@@ -321,7 +299,7 @@ static jlong NativeLoadFromFd(JNIEnv* env, jclass /*clazz*/, const format_type_t
   }
 
   auto loader_assets = LoaderAssetsProvider::Create(env, assets_provider);
-  std::unique_ptr<const ApkAssets> apk_assets;
+  AssetManager2::ApkAssetsPtr apk_assets;
   switch (format) {
     case FORMAT_APK: {
         auto assets =
@@ -388,7 +366,7 @@ static jlong NativeLoadFromFdOffset(JNIEnv* env, jclass /*clazz*/, const format_
   }
 
   auto loader_assets = LoaderAssetsProvider::Create(env, assets_provider);
-  std::unique_ptr<const ApkAssets> apk_assets;
+  AssetManager2::ApkAssetsPtr apk_assets;
   switch (format) {
     case FORMAT_APK: {
         auto assets =
@@ -426,11 +404,17 @@ static jlong NativeLoadFromFdOffset(JNIEnv* env, jclass /*clazz*/, const format_
 
 static jlong NativeLoadEmpty(JNIEnv* env, jclass /*clazz*/, jint flags, jobject assets_provider) {
   auto apk_assets = ApkAssets::Load(LoaderAssetsProvider::Create(env, assets_provider), flags);
+  if (apk_assets == nullptr) {
+    const std::string error_msg =
+        base::StringPrintf("Failed to load empty assets with provider %p", (void*)assets_provider);
+    jniThrowException(env, "java/io/IOException", error_msg.c_str());
+    return 0;
+  }
   return CreateGuardedApkAssets(std::move(apk_assets));
 }
 
 static void NativeDestroy(JNIEnv* /*env*/, jclass /*clazz*/, jlong ptr) {
-    DeleteGuardedApkAssets(ApkAssetsFromLong(ptr));
+  DeleteGuardedApkAssets(ApkAssetsFromLong(ptr));
 }
 
 static jstring NativeGetAssetPath(JNIEnv* env, jclass /*clazz*/, jlong ptr) {
@@ -475,22 +459,9 @@ static jlong NativeOpenXml(JNIEnv* env, jclass /*clazz*/, jlong ptr, jstring fil
     return 0;
   }
 
-  // WESTLAKE (arm64 board, 2026-07-21): see the matching comment in
-  // android_util_AssetManager_aosp.cpp NativeOpenXmlAsset — getIncFsBuffer() is only usable
-  // for STORED entries; DEFLATED res/*.xml needs the decompressing getBuffer() path or the
-  // parser sees an empty document ("No start tag found").
-  const void* data = nullptr;
-  size_t length = asset->getLength();
   const auto buffer = asset->getIncFsBuffer(true /* aligned */);
-  if (buffer && length > 0 && buffer.convert<uint8_t>().verify(length)) {
-    data = buffer.unsafe_ptr();
-  } else {
-    data = asset->getBuffer(true /* wordAligned */);
-    length = asset->getLength();
-  }
-  fprintf(stderr, "[WESTLAKE-XML] ApkAssets::NativeOpenXml(%s): data=%p len=%zu\n",
-          path_utf8.c_str(), data, length); fflush(stderr);
-  if (data == nullptr || length == 0) {
+  const size_t length = asset->getLength();
+  if (!buffer.convert<uint8_t>().verify(length)) {
       jniThrowException(env, "java/io/FileNotFoundException",
                         "File not fully present due to incremental installation");
       return 0;
@@ -499,7 +470,7 @@ static jlong NativeOpenXml(JNIEnv* env, jclass /*clazz*/, jlong ptr, jstring fil
   // DynamicRefTable is only needed when looking up resource references. Opening an XML file
   // directly from an ApkAssets has no notion of proper resource references.
   auto xml_tree = util::make_unique<ResXMLTree>(nullptr /*dynamicRefTable*/);
-  status_t err = xml_tree->setTo(data, length, true);
+  status_t err = xml_tree->setTo(buffer.unsafe_ptr(), length, true);
   if (err != NO_ERROR) {
     jniThrowException(env, "java/io/FileNotFoundException", "Corrupt XML binary file");
     return 0;

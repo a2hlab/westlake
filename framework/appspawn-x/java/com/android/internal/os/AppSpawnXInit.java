@@ -225,7 +225,9 @@ public class AppSpawnXInit {
         // in BCP) + CertPathProvider (pure-Java in core-oj.jar).  This must
         // run before preloadClasses (which triggers many <clinit> chains)
         // and is replicated to child via fork-COW of the Class state.
-        overrideJcaProvidersForOH();
+        if (!Boolean.getBoolean("westlake.source.runtime")) {
+            overrideJcaProvidersForOH();
+        }
 
         // 2026-04-30 方向 3 真补救：populate ICUBinary.icuDataFiles at runtime.
         // ICUBinary.<clinit> reads ANDROID_I18N_ROOT/ANDROID_TZDATA_ROOT env
@@ -235,7 +237,9 @@ public class AppSpawnXInit {
         // Runtime won't re-run <clinit> (image-class pre-init flag), so no ICU
         // .res lookup ever finds icudt72l.dat. We reflect-add the data files
         // at runtime so subsequent UResourceBundle / Typeface chains work.
-        ensureICUDataLoaded();
+        if (!Boolean.getBoolean("westlake.source.runtime")) {
+            ensureICUDataLoaded();
+        }
 
         // Pre-init AssetManager.sSystem with a sentinel instance so
         // AssetManager.getSystem() / createSystemAssetsInZygoteLocked early-
@@ -245,8 +249,12 @@ public class AppSpawnXInit {
         // (apparent core-icu4j.jar dex inconsistency: NullValue inner
         // ctor reported inaccessible to its outer class).  Bypassing the
         // whole getSystem() machinery is more surgical than fixing ICU.
-        preInitAssetManagerSystem();
-        preInitTypefaceDefault();
+        if (!Boolean.getBoolean("westlake.source.runtime")) {
+            preInitAssetManagerSystem();
+        }
+        if (!Boolean.getBoolean("westlake.source.runtime")) {
+            preInitTypefaceDefault();
+        }
 
         // [FIX-AII 2026-05-24] PARENT-SIDE Resources warmup. Force-resolve
         // android.content.res.Resources.<clinit> and instantiate sSystem in
@@ -261,6 +269,9 @@ public class AppSpawnXInit {
                             + (r.getConfiguration() != null)));
         } catch (Throwable t) {
             android.util.Log.w(TAG, "[FIX-AII] PARENT Resources.getSystem() threw: " + t);
+            if (Boolean.getBoolean("westlake.source.runtime")) {
+                throw new IllegalStateException("Source system resources initialization failed", t);
+            }
         }
 
         try {
@@ -306,6 +317,9 @@ public class AppSpawnXInit {
             // last-resort safety net. See feedback_java_blocker_patch_skip.md
             // and doc/liboh_android_runtime_design.html §8 (Java 待补齐点).
             Log.e(TAG, "Preload failed (non-fatal)", e);
+            if (Boolean.getBoolean("westlake.source.runtime")) {
+                throw new IllegalStateException("Source framework preload failed", e);
+            }
         }
 
         long elapsed = System.currentTimeMillis() - startTime;

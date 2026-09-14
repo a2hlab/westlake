@@ -60,7 +60,6 @@ import android.view.MagnificationSpec;
 import android.view.MotionEvent;
 import android.view.RemoteAnimationAdapter;
 import android.view.SurfaceControl;
-import android.view.TaskTransitionSpec;
 import android.view.WindowContentFrameStats;
 import android.view.WindowManager;
 import android.view.displayhash.DisplayHash;
@@ -107,6 +106,7 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     public WindowManagerAdapter() {
+        super(adapter.packagemanager.OHPermissionEnforcer.getInstance());
         mOhWindowManager = nativeGetOHWindowManagerService();
         Log.i(TAG, "WindowManagerAdapter created, ohWM handle=0x"
                 + Long.toHexString(mOhWindowManager));
@@ -154,12 +154,11 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     @Override
     public IWindowSession openSession(IWindowSessionCallback callback) throws RemoteException {
         logBridged("openSession", "-> OH ISceneSessionManager.CreateAndConnectSpecificSession");
-        // TODO: Return a bridged IWindowSession instance wrapping OH session
-        return null;
+        return new WindowSessionAdapter();
     }
 
     /** [STUB] useBLAST - always returns true */
-    @Override
+
     public boolean useBLAST() throws RemoteException {
         return true;
     }
@@ -541,13 +540,13 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     /** [BRIDGED] freezeRotation -> OH DisplayManager.FreezeRotation */
-    @Override
+
     public void freezeRotation(int rotation) throws RemoteException {
         logBridged("freezeRotation", "-> OH DisplayManager.FreezeRotation");
     }
 
     /** [BRIDGED] thawRotation -> OH DisplayManager.ThawRotation */
-    @Override
+
     public void thawRotation() throws RemoteException {
         logBridged("thawRotation", "-> OH DisplayManager.ThawRotation");
     }
@@ -560,13 +559,13 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     /** [BRIDGED] freezeDisplayRotation -> OH DisplayManager.FreezeRotation */
-    @Override
+
     public void freezeDisplayRotation(int displayId, int rotation) throws RemoteException {
         logBridged("freezeDisplayRotation", "-> OH DisplayManager.FreezeRotation");
     }
 
     /** [BRIDGED] thawDisplayRotation -> OH DisplayManager.ThawRotation */
-    @Override
+
     public void thawDisplayRotation(int displayId) throws RemoteException {
         logBridged("thawDisplayRotation", "-> OH DisplayManager.ThawRotation");
     }
@@ -788,7 +787,7 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     /** [BRIDGED] destroyInputConsumer -> OH input management */
-    @Override
+
     public boolean destroyInputConsumer(String name, int displayId) throws RemoteException {
         logBridged("destroyInputConsumer", "-> OH input management");
         return false;
@@ -1116,7 +1115,7 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     // ====================================================================
 
     /** [STUB] attachWindowContextToDisplayArea - OH window context not mapped */
-    @Override
+
     public Configuration attachWindowContextToDisplayArea(IBinder clientToken, int type,
             int displayId, Bundle options) throws RemoteException {
         logStub("attachWindowContextToDisplayArea", "OH window context not mapped");
@@ -1124,14 +1123,14 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     /** [STUB] attachWindowContextToWindowToken - OH window context not mapped */
-    @Override
+
     public void attachWindowContextToWindowToken(IBinder clientToken, IBinder token)
             throws RemoteException {
         logStub("attachWindowContextToWindowToken", "OH window context not mapped");
     }
 
     /** [STUB] attachToDisplayContent - OH window context not mapped */
-    @Override
+
     public Configuration attachToDisplayContent(IBinder clientToken, int displayId)
             throws RemoteException {
         logStub("attachToDisplayContent", "OH window context not mapped");
@@ -1139,7 +1138,7 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     /** [STUB] detachWindowContextFromWindowContainer - OH window context not mapped */
-    @Override
+
     public void detachWindowContextFromWindowContainer(IBinder clientToken)
             throws RemoteException {
         logStub("detachWindowContextFromWindowContainer", "OH window context not mapped");
@@ -1188,13 +1187,10 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     }
 
     /** [STUB] setTaskTransitionSpec - No OH equivalent */
-    @Override
-    public void setTaskTransitionSpec(TaskTransitionSpec spec) throws RemoteException {
-        logStub("setTaskTransitionSpec", "No OH equivalent");
-    }
+
 
     /** [STUB] clearTaskTransitionSpec - No OH equivalent */
-    @Override
+
     public void clearTaskTransitionSpec() throws RemoteException {
         logStub("clearTaskTransitionSpec", "No OH equivalent");
     }
@@ -1294,5 +1290,106 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
     public List<ComponentName> notifyScreenshotListeners(int displayId) throws RemoteException {
         logBridged("notifyScreenshotListeners", "-> OH screenshot listeners");
         return Collections.emptyList();
+    }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public void freezeRotation(int rotation, java.lang.String caller) throws android.os.RemoteException {
+        freezeRotation(rotation);
+    }
+
+    @Override
+    public void thawRotation(java.lang.String caller) throws android.os.RemoteException {
+        thawRotation();
+    }
+
+    @Override
+    public void freezeDisplayRotation(int displayId, int rotation, java.lang.String caller) throws android.os.RemoteException {
+        freezeDisplayRotation(displayId, rotation);
+    }
+
+    @Override
+    public void thawDisplayRotation(int displayId, java.lang.String caller) throws android.os.RemoteException {
+        thawDisplayRotation(displayId);
+    }
+
+    @Override
+    public int getDisplayUserRotation(int displayId) throws android.os.RemoteException {
+        return getDefaultDisplayRotation();
+    }
+
+    @Override
+    public boolean destroyInputConsumer(android.os.IBinder token, int displayId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony input consumer token teardown is not connected");
+    }
+
+    @Override
+    public android.window.WindowContextInfo attachWindowContextToDisplayArea(android.app.IApplicationThread appThread, android.os.IBinder clientToken, int type, int displayId, android.os.Bundle options) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony window context attachment is not connected");
+    }
+
+    @Override
+    public android.window.WindowContextInfo attachWindowContextToWindowToken(android.app.IApplicationThread appThread, android.os.IBinder clientToken, android.os.IBinder token) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony window context attachment is not connected");
+    }
+
+    @Override
+    public android.window.WindowContextInfo attachWindowContextToDisplayContent(android.app.IApplicationThread appThread, android.os.IBinder clientToken, int displayId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony window context attachment is not connected");
+    }
+
+    @Override
+    public void detachWindowContext(android.os.IBinder clientToken) throws android.os.RemoteException {
+        detachWindowContextFromWindowContainer(clientToken);
+    }
+
+    @Override
+    public void requestImeKeyboardShortcuts(com.android.internal.os.IResultReceiver receiver, int deviceId) throws android.os.RemoteException {
+        if (receiver != null) receiver.send(0, Bundle.EMPTY);
+    }
+
+    @Override
+    public boolean replaceContentOnDisplay(int displayId, android.view.SurfaceControl sc) throws android.os.RemoteException {
+        return false;
+    }
+
+    @Override
+    public void registerDecorViewGestureListener(android.view.IDecorViewGestureListener listener, int displayId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony decor gesture subscription is not connected");
+    }
+
+    @Override
+    public void unregisterDecorViewGestureListener(android.view.IDecorViewGestureListener listener, int displayId) throws android.os.RemoteException {
+        logStub("unregisterDecorViewGestureListener", "no OH subscription");
+    }
+
+    @Override
+    public void registerTrustedPresentationListener(android.os.IBinder window, android.window.ITrustedPresentationListener listener, android.window.TrustedPresentationThresholds thresholds, int id) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony trusted presentation subscription is not connected");
+    }
+
+    @Override
+    public void unregisterTrustedPresentationListener(android.window.ITrustedPresentationListener listener, int id) throws android.os.RemoteException {
+        logStub("unregisterTrustedPresentationListener", "no OH subscription");
+    }
+
+    @Override
+    public boolean registerScreenRecordingCallback(android.window.IScreenRecordingCallback callback) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony screen recording subscription is not connected");
+    }
+
+    @Override
+    public void unregisterScreenRecordingCallback(android.window.IScreenRecordingCallback callback) throws android.os.RemoteException {
+        logStub("unregisterScreenRecordingCallback", "no OH subscription");
+    }
+
+    @Override
+    public void setGlobalDragListener(android.window.IGlobalDragListener listener) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony global drag subscription is not connected");
+    }
+
+    @Override
+    public boolean transferTouchGesture(android.window.InputTransferToken transferFromToken, android.window.InputTransferToken transferToToken) throws android.os.RemoteException {
+        return false;
     }
 }

@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ['workspace', 'aidl-build', 'native-tools', 'schema-tools', 'out']:
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--catalog-build', type=Path)
     args = parser.parse_args()
     workspace, output = args.workspace.resolve(), args.out.absolute()
     if output.exists():
@@ -32,7 +33,10 @@ def main():
     record = {'inputs': {}, 'commands': [], 'artifacts': {}, 'modules': {}, 'full_framework_accepted': False,
               'aidl_report_sha256': sha(args.aidl_build / 'artifacts.json')}
     tools = {}
-    for directory in [args.native_tools.resolve(), args.schema_tools.resolve()]:
+    directories = [args.native_tools.resolve(), args.schema_tools.resolve()]
+    if args.catalog_build:
+        directories.append(args.catalog_build.resolve())
+    for directory in directories:
         report = json.loads((directory / 'artifacts.json').read_text())
         for name, entry in report['artifacts'].items():
             path = directory / entry.get('path', name)
@@ -78,14 +82,20 @@ def main():
         module = groups.module(name)
         fields = module['fields']
         kind = module['kind']
-        if kind in {'genrule', 'java_genrule'} and 'stats-log-api-gen' in fields.get('tools', []):
+        generator = next((n for n in ['stats-log-api-gen', 'expresscatalog-codegen']
+                          if n in fields.get('tools', []) and n in tools), None)
+        if kind in {'genrule', 'java_genrule'} and generator:
             destination = output / name
             destination.mkdir()
             (destination / fields['out'][0]).parent.mkdir(parents=True, exist_ok=True)
             text = evaluate(fields['cmd'], module['environment'])
-            text = text.replace('$(location stats-log-api-gen)', str(tools['stats-log-api-gen']))
+            text = text.replace('$(location ' + generator + ')', str(tools[generator]))
             text = text.replace('$(out)', str(destination / fields['out'][0])).replace('$(genDir)', str(destination))
             command = shlex.split(text)
+            if generator == 'expresscatalog-codegen':
+                command += ['--configDir', str(root / 'frameworks-proto-logging/stats/express/catalog')]
+                for path in groups.files(name):
+                    record['inputs'][str(path)] = sha(path)
             if any(token in {'&&', ';', '|', '||'} or '$(' in token for token in command):
                 raise ValueError('Unsupported stats generator command: ' + name)
             run(command, name)

@@ -35,7 +35,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
-#include <linux/if_packet.h>
+#include <netpacket/packet.h>
 #include <net/if.h>
 #include "oh_network_interfaces.h"
 #include <sys/statvfs.h>
@@ -65,7 +65,19 @@
 extern "C" int register_MediaCodec_shim(JNIEnv* env);
 extern "C" int register_android_functions(JNIEnv* env);
 
+#ifdef WESTLAKE_AOSP_BINDER_JNI
+// AOSP's Binder registration entry is global; the Westlake dispatch table
+// historically used a namespaced entry.
+extern int register_android_os_Binder(JNIEnv* env);
+#endif
+
 namespace android {
+
+#ifdef WESTLAKE_AOSP_BINDER_JNI
+int register_android_os_Binder(JNIEnv* env) {
+    return ::register_android_os_Binder(env);
+}
+#endif
 
 // Cached JavaVM so ApkAssets.cpp's AndroidRuntime::getJNIEnv() works.
 static JavaVM* g_vm = nullptr;
@@ -150,6 +162,14 @@ extern int register_android_view_MotionEvent(JNIEnv* env);
 // WESTLAKE §700: stock android.graphics.SurfaceTexture Java lifecycle backed by an
 // OHOS in-process consumer/producer surface pair at the native boundary.
 extern int register_android_graphics_SurfaceTexture_oh(JNIEnv* env);
+#ifdef WESTLAKE_SOURCE_HWUI15
+extern int register_android_hardware_HardwareBuffer(JNIEnv* env);
+#if WESTLAKE_ANDROID_API >= 35
+extern int register_android_hardware_OverlayProperties(JNIEnv* env);
+#endif
+extern int register_android_os_SharedMemory(JNIEnv* env);
+extern int register_westlake_linux_memory(JNIEnv* env);
+#endif
 // WESTLAKE §702: TextureView retains the OH producer endpoint exposed by the
 // SurfaceTexture boundary; the Android Java and HWUI lifecycle remain stock.
 extern int register_android_view_TextureView_oh(JNIEnv* env);
@@ -179,6 +199,7 @@ struct RegJNIRec {
 extern int register_android_database_SQLiteConnection(JNIEnv* env);
 extern int register_android_database_CursorWindow(JNIEnv* env);
 extern int register_westlake_class_library_services(JNIEnv* env);
+extern int register_android_os_incremental_IncrementalManager(JNIEnv* env);
 static const RegJNIRec kRegJNI[] = {
     { "register_android_util_Log",            register_android_util_Log },
     // §504 (2026-08-04): libcore.io.Memory ships in libjavacore.so upstream,
@@ -189,11 +210,16 @@ static const RegJNIRec kRegJNI[] = {
     { "register_libcore_io_Memory",           register_libcore_io_Memory },
     { "register_westlake_class_library_services",
       register_westlake_class_library_services },
+#ifdef WESTLAKE_SOURCE_HWUI15
+    { "register_westlake_linux_memory", register_westlake_linux_memory },
+#endif
     { "register_android_util_EventLog",       register_android_util_EventLog },
     { "register_android_app_Activity",        register_android_app_Activity },
     { "register_android_os_SystemProperties", register_android_os_SystemProperties },
     { "register_android_os_Trace",            register_android_os_Trace },
     { "register_android_os_Process",          register_android_os_Process },
+    { "register_android_os_incremental_IncrementalManager",
+                                              register_android_os_incremental_IncrementalManager },
     { "register_android_os_SystemClock",      register_android_os_SystemClock },
     { "register_android_os_Binder",           register_android_os_Binder },
     // 2026-05-07 G2.14u: AOSP-ported android_os_Parcel.cpp providing
@@ -203,14 +229,23 @@ static const RegJNIRec kRegJNI[] = {
     // .relayout → SurfaceControl.<init> → Parcel.obtain → Parcel.<init>
     // → Parcel.nativeCreate UnsatisfiedLinkError before this entry.
     { "register_android_os_Parcel",           register_android_os_Parcel },
+#ifdef WESTLAKE_SOURCE_HWUI15
+    { "register_android_hardware_HardwareBuffer", register_android_hardware_HardwareBuffer },
+#if WESTLAKE_ANDROID_API >= 35
+    { "register_android_hardware_OverlayProperties", register_android_hardware_OverlayProperties },
+#endif
+    { "register_android_os_SharedMemory", register_android_os_SharedMemory },
+#endif
     { "register_android_view_SurfaceControl", register_android_view_SurfaceControl },
     { "register_android_view_SurfaceSession", register_android_view_SurfaceSession },
     { "register_android_graphics_SurfaceTexture_oh",
       register_android_graphics_SurfaceTexture_oh },
     { "register_android_view_TextureView_oh",
       register_android_view_TextureView_oh },
+#ifndef WESTLAKE_SOURCE_HWUI15
     { "register_android_graphics_TextureLayer_probe",
       register_android_graphics_TextureLayer_probe },
+#endif
     { "register_android_view_DisplayEventReceiver", register_android_view_DisplayEventReceiver },
     { "register_android_view_InputChannel",   register_android_view_InputChannel },
     { "register_android_view_KeyCharacterMap", register_android_view_KeyCharacterMap },
@@ -231,7 +266,9 @@ static const RegJNIRec kRegJNI[] = {
     { "register_android_content_XmlBlock",    register_android_content_XmlBlock },
     { "register_com_android_internal_os_ClassLoaderFactory", register_com_android_internal_os_ClassLoaderFactory },
     { "register_com_android_internal_util_VirtualRefBasePtr", register_com_android_internal_util_VirtualRefBasePtr },
+#ifndef WESTLAKE_SOURCE_HWUI15
     { "register_android_graphics_Typeface",   register_android_graphics_Typeface },
+#endif
     { "register_android_os_GraphicsEnvironment", register_android_os_GraphicsEnvironment },
     // 2026-05-02 audit: kept; see libcore_util_NativeAllocationRegistry_guard.cpp
     // header.  TODO P1: identify implicit dep then replace + remove.
@@ -3652,11 +3689,27 @@ static void wl_register_sensor_natives(JNIEnv* env) {
         {"nativeCreate", "(Ljava/lang/String;)J", reinterpret_cast<void*>(WL_Sensor_nativeCreate)},
         {"nativeGetSensorAtIndex", "(JLandroid/hardware/Sensor;I)Z",
          reinterpret_cast<void*>(WL_Sensor_nativeGetSensorAtIndex)},
+        // Android 15 calls nativeGetDefaultDeviceSensorAtIndex instead of
+        // nativeGetSensorAtIndex whenever android.companion.virtual.flags.Flags
+        // .enableNativeVdm() is set (SystemSensorManager.java:168). Leaving it
+        // unregistered turned an ordinary "no sensors present" condition into an
+        // UnsatisfiedLinkError that escaped through OrientationEventListener ->
+        // TTVideoContainerLayout and unwound the UI looper the moment Toutiao
+        // inflated a video holder (the 视频 tab). Same empty-inventory answer.
+        {"nativeGetDefaultDeviceSensorAtIndex", "(JLandroid/hardware/Sensor;I)Z",
+         reinterpret_cast<void*>(WL_Sensor_nativeGetSensorAtIndex)},
         {"nativeGetDynamicSensors", "(JLjava/util/List;)V",
          reinterpret_cast<void*>(WL_Sensor_nativeGetDynamicSensors)},
         {"nativeGetRuntimeSensors", "(JILjava/util/List;)V",
          reinterpret_cast<void*>(WL_Sensor_nativeGetRuntimeSensors)},
         {"nativeIsDataInjectionEnabled", "(J)Z",
+         reinterpret_cast<void*>(WL_Sensor_nativeIsDataInjectionEnabled)},
+        // Also declared by the Android 15 SystemSensorManager and likewise
+        // unregistered here; answer the same unsupported result rather than
+        // leaving another latent UnsatisfiedLinkError on a sensorless board.
+        {"nativeIsReplayDataInjectionEnabled", "(J)Z",
+         reinterpret_cast<void*>(WL_Sensor_nativeIsDataInjectionEnabled)},
+        {"nativeIsHalBypassReplayDataInjectionEnabled", "(J)Z",
          reinterpret_cast<void*>(WL_Sensor_nativeIsDataInjectionEnabled)},
         {"nativeCreateDirectChannel", "(JIJIILandroid/hardware/HardwareBuffer;)I",
          reinterpret_cast<void*>(WL_Sensor_nativeCreateDirectChannel)},
@@ -3709,7 +3762,8 @@ static void wl_register_sensor_natives(JNIEnv* env) {
 }
 
 int AndroidRuntime::startReg(JNIEnv* env) {
-    wl_icu_early_init();   // WESTLAKE §258 -- before ANY module registers
+    const bool sourceRuntime = getenv("WESTLAKE_RUNTIME_ROOT") != nullptr;
+    if (!sourceRuntime) wl_icu_early_init();
     fprintf(stderr, "[liboh_android_runtime] startReg entering (%zu modules)\n",
             kRegJNICount);
 
@@ -3726,8 +3780,10 @@ int AndroidRuntime::startReg(JNIEnv* env) {
     // Bind their real ICU implementations at the ICU boundary before loading
     // any framework module; registering these at the end of startReg is too
     // late and leaves PatternNative.<clinit> permanently erroneous.
-    wl_register_charset_natives(env);
-    wl_register_regex_natives(env);
+    if (!sourceRuntime) {
+        wl_register_charset_natives(env);
+        wl_register_regex_natives(env);
+    }
 
     // Registration auditing is intentionally opt-in. It patches the live JNI
     // function table and is useful for diagnosis, but must not sit on the
@@ -3747,7 +3803,7 @@ int AndroidRuntime::startReg(JNIEnv* env) {
     // and SEGV pc=0 follows (G2.14r root cause).  Calling JNI_OnLoad here
     // restores the canonical AOSP init flow once for the parent process;
     // child forks inherit the registrations.
-    {
+    if (!sourceRuntime) {
         void* libjc = dlopen("libjavacore.so", RTLD_NOW);
         if (libjc != nullptr) {
             using OnLoadFn = jint (*)(JavaVM*, void*);
@@ -3822,6 +3878,8 @@ int AndroidRuntime::startReg(JNIEnv* env) {
 
     env->PopLocalFrame(nullptr);
 
+    if (sourceRuntime && failures) return -1;
+
     // ============================================================
     // Phase 2 (r27) — dlopen real libhwui.so + invoke its 27 register_X
     // functions to register Paint/Canvas/RenderNode/HardwareRenderer/...
@@ -3839,6 +3897,7 @@ int AndroidRuntime::startReg(JNIEnv* env) {
         };
         void* hwui = nullptr;
         for (const char* p : kHwuiPaths) {
+            if (sourceRuntime && p[0] == '/') continue;
             hwui = dlopen(p, RTLD_NOW | RTLD_GLOBAL);
             if (hwui) {
                 fprintf(stderr, "[liboh_android_runtime] dlopen %s OK\n", p);
@@ -3849,6 +3908,24 @@ int AndroidRuntime::startReg(JNIEnv* env) {
             }
         }
         if (hwui) {
+#ifdef WESTLAKE_SOURCE_HWUI15
+            auto init = reinterpret_cast<void (*)()>(dlsym(hwui, "init_android_graphics"));
+            auto registration = reinterpret_cast<int (*)(JNIEnv*)>(
+                    dlsym(hwui, "register_android_graphics_classes"));
+            if (!init || !registration) {
+                fprintf(stderr, "[liboh_android_runtime] missing source HWUI registration entrypoint\n");
+                env->PopLocalFrame(nullptr);
+                return -1;
+            }
+            init();
+            int rc = registration(env);
+            if (rc < 0 || env->ExceptionCheck()) {
+                if (env->ExceptionCheck()) env->ExceptionDescribe();
+                env->PopLocalFrame(nullptr);
+                return -1;
+            }
+            fprintf(stderr, "[liboh_android_runtime] source HWUI canonical registration PASS\n");
+#else
             // 45 register_X mangled symbol names extracted from libhwui.so
             // dynsym table (`llvm-readelf --dyn-syms ... | grep register_android`).
             // Mangled names use Itanium C++ ABI:
@@ -4006,8 +4083,17 @@ int AndroidRuntime::startReg(JNIEnv* env) {
             }
             fprintf(stderr, "[liboh_android_runtime] libhwui register: %d ok / %d fail\n",
                     hwui_ok, hwui_fail);
+            if (sourceRuntime && hwui_fail) {
+                env->PopLocalFrame(nullptr);
+                return -1;
+            }
+#endif
         } else {
             fprintf(stderr, "[liboh_android_runtime] WARN: libhwui not loaded — graphics natives unbound\n");
+            if (sourceRuntime) {
+                env->PopLocalFrame(nullptr);
+                return -1;
+            }
         }
 
         // G2.4 (2026-04-30): apply graphics JNI compat shim — last-wins
@@ -4024,15 +4110,15 @@ int AndroidRuntime::startReg(JNIEnv* env) {
     // WESTLAKE §404: repair java.lang.invoke statics AFTER libjavacore's
     // register_java_lang_invoke_* natives are bound (they run in its JNI_OnLoad above) and after
     // every module is registered, but still before any app code runs.
-    wl_repair_invoke_classes(env);
+    if (!sourceRuntime) wl_repair_invoke_classes(env);
     wl_register_sensor_natives(env); // WESTLAKE §677 — sensorless OH platform boundary
-    wl_install_exit_guard(env);   // WESTLAKE §412 — last-wins override of Runtime.nativeExit
-    wl_install_proxy_props(env);  // WESTLAKE §413 — outbound HTTP(S) via the hdc reverse tunnel
+    if (!sourceRuntime) wl_install_exit_guard(env);
+    if (!sourceRuntime) wl_install_proxy_props(env);
     wl_register_keyevent_natives(env);  // WESTLAKE §414 — KeyEvent.nativeNextId (BACK key)
     wl_seed_service_manager_cache(env); // WESTLAKE §416 — non-null UserManager for the Settings page
-    wl_register_dns_native(env);        // WESTLAKE §423 — DNS: libcore.io.Linux.android_getaddrinfo
-    wl_repair_os_constants(env);        // WESTLAKE §425 — OsConstants statics were all zero
-    wl_register_tls_natives(env);       // WESTLAKE §441 — real TLS over OHOS OpenSSL
+    if (!sourceRuntime) wl_register_dns_native(env);
+    if (!sourceRuntime) wl_repair_os_constants(env);
+    if (!sourceRuntime) wl_register_tls_natives(env);
     wl_register_probe_log(env);         // WESTLAKE §450 — native log sink for app code
     wl_register_audiopolicy_natives(env); // WESTLAKE §468 — unblock AudioAttributes/<clinit>
     // §494: the MediaCodec/MediaCodecList shim was fully implemented in
@@ -4048,8 +4134,8 @@ int AndroidRuntime::startReg(JNIEnv* env) {
     }
     wl_install_media_session(env);       // WESTLAKE §467 — media_session for MediaSession
     wl_install_shortcut_service(env);   // WESTLAKE §454 — real IShortcutService (Presets page)
-    wl_repair_string_statics(env);      // WESTLAKE §444 — String.CASE_INSENSITIVE_ORDER was null
-    wl_probe_regex(env);                // WESTLAKE §442 — verify the regex engine
+    if (!sourceRuntime) wl_repair_string_statics(env);
+    if (!sourceRuntime) wl_probe_regex(env);
 
     fprintf(stderr, "[liboh_android_runtime] startReg exiting (ok)\n");
     return 0;

@@ -301,23 +301,23 @@ public class LifecycleAdapter {
                 return;
             }
             android.app.servertransaction.ClientTransaction transaction =
-                    android.app.servertransaction.ClientTransaction.obtain(appThread, activityToken);
+                    android.app.servertransaction.ClientTransaction.obtain(appThread);
             switch (androidState) {
                 case ANDROID_STATE_RESUMED:
-                    transaction.setLifecycleStateRequest(
-                            android.app.servertransaction.ResumeActivityItem.obtain(true, false));
+                    transaction.addTransactionItem(
+                            android.app.servertransaction.ResumeActivityItem.obtain(activityToken, true, false));
                     break;
                 case ANDROID_STATE_PAUSED:
-                    transaction.setLifecycleStateRequest(
-                            android.app.servertransaction.PauseActivityItem.obtain());
+                    transaction.addTransactionItem(
+                            android.app.servertransaction.PauseActivityItem.obtain(activityToken));
                     break;
                 case ANDROID_STATE_STOPPED:
-                    transaction.setLifecycleStateRequest(
-                            android.app.servertransaction.StopActivityItem.obtain(0));
+                    transaction.addTransactionItem(
+                            android.app.servertransaction.StopActivityItem.obtain(activityToken));
                     break;
                 case ANDROID_STATE_DESTROYED:
-                    transaction.setLifecycleStateRequest(
-                            android.app.servertransaction.DestroyActivityItem.obtain(false, 0));
+                    transaction.addTransactionItem(
+                            android.app.servertransaction.DestroyActivityItem.obtain(activityToken, false));
                     break;
                 default:
                     Log.w(TAG, "dispatchByActivityToken: unsupported androidState="
@@ -473,7 +473,7 @@ public class LifecycleAdapter {
             }
 
             // Construct ClientTransaction with the appropriate lifecycle item
-            ClientTransaction transaction = ClientTransaction.obtain(appThread, activityToken);
+            ClientTransaction transaction = ClientTransaction.obtain(appThread);
 
             switch (androidState) {
                 case ANDROID_STATE_CREATED:
@@ -489,27 +489,26 @@ public class LifecycleAdapter {
 
                 case ANDROID_STATE_RESUMED:
                     // ResumeActivityItem triggers handleResumeActivity -> Activity.onResume
-                    transaction.setLifecycleStateRequest(
-                            ResumeActivityItem.obtain(true, false));
+                    transaction.addTransactionItem(
+                            ResumeActivityItem.obtain(activityToken, true, false));
                     break;
 
                 case ANDROID_STATE_PAUSED:
                     // PauseActivityItem triggers handlePauseActivity -> Activity.onPause
-                    transaction.setLifecycleStateRequest(
-                            PauseActivityItem.obtain());
+                    transaction.addTransactionItem(
+                            PauseActivityItem.obtain(activityToken));
                     break;
 
                 case ANDROID_STATE_STOPPED:
                     // StopActivityItem triggers handleStopActivity -> Activity.onStop
-                    transaction.setLifecycleStateRequest(
-                            StopActivityItem.obtain(0 /* configChanges */));
+                    transaction.addTransactionItem(
+                            StopActivityItem.obtain(activityToken));
                     break;
 
                 case ANDROID_STATE_DESTROYED:
                     // DestroyActivityItem triggers handleDestroyActivity -> Activity.onDestroy
-                    transaction.setLifecycleStateRequest(
-                            DestroyActivityItem.obtain(false /* finished */,
-                                    0 /* configChanges */));
+                    transaction.addTransactionItem(
+                            DestroyActivityItem.obtain(activityToken, false /* finished */));
                     break;
 
                 default:

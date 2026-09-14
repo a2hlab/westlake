@@ -9,6 +9,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import zipfile
 
@@ -33,11 +35,16 @@ def main():
     parser.add_argument('--sdk', type=Path, required=True, help='SDK root containing native, ets and toolchains')
     parser.add_argument('--restool', type=Path, required=True, help='Source-built V1 Restool 4.105')
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--host-bundle', default='org.westlake.imehost',
+                        help='Use a separate host identity for isolated source device validation')
+    parser.add_argument('--only-host', action='store_true')
     args = parser.parse_args()
     sdk = args.sdk.resolve()
     out = args.out.absolute()
     if out.exists():
         parser.error('--out must be new')
+    if not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z][a-zA-Z0-9_]*)+', args.host_bundle):
+        parser.error('Invalid host bundle name')
     restool = args.restool.resolve()
     version = subprocess.check_output([str(restool), '-v'], text=True)
     if version.strip() != 'Info: Restool version= Restool 4.105':
@@ -56,12 +63,22 @@ def main():
     }
     report = {'artifacts': {}, 'restool_sha256': sha(restool)}
     for name, classes in entries.items():
+        if args.only_host and name != 'imehost':
+            continue
         source = ROOT / 'apps' / name
         output = out / name
         output.mkdir()
+        package = args.host_bundle if name == 'imehost' else 'org.westlake.' + name
+        if name == 'imehost' and package != 'org.westlake.imehost':
+            copied = output / 'source'
+            shutil.copytree(source, copied)
+            module = json.loads((copied / 'module.json').read_text())
+            module['app']['bundleName'] = package
+            (copied / 'module.json').write_text(json.dumps(module, indent=2) + '\n')
+            source = copied
         resources = output / 'resources'
         resources.mkdir()
-        run(restool, '-i', source, '-j', source / 'module.json', '-p', 'org.westlake.' + name,
+        run(restool, '-i', source, '-j', source / 'module.json', '-p', package,
             '-o', resources, '-r', output / 'ResourceTable.js', '-f')
         payload = {p.relative_to(resources).as_posix(): p.read_bytes()
                    for p in sorted(resources.rglob('*')) if p.is_file()}
