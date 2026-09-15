@@ -323,17 +323,14 @@ void SessionStageAdapter::NotifyOccupiedAreaChangeInfo(
     const Rect& /*callingSessionRect*/,
     const std::map<AvoidAreaType, AvoidArea>& /*avoidAreas*/)
 {
-    int occupiedHeight = 0;
-    if (info) {
-        occupiedHeight = info->rect_.height_;
-    }
-    OH_BR_IPC_SCOPE("SessionStage.NotifyOccupiedAreaChangeInfo",
-                    "imeHeight=%{public}d", occupiedHeight);
-
-    std::lock_guard<std::mutex> lock(jniMutex_);
     const Rect rect = info ? info->rect_ : Rect{};
-    callBridgeVoidMethod("onOccupiedAreaRect", "(IIII)V", static_cast<jint>(rect.posX_),
-        static_cast<jint>(rect.posY_), static_cast<jint>(rect.width_), static_cast<jint>(rect.height_));
+    OH_BR_IPC_SCOPE("SessionStage.NotifyOccupiedAreaChangeInfo",
+                    "imeHeight=%{public}d", rect.height_);
+    std::lock_guard<std::mutex> lock(jniMutex_);
+    // Preserve the full host rectangle for floating and split keyboards.
+    callBridgeVoidMethod("onOccupiedAreaRect", "(IIII)V",
+        static_cast<jint>(rect.posX_), static_cast<jint>(rect.posY_),
+        static_cast<jint>(rect.width_), static_cast<jint>(rect.height_));
 }
 
 // ================================================================

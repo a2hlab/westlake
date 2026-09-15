@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "sources": [
+    "android-source/frameworks-native/libs/binder/Binder.cpp",
+    "android-source/frameworks-native/libs/binder/BpBinder.cpp",
+    "android-source/frameworks-native/libs/binder/Debug.cpp",
+    "android-source/frameworks-native/libs/binder/FdTrigger.cpp",
+    "android-source/frameworks-native/libs/binder/IInterface.cpp",
+    "android-source/frameworks-native/libs/binder/IResultReceiver.cpp",
+    "android-source/frameworks-native/libs/binder/Parcel.cpp",
+    "android-source/frameworks-native/libs/binder/ParcelFileDescriptor.cpp",
+    "android-source/frameworks-native/libs/binder/RecordedTransaction.cpp",
+    "android-source/frameworks-native/libs/binder/RpcSession.cpp",
+    "android-source/frameworks-native/libs/binder/RpcServer.cpp",
+    "android-source/frameworks-native/libs/binder/RpcState.cpp",
+    "android-source/frameworks-native/libs/binder/RpcTransportRaw.cpp",
+    "android-source/frameworks-native/libs/binder/Stability.cpp",
+    "android-source/frameworks-native/libs/binder/Status.cpp",
+    "android-source/frameworks-native/libs/binder/TextOutput.cpp",
+    "android-source/frameworks-native/libs/binder/Utils.cpp",
+    "android-source/frameworks-native/libs/binder/file.cpp",
+    "android-source/frameworks-native/libs/binder/OS_android.cpp",
+    "android-source/frameworks-native/libs/binder/OS_unix_base.cpp",
+    "android-source/frameworks-native/libs/binder/UtilsHost.cpp"
+  ],
+  "includes": [
+    "android-source/frameworks-native/libs/binder",
+    "android-source/frameworks-native/libs/binder/include",
+    "android-source/libbase/include",
+    "android-source/system-core/libutils/include",
+    "android-source/system-core/libutils/binder/include",
+    "android-source/system-core/libcutils/include",
+    "android-source/system-core/libsystem/include",
+    "android-source/logging/liblog/include",
+    "android-source/fmtlib/include"
+  ],
+  "defines": [
+    "__OHOS__",
+    "_GNU_SOURCE",
+    "_LIBCPP_PROMOTE_H",
+    "ANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION",
+    "ANDROID_UTILS_REF_BASE_DISABLE_IMPLICIT_CONSTRUCTION",
+    "BINDER_ENABLE_LIBLOG_ASSERT",
+    "BINDER_RPC_DEV_SERVERS"
+  ],
+  "cpp_flags": [
+    "-std=gnu++20",
+    "-Wno-deprecated-declarations"
+  ],
+  "force_includes": [
+    "preserved/runtime-sources/local/libcxx_compat_arm64.h"
+  ],
+  "scope": "AOSP libbinder_rpc_no_kernel source; native serialization and RPC, OH service IPC remains in the bridge"
+}

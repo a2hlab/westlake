@@ -40,6 +40,13 @@ Trace_nativeGetEnabledTags() {
     return static_cast<jlong>(~0ULL);
 }
 
+jboolean JNICALL Trace_nativeIsTagEnabled(jlong tag) {
+    return (Trace_nativeGetEnabledTags() & tag) != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+// The OH tracing backend is registered by the platform, without Perfetto IPC.
+void JNICALL Trace_nativeRegisterWithPerfetto(JNIEnv*, jclass) {}
+
 void JNICALL
 Trace_nativeTraceBegin(JNIEnv* env, jclass /*clazz*/,
                        jlong /*tag*/, jstring name) {
@@ -75,9 +82,14 @@ const JNINativeMethod kTraceMethods[] = {
     // Note: @CriticalNative bindings still register through the standard JNI
     // table; ART will invoke with the reduced calling convention based on the
     // @CriticalNative annotation on the Java declaration.
+#if WESTLAKE_ANDROID_API >= 35
+    { "nativeIsTagEnabled", "(J)Z", reinterpret_cast<void*>(Trace_nativeIsTagEnabled) },
+    { "nativeRegisterWithPerfetto", "()V", reinterpret_cast<void*>(Trace_nativeRegisterWithPerfetto) },
+#else
     { "nativeGetEnabledTags",
       "()J",
       reinterpret_cast<void*>(Trace_nativeGetEnabledTags) },
+#endif
     { "nativeTraceBegin",
       "(JLjava/lang/String;)V",
       reinterpret_cast<void*>(Trace_nativeTraceBegin) },

@@ -247,7 +247,7 @@ public final class InputManagerAdapter implements IInputManager {
                 .build();
     }
 
-    @Override
+
     public boolean isInputDeviceEnabled(int deviceId) {
         log("A", "isInputDeviceEnabled id=" + deviceId);
         if (mNativeBridge == 0L) return true;
@@ -320,14 +320,14 @@ public final class InputManagerAdapter implements IInputManager {
         nativeSetPointerSpeed(mNativeBridge, speed);
     }
 
-    @Override
+
     public void setPointerIconType(int typeId) {
         log("A", "setPointerIconType=" + typeId);
         if (mNativeBridge == 0L) return;
         nativeSetPointerIconType(mNativeBridge, typeId);
     }
 
-    @Override
+
     public void setCustomPointerIcon(PointerIcon icon) {
         log("A", "setCustomPointerIcon");
         if (mNativeBridge == 0L || icon == null) return;
@@ -555,7 +555,7 @@ public final class InputManagerAdapter implements IInputManager {
         return new KeyboardLayout[0];
     }
 
-    @Override
+
     public KeyboardLayout[] getKeyboardLayoutsForInputDevice(InputDeviceIdentifier identifier) {
         log("D", "getKeyboardLayoutsForInputDevice");
         return new KeyboardLayout[0];
@@ -567,38 +567,39 @@ public final class InputManagerAdapter implements IInputManager {
         return null;
     }
 
-    @Override
+
     public String getCurrentKeyboardLayoutForInputDevice(InputDeviceIdentifier identifier) {
         log("D", "getCurrentKeyboardLayoutForInputDevice");
         return null;
     }
 
-    @Override
+
     public void setCurrentKeyboardLayoutForInputDevice(InputDeviceIdentifier identifier,
             String keyboardLayoutDescriptor) {
         log("D", "setCurrentKeyboardLayoutForInputDevice");
     }
 
-    @Override
+
     public String[] getEnabledKeyboardLayoutsForInputDevice(InputDeviceIdentifier identifier) {
         log("D", "getEnabledKeyboardLayoutsForInputDevice");
         return new String[0];
     }
 
-    @Override
+
     public void addKeyboardLayoutForInputDevice(InputDeviceIdentifier identifier,
             String keyboardLayoutDescriptor) {
         log("D", "addKeyboardLayoutForInputDevice");
     }
 
-    @Override
+
     public void removeKeyboardLayoutForInputDevice(InputDeviceIdentifier identifier,
             String keyboardLayoutDescriptor) {
         log("D", "removeKeyboardLayoutForInputDevice");
     }
 
+
     @Override
-    public String getKeyboardLayoutForInputDevice(InputDeviceIdentifier identifier, int userId,
+    public android.hardware.input.KeyboardLayoutSelectionResult getKeyboardLayoutForInputDevice(InputDeviceIdentifier identifier, int userId,
             InputMethodInfo imeInfo, InputMethodSubtype imeSubtype) {
         log("D", "getKeyboardLayoutForInputDevice (new API)");
         return null;
@@ -677,12 +678,12 @@ public final class InputManagerAdapter implements IInputManager {
         log("E", "removePortAssociation");
     }
 
-    @Override
+
     public void addUniqueIdAssociation(String inputPort, String displayUniqueId) {
         log("E", "addUniqueIdAssociation");
     }
 
-    @Override
+
     public void removeUniqueIdAssociation(String inputPort) {
         log("E", "removeUniqueIdAssociation");
     }
@@ -736,4 +737,52 @@ public final class InputManagerAdapter implements IInputManager {
 
     private static native void nativeRegisterDeviceListener(long handle,
             IInputDevicesChangedListener listener);
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public android.view.KeyCharacterMap getKeyCharacterMap(java.lang.String layoutDescriptor) throws android.os.RemoteException {
+        return android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD);
+    }
+
+    @Override
+    public int getMousePointerSpeed() throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony pointer-speed query is not connected");
+    }
+
+    @Override
+    public boolean setPointerIcon(android.view.PointerIcon icon, int displayId, int deviceId, int pointerId, android.os.IBinder inputToken) throws android.os.RemoteException {
+        if (mNativeBridge == 0L || icon == null || displayId != 0) return false;
+        setCustomPointerIcon(icon);
+        return true;
+    }
+
+    @Override
+    public void addUniqueIdAssociationByDescriptor(java.lang.String inputDeviceDescriptor, java.lang.String displayUniqueId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony input descriptor association is not connected");
+    }
+
+    @Override
+    public void removeUniqueIdAssociationByDescriptor(java.lang.String inputDeviceDescriptor) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony input descriptor association is not connected");
+    }
+
+    @Override
+    public void addUniqueIdAssociationByPort(java.lang.String inputPort, java.lang.String displayUniqueId) throws android.os.RemoteException {
+        addUniqueIdAssociation(inputPort, displayUniqueId);
+    }
+
+    @Override
+    public void removeUniqueIdAssociationByPort(java.lang.String inputPort) throws android.os.RemoteException {
+        removeUniqueIdAssociation(inputPort);
+    }
+
+    @Override
+    public void registerStickyModifierStateListener(android.hardware.input.IStickyModifierStateListener listener) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony sticky modifier subscription is not connected");
+    }
+
+    @Override
+    public void unregisterStickyModifierStateListener(android.hardware.input.IStickyModifierStateListener listener) throws android.os.RemoteException {
+        log("D", "unregisterStickyModifierStateListener: no OH subscription");
+    }
 }

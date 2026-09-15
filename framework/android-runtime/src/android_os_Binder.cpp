@@ -110,7 +110,11 @@ jlong   BP_getNativeFinalizer()                           {
 const JNINativeMethod kBinderMethods[] = {
     { "getCallingPid",              "()I",  reinterpret_cast<void*>(B_getCallingPid) },
     { "getCallingUid",              "()I",  reinterpret_cast<void*>(B_getCallingUid) },
+#if WESTLAKE_ANDROID_API >= 35
+    { "isDirectlyHandlingTransactionNative", "()Z", reinterpret_cast<void*>(B_isDirectlyHandlingTransaction) },
+#else
     { "isDirectlyHandlingTransaction", "()Z", reinterpret_cast<void*>(B_isDirectlyHandlingTransaction) },
+#endif
     { "hasExplicitIdentity",        "()Z",  reinterpret_cast<void*>(B_hasExplicitIdentity) },
     { "clearCallingIdentity",       "()J",  reinterpret_cast<void*>(B_clearCallingIdentity) },
     { "restoreCallingIdentity",     "(J)V", reinterpret_cast<void*>(B_restoreCallingIdentity) },

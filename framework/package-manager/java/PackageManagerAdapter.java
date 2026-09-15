@@ -154,7 +154,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         return sInstance;
     }
 
-    public PackageManagerAdapter() {}
+    public PackageManagerAdapter() { super(OHPermissionEnforcer.getInstance()); }
 
     @Override
     public boolean[] canPackageQuery(String callerPackage, String[] targetPackages, int userId) {
@@ -685,6 +685,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public PackageInfo getPackageInfo(String packageName, long flags, int userId) {
         logBridged("getPackageInfo", packageName);
+        if (SourcePackageRegistry.contains(packageName)) {
+            return SourcePackageRegistry.packageInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
                     + System.getenv("ASX_WEBVIEW_APK"));
@@ -724,6 +727,10 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public ApplicationInfo getApplicationInfo(String packageName, long flags, int userId) {
         logBridged("getApplicationInfo", packageName);
+        if (SourcePackageRegistry.contains(packageName)) {
+            PackageInfo info = SourcePackageRegistry.packageInfo(packageName, flags);
+            return info == null ? null : info.applicationInfo;
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
         }
@@ -778,6 +785,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public ActivityInfo getActivityInfo(ComponentName component, long flags, int userId) {
         logBridged("getActivityInfo", component.flattenToShortString());
+        if (SourcePackageRegistry.contains(component.getPackageName())) {
+            PackageInfo info = SourcePackageRegistry.packageInfo(component.getPackageName(),
+                    flags | android.content.pm.PackageManager.GET_ACTIVITIES);
+            if (info != null && info.activities != null) for (ActivityInfo activity : info.activities) {
+                if (component.getClassName().equals(activity.name)) return activity;
+            }
+            return null;
+        }
         // Convert ComponentName to Want-style query
         IntentWantConverter.WantParams want = new IntentWantConverter.WantParams();
         want.bundleName = component.getPackageName();
@@ -883,6 +898,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public int getPackageUid(String packageName, long flags, int userId) {
         logBridged("getPackageUid", packageName);
+        if (SourcePackageRegistry.contains(packageName)) return android.os.Process.myUid();
         return nativeGetUidByBundleName(packageName);
     }
 
@@ -1020,6 +1036,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public android.content.pm.ActivityInfo getReceiverInfo(android.content.ComponentName arg0, long arg1, int arg2) throws android.os.RemoteException {
+        if (SourcePackageRegistry.contains(arg0.getPackageName())) {
+            PackageInfo info = SourcePackageRegistry.packageInfo(arg0.getPackageName(),
+                    arg1 | android.content.pm.PackageManager.GET_RECEIVERS);
+            if (info != null && info.receivers != null) for (ActivityInfo receiver : info.receivers) {
+                if (arg0.getClassName().equals(receiver.name)) return receiver;
+            }
+            return null;
+        }
         logStub("getReceiverInfo", "");
         return null;
     }
@@ -1028,6 +1052,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public android.content.pm.ServiceInfo getServiceInfo(android.content.ComponentName arg0, long arg1, int arg2) throws android.os.RemoteException {
         logBridged("getServiceInfo", String.valueOf(arg0));
+        if (SourcePackageRegistry.contains(arg0.getPackageName())) {
+            PackageInfo info = SourcePackageRegistry.packageInfo(arg0.getPackageName(),
+                    arg1 | android.content.pm.PackageManager.GET_SERVICES);
+            if (info != null && info.services != null) for (ServiceInfo service : info.services) {
+                if (arg0.getClassName().equals(service.name)) return service;
+            }
+            return null;
+        }
         return ServiceInfoResolver.resolve(arg0, arg1);
     }
 
@@ -1035,6 +1067,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public android.content.pm.ProviderInfo getProviderInfo(android.content.ComponentName arg0, long arg1, int arg2) throws android.os.RemoteException {
         logBridged("getProviderInfo", String.valueOf(arg0));
+        if (SourcePackageRegistry.contains(arg0.getPackageName())) {
+            PackageInfo info = SourcePackageRegistry.packageInfo(arg0.getPackageName(),
+                    arg1 | android.content.pm.PackageManager.GET_PROVIDERS);
+            if (info != null && info.providers != null) for (ProviderInfo provider : info.providers) {
+                if (arg0.getClassName().equals(provider.name)) return provider;
+            }
+            return null;
+        }
         return ProviderInfoResolver.resolve(arg0, arg1);
     }
 
@@ -1062,6 +1102,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.lang.String[] getPackagesForUid(int arg0) throws android.os.RemoteException {
+        String sourcePackage = SourcePackageRegistry.packageForUid(arg0);
+        if (sourcePackage != null) return new String[] {sourcePackage};
         logStub("getPackagesForUid", "");
         return null;
     }
@@ -1069,6 +1111,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.lang.String getNameForUid(int arg0) throws android.os.RemoteException {
+        String sourcePackage = SourcePackageRegistry.packageForUid(arg0);
+        if (sourcePackage != null) return sourcePackage;
         logStub("getNameForUid", "");
         return null;
     }
@@ -1261,6 +1305,15 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     private static void collectProvidersForPackage(String packageName,
             String processFilter,
             java.util.List<android.content.pm.ProviderInfo> out) {
+        if (SourcePackageRegistry.contains(packageName)) {
+            PackageInfo info = SourcePackageRegistry.packageInfo(packageName,
+                    android.content.pm.PackageManager.GET_PROVIDERS
+                    | android.content.pm.PackageManager.GET_META_DATA);
+            if (info != null && info.providers != null) for (ProviderInfo provider : info.providers) {
+                if (processFilter == null || processFilter.equals(provider.processName)) out.add(provider);
+            }
+            return;
+        }
         String json = getApkManifestJson(packageName);
         if (json == null || json.isEmpty()) return;
         try {
@@ -1484,7 +1537,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
-    @Override
+
     public java.lang.String[] setPackagesSuspendedAsUser(java.lang.String[] arg0, boolean arg1, android.os.PersistableBundle arg2, android.os.PersistableBundle arg3, android.content.pm.SuspendDialogInfo arg4, java.lang.String arg5, int arg6) throws android.os.RemoteException {
         logStub("setPackagesSuspendedAsUser", "");
         return null;
@@ -1806,4 +1859,76 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         logStub("extendVerificationTimeout", "");
     }
 
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public java.lang.String[] setPackagesSuspendedAsUser(java.lang.String[] packageNames, boolean suspended, android.os.PersistableBundle appExtras, android.os.PersistableBundle launcherExtras, android.content.pm.SuspendDialogInfo dialogInfo, int flags, java.lang.String suspendingPackage, int suspendingUserId, int targetUserId) throws android.os.RemoteException {
+        throw new SecurityException("Package suspension requires the OH bundle manager");
+    }
+
+    @Override
+    public boolean isPackageQuarantinedForUser(java.lang.String packageName, int userId) throws android.os.RemoteException {
+        return false;
+    }
+
+    @Override
+    public boolean isPackageStoppedForUser(java.lang.String packageName, int userId) throws android.os.RemoteException {
+        ApplicationInfo info = getApplicationInfo(packageName, 0, userId);
+        return info != null && (info.flags & ApplicationInfo.FLAG_STOPPED) != 0;
+    }
+
+    @Override
+    public java.lang.String getSuspendingPackage(java.lang.String packageName, int userId) throws android.os.RemoteException {
+        return null;
+    }
+
+    @Override
+    public java.util.Map<java.lang.String,java.lang.String> getSystemSharedLibraryNamesAndPaths() throws android.os.RemoteException {
+        return java.util.Collections.emptyMap();
+    }
+
+    @Override
+    public int getUserMinAspectRatio(java.lang.String packageName, int userId) throws android.os.RemoteException {
+        return 0;
+    }
+
+    @Override
+    public void setUserMinAspectRatio(java.lang.String packageName, int userId, int aspectRatio) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony user aspect-ratio policy is not connected");
+    }
+
+    @Override
+    public void registerPackageMonitorCallback(android.os.IRemoteCallback callback, int userId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony package change subscription is not connected");
+    }
+
+    @Override
+    public void unregisterPackageMonitorCallback(android.os.IRemoteCallback callback) throws android.os.RemoteException {
+        logStub("unregisterPackageMonitorCallback", "no OH subscription");
+    }
+
+    @Override
+    public android.content.pm.ArchivedPackageParcel getArchivedPackage(java.lang.String packageName, int userId) throws android.os.RemoteException {
+        return null;
+    }
+
+    @Override
+    public android.graphics.Bitmap getArchivedAppIcon(java.lang.String packageName, android.os.UserHandle user, java.lang.String callingPackageName) throws android.os.RemoteException {
+        return null;
+    }
+
+    @Override
+    public boolean isAppArchivable(java.lang.String packageName, android.os.UserHandle user) throws android.os.RemoteException {
+        return false;
+    }
+
+    @Override
+    public int getAppMetadataSource(java.lang.String packageName, int userId) throws android.os.RemoteException {
+        return 0;
+    }
+
+    @Override
+    public android.content.ComponentName getDomainVerificationAgent(int userId) throws android.os.RemoteException {
+        return null;
+    }
 }

@@ -178,7 +178,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     }
 
     /** [STUB] startDreamActivity - No OH dream/screensaver equivalent */
-    @Override
+
     public boolean startDreamActivity(Intent intent) throws RemoteException {
         logStub("startDreamActivity", "No OH dream/screensaver equivalent");
         return false;
@@ -376,7 +376,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     }
 
     /** [BRIDGED] getTaskDescription -> OH IMissionManager.GetMissionInfo */
-    @Override
+
     public ActivityManager.TaskDescription getTaskDescription(int taskId) throws RemoteException {
         logBridged("getTaskDescription", "-> OH IMissionManager.GetMissionInfo");
         return null;
@@ -419,7 +419,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     }
 
     /** [STUB] isAssistDataAllowedOnCurrentActivity - No OH assist equivalent */
-    @Override
+
     public boolean isAssistDataAllowedOnCurrentActivity() throws RemoteException {
         logStub("isAssistDataAllowedOnCurrentActivity", "No OH assist equivalent");
         return false;
@@ -709,7 +709,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     }
 
     /** [BRIDGED] getTaskSnapshot -> OH ISceneSessionManager.GetSessionSnapshot */
-    @Override
+
     public TaskSnapshot getTaskSnapshot(int taskId, boolean isLowResolution,
             boolean takeSnapshotIfNeeded) throws RemoteException {
         logBridged("getTaskSnapshot", "-> OH ISceneSessionManager.GetSessionSnapshot");
@@ -864,7 +864,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     }
 
     /** [BRIDGED] onPictureInPictureStateChanged -> OH ISession PiP state */
-    @Override
+
     public void onPictureInPictureStateChanged(PictureInPictureUiState pipState)
             throws RemoteException {
         logBridged("onPictureInPictureStateChanged", "-> OH ISession PiP state");
@@ -1095,5 +1095,21 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      */
     private void logStub(String method, String reason) {
         Log.d(TAG, "[STUB] " + method + " - " + reason);
+    }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public android.window.TaskSnapshot getTaskSnapshot(int taskId, boolean isLowResolution) throws android.os.RemoteException {
+        return getTaskSnapshot(taskId, isLowResolution, false);
+    }
+
+    @Override
+    public boolean isAssistDataAllowed() throws android.os.RemoteException {
+        return isAssistDataAllowedOnCurrentActivity();
+    }
+
+    @Override
+    public void onPictureInPictureUiStateChanged(android.app.PictureInPictureUiState pipState) throws android.os.RemoteException {
+        onPictureInPictureStateChanged(pipState);
     }
 }

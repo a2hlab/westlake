@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "scope": "Pinned Android GIF encoder and decoder source objects",
+  "sources": [
+    "android-source/giflib-android15/dgif_lib.c",
+    "android-source/giflib-android15/egif_lib.c",
+    "android-source/giflib-android15/gifalloc.c",
+    "android-source/giflib-android15/gif_err.c",
+    "android-source/giflib-android15/gif_hash.c",
+    "android-source/giflib-android15/openbsd-reallocarray.c",
+    "android-source/giflib-android15/quantize.c"
+  ],
+  "includes": [
+    "android-source/giflib-android15"
+  ],
+  "defines": [
+    "HAVE_CONFIG_H",
+    "_GNU_SOURCE"
+  ]
+}

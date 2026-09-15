@@ -35,6 +35,7 @@ void GE_setDriverPathAndSphalLibraries(JNIEnv*, jclass, jstring, jstring) {}
 void GE_setGpuStats(JNIEnv*, jclass, jstring, jstring, jlong, jlong, jstring, jint) {}
 // setAngleInfo(String, String, String, String[]) — no-op
 void GE_setAngleInfo(JNIEnv*, jclass, jstring, jstring, jstring, jobjectArray) {}
+void GE_nativeSetAngleInfo(JNIEnv*, jclass, jstring, jboolean, jstring, jobjectArray) {}
 // getShouldUseAngle(String) — return false
 jboolean GE_getShouldUseAngle(JNIEnv*, jclass, jstring) { return JNI_FALSE; }
 // setInjectLayersPrSetDumpable() — return true (caller treats failure as ok)
@@ -51,8 +52,12 @@ const JNINativeMethod kMethods[] = {
     {"setDebugLayersGLES",            "(Ljava/lang/String;)V",               (void*)GE_setDebugLayersGLES},
     {"setDriverPathAndSphalLibraries","(Ljava/lang/String;Ljava/lang/String;)V", (void*)GE_setDriverPathAndSphalLibraries},
     {"setGpuStats",                   "(Ljava/lang/String;Ljava/lang/String;JJLjava/lang/String;I)V", (void*)GE_setGpuStats},
+#if WESTLAKE_ANDROID_API >= 35
+    {"nativeSetAngleInfo",            "(Ljava/lang/String;ZLjava/lang/String;[Ljava/lang/String;)V", (void*)GE_nativeSetAngleInfo},
+#else
     {"setAngleInfo",                  "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)V", (void*)GE_setAngleInfo},
     {"getShouldUseAngle",             "(Ljava/lang/String;)Z",               (void*)GE_getShouldUseAngle},
+#endif
     {"setInjectLayersPrSetDumpable",  "()Z",                                  (void*)GE_setInjectLayersPrSetDumpable},
     {"nativeToggleAngleAsSystemDriver","(Z)V",                                (void*)GE_nativeToggleAngleAsSystemDriver},
     {"hintActivityLaunch",            "()V",                                  (void*)GE_hintActivityLaunch},

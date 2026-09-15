@@ -86,6 +86,35 @@ static const char kDex2oatBootClasspath[] =
     "/data/local/tmp/asx/fw/adapter-runtime-bcp.jar";
 
 static void seedRequiredEnvs() {
+    if (const char* root = getenv("WESTLAKE_RUNTIME_ROOT"); root && *root) {
+        if (root[0] != '/' || strchr(root, ':') != nullptr) {
+            fprintf(stderr, "WESTLAKE_RUNTIME_ROOT must be an absolute path without ':'\n");
+            exit(2);
+        }
+        const std::string stage(root);
+        static const char* jars[] = {"core-oj", "core-libart", "core-icu4j", "conscrypt",
+            "okhttp", "bouncycastle", "apache-xml", "framework", "adapter-runtime-bcp"};
+        std::string physical, logical;
+        for (const char* name : jars) {
+            if (!physical.empty()) { physical += ':'; logical += ':'; }
+            physical += stage + "/fw/" + name + ".jar";
+            logical += std::string("/system/framework/") + name + ".jar";
+        }
+        const auto seed = [](const char* key, const std::string& value) {
+            if (!getenv(key)) setenv(key, value.c_str(), 1);
+        };
+        seed("BOOTCLASSPATH", physical);
+        seed("DEX2OATBOOTCLASSPATH", physical);
+        seed("BOOTCLASSPATH_LOCATIONS", logical);
+        seed("ANDROID_BOOT_IMAGE", stage + "/boot/boot.art");
+        seed("ANDROID_ROOT", stage);
+        seed("ANDROID_DATA", stage + "/data");
+        seed("ANDROID_I18N_ROOT", stage + "/i18n");
+        seed("ANDROID_TZDATA_ROOT", stage + "/tzdata");
+        seed("ICU_DATA", stage + "/i18n/etc/icu");
+        seed("WESTLAKE_FRAMEWORK_RES_PATH", stage + "/framework-res.apk");
+        return;
+    }
     // Long values (>128 B) - OH init cfg parser cannot carry these
     // Preserve explicit launcher overrides so candidate boot images can be
     // validated in an isolated appspawn without replacing the live image.
@@ -174,11 +203,14 @@ int main(int argc, char* argv[]) {
     // Parse command line arguments
     const char* socketName = kDefaultSocketName;
     const char* sandboxConfig = kDefaultSandboxConfig;
+    bool preloadTest = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--socket-name") == 0 && i + 1 < argc) {
             socketName = argv[++i];
         } else if (strcmp(argv[i], "--sandbox-config") == 0 && i + 1 < argc) {
             sandboxConfig = argv[++i];
+        } else if (strcmp(argv[i], "--preload-test") == 0) {
+            preloadTest = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             fprintf(stdout,
                     "Usage: %s [OPTIONS]\n"
@@ -186,6 +218,7 @@ int main(int argc, char* argv[]) {
                     "Options:\n"
                     "  --socket-name NAME       Unix socket name (default: %s)\n"
                     "  --sandbox-config PATH    Sandbox config JSON (default: %s)\n"
+                    "  --preload-test           Initialize source framework and exit without listening\n"
                     "  --help, -h               Show this help\n",
                     argv[0], kDefaultSocketName, kDefaultSandboxConfig);
             return 0;
@@ -209,7 +242,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    ret = server.createListenSocket();
+    ret = preloadTest ? 0 : server.createListenSocket();
     dbgMark("M7_after_createListenSocket");
     fprintf(stderr, "[MAIN] createListenSocket ret=%d\n", ret); fflush(stderr);
     if (ret != 0) {
@@ -248,9 +281,17 @@ int main(int argc, char* argv[]) {
     phase2_done_main:;
     if (ret != 0) {
         LOGE("Failed to start ART VM on worker pthread, ret=%d", ret);
+        // A failed zygote preload probe must not run DestroyJavaVM either.
+        if (preloadTest) { fflush(stderr); _exit(1); }
         return 1;
     }
     LOGI("ART VM started + framework preloaded on worker pthread");
+    if (preloadTest) {
+        fprintf(stderr, "SOURCE_FRAMEWORK_PRELOAD_PASS\n");
+        fflush(stderr);
+        // A zygote VM is not an application VM and cannot use DestroyJavaVM.
+        _exit(0);
+    }
 
     // ============ Phase 4: Enter Event Loop ============
     LOGI("Phase 4: Ready to accept spawn requests");

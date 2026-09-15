@@ -1048,15 +1048,20 @@ static void wl_dl2_resume(JNIEnv* env, int rec) {
     jclass resCls = env->FindClass("android/app/servertransaction/ResumeActivityItem");
     if (txCls == nullptr || resCls == nullptr) { env->ExceptionClear();
         fprintf(stderr, "[WESTLAKE-DL2RESUME] transaction classes missing\n"); fflush(stderr); return; }
+    // Android 15 moved the activity token out of ClientTransaction and into each
+    // item: obtain() takes only the client, and ResumeActivityItem/ActivityResultItem
+    // take the token as their first argument. GetStaticMethodID raises
+    // NoSuchMethodError for a signature that does not exist rather than returning
+    // null, so keeping the pre-15 shapes here aborted the runtime.
     jmethodID txObtain = env->GetStaticMethodID(txCls, "obtain",
-        "(Landroid/app/IApplicationThread;Landroid/os/IBinder;)"
+        "(Landroid/app/IApplicationThread;)"
         "Landroid/app/servertransaction/ClientTransaction;");
     jmethodID resObtain = env->GetStaticMethodID(resCls, "obtain",
-        "(ZZ)Landroid/app/servertransaction/ResumeActivityItem;");
+        "(Landroid/os/IBinder;ZZ)Landroid/app/servertransaction/ResumeActivityItem;");
     if (txObtain == nullptr || resObtain == nullptr) { env->ExceptionClear();
         fprintf(stderr, "[WESTLAKE-DL2RESUME] obtain() lookup failed\n"); fflush(stderr); return; }
-    jobject tx  = env->CallStaticObjectMethod(txCls, txObtain, appThread, token);
-    jobject res = env->CallStaticObjectMethod(resCls, resObtain, JNI_TRUE, JNI_FALSE);
+    jobject tx  = env->CallStaticObjectMethod(txCls, txObtain, appThread);
+    jobject res = env->CallStaticObjectMethod(resCls, resObtain, token, JNI_TRUE, JNI_FALSE);
     jmethodID setLifecycle = env->GetMethodID(txCls, "setLifecycleStateRequest",
         "(Landroid/app/servertransaction/ActivityLifecycleItem;)V");
     if (tx == nullptr || res == nullptr || setLifecycle == nullptr) { env->ExceptionClear();
@@ -1084,14 +1089,15 @@ static void wl_dl2_resume(JNIEnv* env, int rec) {
             ? env->GetMethodID(arrayListCls, "<init>", "()V") : nullptr;
         jmethodID resultObtain = resultCls != nullptr
             ? env->GetStaticMethodID(resultCls, "obtain",
-                "(Ljava/util/List;)Landroid/app/servertransaction/ActivityResultItem;")
+                "(Landroid/os/IBinder;Ljava/util/List;)"
+                "Landroid/app/servertransaction/ActivityResultItem;")
             : nullptr;
         jmethodID addCallback = env->GetMethodID(txCls, "addCallback",
             "(Landroid/app/servertransaction/ClientTransactionItem;)V");
         if (listCtor != nullptr && resultObtain != nullptr && addCallback != nullptr) {
             jobject emptyResults = env->NewObject(arrayListCls, listCtor);
             jobject resultItem = emptyResults != nullptr
-                ? env->CallStaticObjectMethod(resultCls, resultObtain, emptyResults)
+                ? env->CallStaticObjectMethod(resultCls, resultObtain, token, emptyResults)
                 : nullptr;
             if (!env->ExceptionCheck() && resultItem != nullptr) {
                 env->CallVoidMethod(tx, addCallback, resultItem);

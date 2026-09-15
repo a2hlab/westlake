@@ -34,6 +34,7 @@
 // ============================================================================
 
 #include <dlfcn.h>
+#include <cstdlib>
 #include <hilog/log.h>
 #include <jni.h>
 
@@ -132,6 +133,7 @@ int register_android_graphics_Typeface(JNIEnv* env) {
                 rc, env->ExceptionCheck() ? 1 : 0);
             if (env->ExceptionCheck()) {
                 env->ExceptionDescribe();
+                if (getenv("WESTLAKE_RUNTIME_ROOT")) return -1;
                 env->ExceptionClear();
             }
             return rc;
@@ -144,6 +146,7 @@ int register_android_graphics_Typeface(JNIEnv* env) {
             "dlopen libhwui.so failed: %{public}s",
             dlerror() ? dlerror() : "(null)");
     }
+    if (getenv("WESTLAKE_RUNTIME_ROOT")) return -1;
     // Fallback: register adapter's broken stubs (returns fake handle 1L —
     // will crash downstream). Better than UnsatisfiedLinkError, but logs
     // loudly so we know we're on the bad path.

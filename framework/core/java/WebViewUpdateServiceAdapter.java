@@ -76,4 +76,11 @@ public final class WebViewUpdateServiceAdapter extends IWebViewUpdateService.Stu
 
     @Override
     public void notifyRelroCreationCompleted() {}
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public android.webkit.WebViewProviderInfo getDefaultWebViewPackage() throws android.os.RemoteException {
+        PackageInfo pi = getCurrentWebViewPackage();
+        return pi == null ? null : new WebViewProviderInfo(pi.packageName, "Westlake WebView", true, false, new String[0]);
+    }
 }

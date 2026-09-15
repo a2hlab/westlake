@@ -634,8 +634,15 @@ static const JNINativeMethod gMotionEventMethods[] = {
     {"nativeSetButtonState", "(JI)V", reinterpret_cast<void*>(nativeSetButtonState)},
     {"nativeGetClassification", "(J)I", reinterpret_cast<void*>(nativeGetClassification)},
     {"nativeOffsetLocation", "(JFF)V", reinterpret_cast<void*>(nativeOffsetLocation)},
+#if WESTLAKE_ANDROID_API >= 35
+    // OH event samples are kept in raw coordinates. mX/YOffset is the
+    // translation from that raw coordinate space to the current local space.
+    {"nativeGetRawXOffset", "(J)F", reinterpret_cast<void*>(nativeGetXOffset)},
+    {"nativeGetRawYOffset", "(J)F", reinterpret_cast<void*>(nativeGetYOffset)},
+#else
     {"nativeGetXOffset", "(J)F", reinterpret_cast<void*>(nativeGetXOffset)},
     {"nativeGetYOffset", "(J)F", reinterpret_cast<void*>(nativeGetYOffset)},
+#endif
     {"nativeGetXPrecision", "(J)F", reinterpret_cast<void*>(nativeGetXPrecision)},
     {"nativeGetYPrecision", "(J)F", reinterpret_cast<void*>(nativeGetYPrecision)},
     {"nativeGetXCursorPosition", "(J)F", reinterpret_cast<void*>(nativeGetXCursorPosition)},

@@ -22,6 +22,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdarg>
 #include <dlfcn.h>
 #include <thread>
 #include <atomic>
@@ -48,6 +49,24 @@ void wl_set_root_index(int idx) { g_rootIndex.store(idx); }
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+// Source-device probes preserve stderr as a content-addressed artifact.  Keep
+// view-tree diagnostics in Android logging for interactive use and mirror them
+// to stderr only when the source harness requests durable evidence.
+static void wl_view_log(int priority, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    va_list androidArgs;
+    va_copy(androidArgs, args);
+    __android_log_vprint(priority, LOG_TAG, format, androidArgs);
+    va_end(androidArgs);
+    if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {
+        std::vfprintf(stderr, format, args);
+        std::fputc('\n', stderr);
+        std::fflush(stderr);
+    }
+    va_end(args);
+}
 
 // Android InputMessage constants (from InputTransport.h)
 // These must match the AOSP InputMessage struct layout
@@ -442,18 +461,25 @@ static void wl_destroy_finished_direct_launch_activities(JNIEnv* env) {
         env->ExceptionClear();
         return;
     }
+    // Android 15 moved the activity token out of ClientTransaction and into each
+    // item, so obtain() takes only the client and every item takes the token.
+    // These lookups still carried the pre-15 shapes, and GetStaticMethodID raises
+    // NoSuchMethodError rather than returning null for a signature that does not
+    // exist -- so finishing an activity (tapping 同意 on Toutiao's consent dialog)
+    // aborted the runtime with a pending exception on the main looper.
     jmethodID txObtain = env->GetStaticMethodID(txCls, "obtain",
-        "(Landroid/app/IApplicationThread;Landroid/os/IBinder;)"
+        "(Landroid/app/IApplicationThread;)"
         "Landroid/app/servertransaction/ClientTransaction;");
     jmethodID destroyObtain = env->GetStaticMethodID(destroyCls, "obtain",
-        "(ZI)Landroid/app/servertransaction/DestroyActivityItem;");
+        "(Landroid/os/IBinder;Z)Landroid/app/servertransaction/DestroyActivityItem;");
     jmethodID setLifecycle = env->GetMethodID(txCls, "setLifecycleStateRequest",
         "(Landroid/app/servertransaction/ActivityLifecycleItem;)V");
     jmethodID addCallback = env->GetMethodID(txCls, "addCallback",
         "(Landroid/app/servertransaction/ClientTransactionItem;)V");
     jmethodID listCtor = env->GetMethodID(listCls, "<init>", "()V");
     jmethodID resultObtain = env->GetStaticMethodID(resultCls, "obtain",
-        "(Ljava/util/List;)Landroid/app/servertransaction/ActivityResultItem;");
+        "(Landroid/os/IBinder;Ljava/util/List;)"
+        "Landroid/app/servertransaction/ActivityResultItem;");
     jclass appThreadCls = env->GetObjectClass(appThread);
     jmethodID scheduleM = appThreadCls != nullptr
         ? env->GetMethodID(appThreadCls, "scheduleTransaction",
@@ -488,12 +514,13 @@ static void wl_destroy_finished_direct_launch_activities(JNIEnv* env) {
         if (env->ExceptionCheck()) env->ExceptionClear();
 
         if (finished == JNI_TRUE) {
-            jobject tx = env->CallStaticObjectMethod(txCls, txObtain, appThread, token);
+            jobject tx = env->CallStaticObjectMethod(txCls, txObtain, appThread);
             jobject destroy = env->CallStaticObjectMethod(
-                destroyCls, destroyObtain, JNI_TRUE, (jint)0);
+                destroyCls, destroyObtain, token, JNI_TRUE);
             jobject emptyResults = env->NewObject(listCls, listCtor);
             jobject result = emptyResults != nullptr
-                ? env->CallStaticObjectMethod(resultCls, resultObtain, emptyResults) : nullptr;
+                ? env->CallStaticObjectMethod(resultCls, resultObtain, token, emptyResults)
+                : nullptr;
             if (!env->ExceptionCheck() && tx != nullptr && result != nullptr) {
                 env->CallVoidMethod(tx, addCallback, result);
             }
@@ -2193,6 +2220,12 @@ static void wl_append_fresco_image_state(JNIEnv* env, jobject view, const char* 
     if (viewClass != nullptr) env->DeleteLocalRef(viewClass);
 }
 
+// Views that are hidden or measured to nothing are normally left out of the dump,
+// which is the right default but hides exactly the case where a list has items and
+// still shows nothing. wl_dump_verbose prints them too, tagged with why they were
+// skipped, so a zero-height row is distinguishable from a row that does not exist.
+static bool wl_dump_verbose;
+
 static void wl_dump_view(JNIEnv* env, WlViewDumpCtx& c, jobject v, int px, int py, int depth,
                          jobject resources) {
     if (v == nullptr || depth > 24) return;
@@ -2250,6 +2283,14 @@ static void wl_dump_view(JNIEnv* env, WlViewDumpCtx& c, jobject v, int px, int p
     char indent[64]; int di = depth < 20 ? depth : 20;
     for (int i = 0; i < di; ++i) indent[i] = ' ';
     indent[di] = 0;
+    if (vis != 0 || w <= 0 || h <= 0) {
+        if (wl_dump_verbose) {
+            const char* why = vis != 0 ? (vis == 4 ? "INVISIBLE" : "GONE") : "ZERO-SIZE";
+            wl_view_log(ANDROID_LOG_INFO, "VT %s%s id=%s rect=[%d,%d %dx%d] SKIPPED=%s",
+                        indent, shortName ? shortName : "?",
+                        idbuf[0] ? idbuf : "-", x, y, (int)w, (int)h, why);
+        }
+    }
     if (vis == 0 && w > 0 && h > 0) {   // VISIBLE and laid out
         // WESTLAKE §462: for a Material Slider also print its LIVE value. Reading the row label
         // behind the dialog cannot distinguish "the drag never moved the slider" from "it moved but
@@ -2374,7 +2415,8 @@ static void wl_dump_view(JNIEnv* env, WlViewDumpCtx& c, jobject v, int px, int p
         }
         wl_append_fresco_image_state(env, v, shortName, extra, sizeof(extra));
         wl_append_toutiao_player_state(env, v, shortName, extra, sizeof(extra));
-        LOGI("VT %s%s id=%s rect=[%d,%d %dx%d] c=%d en=%d f=%d ftm=%d itm=%d %s%s%s%s",
+        wl_view_log(ANDROID_LOG_INFO,
+             "VT %s%s id=%s rect=[%d,%d %dx%d] c=%d en=%d f=%d ftm=%d itm=%d %s%s%s%s",
              indent, shortName ? shortName : "?", idbuf[0] ? idbuf : "-",
              x, y, (int)w, (int)h, (int)clk, (int)en, (int)foc, (int)ftm, (int)itm,
              txt[0] ? "\"" : "", txt, txt[0] ? "\"" : "", extra);
@@ -2383,7 +2425,7 @@ static void wl_dump_view(JNIEnv* env, WlViewDumpCtx& c, jobject v, int px, int p
     if (jn) env->DeleteLocalRef(jn);
     if (vc) env->DeleteLocalRef(vc);
 
-    if (vis != 0) return;   // do not descend into hidden subtrees
+    if (vis != 0 && !wl_dump_verbose) return;   // do not descend into hidden subtrees
     if (c.vgCls && env->IsInstanceOf(v, c.vgCls)) {
         const jint n = env->CallIntMethod(v, c.getChildCount);
         if (env->ExceptionCheck()) { env->ExceptionClear(); return; }
@@ -2401,13 +2443,29 @@ static void wl_dump_view(JNIEnv* env, WlViewDumpCtx& c, jobject v, int px, int p
 void wl_dump_view_tree(JNIEnv* env, int rootIdx);
 void wl_dump_view_tree(JNIEnv* env, int rootIdx) {
     jclass wmgCls = env->FindClass("android/view/WindowManagerGlobal");
-    if (!wmgCls || env->ExceptionCheck()) { env->ExceptionClear(); return; }
+    if (!wmgCls || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        wl_view_log(ANDROID_LOG_ERROR, "dumpViewTree: WindowManagerGlobal unavailable");
+        return;
+    }
     jmethodID getInst = env->GetStaticMethodID(wmgCls, "getInstance", "()Landroid/view/WindowManagerGlobal;");
     jobject wmg = env->CallStaticObjectMethod(wmgCls, getInst);
-    if (!wmg || env->ExceptionCheck()) { env->ExceptionClear(); return; }
+    if (!wmg || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        wl_view_log(ANDROID_LOG_ERROR, "dumpViewTree: WindowManagerGlobal instance unavailable");
+        return;
+    }
     jfieldID mRootsF = env->GetFieldID(wmgCls, "mRoots", "Ljava/util/ArrayList;");
+    if (!mRootsF || env->ExceptionCheck()) {
+        env->ExceptionClear();
+        wl_view_log(ANDROID_LOG_ERROR, "dumpViewTree: WindowManagerGlobal.mRoots unavailable");
+        return;
+    }
     jobject roots = env->GetObjectField(wmg, mRootsF);
-    if (!roots) return;
+    if (!roots) {
+        wl_view_log(ANDROID_LOG_ERROR, "dumpViewTree: WindowManagerGlobal.mRoots is null");
+        return;
+    }
     jclass listCls = env->FindClass("java/util/ArrayList");
     jmethodID sizeM = env->GetMethodID(listCls, "size", "()I");
     jmethodID getM  = env->GetMethodID(listCls, "get", "(I)Ljava/lang/Object;");
@@ -2472,7 +2530,7 @@ void wl_dump_view_tree(JNIEnv* env, int rootIdx) {
         if (!vri) continue;
         jobject view = env->GetObjectField(vri, mViewF);
         if (view) {
-            LOGI("VT ==== root[%d] ====", (int)i);
+            wl_view_log(ANDROID_LOG_INFO, "VT ==== root[%d] ====", (int)i);
             jobject res = c.getResources ? env->CallObjectMethod(view, c.getResources) : nullptr;
             if (env->ExceptionCheck()) { env->ExceptionClear(); res = nullptr; }
             wl_dump_view(env, c, view, 0, 0, 0, res);
@@ -2482,7 +2540,7 @@ void wl_dump_view_tree(JNIEnv* env, int rootIdx) {
         env->DeleteLocalRef(vri);
     }
     if (env->ExceptionCheck()) env->ExceptionClear();
-    LOGI("VT ==== end ====");
+    wl_view_log(ANDROID_LOG_INFO, "VT ==== end ====");
 }
 
 // Dump selected Java stacks without relying on SIGQUIT/tombstoned. The OH
@@ -5152,17 +5210,29 @@ void OHInputBridge::startTapControlChannel() {
                 continue;
             }
             if (buf[0] == 'v' || buf[0] == 'V') {     // §409: dump the view hierarchy
+                // Uppercase V additionally reports hidden and zero-size views.
+                wl_dump_verbose = (buf[0] == 'V');
                 FILE* wv = fopen(path, "w"); if (wv) fclose(wv);
                 int ri = -1; sscanf(buf + 1, "%d", &ri);
                 JNIEnv* denv = nullptr; bool det = false;
                 JavaVM* vm = OHInputBridge::getInstance().javaVm();
+                std::fprintf(stderr, "[SOURCE-CONTROL] command=v vm=%p root=%d\n", vm, ri);
+                std::fflush(stderr);
                 if (vm != nullptr) {
-                    if (vm->GetEnv(reinterpret_cast<void**>(&denv), JNI_VERSION_1_6) != JNI_OK) {
+                    const jint getRc = vm->GetEnv(reinterpret_cast<void**>(&denv), JNI_VERSION_1_6);
+                    if (getRc != JNI_OK) {
                         JavaVMAttachArgs aa{JNI_VERSION_1_6, "oh-view-dump", nullptr};
-                        if (vm->AttachCurrentThread(&denv, &aa) == JNI_OK) det = true; else denv = nullptr;
+                        const jint attachRc = vm->AttachCurrentThread(&denv, &aa);
+                        std::fprintf(stderr,
+                                "[SOURCE-CONTROL] command=v getEnv=%d attach=%d env=%p\n",
+                                getRc, attachRc, denv);
+                        std::fflush(stderr);
+                        if (attachRc == JNI_OK) det = true; else denv = nullptr;
                     }
                     if (denv) { wl_dump_view_tree(denv, ri); if (det) vm->DetachCurrentThread(); }
+                    else { LOGE("dumpViewTree: unable to attach control thread"); }
                 }
+                else { LOGE("dumpViewTree: JavaVM unavailable"); }
                 continue;
             }
             if (buf[0] == 'r' || buf[0] == 'R') {

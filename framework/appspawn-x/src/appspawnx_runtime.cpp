@@ -9,6 +9,9 @@
 #include "appspawnx_runtime.h"
 #include "spawn_msg.h"
 
+int runSourceFrameworkContracts(JNIEnv* env);
+int initializeSourceFontMap(JNIEnv* env);
+
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
@@ -169,9 +172,18 @@ int AppSpawnXRuntime::startVm() {
     //   NPE: 'boolean java.lang.String.contains(java.lang.CharSequence)' on a null object
     // -> ensureBindApplication fails -> mInitialApplication null -> getResources() NPE.
     // Java-stack-confirmed via the common_throws.cc NPE-DIAG.
-    options.push_back(makeOption(
-        "-Djava.library.path=/data/local/tmp/asx:/system/lib64:/system/lib64/platformsdk:"
-        "/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk"));
+    const char* sourceRoot = getenv("WESTLAKE_RUNTIME_ROOT");
+    const std::string nativeRoot = sourceRoot && *sourceRoot ? sourceRoot : "/data/local/tmp/asx";
+    addDynamicOption("-Djava.library.path=" + nativeRoot + ":/system/lib64:/system/lib64/platformsdk:"
+        "/system/lib64/chipset-sdk:/system/lib64/chipset-sdk-sp:/system/lib64/ndk");
+    if (sourceRoot && *sourceRoot) {
+        addDynamicOption("-Dwestlake.source.runtime=true");
+        addDynamicOption("-Dwestlake.android.root=" + nativeRoot);
+        addDynamicOption("-Dwestlake.android.product=" + nativeRoot + "/product");
+    }
+    if (const char* locations = getenv("BOOTCLASSPATH_LOCATIONS"); locations && *locations) {
+        addDynamicOption(std::string("-Xbootclasspath-locations:") + locations);
+    }
 
     // Previously forced interpreter mode via -Xint, but the bytecode
     // interpreter (ExecuteSwitchImplCpp) recurses once per Java method call.
@@ -518,6 +530,10 @@ int AppSpawnXRuntime::registerNativeMethods() {
     //   (_ZN7android14AndroidRuntime8startRegEP7_JNIEnv)
     // so the existing dlsym call site keeps working.
     void* libRuntime = dlopen("liboh_android_runtime.so", RTLD_NOW);
+    if (!libRuntime && getenv("WESTLAKE_RUNTIME_ROOT")) {
+        LOGE("Source framework native library load failed: %s", dlerror());
+        return -1;
+    }
     if (!libRuntime) {
         // 2026-07-09 arm64: liboh_android_runtime.so is not built as a separate lib
         // on this port — the bridge (liboh_adapter_bridge.so) statically links
@@ -544,6 +560,7 @@ int AppSpawnXRuntime::registerNativeMethods() {
     if (startReg) {
         int rc = startReg(env_);
         if (rc < 0) {
+            if (getenv("WESTLAKE_RUNTIME_ROOT")) return rc;
             // 2026-07-09 arm64: startReg stops at the FIRST failing module
             // (register_android_view_MotionEvent fails on this board), but all
             // modules BEFORE it — incl. register_android_os_Process (setArgV0Native),
@@ -558,6 +575,7 @@ int AppSpawnXRuntime::registerNativeMethods() {
         }
     } else {
         LOGW("AndroidRuntime::startReg symbol not found: %s", dlerror());
+        if (getenv("WESTLAKE_RUNTIME_ROOT")) return -1;
         LOGW("Attempting manual registration of essential JNI methods");
 
         // Manually register the minimum set of JNI methods needed for boot.
@@ -613,8 +631,10 @@ int AppSpawnXRuntime::cacheJavaReferences() {
     // absent AND shadowed by the appspawn-x sandbox tmpfs). This lets our patched
     // AppSpawnXInit (framework-res redirected to /data/local/tmp/asx) actually load,
     // instead of falling through to the stock BCP version.
-    static const char* kRuntimeJarPath =
-        "/data/local/tmp/asx/oh-adapter-runtime.jar";
+    const char* root = getenv("WESTLAKE_RUNTIME_ROOT");
+    const std::string runtimeJar = root && *root ? std::string(root) + "/fw/adapter-runtime-bcp.jar"
+                                               : "/data/local/tmp/asx/oh-adapter-runtime.jar";
+    const char* kRuntimeJarPath = runtimeJar.c_str();
 
     jclass localClass = nullptr;
 
@@ -761,6 +781,9 @@ int AppSpawnXRuntime::preload() {
         LOGI("Preload completed successfully");
     }
 
+    // Source builds supply Conscrypt and ICU. Legacy provider replacement is
+    // only for captured stacks whose boot class path omitted those components.
+    if (getenv("WESTLAKE_RUNTIME_ROOT") == nullptr) {
     // Conscrypt is absent on OH. AppSpawnXInit first prunes the configured
     // provider list to the implementations present in the boot class path.
     // Only after that policy has initialized Providers may we add the OH JSSE
@@ -790,9 +813,20 @@ int AppSpawnXRuntime::preload() {
         env_->ExceptionDescribe();
         env_->ExceptionClear();
     }
+    }  // end of the legacy-only JSSE provider replacement
 
     // Install the pure-Java PKIX bridge after the provider list and JSSE
     // provider are stable. The bridge lives in an appended BCP dex.
+    //
+    // WESTLAKE: this MUST also run for source builds, so it is deliberately
+    // OUTSIDE the WESTLAKE_RUNTIME_ROOT gate above -- that gate covers only the
+    // legacy JSSE provider replacement. The bridge is what restores the standard
+    // JCA TrustManagerFactory.PKIX contract from the platform CA bundle
+    // (/etc/ssl/certs/cacert.pem, 118 roots). Conscrypt is on the source boot
+    // classpath but its JNI library is unavailable on OH, so while the bridge
+    // was gated off every HTTPS request failed with
+    //   CertPathValidatorException: Trust anchor for certification path not found
+    // and every Toutiao page rendered the "network unavailable" empty state.
     jclass trustBridge = env_->FindClass("adapter/security/OhTrustBridge");
     if (trustBridge != nullptr) {
         jmethodID installTrust = env_->GetStaticMethodID(trustBridge, "install", "()V");
@@ -810,7 +844,7 @@ int AppSpawnXRuntime::preload() {
     }
 
     if (preloadFailed) {
-        return 0;
+        return getenv("WESTLAKE_RUNTIME_ROOT") ? -1 : 0;
     }
 
     // 2026-07-09: force-init the fork-sensitive daemon/cleaner classes NOW, in this
@@ -1031,6 +1065,8 @@ int AppSpawnXRuntime::preload() {
             LOGE("[B35.A] dlopen(liboh_adapter_bridge.so, NOLOAD|NOW) returned null — bridge.so not loaded yet?");
         }
     }
+    if (initializeSourceFontMap(env_) != 0) return -1;
+    if (getenv("WESTLAKE_SOURCE_CONTRACTS")) return runSourceFrameworkContracts(env_);
     return 0;
 }
 

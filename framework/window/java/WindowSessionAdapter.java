@@ -486,7 +486,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [BRIDGED] remove -> OH ISession.Disconnect + ISceneSessionManager.DestroySession
      */
-    @Override
+
     public void remove(IWindow window) throws RemoteException {
         OhWindowPolicy.remove(window);
         OhInsetsBridge.remove(window);
@@ -524,8 +524,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [BRIDGED] relayout -> OH ISession.UpdateSessionRect + UpdateSizeChangeReason
      */
+
     @Override
-    public int relayout(IWindow window, WindowManager.LayoutParams attrs,
+    public int relayoutLegacy(IWindow window, WindowManager.LayoutParams attrs,
             int requestedWidth, int requestedHeight, int viewVisibility,
             int flags, int seq, int lastSyncSeqId, ClientWindowFrames outFrames,
             MergedConfiguration outMergedConfiguration, SurfaceControl outSurfaceControl,
@@ -645,7 +646,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 int displayId = 0;
                 window.resized(pushedFrames, false /* reportDraw */, cfg, pushedInsets,
                         true /* forceLayout */, false /* alwaysConsumeSystemBars */,
-                        displayId, 0 /* syncSeqId */, false /* dragResizing */);
+                        displayId, 0 /* syncSeqId */, false /* dragResizing */, null);
                 mReversePushed.add(window.asBinder());
                 System.err.println("[OH_WSA-relayout] reverse-pushed via IWindow.resized (once): "
                         + width + "x" + height);
@@ -825,7 +826,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [STUB] performHapticFeedback - OH handles haptics differently
      */
-    @Override
+
     public boolean performHapticFeedback(int effectId, boolean always) throws RemoteException {
         logStub("performHapticFeedback", "OH haptic framework not mapped");
         return false;
@@ -834,7 +835,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [STUB] performHapticFeedbackAsync - OH handles haptics differently (oneway)
      */
-    @Override
+
     public void performHapticFeedbackAsync(int effectId, boolean always) throws RemoteException {
         logStub("performHapticFeedbackAsync", "OH haptic framework not mapped");
     }
@@ -846,7 +847,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [BRIDGED] performDrag -> OH drag and drop framework
      */
-    @Override
+
     public IBinder performDrag(IWindow window, int flags, SurfaceControl surface,
             int touchSource, float touchX, float touchY, float thumbCenterX,
             float thumbCenterY, ClipData data) throws RemoteException {
@@ -948,11 +949,11 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [STUB] sendWallpaperCommand - OH wallpaper system differs
      */
+
     @Override
-    public Bundle sendWallpaperCommand(IBinder window, String action, int x, int y,
+    public void sendWallpaperCommand(IBinder window, String action, int x, int y,
             int z, Bundle extras, boolean sync) throws RemoteException {
         logStub("sendWallpaperCommand", "OH wallpaper command not mapped");
-        return null;
     }
 
     /**
@@ -970,7 +971,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [BRIDGED] updatePointerIcon -> OH input pointer icon (oneway)
      */
-    @Override
+
     public void updatePointerIcon(IWindow window) throws RemoteException {
         logBridged("updatePointerIcon", "-> OH input pointer icon");
         // TODO: Phase 2 - call native pointer icon update
@@ -998,7 +999,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [BRIDGED] grantInputChannel -> OH ISession input channel
      */
-    @Override
+
     public void grantInputChannel(int displayId, SurfaceControl surface, IWindow window,
             IBinder hostInputToken, int flags, int privateFlags, int inputFeatures,
             int type, IBinder windowToken, IBinder focusGrantToken, String inputHandleName,
@@ -1025,7 +1026,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [STUB] grantEmbeddedWindowFocus - OH embedded window focus model differs
      */
-    @Override
+
     public void grantEmbeddedWindowFocus(IWindow window, IBinder inputToken,
             boolean grantFocus) throws RemoteException {
         logStub("grantEmbeddedWindowFocus", "OH embedded window focus not mapped");
@@ -1034,7 +1035,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * [STUB] transferEmbeddedTouchFocusToHost - OH embedded touch model differs
      */
-    @Override
+
     public boolean transferEmbeddedTouchFocusToHost(IWindow embeddedWindow)
             throws RemoteException {
         logStub("transferEmbeddedTouchFocusToHost", "OH embedded touch focus not mapped");
@@ -1210,5 +1211,57 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             return layoutDimension;
         }
         return sessionDimension;
+    }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public void remove(android.os.IBinder clientToken) throws android.os.RemoteException {
+        remove(IWindow.Stub.asInterface(clientToken));
+    }
+
+    @Override
+    public int relayout(android.view.IWindow window, android.view.WindowManager.LayoutParams attrs, int requestedWidth, int requestedHeight, int viewVisibility, int flags, int seq, int lastSyncSeqId, android.view.WindowRelayoutResult outRelayoutResult) throws android.os.RemoteException {
+        int result = relayoutLegacy(window, attrs, requestedWidth, requestedHeight, viewVisibility, flags, seq, lastSyncSeqId, outRelayoutResult.frames, outRelayoutResult.mergedConfiguration, outRelayoutResult.surfaceControl, outRelayoutResult.insetsState, outRelayoutResult.activeControls, new Bundle());
+        outRelayoutResult.syncSeqId = lastSyncSeqId;
+        if (result >= 0 && attrs != null && attrs.type >= WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW && attrs.type <= WindowManager.LayoutParams.LAST_APPLICATION_WINDOW) {
+            outRelayoutResult.activityWindowInfo = new android.window.ActivityWindowInfo();
+            outRelayoutResult.activityWindowInfo.set(false, outRelayoutResult.frames.frame, outRelayoutResult.frames.frame);
+        }
+        return result;
+    }
+
+    @Override
+    public boolean performHapticFeedback(int effectId, boolean always, boolean fromIme) throws android.os.RemoteException {
+        return performHapticFeedback(effectId, always);
+    }
+
+    @Override
+    public void performHapticFeedbackAsync(int effectId, boolean always, boolean fromIme) throws android.os.RemoteException {
+        performHapticFeedbackAsync(effectId, always);
+    }
+
+    @Override
+    public android.os.IBinder performDrag(android.view.IWindow window, int flags, android.view.SurfaceControl surface, int touchSource, int touchDeviceId, int touchPointerId, float touchX, float touchY, float thumbCenterX, float thumbCenterY, android.content.ClipData data) throws android.os.RemoteException {
+        return performDrag(window, flags, surface, touchSource, touchX, touchY, thumbCenterX, thumbCenterY, data);
+    }
+
+    @Override
+    public void grantInputChannel(int displayId, android.view.SurfaceControl surface, android.os.IBinder clientToken, android.window.InputTransferToken hostInputTransferToken, int flags, int privateFlags, int inputFeatures, int type, android.os.IBinder windowToken, android.window.InputTransferToken embeddedInputTransferToken, java.lang.String inputHandleName, android.view.InputChannel outInputChannel) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony embedded input-channel provider is not connected");
+    }
+
+    @Override
+    public void grantEmbeddedWindowFocus(android.view.IWindow window, android.window.InputTransferToken inputToken, boolean grantFocus) throws android.os.RemoteException {
+        grantEmbeddedWindowFocus(window, inputToken == null ? null : inputToken.getToken(), grantFocus);
+    }
+
+    @Override
+    public void reportDecorViewGestureInterceptionChanged(android.view.IWindow window, boolean intercepted) throws android.os.RemoteException {
+        logStub("reportDecorViewGestureInterceptionChanged", "OH decor gestures use the OH input dispatcher");
+    }
+
+    @Override
+    public boolean moveFocusToAdjacentWindow(android.view.IWindow fromWindow, int direction) throws android.os.RemoteException {
+        return false;
     }
 }

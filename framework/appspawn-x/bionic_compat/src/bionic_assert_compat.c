@@ -42,6 +42,7 @@ int __open_2(const char* path, int flags) {
 }
 
 /* Android's legacy property read API, backed by OH's parameter service. */
+#ifndef WESTLAKE_EXTERNAL_SYSTEM_PROPERTIES
 int __system_property_get(const char* name, char* value) {
     typedef int (*ReadParamFn)(const char*, char*, unsigned int*);
     static ReadParamFn read_param;
@@ -66,6 +67,7 @@ int __system_property_get(const char* name, char* value) {
     value[WESTLAKE_ANDROID_PROP_VALUE_MAX - 1] = '\0';
     return (int)strlen(value);
 }
+#endif
 
 /* Integer parsing is locale-independent in bionic too; its locale entry
  * points are direct forwards to the ordinary functions. */

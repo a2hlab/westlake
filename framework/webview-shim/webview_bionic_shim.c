@@ -50,6 +50,45 @@ static int caller_uses_bionic_signal_abi(void *return_address,
 }
 
 /*
+ * Bionic exposes getprogname(), while the OH musl libc on the target does
+ * not.  Newer Chromium 109 link outputs retain that import even though the
+ * value is only used for process identity and diagnostics.  The WebView ELF
+ * import is redirected to this equal-length name (getprogname ->
+ * wl_progname), keeping the compatibility behavior local to the Android
+ * boundary instead of adding a process-wide libc interposer.
+ */
+static pthread_once_t westlake_program_name_once = PTHREAD_ONCE_INIT;
+static char westlake_program_name[256] = "unknown";
+
+static void westlake_read_program_name(void)
+{
+    char value[sizeof(westlake_program_name)];
+    ssize_t length = -1;
+    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        length = read(fd, value, sizeof(value) - 1);
+        close(fd);
+    }
+    if (length <= 0) {
+        length = readlink("/proc/self/exe", value, sizeof(value) - 1);
+    }
+    if (length <= 0) return;
+    value[length] = '\0';
+    char *base = strrchr(value, '/');
+    base = base != NULL ? base + 1 : value;
+    if (*base != '\0') {
+        snprintf(westlake_program_name, sizeof(westlake_program_name), "%s",
+                 base);
+    }
+}
+
+const char *wl_progname(void)
+{
+    pthread_once(&westlake_program_name_once, westlake_read_program_name);
+    return westlake_program_name;
+}
+
+/*
  * Android's public arm64 signal ABI is not compatible with OH musl:
  *
  *   bionic: flags@0, callback@8, 64-bit mask@16, restorer@24 (32 bytes)

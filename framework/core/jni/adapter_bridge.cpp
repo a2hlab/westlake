@@ -37,6 +37,7 @@
 #include "adapter_bridge.h"
 #include "oh_callback_handler.h"
 #include "oh_datashare_client.h"
+#include "oh_input_bridge.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -46,6 +47,7 @@
 #include <pthread.h>
 #include <string>
 #include <unistd.h>
+#include <fcntl.h>
 #include <dlfcn.h>
 #include <cstdint>
 #include <cstring>
@@ -67,21 +69,32 @@ extern "C" int HiLogPrint(int type, int level, unsigned int domain,
 #define LOGI(fmt, ...) HiLogPrint(3, 4, 0xD000F00u, LOG_TAG, fmt, ##__VA_ARGS__)
 #define LOGE(fmt, ...) HiLogPrint(3, 6, 0xD000F00u, LOG_TAG, fmt, ##__VA_ARGS__)
 
-// 2026-05-08 G2.14x: preload chipset Mali GPU driver into RTLD_GLOBAL scope so
-// helloworld matches RS process loading: RS DT_NEEDED libmali.so.0 (eager link,
-// global by default); App side OH wrapper EglWrapperLoader::Load uses RTLD_LOCAL
-// for libEGL_impl.so (= libmali symlink), which keeps mali symbols private.
-// This mismatch was identified as a candidate root cause for the EGLDisplay
-// invalid issue seen in helloworld but not in RS. Pre-loading libmali.so.0 into
-// the global scope before any hwui PLT resolution puts mali's eglXxx symbols
-// into the global lookup chain, matching RS behavior.
+// 2026-05-08 G2.14x: preload the chipset Mali GPU driver before any hwui PLT
+// resolution, so the driver is resident as early as it is in an RS process
+// (which pulls libmali.so.0 in via DT_NEEDED) rather than being loaded lazily
+// by OH's EglWrapperLoader. This was identified as a candidate root cause for
+// the EGLDisplay-invalid issue seen in helloworld but not in RS.
+//
+// 2026-09-11: the preload stays, but it is RTLD_LOCAL now — it was RTLD_GLOBAL,
+// which published the whole driver into the process-wide lookup chain. That is
+// not just the eglXxx entry points: libGLES_mali.z.so statically links zlib and
+// exports 90 of its symbols (deflate*, inflate*, crc32*, adler32*, compress*).
+// Publishing them globally let a z_stream initialised by one zlib be handed to
+// the driver's private copy, whose deflate_state differs, and Toutiao died
+// reproducibly with SIGSEGV in deflateReset+60 on a bd_tracker thread about two
+// minutes into every run (cppcrash-17883, cppcrash-19202).
+//
+// Stock OH never has this problem: the driver lives in the chipsetsdk linker
+// namespace and EglWrapperLoader::Load opens libEGL_impl.so (the libmali
+// symlink) with RTLD_LOCAL, keeping those symbols private. RTLD_LOCAL restores
+// exactly that, while keeping the early-load behaviour the preload exists for.
 __attribute__((constructor))
 static void preload_libmali_global() {
-    void* h = dlopen("libmali.so.0", RTLD_NOW | RTLD_GLOBAL);
+    void* h = dlopen("libmali.so.0", RTLD_NOW | RTLD_LOCAL);
     if (h == nullptr) {
         LOGE("preload libmali.so.0 failed: %{public}s", dlerror());
     } else {
-        LOGI("preload libmali.so.0 -> RTLD_GLOBAL OK (handle=%p)", h);
+        LOGI("preload libmali.so.0 -> RTLD_LOCAL OK (handle=%p)", h);
     }
 }
 
@@ -284,10 +297,6 @@ static std::atomic<int> g_app_boundary_native_state{0};
 
 static jint install_app_boundary_natives(JNIEnv* env, jobject app_class_loader);
 
-// Resolve the APK ClassLoader from ActivityThread's normal bind state.  This
-// becomes available before Application.onCreate(), so the boundary native is
-// installed before application code can invoke it.  Keeping this lookup here
-// avoids any ART-wide native lookup fallback.
 static jobject find_bound_app_class_loader(JNIEnv* env, jclass activity_thread) {
     jmethodID current_thread = env->GetStaticMethodID(
             activity_thread, "currentActivityThread", "()Landroid/app/ActivityThread;");
@@ -514,56 +523,78 @@ extern int register_WindowManagerAdapter(JNIEnv*);
 extern int register_WindowSessionAdapter(JNIEnv*);
 extern int register_InputEventBridge(JNIEnv*);
 extern int register_InputMethodBridge(JNIEnv*);
+extern int register_DisplayManagerAdapter(JNIEnv*);
+extern int register_InputManagerAdapter(JNIEnv*);
 
-// ---- BLASTBufferQueue ABI fixup (app-owned SurfaceView: Unity/NativeActivity) ----
-// The deployed Android-13 framework.jar declares nativeUpdate(JJJJI)V + transaction/
-// sync natives the (older-AOSP) runtime never bound, so SurfaceView crashes on
-// UnsatisfiedLinkError. Bind a real nativeUpdate (mirrors the runtime's BBQ_nativeUpdate,
-// resolving sessionId -> OHNativeWindow via oh_wm_get_*) + no-op the transaction methods.
-// Struct layout copied from android_graphics_compat_shim.cpp so the runtime's
-// BBQ_nativeGetSurface reads ohNativeWindow at the right offset.
-extern "C" void* oh_wm_get_native_window(int32_t sessionId);
-extern "C" int32_t oh_wm_get_last_session(void);
-namespace {
-struct BbqFix { int32_t magic; char name[64]; int32_t width; int32_t height; int32_t format; void* ohNativeWindow; int32_t sessionId; };
-constexpr int32_t kBbqFixMagic = 0x4F484251;  // 'OHBQ'
-void BbqUpdateFix(JNIEnv*, jclass, jlong p, jlong, jlong w, jlong h, jint fmt) {
-    BbqFix* b = reinterpret_cast<BbqFix*>(static_cast<uintptr_t>(p));
-    if (!b || b->magic != kBbqFixMagic) return;
-    b->width = static_cast<int32_t>(w); b->height = static_cast<int32_t>(h); b->format = fmt;
-    int32_t sid = oh_wm_get_last_session();
-    b->sessionId = sid;
-    b->ohNativeWindow = sid ? oh_wm_get_native_window(sid) : nullptr;
-}
-void     BbqVJL  (JNIEnv*, jclass, jlong, jobject) {}
-void     BbqVJJ  (JNIEnv*, jclass, jlong, jlong) {}
-void     BbqVJ   (JNIEnv*, jclass, jlong) {}
-jobject  BbqOJJ  (JNIEnv*, jclass, jlong, jlong) { return nullptr; }
-jboolean BbqBJJ  (JNIEnv*, jclass, jlong, jlong) { return JNI_FALSE; }
-jboolean BbqBJLZ (JNIEnv*, jclass, jlong, jobject, jboolean) { return JNI_FALSE; }
-}  // namespace
-static int register_BLASTBufferQueue_fixup(JNIEnv* env) {
-    jclass c = env->FindClass("android/graphics/BLASTBufferQueue");
-    if (!c) { if (env->ExceptionCheck()) env->ExceptionClear();
-        ZYG_LOG_ERR("[BBQ-FIX] FindClass(BLASTBufferQueue) null"); return -1; }
-    const JNINativeMethod ms[] = {
-        {const_cast<char*>("nativeUpdate"), const_cast<char*>("(JJJJI)V"), reinterpret_cast<void*>(BbqUpdateFix)},
-        {const_cast<char*>("nativeSetTransactionHangCallback"), const_cast<char*>("(JLandroid/graphics/BLASTBufferQueue$TransactionHangCallback;)V"), reinterpret_cast<void*>(BbqVJL)},
-        {const_cast<char*>("nativeApplyPendingTransactions"), const_cast<char*>("(JJ)V"), reinterpret_cast<void*>(BbqVJJ)},
-        {const_cast<char*>("nativeClearSyncTransaction"), const_cast<char*>("(J)V"), reinterpret_cast<void*>(BbqVJ)},
-        {const_cast<char*>("nativeStopContinuousSyncTransaction"), const_cast<char*>("(J)V"), reinterpret_cast<void*>(BbqVJ)},
-        {const_cast<char*>("nativeGatherPendingTransactions"), const_cast<char*>("(JJ)Landroid/view/SurfaceControl$Transaction;"), reinterpret_cast<void*>(BbqOJJ)},
-        {const_cast<char*>("nativeIsSameSurfaceControl"), const_cast<char*>("(JJ)Z"), reinterpret_cast<void*>(BbqBJJ)},
-        {const_cast<char*>("nativeSyncNextTransaction"), const_cast<char*>("(JLjava/util/function/Consumer;Z)Z"), reinterpret_cast<void*>(BbqBJLZ)},
-    };
-    int ok = 0;
-    for (size_t i = 0; i < sizeof(ms) / sizeof(ms[0]); i++) {
-        jint rc = env->RegisterNatives(c, &ms[i], 1);
+extern "C" jstring
+Java_adapter_packagemanager_PackageManagerAdapter_nativeGetBundleInfo(
+        JNIEnv*, jclass, jstring, jint);
+extern "C" jstring
+Java_adapter_packagemanager_PackageManagerAdapter_nativeGetApplicationInfo(
+        JNIEnv*, jclass, jstring, jint);
+extern "C" jstring
+Java_adapter_packagemanager_PackageManagerAdapter_nativeGetAllBundleInfos(
+        JNIEnv*, jclass, jint);
+extern "C" jstring
+Java_adapter_packagemanager_PackageManagerAdapter_nativeQueryAbilityInfos(
+        JNIEnv*, jclass, jstring, jint);
+extern "C" jint
+Java_adapter_packagemanager_PackageManagerAdapter_nativeGetUidByBundleName(
+        JNIEnv*, jclass, jstring);
+extern "C" jint
+Java_adapter_packagemanager_PackageManagerAdapter_nativeCheckPermission(
+        JNIEnv*, jclass, jstring, jstring);
+extern "C" jstring
+Java_adapter_packagemanager_PackageManagerAdapter_nativeParseApkManifestJson(
+        JNIEnv*, jclass, jstring);
+extern "C" jstring
+Java_adapter_packagemanager_PackageManagerAdapter_nativeGetOhSystemProperty(
+        JNIEnv*, jclass, jstring, jstring);
+
+static int register_PackageManagerAdapter(JNIEnv* env) {
+    jclass clazz = env->FindClass("adapter/packagemanager/PackageManagerAdapter");
+    if (clazz == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
-        if (rc == 0) ok++;
+        ZYG_LOG_ERR("RegisterNatives(PackageManagerAdapter): class not found");
+        return JNI_ERR;
     }
-    ZYG_LOG_INFO("[BBQ-FIX] registered %{public}d/8 BLASTBufferQueue natives", ok);
-    return 0;
+    const JNINativeMethod methods[] = {
+        {const_cast<char*>("nativeGetBundleInfo"),
+         const_cast<char*>("(Ljava/lang/String;I)Ljava/lang/String;"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeGetBundleInfo)},
+        {const_cast<char*>("nativeGetApplicationInfo"),
+         const_cast<char*>("(Ljava/lang/String;I)Ljava/lang/String;"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeGetApplicationInfo)},
+        {const_cast<char*>("nativeGetAllBundleInfos"),
+         const_cast<char*>("(I)Ljava/lang/String;"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeGetAllBundleInfos)},
+        {const_cast<char*>("nativeQueryAbilityInfos"),
+         const_cast<char*>("(Ljava/lang/String;I)Ljava/lang/String;"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeQueryAbilityInfos)},
+        {const_cast<char*>("nativeGetUidByBundleName"),
+         const_cast<char*>("(Ljava/lang/String;)I"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeGetUidByBundleName)},
+        {const_cast<char*>("nativeCheckPermission"),
+         const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)I"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeCheckPermission)},
+        {const_cast<char*>("nativeParseApkManifestJson"),
+         const_cast<char*>("(Ljava/lang/String;)Ljava/lang/String;"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeParseApkManifestJson)},
+        {const_cast<char*>("nativeGetOhSystemProperty"),
+         const_cast<char*>("(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+         reinterpret_cast<void*>(Java_adapter_packagemanager_PackageManagerAdapter_nativeGetOhSystemProperty)},
+    };
+    const jint rc = env->RegisterNatives(
+            clazz, methods, sizeof(methods) / sizeof(methods[0]));
+    env->DeleteLocalRef(clazz);
+    if (rc != JNI_OK) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        ZYG_LOG_ERR("RegisterNatives(PackageManagerAdapter) failed rc=%{public}d", rc);
+    } else {
+        ZYG_LOG_INFO("RegisterNatives(PackageManagerAdapter) OK (%{public}zu methods)",
+                     sizeof(methods) / sizeof(methods[0]));
+    }
+    return rc;
 }
 
 // ---- Audio native stubs (Unity/AudioTrack init hits unimplemented AudioSystem/AudioTrack
@@ -581,7 +612,7 @@ jint AS_outLatency(JNIEnv*, jclass, jint) { return 0; }              // getOutpu
 jint AS_deviceConnectionState(JNIEnv*, jclass, jint, jstring) {
     // This boundary has no Android audio-policy inventory.  Report the queried
     // route as unavailable, matching the empty AudioPort/AudioPatch lists
-    // registered by AndroidRuntime.cpp instead of throwing during player init.
+    // instead of throwing during player initialization.
     return 0;  // AudioSystem.DEVICE_STATE_UNAVAILABLE
 }
 jint AT_minBuf(JNIEnv*, jclass, jint, jint, jint) { return 8192; }   // native_get_min_buff_size(III)
@@ -686,27 +717,30 @@ extern "C" JNIEXPORT jobject JNICALL Java_ms_bd_c_m_a(
     return result;
 }
 
-static jint install_app_boundary_natives(JNIEnv* env, jobject app_class_loader) {
-    if (app_class_loader == nullptr) return 0;
+// Called at the framework's pre-bind point with the real APK ClassLoader.
+// RegisterNatives is the canonical way for a boot-owned boundary library to
+// provide an implementation to a class owned by an application ClassLoader;
+// no ART-wide or process-global JNI fallback is needed.
+static jint install_app_boundary_natives(JNIEnv* env, jobject appClassLoader) {
+    if (appClassLoader == nullptr) return 0;
     const char* configured = std::getenv("WESTLAKE_APP_BOUNDARY_NATIVES");
     if (configured == nullptr || std::strstr(configured, "metasec") == nullptr) return 0;
 
-    jclass loader_class = env->FindClass("java/lang/ClassLoader");
-    jmethodID load_class = loader_class != nullptr
-            ? env->GetMethodID(loader_class, "loadClass",
-                               "(Ljava/lang/String;)Ljava/lang/Class;")
+    jclass loaderClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClass = loaderClass != nullptr
+            ? env->GetMethodID(loaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;")
             : nullptr;
-    if (load_class == nullptr) {
+    if (loadClass == nullptr) {
         if (env->ExceptionCheck()) env->ExceptionClear();
-        if (loader_class != nullptr) env->DeleteLocalRef(loader_class);
+        if (loaderClass != nullptr) env->DeleteLocalRef(loaderClass);
         return 0;
     }
 
     jstring name = env->NewStringUTF("ms.bd.c.m");
     auto target = reinterpret_cast<jclass>(
-            env->CallObjectMethod(app_class_loader, load_class, name));
+            env->CallObjectMethod(appClassLoader, loadClass, name));
     env->DeleteLocalRef(name);
-    env->DeleteLocalRef(loader_class);
+    env->DeleteLocalRef(loaderClass);
     if (target == nullptr || env->ExceptionCheck()) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         if (target != nullptr) env->DeleteLocalRef(target);
@@ -726,19 +760,27 @@ static jint install_app_boundary_natives(JNIEnv* env, jobject app_class_loader) 
 
 extern "C" JNIEXPORT jint JNICALL
 Java_adapter_activity_AppSchedulerBridge_nativeInstallAppBoundaryNatives(
-        JNIEnv* env, jclass, jobject app_class_loader) {
-    return install_app_boundary_natives(env, app_class_loader);
+        JNIEnv* env, jclass, jobject appClassLoader) {
+    return install_app_boundary_natives(env, appClassLoader);
 }
 
 extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
     ZYG_LOG_INFO("[B34.1] JNI_OnLoad: oh_adapter_bridge entered");
     AdapterBridge::getInstance().setJavaVM(vm);
+    // The bridge can start its control/input thread before OHEnvironment.init
+    // runs. Publish the VM at library load as well so a post-fork child can
+    // attach that thread for view-tree and input dispatch immediately.
+    OHInputBridge::getInstance().setJavaVM(vm);
 
     // Bridge to OH libskia_canvaskit's SkCodecs::Register — without this the
     // 4-arg SkCodec::MakeFromStream wrapper sees an empty decoder list and
     // returns kUnimplemented for every PNG/JPEG/WEBP load (HelloWorld
     // setContentView -> ImageDecoder failure root cause).
+    #if !defined(__aarch64__)
     adapter::RegisterAllSkiaCodecs();
+    #else
+    { const char m[]="[JNIONLOAD] skipped skia\n"; write(2,m,sizeof(m)-1); }
+    #endif
 
     JNIEnv* env = nullptr;
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
@@ -761,7 +803,9 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
     register_WindowSessionAdapter(env);
     register_InputEventBridge(env);
     register_InputMethodBridge(env);
-    register_BLASTBufferQueue_fixup(env);
+    if (register_PackageManagerAdapter(env) != JNI_OK) return JNI_ERR;
+    if (register_DisplayManagerAdapter(env) != JNI_OK) return JNI_ERR;
+    if (register_InputManagerAdapter(env) != JNI_OK) return JNI_ERR;
     register_Audio_fixup(env);
     register_MediaCodec_shim(env);
 

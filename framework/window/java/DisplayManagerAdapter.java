@@ -42,6 +42,7 @@ import android.view.Display;
 import android.view.DisplayAddress;
 import android.view.DisplayInfo;
 import android.view.Surface;
+import android.view.SurfaceControl;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -76,6 +77,7 @@ public final class DisplayManagerAdapter extends IDisplayManager.Stub {
     }
 
     public DisplayManagerAdapter() {
+        super(adapter.packagemanager.OHPermissionEnforcer.getInstance());
         System.err.println("[" + TAG + "] instantiated (real-routed via OH Rosen DisplayManager)");
     }
 
@@ -354,5 +356,34 @@ public final class DisplayManagerAdapter extends IDisplayManager.Stub {
     @Override public int getRefreshRateSwitchingType() { return 0; }
     @Override public DisplayDecorationSupport getDisplayDecorationSupport(int displayId) { return null; }
     @Override public void setDisplayIdToMirror(IBinder token, int displayId) {}
-    @Override public OverlayProperties getOverlaySupport() { return null; }
+    @Override
+    public OverlayProperties getOverlaySupport() {
+        // DisplayManagerGlobal caches this result and HardwareRenderer
+        // dereferences it during its first display initialization.  The OH
+        // boundary advertises no Android hardware-overlay combinations, but
+        // it must still return the non-null value object required by the
+        // Android display contract.
+        return SurfaceControl.getOverlaySupport();
+    }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public void enableConnectedDisplay(int displayId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony connected display control is not connected");
+    }
+
+    @Override
+    public void disableConnectedDisplay(int displayId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony connected display control is not connected");
+    }
+
+    @Override
+    public boolean requestDisplayPower(int displayId, boolean on) throws android.os.RemoteException {
+        return false;
+    }
+
+    @Override
+    public void requestDisplayModes(android.os.IBinder token, int displayId, int[] modeIds) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony display mode request is not connected");
+    }
 }

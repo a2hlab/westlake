@@ -31,6 +31,9 @@
     "uiSyntax": "ets",
     "virtualMachine": "ark24.0.0.0",
     "apiType": "stageMode",
-    "requestPermissions": [{"name": "ohos.permission.INTERNET"}]
+    "requestPermissions": [
+      {"name": "ohos.permission.INTERNET"},
+      {"name": "ohos.permission.GET_NETWORK_INFO"}
+    ]
   }
 }

@@ -450,7 +450,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [BRIDGED] serviceDoneExecuting -> OH IAbilityManager.ScheduleCommandAbilityDone (oneway)
-    @Override
+
     public void serviceDoneExecuting(IBinder token, int type, int startId,
             int res) throws RemoteException {
         logBridged("serviceDoneExecuting", "-> OH ScheduleCommandAbilityDone");
@@ -584,7 +584,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [BRIDGED] finishAttachApplication -> OH IAppMgr (part of attach flow)
-    @Override
+
     public void finishAttachApplication(long startSeq) throws RemoteException {
         logBridged("finishAttachApplication", "-> OH AttachApplication completion");
     }
@@ -901,7 +901,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [STUB] setApplicationStartInfoCompleteListener
-    @Override
+
     public void setApplicationStartInfoCompleteListener(
             IApplicationStartInfoCompleteListener listener,
             int userId) throws RemoteException {
@@ -909,7 +909,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [STUB] removeApplicationStartInfoCompleteListener
-    @Override
+
     public void removeApplicationStartInfoCompleteListener(
             int userId) throws RemoteException {
         logStub("removeApplicationStartInfoCompleteListener", "No OH equivalent");
@@ -1143,7 +1143,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [STUB] isModernBroadcastQueueEnabled
-    @Override
+
     public boolean isModernBroadcastQueueEnabled() throws RemoteException {
         logStub("isModernBroadcastQueueEnabled", "OH broadcast not mapped");
         return false;
@@ -1684,7 +1684,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [STUB] stopUserWithDelayedLocking
-    @Override
+
     public int stopUserWithDelayedLocking(int userid, boolean force,
             IStopUserCallback callback) throws RemoteException {
         logStub("stopUserWithDelayedLocking", "OH user management not mapped in Phase 1");
@@ -1877,7 +1877,7 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     }
 
     // [STUB] dumpHeap
-    @Override
+
     public boolean dumpHeap(String process, int userId, boolean managed, boolean mallocInfo,
             boolean runGc, String path, ParcelFileDescriptor fd,
             RemoteCallback finishCallback) throws RemoteException {
@@ -2371,5 +2371,121 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     public int[] getUidFrozenState(int[] uids) throws RemoteException {
         logStub("getUidFrozenState", "OH app freezer not mapped");
         return new int[0];
+    }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public void finishAttachApplication(long startSeq, long timestampApplicationOnCreateNs) throws android.os.RemoteException {
+        finishAttachApplication(startSeq);
+    }
+
+    @Override
+    public void serviceDoneExecuting(android.os.IBinder token, int type, int startId, int res, android.content.Intent intent) throws android.os.RemoteException {
+        serviceDoneExecuting(token, type, startId, res);
+    }
+
+    @Override
+    public boolean dumpHeap(java.lang.String process, int userId, boolean managed, boolean mallocInfo, boolean runGc, java.lang.String dumpBitmaps, java.lang.String path, android.os.ParcelFileDescriptor fd, android.os.RemoteCallback finishCallback) throws android.os.RemoteException {
+        return dumpHeap(process, userId, managed, mallocInfo, runGc, path, fd, finishCallback);
+    }
+
+    @Override
+    public int stopUserWithDelayedLocking(int userid, android.app.IStopUserCallback callback) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony user stop control is not connected");
+    }
+
+    @Override
+    public int stopUserWithCallback(int userid, android.app.IStopUserCallback callback) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony user stop control is not connected");
+    }
+
+    @Override
+    public int stopUserExceptCertainProfiles(int userid, boolean stopProfileRegardlessOfParent, android.app.IStopUserCallback callback) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony profile stop control is not connected");
+    }
+
+    @Override
+    public int checkContentUriPermissionFull(android.net.Uri uri, int pid, int uid, int mode, int userId) throws android.os.RemoteException {
+        return android.content.pm.PackageManager.PERMISSION_DENIED;
+    }
+
+    @Override
+    public void requestBugReportWithExtraAttachment(android.net.Uri extraAttachment) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony bug report attachment service is not connected");
+    }
+
+    @Override
+    public void setThemeOverlayReady(int userId) throws android.os.RemoteException {
+        logStub("setThemeOverlayReady", "OH owns theme overlays");
+    }
+
+    @Override
+    public void addApplicationStartInfoCompleteListener(android.app.IApplicationStartInfoCompleteListener listener, int userId) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony application start-info subscription is not connected");
+    }
+
+    @Override
+    public void removeApplicationStartInfoCompleteListener(android.app.IApplicationStartInfoCompleteListener listener, int userId) throws android.os.RemoteException {
+        removeApplicationStartInfoCompleteListener(userId);
+    }
+
+    @Override
+    public void addStartInfoTimestamp(int key, long timestampNs, int userId) throws android.os.RemoteException {
+        logStub("addStartInfoTimestamp", "OH owns process startup accounting");
+    }
+
+    @Override
+    public void reportStartInfoViewTimestamps(long renderThreadDrawStartTimeNs, long framePresentedTimeNs) throws android.os.RemoteException {
+        logStub("reportStartInfoViewTimestamps", "OH owns frame accounting");
+    }
+
+    @Override
+    public boolean hasServiceTimeLimitExceeded(android.content.ComponentName className, android.os.IBinder token) throws android.os.RemoteException {
+        return false;
+    }
+
+    @Override
+    public int checkPermissionForDevice(java.lang.String permission, int pid, int uid, int deviceId) throws android.os.RemoteException {
+        return deviceId == 0 ? adapter.packagemanager.PermissionManagerAdapter.checkProcessPermission(permission, pid, uid) : android.content.pm.PackageManager.PERMISSION_DENIED;
+    }
+
+    @Override
+    public void frozenBinderTransactionDetected(int debugPid, int code, int flags, int err) throws android.os.RemoteException {
+        logStub("frozenBinderTransactionDetected", "OH owns process freezing");
+    }
+
+    @Override
+    public int getBindingUidProcessState(int uid, java.lang.String callingPackage) throws android.os.RemoteException {
+        return getUidProcessState(uid, callingPackage);
+    }
+
+    @Override
+    public long getUidLastIdleElapsedTime(int uid, java.lang.String callingPackage) throws android.os.RemoteException {
+        throw new UnsupportedOperationException("OpenHarmony UID idle-time query is not connected");
+    }
+
+    @Override
+    public void addOverridePermissionState(int originatingUid, int uid, java.lang.String permission, int result) throws android.os.RemoteException {
+        throw new SecurityException("Permission overrides require the OH controller");
+    }
+
+    @Override
+    public void removeOverridePermissionState(int originatingUid, int uid, java.lang.String permission) throws android.os.RemoteException {
+        throw new SecurityException("Permission overrides require the OH controller");
+    }
+
+    @Override
+    public void clearOverridePermissionStates(int originatingUid, int uid) throws android.os.RemoteException {
+        throw new SecurityException("Permission overrides require the OH controller");
+    }
+
+    @Override
+    public void clearAllOverridePermissionStates(int originatingUid) throws android.os.RemoteException {
+        throw new SecurityException("Permission overrides require the OH controller");
+    }
+
+    @Override
+    public void noteAppRestrictionEnabled(java.lang.String packageName, int uid, int restrictionType, boolean enabled, int reason, java.lang.String subReason, int source, long threshold) throws android.os.RemoteException {
+        logStub("noteAppRestrictionEnabled", "OH owns application restriction accounting");
     }
 }

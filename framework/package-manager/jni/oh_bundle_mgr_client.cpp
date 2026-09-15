@@ -336,27 +336,13 @@ int32_t OHBundleMgrClient::checkPermission(const std::string& bundleName,
 
 // ============================================================================
 // JNI Registration
+// APK metadata JNI entry points are owned by apk_manifest_jni.cpp.
+// The OH C++ client remains available for host bundle and installed-package queries.
 // ============================================================================
 
 extern "C" {
 
-JNIEXPORT jstring JNICALL
-Java_adapter_packagemanager_PackageManagerAdapter_nativeGetBundleInfo(
-        JNIEnv* env, jclass clazz, jstring bundleName, jint flags) {
-    const char* name = env->GetStringUTFChars(bundleName, nullptr);
-    std::string result = OHBundleMgrClient::getInstance().getBundleInfo(name, flags);
-    env->ReleaseStringUTFChars(bundleName, name);
-    return env->NewStringUTF(result.c_str());
-}
 
-JNIEXPORT jstring JNICALL
-Java_adapter_packagemanager_PackageManagerAdapter_nativeGetApplicationInfo(
-        JNIEnv* env, jclass clazz, jstring bundleName, jint flags) {
-    const char* name = env->GetStringUTFChars(bundleName, nullptr);
-    std::string result = OHBundleMgrClient::getInstance().getApplicationInfo(name, flags);
-    env->ReleaseStringUTFChars(bundleName, name);
-    return env->NewStringUTF(result.c_str());
-}
 
 JNIEXPORT jstring JNICALL
 Java_adapter_packagemanager_PackageManagerAdapter_nativeGetAllBundleInfos(
@@ -365,14 +351,6 @@ Java_adapter_packagemanager_PackageManagerAdapter_nativeGetAllBundleInfos(
     return env->NewStringUTF(result.c_str());
 }
 
-JNIEXPORT jstring JNICALL
-Java_adapter_packagemanager_PackageManagerAdapter_nativeQueryAbilityInfos(
-        JNIEnv* env, jclass clazz, jstring wantJson, jint flags) {
-    const char* json = env->GetStringUTFChars(wantJson, nullptr);
-    std::string result = OHBundleMgrClient::getInstance().queryAbilityInfos(json, flags);
-    env->ReleaseStringUTFChars(wantJson, json);
-    return env->NewStringUTF(result.c_str());
-}
 
 JNIEXPORT jint JNICALL
 Java_adapter_packagemanager_PackageManagerAdapter_nativeGetUidByBundleName(

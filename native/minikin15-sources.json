@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "scope": "Android 15 text layout with the pinned release C++ hyphenator",
+  "sources": [
+    "android-source/minikin-android15/libs/minikin/BidiUtils.cpp",
+    "android-source/minikin-android15/libs/minikin/CmapCoverage.cpp",
+    "android-source/minikin-android15/libs/minikin/Emoji.cpp",
+    "android-source/minikin-android15/libs/minikin/Font.cpp",
+    "android-source/minikin-android15/libs/minikin/FontCollection.cpp",
+    "android-source/minikin-android15/libs/minikin/FontFamily.cpp",
+    "android-source/minikin-android15/libs/minikin/FontFeatureUtils.cpp",
+    "android-source/minikin-android15/libs/minikin/FontFileParser.cpp",
+    "android-source/minikin-android15/libs/minikin/FontUtils.cpp",
+    "android-source/minikin-android15/libs/minikin/GraphemeBreak.cpp",
+    "android-source/minikin-android15/libs/minikin/GreedyLineBreaker.cpp",
+    "android-source/minikin-android15/libs/minikin/Hyphenator.cpp",
+    "android-source/minikin-android15/libs/minikin/HyphenatorMap.cpp",
+    "android-source/minikin-android15/libs/minikin/Layout.cpp",
+    "android-source/minikin-android15/libs/minikin/LayoutCore.cpp",
+    "android-source/minikin-android15/libs/minikin/LayoutUtils.cpp",
+    "android-source/minikin-android15/libs/minikin/LineBreaker.cpp",
+    "android-source/minikin-android15/libs/minikin/LineBreakerUtil.cpp",
+    "android-source/minikin-android15/libs/minikin/Locale.cpp",
+    "android-source/minikin-android15/libs/minikin/LocaleListCache.cpp",
+    "android-source/minikin-android15/libs/minikin/MeasuredText.cpp",
+    "android-source/minikin-android15/libs/minikin/Measurement.cpp",
+    "android-source/minikin-android15/libs/minikin/MinikinFontFactory.cpp",
+    "android-source/minikin-android15/libs/minikin/MinikinInternal.cpp",
+    "android-source/minikin-android15/libs/minikin/OptimalLineBreaker.cpp",
+    "android-source/minikin-android15/libs/minikin/ScriptUtils.cpp",
+    "android-source/minikin-android15/libs/minikin/SparseBitSet.cpp",
+    "android-source/minikin-android15/libs/minikin/SystemFonts.cpp",
+    "android-source/minikin-android15/libs/minikin/U16StringPiece.cpp",
+    "android-source/minikin-android15/libs/minikin/WordBreaker.cpp"
+  ],
+  "includes": [
+    "android-source/minikin-android15/include",
+    "android-source/minikin-android15/libs/minikin",
+    "android-source/logging/liblog/include",
+    "android-source/libbase/include",
+    "android-source/fmtlib/include",
+    "android-source/system-core/libcutils/include",
+    "android-source/system-core/libutils/include",
+    "android-source/system-core/libutils/binder/include",
+    "android-source/system-core/libsystem/include",
+    "android-source/system-core/libprocessgroup/include",
+    "android-source/libnativehelper/include_jni",
+    "android-source/libnativehelper/include",
+    "android-source/libnativehelper/include_platform",
+    "android-source/libnativehelper/include_platform_header_only",
+    "android-source/libnativehelper/header_only_include",
+    "android-source/libziparchive/include",
+    "android-source/libziparchive/incfs_support/include",
+    "android-source/expat/lib",
+    "android-source/expat/expat/lib",
+    "android-source/expat",
+    "westlake/native/include",
+    "android-source/icu/icu4c/source/common",
+    "android-source/icu/icu4c/source/i18n",
+    "preserved/runtime-sources/aosp11-harfbuzz/src"
+  ],
+  "defines": [
+    "_GNU_SOURCE",
+    "NDEBUG"
+  ],
+  "cpp_flags": [
+    "-std=gnu++20"
+  ],
+  "force_includes": [
+    "westlake/native/include/ohos_port.h"
+  ],
+  "source_replacements": {
+    "android-source/minikin-android15/libs/minikin/Hyphenator.cpp": {
+      "#ifndef _WIN32": "#if !defined(_WIN32) && defined(MINIKIN_ENABLE_RUST)",
+      "#ifdef _WIN32": "#if defined(_WIN32) || !defined(MINIKIN_ENABLE_RUST)"
+    }
+  },
+  "source_tree_replacements": {
+    "android-source/minikin-android15/libs/minikin": {
+      "FeatureFlags.h": {
+        "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+      }
+    }
+  },
+  "required_release_flags": {
+    "com.android.text.flags": {
+      "rust_hyphenator": false
+    }
+  }
+}

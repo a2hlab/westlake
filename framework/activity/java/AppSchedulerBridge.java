@@ -64,6 +64,11 @@ public class AppSchedulerBridge {
                 com.android.internal.os.AppSpawnXInit.nativeHiLog(
                         "AppSpawnXJava",
                         where + " cause[" + depth + "]=" + type + ": " + message);
+                StackTraceElement[] stack = current.getStackTrace();
+                for (int frame = 0; frame < Math.min(stack.length, 24); frame++) {
+                    com.android.internal.os.AppSpawnXInit.nativeHiLog(
+                            "AppSpawnXJava", where + " at " + stack[frame]);
+                }
             } catch (Throwable ignored) {
                 // Deliberately no System.err fallback: this helper exists for
                 // the state in which the redirected PrintStream is unusable.
@@ -185,7 +190,9 @@ public class AppSchedulerBridge {
             ai.sourceDir = apkPath;
             ai.publicSourceDir = apkPath;
             String apkDir = new java.io.File(apkPath).getParent();
-            ai.nativeLibraryDir = apkDir + "/lib/arm64";
+            String nativeDirectory = System.getenv("ASX_NATIVE_LIB_DIR");
+            ai.nativeLibraryDir = nativeDirectory == null || nativeDirectory.isEmpty()
+                    ? apkDir + "/lib/arm64" : nativeDirectory;
             ai.dataDir = "/data/data/" + pkg;
             ai.deviceProtectedDataDir = ai.dataDir;
             ai.credentialProtectedDataDir = ai.dataDir;
@@ -205,6 +212,10 @@ public class AppSchedulerBridge {
             if ("com.github.ashutoshgngwr.noice".equals(pkg)) {
                 ai.className = "com.github.ashutoshgngwr.noice.NoiceApplication";
             }
+            if ("1".equals(System.getenv("WESTLAKE_SOURCE_PACKAGE"))) {
+                adapter.packagemanager.OHUserManager.install();
+                ai = adapter.packagemanager.SourcePackageRegistry.register(ai);
+            }
             sInjectedAppInfo = ai;
             System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir);
 
@@ -212,6 +223,9 @@ public class AppSchedulerBridge {
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
             ensureBindApplication(at, pkg, null);
             System.err.println("[DIRECT-LAUNCH] bind done sBindAppDone=" + sBindAppDone);
+            if (!sBindAppDone) {
+                throw new IllegalStateException("Application binding failed; activity launch withheld");
+            }
 
             // 3. WESTLAKE §653 (2026-08-15): let the app's OWN asynchronous initialisation settle
             // before starting the Activity.
@@ -270,9 +284,9 @@ public class AppSchedulerBridge {
             return;
         }
         android.app.servertransaction.ClientTransaction tx =
-                android.app.servertransaction.ClientTransaction.obtain(appThread, token);
-        tx.setLifecycleStateRequest(
-                android.app.servertransaction.ResumeActivityItem.obtain(true, false));
+                android.app.servertransaction.ClientTransaction.obtain(appThread);
+        tx.addTransactionItem(
+                android.app.servertransaction.ResumeActivityItem.obtain(token, true, false));
         appThread.scheduleTransaction(tx);
         System.err.println("[DIRECT-LAUNCH] resume transaction scheduled for recordId=" + recordId);
     }
@@ -378,14 +392,20 @@ public class AppSchedulerBridge {
             // BCP PackageManagerAdapter cannot get new methods without boot image
             // rebuild — see memory feedback_boot_image_full_rebuild_risk.md.
             String manifestJson = "";
+            boolean sourcePackage = adapter.packagemanager.SourcePackageRegistry.contains(bundleName);
             try {
-                manifestJson = nativeParseManifestJson(bundleName);
+                if (!sourcePackage) manifestJson = nativeParseManifestJson(bundleName);
                 if (manifestJson == null) manifestJson = "";
             } catch (Throwable t) {
                 System.err.println("[B43-BIND] nativeParseManifestJson failed: " + t);
             }
             java.util.List<android.content.pm.ProviderInfo> realProviders =
-                    buildProvidersFromManifest(bundleName, manifestJson);
+                    sourcePackage ? adapter.packagemanager.PackageManagerAdapter.getProvidersForPackage(bundleName)
+                    : buildProvidersFromManifest(bundleName, manifestJson);
+            if (sourcePackage) {
+                final String appProcess = appInfo.processName;
+                realProviders.removeIf(provider -> !appProcess.equals(provider.processName));
+            }
             // §611e: append the in-process settings provider (see WlSettingsProvider).
             // Installed into the process-local provider map at bind, so every
             // Settings/DeviceConfig read resolves locally instead of NPEing on the
@@ -408,7 +428,7 @@ public class AppSchedulerBridge {
 
             // P2-B v2: enrich appInfo with manifest fields (className/theme/largeHeap/factory).
             try {
-                applyManifestFieldsToAppInfoLocal(appInfo, manifestJson);
+                if (!sourcePackage) applyManifestFieldsToAppInfoLocal(appInfo, manifestJson);
             } catch (Throwable t) {
                 System.err.println("[B43-BIND] applyManifestFields failed: " + t);
             }
@@ -440,6 +460,7 @@ public class AppSchedulerBridge {
             setField(data, "autofillOptions", buildDisabledAutofillOptions());
             setField(data, "contentCaptureOptions", buildDisabledContentCaptureOptions());
             setField(data, "disabledCompatChanges", new long[0]);
+            setField(data, "mLoggableCompatChanges", new long[0]);
             setField(data, "mSerializedSystemFontMap", null);
             setField(data, "startRequestedElapsedTime", android.os.SystemClock.elapsedRealtime());
             setField(data, "startRequestedUptime", android.os.SystemClock.uptimeMillis());
@@ -1614,14 +1635,15 @@ public class AppSchedulerBridge {
                     + ")");
 
             // Construct the ClientTransaction with LaunchActivityItem
-            ClientTransaction transaction = ClientTransaction.obtain(
-                    applicationThread, token);
+            ClientTransaction transaction = ClientTransaction.obtain(applicationThread);
 
             android.content.res.Configuration cfg = activityThread.getConfiguration();
             // LaunchActivityItem carries all data needed for activity creation.
             // §1.2.4.4: most A_ONLY_* fields stay null (Phase 1/2 default).
+            android.window.ActivityWindowInfo windowInfo = new android.window.ActivityWindowInfo();
+            windowInfo.set(false, cfg.windowConfiguration.getBounds(), cfg.windowConfiguration.getBounds());
             LaunchActivityItem launchItem = LaunchActivityItem.obtain(
-                    intent,
+                    token, intent,
                     System.identityHashCode(token),       // ident (P1 A_ONLY_SYNTH)
                     activityInfo,
                     cfg,                                  // curConfig
@@ -1637,14 +1659,16 @@ public class AppSchedulerBridge {
                     null,                                 // activityOptions (P2: from OH StartOptions)
                     false,                                // isForward (P2: from Want.flags)
                     null,                                 // profilerInfo (P3 A_ONLY_NULL)
-                    null,                                 // assistToken (P3)
+                    new android.os.Binder(),               // assistToken
                     adapter.activity.ActivityClientControllerAdapter.getInstance(),
                                                           // activityClientController (P1 §1.2.4.4)
-                    null,                                 // shareableActivityToken (P3)
+                    new android.os.Binder(),               // shareableActivityToken
                     false,                                // launchedFromBubble (default)
-                    null                                  // taskFragmentToken (P3)
+                    null,                                 // taskFragmentToken
+                    new android.os.Binder(),              // initialCallerInfoAccessToken
+                    windowInfo
             );
-            transaction.addCallback(launchItem);
+            transaction.addTransactionItem(launchItem);
 
             // G2.14m (2026-05-01): NO setLifecycleStateRequest at launch time.
             // OH protocol is two-phase:

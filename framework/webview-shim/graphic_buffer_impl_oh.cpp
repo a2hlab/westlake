@@ -1,4 +1,4 @@
-#include "graphic_buffer_impl.h"
+#include "webview_graphic_buffer_oh.h"
 
 #include <stdint.h>
 #include <stdio.h>

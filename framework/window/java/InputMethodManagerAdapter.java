@@ -59,6 +59,7 @@ public final class InputMethodManagerAdapter extends IInputMethodManager.Stub {
     }
 
     public InputMethodManagerAdapter() {
+        super(adapter.packagemanager.OHPermissionEnforcer.getInstance());
         System.err.println("[" + TAG + "] instantiated (OH metadata and bound editor sessions)");
     }
 
@@ -90,15 +91,17 @@ public final class InputMethodManagerAdapter extends IInputMethodManager.Stub {
         return OhImeMetadata.current();
     }
 
+
     @Override
-    public List<InputMethodInfo> getInputMethodList(int userId, int directBootAwareness)
+    public List<InputMethodInfo> getInputMethodListLegacy(int userId, int directBootAwareness)
             throws RemoteException {
         enforceUser(userId);
         return OhImeMetadata.list(false);
     }
 
+
     @Override
-    public List<InputMethodInfo> getEnabledInputMethodList(int userId) throws RemoteException {
+    public List<InputMethodInfo> getEnabledInputMethodListLegacy(int userId) throws RemoteException {
         enforceUser(userId);
         return OhImeMetadata.list(true);
     }
@@ -178,7 +181,7 @@ public final class InputMethodManagerAdapter extends IInputMethodManager.Stub {
             if (generation == 0) return InputBindResult.IME_NOT_CONNECTED;
             System.err.println("[OH_IMMAdapter] bound id=" + method.getId() + " generation=" + generation);
             return new InputBindResult(0, new OhInputMethodSession(generation), null,
-                    null, method.getId(), (int) (generation & 0x7fffffff), null, false);
+                    null, method.getId(), (int) (generation & 0x7fffffff), false);
         }
         return InputBindResult.NO_EDITOR;
     }
@@ -225,7 +228,7 @@ public final class InputMethodManagerAdapter extends IInputMethodManager.Stub {
         return OhImeBridge.visibleHeight();
     }
 
-    @Override
+
     public void reportVirtualDisplayGeometryAsync(IInputMethodClient parentClient,
             int childDisplayId, float[] matrixValues) throws RemoteException {
     }
@@ -277,13 +280,13 @@ public final class InputMethodManagerAdapter extends IInputMethodManager.Stub {
             String delegatePackageName, String delegatorPackageName) throws RemoteException {
     }
 
-    @Override
+
     public boolean acceptStylusHandwritingDelegation(IInputMethodClient client, int userId,
             String delegatePackageName, String delegatorPackageName) throws RemoteException {
         return false;
     }
 
-    @Override
+
     public boolean isStylusHandwritingAvailableAsUser(int userId) throws RemoteException {
         return false;
     }
@@ -305,5 +308,49 @@ public final class InputMethodManagerAdapter extends IInputMethodManager.Stub {
     @Override
     public IImeTracker getImeTrackerService() throws RemoteException {
         return null;
+    }
+
+    // Android 15 service boundary. Unsupported OH capabilities fail explicitly.
+    @Override
+    public com.android.internal.inputmethod.InputMethodInfoSafeList getInputMethodList(int userId, int directBootAwareness) throws android.os.RemoteException {
+        return com.android.internal.inputmethod.InputMethodInfoSafeList.create(getInputMethodListLegacy(userId, directBootAwareness));
+    }
+
+    @Override
+    public com.android.internal.inputmethod.InputMethodInfoSafeList getEnabledInputMethodList(int userId) throws android.os.RemoteException {
+        return com.android.internal.inputmethod.InputMethodInfoSafeList.create(getEnabledInputMethodListLegacy(userId));
+    }
+
+    @Override
+    public void startInputOrWindowGainedFocusAsync(int startInputReason, com.android.internal.inputmethod.IInputMethodClient client, android.os.IBinder windowToken, int startInputFlags, int softInputMode, int windowFlags, android.view.inputmethod.EditorInfo editorInfo, com.android.internal.inputmethod.IRemoteInputConnection inputConnection, com.android.internal.inputmethod.IRemoteAccessibilityInputConnection remoteAccessibilityInputConnection, int unverifiedTargetSdkVersion, int userId, android.window.ImeOnBackInvokedDispatcher imeDispatcher, int startInputSeq) throws android.os.RemoteException {
+        InputBindResult result = startInputOrWindowGainedFocus(startInputReason, client, windowToken, startInputFlags, softInputMode, windowFlags, editorInfo, inputConnection, remoteAccessibilityInputConnection, unverifiedTargetSdkVersion, userId, imeDispatcher);
+        if (client != null) client.onStartInputResult(result, startInputSeq);
+    }
+
+    @Override
+    public void hideSoftInputFromServerForTest() throws android.os.RemoteException {
+        throw new SecurityException("Use the OH keyboard controller to hide its window");
+    }
+
+    @Override
+    public boolean acceptStylusHandwritingDelegation(com.android.internal.inputmethod.IInputMethodClient client, int userId, java.lang.String delegatePackageName, java.lang.String delegatorPackageName, int flags) throws android.os.RemoteException {
+        return acceptStylusHandwritingDelegation(client, userId, delegatePackageName, delegatorPackageName);
+    }
+
+    @Override
+    public boolean isStylusHandwritingAvailableAsUser(int userId, boolean connectionless) throws android.os.RemoteException {
+        return isStylusHandwritingAvailableAsUser(userId);
+    }
+
+    @Override
+    public void startConnectionlessStylusHandwriting(com.android.internal.inputmethod.IInputMethodClient client, int userId, android.view.inputmethod.CursorAnchorInfo cursorAnchorInfo, java.lang.String delegatePackageName, java.lang.String delegatorPackageName, com.android.internal.inputmethod.IConnectionlessHandwritingCallback callback) throws android.os.RemoteException {
+        enforceUser(userId);
+        if (callback != null) callback.onError(android.view.inputmethod.ConnectionlessHandwritingCallback.CONNECTIONLESS_HANDWRITING_ERROR_UNSUPPORTED);
+    }
+
+    @Override
+    public void acceptStylusHandwritingDelegationAsync(com.android.internal.inputmethod.IInputMethodClient client, int userId, java.lang.String delegatePackageName, java.lang.String delegatorPackageName, int flags, com.android.internal.inputmethod.IBooleanListener callback) throws android.os.RemoteException {
+        enforceUser(userId);
+        if (callback != null) callback.onResult(false);
     }
 }

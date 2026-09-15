@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "scope": "Original Android StatsLog JNI and statistics socket calls",
+  "sources": ["android-source/modules-statsd/framework/jni/android_util_StatsLog.cpp"],
+  "includes": [
+    "android-source/libnativehelper/include_jni",
+    "android-source/libnativehelper/header_only_include",
+    "android-source/logging/liblog/include",
+    "android-source/modules-statsd/lib/libstatssocket/include"
+  ]
+}

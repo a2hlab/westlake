@@ -1,0 +1,264 @@
+{
+  "schema": 1,
+  "target": "aarch64-linux-ohos",
+  "sources": [
+    "android-source/frameworks-base/native/graphics/jni/bitmap.cpp",
+    "android-source/frameworks-base/native/graphics/jni/imagedecoder.cpp",
+    "android-source/frameworks-base/native/graphics/jni/aassetstreamadaptor.cpp"
+  ],
+  "excluded": [
+    "jni/pdf: separate PDF provider",
+    "apex/jni_runtime.cpp: Westlake owns graphics native registration"
+  ],
+  "hwui_source_root": "android-source/frameworks-base/libs/hwui",
+  "minikin_include": "android-source/minikin-android15/include",
+  "cpp_standard": "gnu++20",
+  "header_replacements": {
+    "jni/GraphicsJNI.h": {
+      "zeroInit() const override": "zeroInit() const"
+    },
+    "FeatureFlags.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "hwui/Canvas.h": {
+      "class SkRuntimeShaderBuilder;": "// SkRuntimeShaderBuilder is an alias supplied by the pinned Skia headers."
+    },
+    "AutoBackendTextureRelease.cpp": {
+      "include/gpu/GrBackendSurface.h": "include/gpu/ganesh/GrBackendSurface.h"
+    },
+    "FrameInfoVisualizer.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "HardwareBitmapUploader.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "JankTracker.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "Mesh.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "ProfileData.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "Properties.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "RecordingCanvas.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "RenderNode.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "RootRenderNode.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "SkiaCanvas.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "Tonemapper.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "effects/GainmapRenderer.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "hwui/AnimatedImageThread.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "hwui/Bitmap.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)",
+      "#include <private/android/AHardwareBufferHelpers.h>\n#include <ui/GraphicBuffer.h>\n#include <ui/GraphicBufferMapper.h>": "#include <westlake_hwui_buffer.h>",
+      "static uint64_t AHardwareBuffer_getAllocationSize(AHardwareBuffer* aHardwareBuffer) {\n    GraphicBuffer* buffer = AHardwareBuffer_to_GraphicBuffer(aHardwareBuffer);\n    auto& mapper = GraphicBufferMapper::get();\n    uint64_t size = 0;\n    auto err = mapper.getAllocationSize(buffer->handle, &size);\n    if (err == OK) {\n        if (size > 0) {\n            return size;\n        } else {\n            ALOGW(\"Mapper returned size = 0 for buffer format: 0x%x size: %d x %d\", buffer->format,\n                  buffer->width, buffer->height);\n            // Fall-through to estimate\n        }\n    }\n\n    // Estimation time!\n    // Stride could be = 0 if it's ill-defined (eg, compressed buffer), in which case we use the\n    // width of the buffer instead\n    size = std::max(buffer->width, buffer->stride) * buffer->height;\n    // Require bpp to be at least 1. This is too low for many formats, but it's better than 0\n    // Also while we could make increasingly better estimates, the reality is that mapper@4\n    // should be common enough at this point that we won't ever hit this anyway\n    size *= std::max(1u, bytesPerPixel(buffer->format));\n    return size;\n}": "static uint64_t AHardwareBuffer_getAllocationSize(AHardwareBuffer* buffer) {\n    return westlakeHardwareBufferAllocationSize(buffer);\n}",
+      "mallopt(M_PURGE, 0);": "#ifdef __OHOS__\n            mallopt(M_FLUSH_THREAD_CACHE, 0);\n#else\n            mallopt(M_PURGE, 0);\n#endif"
+    },
+    "hwui/Bitmap.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/AnimatedImageDrawable.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/Bitmap.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/Gainmap.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/HardwareBufferHelpers.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/ImageDecoder.cpp": {
+      "#ifndef __ANDROID__": "#if !defined(__ANDROID__) && !defined(__OHOS__)"
+    },
+    "jni/Region.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/ScopedParcel.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/ScopedParcel.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/Typeface.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/android_graphics_ColorSpace.cpp": {
+      "#if defined(__ANDROID__)": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/android_graphics_DisplayListCanvas.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/android_graphics_HardwareRenderer.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "jni/graphics_jni_helpers.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "pipeline/skia/BackdropFilterDrawable.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "pipeline/skia/RenderNodeDrawable.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "pipeline/skia/SkiaDisplayList.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "pipeline/skia/SkiaRecordingCanvas.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "renderthread/CacheManager.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "renderthread/CanvasContext.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)",
+      "#ifndef __ANDROID__": "#if !defined(__ANDROID__) && !defined(__OHOS__)"
+    },
+    "renderthread/DrawFrameTask.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "renderthread/DrawFrameTask.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "renderthread/ReliableSurface.h": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)"
+    },
+    "renderthread/RenderProxy.cpp": {
+      "#ifdef __ANDROID__": "#if defined(__ANDROID__) || defined(__OHOS__)",
+      "        GraphicBufferAllocator::getInstance().dump(grallocInfo);": "#ifdef __OHOS__\n        grallocInfo = \"Graphics allocations use the OH host allocator; aggregate host allocation accounting is unavailable here.\";\n#else\n        GraphicBufferAllocator::getInstance().dump(grallocInfo);\n#endif"
+    },
+    "pipeline/skia/SkiaOpenGLPipeline.cpp": {
+      "include/gpu/gl/GrGLTypes.h": "include/gpu/ganesh/gl/GrGLTypes.h"
+    },
+    "pipeline/skia/GLFunctorDrawable.cpp": {
+      "include/gpu/gl/GrGLTypes.h": "include/gpu/ganesh/gl/GrGLTypes.h"
+    },
+    "platform/android/thread/ThreadBase.h": {
+      "#include <algorithm>": "#include <algorithm>\n#include <atomic>\n#include <unistd.h>",
+      "    WorkQueue& queue() { return mQueue; }": "#ifdef __OHOS__\n    // Publish the actual host TID once the render worker starts.\n    pid_t getTid() const { return isRunning() ? mHostTid.load() : -1; }\n    status_t readyToRun() override { mHostTid.store(gettid()); return Thread::readyToRun(); }\n#endif\n    WorkQueue& queue() { return mQueue; }",
+      "    WorkQueue mQueue;": "#ifdef __OHOS__\n    std::atomic<pid_t> mHostTid{-1};\n#endif\n    WorkQueue mQueue;"
+    },
+    "jni/android_graphics_Picture.cpp": {
+      "static const std::array gMethods = {": "static const JNINativeMethod gMethods[] = {",
+      "gMethods.data(), gMethods.size()": "gMethods, std::size(gMethods)"
+    },
+    "jni/android_graphics_HardwareRendererObserver.cpp": {
+      "static const std::array gMethods = {": "static const JNINativeMethod gMethods[] = {",
+      "gMethods.data(), gMethods.size()": "gMethods, std::size(gMethods)"
+    },
+    "renderthread/VulkanManager.h": {
+      "#include <vk/GrVkExtensions.h>": "#include \"include/gpu/vk/VulkanExtensions.h\"",
+      "#include <vk/GrVkBackendContext.h>": "#include \"include/gpu/vk/VulkanBackendContext.h\"",
+      "GrVkExtensions": "skgpu::VulkanExtensions"
+    },
+    "renderthread/VulkanManager.cpp": {
+      "#include <vk/GrVkExtensions.h>": "#include \"include/gpu/vk/VulkanExtensions.h\"",
+      "GrVkExtensions": "skgpu::VulkanExtensions",
+      "GrVkBackendContext": "skgpu::VulkanBackendContext"
+    },
+    "jni/BitmapFactory.cpp": {
+      ", SkCanvas::ColorBehavior::kLegacy": ""
+    },
+    "apex/jni_runtime.cpp": {
+      "            REG_JNI(register_android_graphics_pdf_PdfDocument),": "            // PDF has a separate native provider, outside this renderer profile.",
+      "            REG_JNI(register_android_graphics_pdf_PdfEditor),": "            // PDF editor registration belongs to that provider.",
+      "        if (android::gRegJNI[i].mProc(env) < 0) {": "        fprintf(stderr, \"[SOURCE-HWUI] register module %zu/%d\\n\", i + 1, NELEM(android::gRegJNI));\n        if (android::gRegJNI[i].mProc(env) < 0) {"
+    }
+  },
+  "defines": [
+    "SK_SUPPORT_LEGACY_EMBOSSMASKFILTER",
+    "WESTLAKE_ANDROID_API=35",
+    "SK_VULKAN",
+    "VK_USE_PLATFORM_ANDROID_KHR"
+  ],
+  "compat_replacements": {
+    "skia_compat_headers/hwui_force_include.h": {
+      "inline void __c11_atomic_thread_fence(int order) { __atomic_thread_fence(order); }": "template <typename Order> inline void __c11_atomic_thread_fence(Order order) { __atomic_thread_fence(static_cast<int>(order)); }",
+      "static inline unsigned ASurfaceTexture_getCurrentTextureTarget(ASurfaceTexture*) { return 0; }": "// Declared by the source SurfaceTexture platform header.",
+      "static inline AHardwareBuffer* ASurfaceTexture_dequeueBuffer(ASurfaceTexture*, ...) { return nullptr; }": "// SurfaceTexture buffer consumption is supplied by the OH boundary.",
+      "static inline int ANativeWindow_setDequeueTimeout(ANativeWindow*, long) { return 0; }": "// Native declaration and OH boundary implementation required.",
+      "static inline int ANativeWindow_tryAllocateBuffers(ANativeWindow*) { return 0; }": "// Native declaration and OH boundary implementation required.",
+      "static inline long ANativeWindow_getLastDequeueStartTime(ANativeWindow*) { return 0; }": "// Native declaration and OH boundary implementation required.",
+      "static inline long ANativeWindow_getLastDequeueDuration(ANativeWindow*) { return 0; }": "// Native declaration and OH boundary implementation required.",
+      "static inline long ANativeWindow_getLastQueueDuration(ANativeWindow*) { return 0; }": "// Native declaration and OH boundary implementation required.",
+      "static inline unsigned long long ANativeWindow_getNextFrameId(ANativeWindow*) { return 0; }": "// Native declaration and OH boundary implementation required.",
+      "static inline AChoreographer* AChoreographer_create() { return nullptr; }": "// Native declaration and OH boundary implementation required.",
+      "static inline int AChoreographer_getFd(AChoreographer*) { return -1; }": "// Native declaration and OH boundary implementation required.",
+      "static inline void AChoreographer_handlePendingEvents(AChoreographer*, void*) {}": "// Native declaration and OH boundary implementation required.",
+      "static inline void AChoreographer_registerRefreshRateCallback(AChoreographer*, ...) {}": "// Native declaration and OH boundary implementation required."
+    }
+  },
+  "includes_before_compat": [
+    "android-source/frameworks-native/include",
+    "android-source/frameworks-base/native/graphics/jni",
+    "android-source/frameworks-base/native/android/include",
+    "android-source/frameworks-native/libs/arect/include",
+    "android-source/frameworks-base/libs/hwui/apex/include",
+    "android-source/oh-skia/m133/include/third_party/vulkan",
+    "android-source/oh-skia/m133/client_utils/android",
+    "android-source/frameworks-native/libs/shaders/include",
+    "android-source/frameworks-native/libs/tonemap/include",
+    "android-source/frameworks-native/libs/nativedisplay/include",
+    "android-source/modules-statsd/lib/libstatspull/include",
+    "android-source/modules-statsd/lib/libstatssocket/include",
+    "android-source/giflib-android15",
+    "android-source/libultrahdr-android15/lib/include",
+    "android-source/hardware-libhardware/include",
+    "android-source/frameworks-native/libs/binder/ndk/include_ndk",
+    "android-source/frameworks-native/libs/binder/ndk/include_cpp",
+    "android-source/frameworks-native/libs/binder/ndk/include_platform",
+    "android-source/system-libbase-hidl/base/include",
+    "android-source/system-libbase-hidl/transport/include",
+    "android-source/frameworks-native/opengl/libs/EGL/include",
+    "android-source/libultrahdr-android15",
+    "android-source/system-libfmq/base",
+    "android-source/oh-skia/m133/include/encode",
+    "android-source/oh-skia/third_party/externals/libjpeg-turbo",
+    "android-source/frameworks-base/libs/hwui/apex/include",
+    "android-source/frameworks-base/libs/hwui/platform/linux",
+    "android-source/oh-skia/m133/src/sksl",
+    "android-source/oh-skia/m133/modules/skcms/src",
+    "android-source/system-core/libsync/include"
+  ],
+  "remove_compat_headers": [
+    "skia_compat_headers/vulkan/vulkan.h",
+    "skia_compat_headers/vulkan/vulkan_core.h",
+    "hwui_stubinc/thread/ThreadBase.h",
+    "skia_compat_headers/android/choreographer.h",
+    "skia_compat_headers/android/surface_texture.h",
+    "skia_compat_headers/android/native_window.h",
+    "skia_compat_headers/android/hardware_buffer.h",
+    "skia_compat_headers/apex/window.h",
+    "skia_compat_headers/system/window.h",
+    "skia_compat_headers/vndk/window.h"
+  ],
+  "include_generated_sources": false,
+  "remove_defines": [
+    "HWUI_NO_VULKAN=1"
+  ],
+  "flags_by_source_prefix": {
+    "android-source/oh-skia/": [
+      "-fno-rtti",
+      "-fno-exceptions"
+    ]
+  },
+  "include_replacements_by_source": {}
+}

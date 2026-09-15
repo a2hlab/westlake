@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "sources": [
+    "android-source/modules-statsd/lib/libstatssocket/stats_event.c",
+    "android-source/modules-statsd/lib/libstatssocket/stats_buffer_writer.c",
+    "android-source/modules-statsd/lib/libstatssocket/stats_socket.c",
+    "android-source/modules-statsd/lib/libstatssocket/stats_socket_loss_reporter.cpp",
+    "android-source/modules-statsd/lib/libstatssocket/utils.cpp",
+    "android-source/modules-statsd/lib/libstatssocket/statsd_writer.cpp",
+    "android-source/modules-statsd/lib/libstatssocket/stats_buffer_writer_queue.cpp"
+  ],
+  "includes": [
+    "android-source/modules-statsd/lib/libstatssocket",
+    "android-source/modules-statsd/lib/libstatspull",
+    "android-source/modules-statsd/lib/libstatspull/include",
+    "android-source/modules-statsd/lib/libstatssocket/include",
+    "android-source/frameworks-native/libs/binder",
+    "android-source/frameworks-native/libs/binder/include",
+    "android-source/libbase/include",
+    "android-source/system-core/libutils/include",
+    "android-source/system-core/libutils/binder/include",
+    "android-source/system-core/libcutils/include",
+    "android-source/system-core/libsystem/include",
+    "android-source/logging/liblog/include",
+    "android-source/fmtlib/include",
+    "android-source/frameworks-native/libs/binder/ndk/include_ndk",
+    "android-source/frameworks-native/libs/binder/ndk/include_cpp",
+    "android-source/frameworks-native/libs/binder/ndk/include_platform",
+    "android-source/frameworks-native/libs/binder/ndk",
+    "android-source/frameworks-base/core/jni/include",
+    "android-source/libnativehelper/include_jni",
+    "android-source/system-core/libcutils/include/private",
+    "android-source/frameworks-native/libs/android_runtime_lazy/include",
+    "android-source/libnativehelper/include",
+    "android-source/libnativehelper/include_platform",
+    "android-source/libnativehelper/header_only_include",
+    "android-source/libnativehelper/include_platform_header_only",
+    "android-source/system-core/libvendorsupport/include_llndk"
+  ],
+  "defines": [
+    "__OHOS__",
+    "_GNU_SOURCE",
+    "_LIBCPP_PROMOTE_H",
+    "BINDER_ENABLE_LIBLOG_ASSERT",
+    "BINDER_RPC_DEV_SERVERS",
+    "__INTRODUCED_IN(x)=",
+    "__INTRODUCED_IN_32(x)=",
+    "__INTRODUCED_IN_64(x)=",
+    "__INTRODUCED_IN_FUTURE="
+  ],
+  "cpp_flags": [
+    "-std=gnu++20",
+    "-Wno-deprecated-declarations"
+  ],
+  "force_includes": [
+    "preserved/runtime-sources/local/libcxx_compat_arm64.h"
+  ],
+  "scope": "Original Android stats event wire format and socket writer",
+  "source_replacements": {},
+  "source_tree_replacements": {
+    "android-source/modules-statsd/lib/libstatssocket": {
+      "statsd_writer.h": {
+        "#include <stdatomic.h>": "#ifdef __cplusplus\n#include <atomic>\nusing std::atomic_int;\n#else\n#include <stdatomic.h>\n#endif",
+        "__BEGIN_DECLS": "#ifdef __cplusplus\nextern \"C\" {\n#endif",
+        "__END_DECLS": "#ifdef __cplusplus\n}\n#endif"
+      },
+      "statsd_writer.cpp": {
+        "#include <stdatomic.h>": "#include <atomic>\nusing std::memory_order_relaxed;"
+      }
+    }
+  },
+  "generated_source_prefixes": [
+    "src/stats_statsdsocketlog.cpp"
+  ]
+}
