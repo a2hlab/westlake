@@ -1212,14 +1212,25 @@ static void wl_name_java_method(void* ctx) {
     // transitively via libhwui via liboh_adapter_bridge.so).
     {
         using MarkFn = void (*)(void);
-        MarkFn fn = reinterpret_cast<MarkFn>(
-            dlsym(RTLD_DEFAULT, "oh_typeface_mark_child"));
+        // liboh_hwui_shim is intentionally RTLD_LOCAL: exporting the OH/Skia
+        // boundary into the process-global scope would let unrelated APK DSOs
+        // bind to it. RTLD_DEFAULT therefore cannot see the marker on OH musl.
+        // Resolve it from the owning DSO while preserving that isolation.
+        void* owner = dlopen("liboh_hwui_shim.so", RTLD_NOLOAD | RTLD_NOW);
+        if (owner == nullptr) {
+            owner = dlopen("liboh_hwui_shim.so", RTLD_NOW | RTLD_LOCAL);
+        }
+        MarkFn fn = reinterpret_cast<MarkFn>(owner != nullptr
+            ? dlsym(owner, "oh_typeface_mark_child")
+            : dlsym(RTLD_DEFAULT, "oh_typeface_mark_child"));
         if (fn) {
             fn();
             LOGI("[CHILD] oh_typeface_mark_child() invoked");
         } else {
-            LOGW("[CHILD] oh_typeface_mark_child symbol not found — Typeface "
-                 "real-init won't fire (font rendering will degrade)");
+            const char* error = dlerror();
+            LOGW("[CHILD] oh_typeface_mark_child unavailable — Typeface "
+                 "real-init won't fire (font rendering will degrade): %s",
+                 error != nullptr ? error : "unknown loader error");
         }
     }
 
@@ -1944,6 +1955,18 @@ static bool populateChildSecureRandomServices(JNIEnv* env, jobject provider) {
 }
 
 static bool installChildSecurityProvider(JNIEnv* env, AppSpawnXRuntime* runtime) {
+    // Source runtimes carry the platform Conscrypt provider on their boot class
+    // path and install OhTrustBridge during preload. WestlakeJsseProvider is a
+    // captured-stack replacement and is intentionally absent from source
+    // adapter jars, so do not turn that expected absence into a child-startup
+    // error on every launch.
+    if (getenv("WESTLAKE_RUNTIME_ROOT") != nullptr) {
+        fprintf(stderr,
+                "[CHILD-SECURITY] source runtime uses Conscrypt/OhTrustBridge; "
+                "legacy WestlakeJSSE skipped\n");
+        return true;
+    }
+
     jclass providerClass = runtime != nullptr
             ? runtime->loadClassViaPath(env, "adapter.compat.WestlakeJsseProvider")
             : env->FindClass("adapter/compat/WestlakeJsseProvider");

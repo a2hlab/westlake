@@ -22,6 +22,18 @@
     "westlake/native/include"
   ],
   "libraries": {
+    "libsoundpool.so": {
+      "sources": [
+        "westlake/framework/core/jni/oh_soundpool_jni.c"
+      ],
+      "deps": []
+    },
+    "libandroid_native_network_compat.so": {
+      "sources": [
+        "westlake/framework/appspawn-x/bionic_compat/src/android_native_network_compat.c"
+      ],
+      "deps": []
+    },
     "liblog.so": {
       "sources": [
         "android-source/logging/liblog/log_event_list.cpp",

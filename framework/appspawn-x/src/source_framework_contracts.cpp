@@ -110,6 +110,42 @@ int runSourceFrameworkContracts(JNIEnv* env) {
     REQUIRE(::close(pipeFds[0]) == 0 && ::close(pipeFds[1]) == 0);
     ALooper_release(nativeLooper);
     fprintf(stderr, "SOURCE_SHARED_LOOPER_PASS java_dispatch=1 native_dispatch=1 ownership_preserved=1\n");
+
+    // The device-captured WebView NDK shim looks these private backend symbols
+    // up through liboh_adapter_bridge.so.  Verify both transitive symbol
+    // ownership and real Java-MessageQueue dispatch, not merely that the
+    // implementation exists in an unlinked source file.
+    void* adapterBridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
+    if (adapterBridge == nullptr) {
+        adapterBridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_GLOBAL);
+    }
+    REQUIRE(adapterBridge);
+    auto backendPrepare = reinterpret_cast<void* (*)(int)>(
+            dlsym(adapterBridge, "wl_ALooper_prepare"));
+    auto backendAddFd = reinterpret_cast<int (*)(void*, int, int, int,
+            ALooper_callbackFunc, void*)>(dlsym(adapterBridge, "wl_ALooper_addFd"));
+    auto backendRemoveFd = reinterpret_cast<int (*)(void*, int)>(
+            dlsym(adapterBridge, "wl_ALooper_removeFd"));
+    auto backendWake = reinterpret_cast<void (*)(void*)>(
+            dlsym(adapterBridge, "wl_ALooper_wake"));
+    REQUIRE(backendPrepare && backendAddFd && backendRemoveFd && backendWake);
+    void* backendLooper = backendPrepare(0); REQUIRE(backendLooper);
+    jobject backendQueue = env->NewObject(queueClass, queueCtor, JNI_TRUE);
+    REQUIRE(backendQueue);
+    int backendPipe[2]; REQUIRE(::pipe(backendPipe) == 0);
+    int backendCallbacks = 0;
+    REQUIRE(backendAddFd(backendLooper, backendPipe[0], ALOOPER_POLL_CALLBACK,
+                         ALOOPER_EVENT_INPUT, checkLooperCallback,
+                         &backendCallbacks) == 1);
+    REQUIRE(::write(backendPipe[1], "Q", 1) == 1);
+    env->CallVoidMethod(backendQueue, queuePoll,
+                        env->GetLongField(backendQueue, queuePointer), 0);
+    REQUIRE(!env->ExceptionCheck() && backendCallbacks == 1);
+    backendWake(backendLooper);
+    REQUIRE(backendRemoveFd(backendLooper, backendPipe[0]) == 1);
+    REQUIRE(::close(backendPipe[0]) == 0 && ::close(backendPipe[1]) == 0);
+    env->CallVoidMethod(backendQueue, queueDispose); REQUIRE(!env->ExceptionCheck());
+    fprintf(stderr, "SOURCE_WEBVIEW_ALOOPER_BACKEND_PASS symbols=4 java_dispatch=1\n");
     jclass surfaceControl = env->FindClass("android/view/SurfaceControl"); REQUIRE(surfaceControl);
     auto overlayQuery = env->GetStaticMethodID(surfaceControl, "getOverlaySupport",
             "()Landroid/hardware/OverlayProperties;"); REQUIRE(overlayQuery);
@@ -218,6 +254,252 @@ int runSourceFrameworkContracts(JNIEnv* env) {
     REQUIRE(::close(socketFd) == 0);
     env->SetIntField(fdObject, descriptorField, -1); REQUIRE(!env->ExceptionCheck());
     fprintf(stderr, "SOURCE_TRAFFIC_STATS_JNI_PASS invalid_fd=EBADF accounting=EOPNOTSUPP socket_preserved=1\n");
+
+    // Android's ConnectivityService resolves per-network queries against the
+    // supplied handle. An unknown handle must not inherit the default network's
+    // info, capabilities, or link properties merely because it is connected.
+    jclass connectivityAdapter = env->FindClass("adapter/core/ConnectivityManagerAdapter");
+    REQUIRE(connectivityAdapter);
+    auto connectivityBinder = env->GetStaticMethodID(connectivityAdapter, "getBinder",
+            "()Landroid/os/IBinder;"); REQUIRE(connectivityBinder);
+    jobject binder = env->CallStaticObjectMethod(connectivityAdapter, connectivityBinder);
+    REQUIRE(binder);
+    jclass connectivityStub = env->FindClass("android/net/IConnectivityManager$Stub");
+    REQUIRE(connectivityStub);
+    auto asConnectivity = env->GetStaticMethodID(connectivityStub, "asInterface",
+            "(Landroid/os/IBinder;)Landroid/net/IConnectivityManager;");
+    REQUIRE(asConnectivity);
+    jobject connectivity = env->CallStaticObjectMethod(connectivityStub, asConnectivity, binder);
+    REQUIRE(connectivity);
+    jclass connectivityInterface = env->FindClass("android/net/IConnectivityManager");
+    REQUIRE(connectivityInterface);
+    auto activeNetwork = env->GetMethodID(connectivityInterface, "getActiveNetwork",
+            "()Landroid/net/Network;"); REQUIRE(activeNetwork);
+    auto networkInfoForUid = env->GetMethodID(connectivityInterface, "getNetworkInfoForUid",
+            "(Landroid/net/Network;IZ)Landroid/net/NetworkInfo;"); REQUIRE(networkInfoForUid);
+    auto networkCapabilities = env->GetMethodID(connectivityInterface, "getNetworkCapabilities",
+            "(Landroid/net/Network;Ljava/lang/String;Ljava/lang/String;)Landroid/net/NetworkCapabilities;");
+    REQUIRE(networkCapabilities);
+    auto networkLinks = env->GetMethodID(connectivityInterface, "getLinkProperties",
+            "(Landroid/net/Network;)Landroid/net/LinkProperties;"); REQUIRE(networkLinks);
+    auto networkInfoForType = env->GetMethodID(connectivityInterface, "getNetworkInfo",
+            "(I)Landroid/net/NetworkInfo;"); REQUIRE(networkInfoForType);
+    jobject currentNetwork = env->CallObjectMethod(connectivity, activeNetwork); REQUIRE(currentNetwork);
+    jclass networkClass = env->FindClass("android/net/Network"); REQUIRE(networkClass);
+    auto networkId = env->GetFieldID(networkClass, "netId", "I"); REQUIRE(networkId);
+    auto networkCtor = env->GetMethodID(networkClass, "<init>", "(I)V"); REQUIRE(networkCtor);
+    jint currentId = env->GetIntField(currentNetwork, networkId); REQUIRE(currentId > 0);
+    jobject unknownNetwork = env->NewObject(networkClass, networkCtor, currentId + 12345);
+    REQUIRE(unknownNetwork);
+    jobject currentInfo = env->CallObjectMethod(connectivity, networkInfoForUid,
+            currentNetwork, jint(0), JNI_FALSE); REQUIRE(currentInfo);
+    REQUIRE(env->CallObjectMethod(connectivity, networkInfoForUid,
+            unknownNetwork, jint(0), JNI_FALSE) == nullptr);
+    jclass networkInfoClass = env->FindClass("android/net/NetworkInfo"); REQUIRE(networkInfoClass);
+    auto networkType = env->GetMethodID(networkInfoClass, "getType", "()I"); REQUIRE(networkType);
+    jint currentType = env->CallIntMethod(currentInfo, networkType); REQUIRE(currentType >= 0);
+    REQUIRE(env->CallObjectMethod(connectivity, networkInfoForType, currentType));
+    REQUIRE(env->CallObjectMethod(connectivity, networkInfoForType, jint(-1)) == nullptr);
+    jstring callingPackage = env->NewStringUTF("org.westlake.sourcehost"); REQUIRE(callingPackage);
+    REQUIRE(env->CallObjectMethod(connectivity, networkCapabilities,
+            currentNetwork, callingPackage, nullptr));
+    REQUIRE(env->CallObjectMethod(connectivity, networkCapabilities,
+            unknownNetwork, callingPackage, nullptr) == nullptr);
+    jobject currentLinks = env->CallObjectMethod(connectivity, networkLinks, currentNetwork);
+    REQUIRE(currentLinks);
+    REQUIRE(env->CallObjectMethod(connectivity, networkLinks, unknownNetwork) == nullptr);
+    fprintf(stderr, "SOURCE_CONNECTIVITY_HANDLE_PASS current=%d unknown=null type_filter=1\n",
+            currentId);
+    jclass linkPropertiesClass = env->FindClass("android/net/LinkProperties");
+    REQUIRE(linkPropertiesClass);
+    auto getDnsServers = env->GetMethodID(linkPropertiesClass, "getDnsServers",
+            "()Ljava/util/List;"); REQUIRE(getDnsServers);
+    auto getLinkAddresses = env->GetMethodID(linkPropertiesClass, "getLinkAddresses",
+            "()Ljava/util/List;"); REQUIRE(getLinkAddresses);
+    auto getRoutes = env->GetMethodID(linkPropertiesClass, "getRoutes",
+            "()Ljava/util/List;"); REQUIRE(getRoutes);
+    jobject dnsServers = env->CallObjectMethod(currentLinks, getDnsServers); REQUIRE(dnsServers);
+    jobject linkAddresses = env->CallObjectMethod(currentLinks, getLinkAddresses);
+    REQUIRE(linkAddresses);
+    jobject routes = env->CallObjectMethod(currentLinks, getRoutes); REQUIRE(routes);
+    jclass listClass = env->FindClass("java/util/List"); REQUIRE(listClass);
+    auto listSize = env->GetMethodID(listClass, "size", "()I"); REQUIRE(listSize);
+    jint dnsCount = env->CallIntMethod(dnsServers, listSize); REQUIRE(dnsCount > 0);
+    jint linkCount = env->CallIntMethod(linkAddresses, listSize); REQUIRE(linkCount > 0);
+    jint routeCount = env->CallIntMethod(routes, listSize); REQUIRE(routeCount > 0);
+    jclass objectClass = env->FindClass("java/lang/Object"); REQUIRE(objectClass);
+    auto objectToString = env->GetMethodID(objectClass, "toString",
+            "()Ljava/lang/String;"); REQUIRE(objectToString);
+    jstring dnsText = static_cast<jstring>(env->CallObjectMethod(dnsServers, objectToString));
+    REQUIRE(dnsText);
+    jstring linkText = static_cast<jstring>(env->CallObjectMethod(linkAddresses, objectToString));
+    REQUIRE(linkText);
+    jstring routeText = static_cast<jstring>(env->CallObjectMethod(routes, objectToString));
+    REQUIRE(routeText);
+    const char *dnsChars = env->GetStringUTFChars(dnsText, nullptr); REQUIRE(dnsChars);
+    const char *linkChars = env->GetStringUTFChars(linkText, nullptr); REQUIRE(linkChars);
+    const char *routeChars = env->GetStringUTFChars(routeText, nullptr); REQUIRE(routeChars);
+    fprintf(stderr, "SOURCE_CONNECTIVITY_LINK_VALUES_PASS dns=%d addresses=%d servers=%s links=%s\n",
+            dnsCount, linkCount, dnsChars, linkChars);
+    fprintf(stderr, "SOURCE_CONNECTIVITY_ROUTES_PASS routes=%d values=%s\n",
+            routeCount, routeChars);
+    env->ReleaseStringUTFChars(routeText, routeChars);
+    env->ReleaseStringUTFChars(linkText, linkChars);
+    env->ReleaseStringUTFChars(dnsText, dnsChars);
+
+    // Compare the Android proxy getter with the proxy carried by current
+    // LinkProperties. Also exercise a configured host/port/exclusion mapping
+    // without changing the board's actual network or global proxy settings.
+    auto networkProxy = env->GetMethodID(connectivityInterface, "getProxyForNetwork",
+            "(Landroid/net/Network;)Landroid/net/ProxyInfo;"); REQUIRE(networkProxy);
+    auto linkProxyGetter = env->GetMethodID(linkPropertiesClass, "getHttpProxy",
+            "()Landroid/net/ProxyInfo;"); REQUIRE(linkProxyGetter);
+    jobject currentProxy = env->CallObjectMethod(connectivity, networkProxy, currentNetwork);
+    jobject defaultProxy = env->CallObjectMethod(connectivity, networkProxy, nullptr);
+    jobject linkProxy = env->CallObjectMethod(currentLinks, linkProxyGetter);
+    REQUIRE(!env->ExceptionCheck());
+    REQUIRE((currentProxy == nullptr) == (defaultProxy == nullptr));
+    REQUIRE((currentProxy == nullptr) == (linkProxy == nullptr));
+    jclass proxyClass = env->FindClass("android/net/ProxyInfo"); REQUIRE(proxyClass);
+    auto proxyEquals = env->GetMethodID(proxyClass, "equals", "(Ljava/lang/Object;)Z");
+    REQUIRE(proxyEquals);
+    if (currentProxy != nullptr) {
+        REQUIRE(env->CallBooleanMethod(currentProxy, proxyEquals, defaultProxy));
+        REQUIRE(env->CallBooleanMethod(currentProxy, proxyEquals, linkProxy));
+    }
+    auto buildProxy = env->GetStaticMethodID(connectivityAdapter, "buildProxyInfo",
+            "(Ljava/lang/String;I[Ljava/lang/String;)Landroid/net/ProxyInfo;");
+    REQUIRE(buildProxy);
+    jclass proxyStringClass = env->FindClass("java/lang/String"); REQUIRE(proxyStringClass);
+    jobjectArray exclusions = env->NewObjectArray(1, proxyStringClass, nullptr);
+    REQUIRE(exclusions);
+    jstring exclusion = env->NewStringUTF("*.internal.example.com"); REQUIRE(exclusion);
+    env->SetObjectArrayElement(exclusions, 0, exclusion); REQUIRE(!env->ExceptionCheck());
+    jstring host = env->NewStringUTF("proxy.example.com"); REQUIRE(host);
+    jobject configuredProxy = env->CallStaticObjectMethod(connectivityAdapter, buildProxy,
+            host, jint(8080), exclusions); REQUIRE(configuredProxy);
+    auto getProxyHost = env->GetMethodID(proxyClass, "getHost", "()Ljava/lang/String;");
+    auto getProxyPort = env->GetMethodID(proxyClass, "getPort", "()I");
+    auto getProxyExclusions = env->GetMethodID(proxyClass, "getExclusionList",
+            "()[Ljava/lang/String;");
+    REQUIRE(getProxyHost && getProxyPort && getProxyExclusions);
+    jstring returnedHost = static_cast<jstring>(env->CallObjectMethod(configuredProxy,
+            getProxyHost)); REQUIRE(returnedHost);
+    const char *returnedHostChars = env->GetStringUTFChars(returnedHost, nullptr);
+    REQUIRE(returnedHostChars);
+    REQUIRE(strcmp(returnedHostChars, "proxy.example.com") == 0);
+    env->ReleaseStringUTFChars(returnedHost, returnedHostChars);
+    REQUIRE(env->CallIntMethod(configuredProxy, getProxyPort) == 8080);
+    jobjectArray returnedExclusions = static_cast<jobjectArray>(env->CallObjectMethod(
+            configuredProxy, getProxyExclusions)); REQUIRE(returnedExclusions);
+    REQUIRE(env->GetArrayLength(returnedExclusions) == 1);
+    fprintf(stderr, "SOURCE_CONNECTIVITY_PROXY_PASS configured=%d default_match=1 link_match=1 synthetic=1\n",
+            currentProxy != nullptr);
+
+    // SoundPool is a JNI-loaded Android library, but its compressed-audio
+    // implementation belongs at the OH boundary. Prove both halves: the
+    // source-built shim can create the public OH AVPlayer backend, and the
+    // unchanged Java API can load and play an actual finite WAV descriptor.
+    void* soundpoolLibrary = dlopen("libsoundpool.so", RTLD_NOW | RTLD_LOCAL);
+    REQUIRE(soundpoolLibrary);
+    auto soundpoolBackendProbe = reinterpret_cast<int (*)()>(
+            dlsym(soundpoolLibrary, "oh_soundpool_backend_probe"));
+    REQUIRE(soundpoolBackendProbe && soundpoolBackendProbe() == 1);
+    REQUIRE(dlclose(soundpoolLibrary) == 0);
+    fprintf(stderr, "SOURCE_SOUNDPOOL_BACKEND_PASS avplayer_create=1 release=1\n");
+
+    char soundPath[] = "/data/local/tmp/westlake-soundpool-XXXXXX";
+    int soundFd = mkstemp(soundPath); REQUIRE(soundFd >= 0);
+    constexpr uint32_t sampleRate = 44100;
+    constexpr uint32_t sampleBytes = sampleRate * 2;
+    std::vector<unsigned char> wav(44 + sampleBytes, 0);
+    auto put16 = [&wav](size_t offset, uint16_t value) {
+        wav[offset] = static_cast<unsigned char>(value);
+        wav[offset + 1] = static_cast<unsigned char>(value >> 8);
+    };
+    auto put32 = [&wav](size_t offset, uint32_t value) {
+        wav[offset] = static_cast<unsigned char>(value);
+        wav[offset + 1] = static_cast<unsigned char>(value >> 8);
+        wav[offset + 2] = static_cast<unsigned char>(value >> 16);
+        wav[offset + 3] = static_cast<unsigned char>(value >> 24);
+    };
+    std::memcpy(wav.data(), "RIFF", 4);
+    put32(4, static_cast<uint32_t>(wav.size() - 8));
+    std::memcpy(wav.data() + 8, "WAVEfmt ", 8);
+    put32(16, 16);
+    put16(20, 1);
+    put16(22, 1);
+    put32(24, sampleRate);
+    put32(28, sampleRate * 2);
+    put16(32, 2);
+    put16(34, 16);
+    std::memcpy(wav.data() + 36, "data", 4);
+    put32(40, sampleBytes);
+    size_t written = 0;
+    while (written < wav.size()) {
+        ssize_t count = ::write(soundFd, wav.data() + written, wav.size() - written);
+        REQUIRE(count > 0);
+        written += static_cast<size_t>(count);
+    }
+    REQUIRE(::lseek(soundFd, 0, SEEK_SET) == 0);
+    env->SetIntField(fdObject, descriptorField, soundFd); REQUIRE(!env->ExceptionCheck());
+    jclass soundpool = env->FindClass("android/media/SoundPool"); REQUIRE(soundpool);
+    auto soundpoolSetup = env->GetMethodID(soundpool, "native_setup",
+            "(ILjava/lang/Object;Ljava/lang/String;)I"); REQUIRE(soundpoolSetup);
+    auto soundpoolLoad = env->GetMethodID(soundpool, "load", "(Ljava/io/FileDescriptor;JJI)I");
+    auto soundpoolPlay = env->GetMethodID(soundpool, "_play", "(IFFIIFI)I");
+    auto soundpoolPause = env->GetMethodID(soundpool, "pause", "(I)V");
+    auto soundpoolResume = env->GetMethodID(soundpool, "resume", "(I)V");
+    auto soundpoolStop = env->GetMethodID(soundpool, "stop", "(I)V");
+    auto soundpoolVolume = env->GetMethodID(soundpool, "_setVolume", "(IFF)V");
+    auto soundpoolUnload = env->GetMethodID(soundpool, "unload", "(I)Z");
+    auto soundpoolRelease = env->GetMethodID(soundpool, "native_release", "()V");
+    REQUIRE(soundpoolLoad && soundpoolPlay && soundpoolPause && soundpoolResume
+            && soundpoolStop && soundpoolVolume && soundpoolUnload && soundpoolRelease);
+    jclass attributesBuilder = env->FindClass("android/media/AudioAttributes$Builder");
+    REQUIRE(attributesBuilder);
+    auto attributesBuilderCtor = env->GetMethodID(attributesBuilder, "<init>", "()V");
+    auto attributesBuild = env->GetMethodID(attributesBuilder, "build",
+            "()Landroid/media/AudioAttributes;");
+    REQUIRE(attributesBuilderCtor && attributesBuild);
+    jobject attributesBuilderObject = env->NewObject(attributesBuilder, attributesBuilderCtor);
+    REQUIRE(attributesBuilderObject);
+    jobject attributes = env->CallObjectMethod(attributesBuilderObject, attributesBuild);
+    REQUIRE(attributes);
+    jobject soundpoolObject = env->AllocObject(soundpool); REQUIRE(soundpoolObject);
+    jstring sourcePackage = env->NewStringUTF("source.contract"); REQUIRE(sourcePackage);
+    REQUIRE(env->CallIntMethod(soundpoolObject, soundpoolSetup, 1, attributes, sourcePackage) == 0);
+    jint sampleId = env->CallIntMethod(soundpoolObject, soundpoolLoad, fdObject,
+            jlong(0), jlong(wav.size()), 1);
+    REQUIRE(sampleId > 0 && !env->ExceptionCheck());
+    REQUIRE(::close(soundFd) == 0);
+    soundFd = -1;
+    REQUIRE(::unlink(soundPath) == 0);
+    env->SetIntField(fdObject, descriptorField, -1); REQUIRE(!env->ExceptionCheck());
+    jint streamId = 0;
+    int loadPolls = 0;
+    for (; loadPolls < 100 && streamId == 0; ++loadPolls) {
+        usleep(50000);
+        streamId = env->CallIntMethod(soundpoolObject, soundpoolPlay,
+                sampleId, 1.0f, 1.0f, 1, 0, 1.0f, 0);
+        REQUIRE(!env->ExceptionCheck());
+    }
+    REQUIRE(streamId > 0);
+    usleep(300000);
+    env->CallVoidMethod(soundpoolObject, soundpoolVolume, streamId, 0.25f, 0.25f);
+    env->CallVoidMethod(soundpoolObject, soundpoolPause, streamId);
+    REQUIRE(!env->ExceptionCheck());
+    usleep(50000);
+    env->CallVoidMethod(soundpoolObject, soundpoolResume, streamId);
+    REQUIRE(!env->ExceptionCheck());
+    usleep(50000);
+    env->CallVoidMethod(soundpoolObject, soundpoolStop, streamId);
+    REQUIRE(!env->ExceptionCheck());
+    REQUIRE(env->CallBooleanMethod(soundpoolObject, soundpoolUnload, sampleId));
+    env->CallVoidMethod(soundpoolObject, soundpoolRelease); REQUIRE(!env->ExceptionCheck());
+    fprintf(stderr, "SOURCE_SOUNDPOOL_JAVA_PASS load=1 play=1 controls=1 polls=%d bytes=%zu\n",
+            loadPolls, wav.size());
+
     jclass parcel = env->FindClass("android/os/Parcel"); REQUIRE(parcel);
     auto obtain = env->GetStaticMethodID(parcel, "obtain", "()Landroid/os/Parcel;"); REQUIRE(obtain);
     auto recycle = env->GetMethodID(parcel, "recycle", "()V"); REQUIRE(recycle);
