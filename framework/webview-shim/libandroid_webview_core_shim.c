@@ -250,6 +250,18 @@ int ALooper_removeFd(ALooper *looper, int fd)
     return result;
 }
 
+void ALooper_wake(ALooper *looper)
+{
+    if (looper == NULL || looper->backend == NULL) {
+        return;
+    }
+    typedef void (*Fn)(void *);
+    Fn fn = (Fn)bridge_symbol("wl_ALooper_wake");
+    if (fn != NULL) {
+        fn(looper->backend);
+    }
+}
+
 /*
  * Android NDK sensor boundary for boards with no physical Android sensors.
  * A non-null manager is a valid service handle; an absent default sensor is
