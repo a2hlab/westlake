@@ -15,6 +15,7 @@
 #include <android/bitmap.h>
 #include <android/imagedecoder.h>
 #include <android/looper.h>
+#include <network/netmanager/net_connection.h>
 
 extern "C" int* __errno();
 
@@ -301,8 +302,9 @@ int runSourceFrameworkContracts(JNIEnv* env) {
     REQUIRE(env->CallObjectMethod(connectivity, networkInfoForType, currentType));
     REQUIRE(env->CallObjectMethod(connectivity, networkInfoForType, jint(-1)) == nullptr);
     jstring callingPackage = env->NewStringUTF("org.westlake.sourcehost"); REQUIRE(callingPackage);
-    REQUIRE(env->CallObjectMethod(connectivity, networkCapabilities,
-            currentNetwork, callingPackage, nullptr));
+    jobject currentCapabilities = env->CallObjectMethod(connectivity, networkCapabilities,
+            currentNetwork, callingPackage, nullptr);
+    REQUIRE(currentCapabilities);
     REQUIRE(env->CallObjectMethod(connectivity, networkCapabilities,
             unknownNetwork, callingPackage, nullptr) == nullptr);
     jobject currentLinks = env->CallObjectMethod(connectivity, networkLinks, currentNetwork);
@@ -395,6 +397,222 @@ int runSourceFrameworkContracts(JNIEnv* env) {
     REQUIRE(env->GetArrayLength(returnedExclusions) == 1);
     fprintf(stderr, "SOURCE_CONNECTIVITY_PROXY_PASS configured=%d default_match=1 link_match=1 synthetic=1\n",
             currentProxy != nullptr);
+
+    // Exercise the public OH application-proxy API as a reversible A/B. This
+    // proves the native snapshot, Java ProxyInfo mapping, default-network
+    // getter, and LinkProperties view all carry the same configured values.
+    void* netConnection = dlopen("libnet_connection.so", RTLD_NOW | RTLD_LOCAL);
+    REQUIRE(netConnection);
+    auto getDefaultHttpProxy = reinterpret_cast<int32_t (*)(NetConn_HttpProxy*)>(
+            dlsym(netConnection, "OH_NetConn_GetDefaultHttpProxy"));
+    auto setAppHttpProxy = reinterpret_cast<int32_t (*)(NetConn_HttpProxy*)>(
+            dlsym(netConnection, "OH_NetConn_SetAppHttpProxy"));
+    REQUIRE(getDefaultHttpProxy && setAppHttpProxy);
+    // NetConn_HttpProxy embeds the full exclusion table and is too large for
+    // Appspawn's preload-thread stack. Keep all three snapshots on the heap.
+    auto* proxyStorage = static_cast<NetConn_HttpProxy*>(
+            calloc(3, sizeof(NetConn_HttpProxy))); REQUIRE(proxyStorage);
+    NetConn_HttpProxy* previousProxy = &proxyStorage[0];
+    NetConn_HttpProxy* testProxy = &proxyStorage[1];
+    NetConn_HttpProxy* observedProxy = &proxyStorage[2];
+    REQUIRE(getDefaultHttpProxy(previousProxy) == 0);
+    std::strncpy(testProxy->host, "127.0.0.1", sizeof(testProxy->host) - 1);
+    testProxy->port = 18080;
+    testProxy->exclusionListSize = 1;
+    std::strncpy(testProxy->exclusionList[0], "localhost",
+            sizeof(testProxy->exclusionList[0]) - 1);
+    REQUIRE(setAppHttpProxy(testProxy) == 0);
+    REQUIRE(getDefaultHttpProxy(observedProxy) == 0);
+    REQUIRE(strcmp(observedProxy->host, testProxy->host) == 0 &&
+            observedProxy->port == testProxy->port && observedProxy->exclusionListSize == 1 &&
+            strcmp(observedProxy->exclusionList[0], testProxy->exclusionList[0]) == 0);
+    // OhConnectivityState intentionally caches a snapshot for 250 ms.
+    usleep(300000);
+    jobject configuredBoardProxy = env->CallObjectMethod(connectivity, networkProxy,
+            currentNetwork); REQUIRE(configuredBoardProxy);
+    jobject configuredDefaultProxy = env->CallObjectMethod(connectivity, networkProxy, nullptr);
+    REQUIRE(configuredDefaultProxy);
+    jobject configuredLinks = env->CallObjectMethod(connectivity, networkLinks, currentNetwork);
+    REQUIRE(configuredLinks);
+    jobject configuredLinkProxy = env->CallObjectMethod(configuredLinks, linkProxyGetter);
+    REQUIRE(configuredLinkProxy);
+    jstring boardProxyHost = static_cast<jstring>(env->CallObjectMethod(configuredBoardProxy,
+            getProxyHost)); REQUIRE(boardProxyHost);
+    const char* boardProxyHostChars = env->GetStringUTFChars(boardProxyHost, nullptr);
+    REQUIRE(boardProxyHostChars);
+    bool boardProxyHostMatches = strcmp(boardProxyHostChars, testProxy->host) == 0;
+    env->ReleaseStringUTFChars(boardProxyHost, boardProxyHostChars);
+    REQUIRE(boardProxyHostMatches);
+    REQUIRE(env->CallIntMethod(configuredBoardProxy, getProxyPort) == testProxy->port);
+    REQUIRE(env->CallBooleanMethod(configuredBoardProxy, proxyEquals,
+            configuredDefaultProxy));
+    REQUIRE(env->CallBooleanMethod(configuredBoardProxy, proxyEquals, configuredLinkProxy));
+    jobjectArray boardExclusions = static_cast<jobjectArray>(env->CallObjectMethod(
+            configuredBoardProxy, getProxyExclusions)); REQUIRE(boardExclusions);
+    REQUIRE(env->GetArrayLength(boardExclusions) == 1);
+    jstring boardExclusion = static_cast<jstring>(env->GetObjectArrayElement(
+            boardExclusions, 0)); REQUIRE(boardExclusion);
+    const char* boardExclusionChars = env->GetStringUTFChars(boardExclusion, nullptr);
+    REQUIRE(boardExclusionChars);
+    bool boardExclusionMatches = strcmp(boardExclusionChars,
+            testProxy->exclusionList[0]) == 0;
+    env->ReleaseStringUTFChars(boardExclusion, boardExclusionChars);
+    REQUIRE(boardExclusionMatches);
+    REQUIRE(setAppHttpProxy(previousProxy) == 0);
+    memset(observedProxy, 0, sizeof(*observedProxy));
+    REQUIRE(getDefaultHttpProxy(observedProxy) == 0);
+    REQUIRE(strcmp(observedProxy->host, previousProxy->host) == 0 &&
+            observedProxy->port == previousProxy->port &&
+            observedProxy->exclusionListSize == previousProxy->exclusionListSize);
+    free(proxyStorage);
+    REQUIRE(dlclose(netConnection) == 0);
+    fprintf(stderr, "SOURCE_CONNECTIVITY_CONFIGURED_PROXY_PASS host=127.0.0.1 port=18080 exclusions=1 default_match=1 link_match=1 restored=1\n");
+
+    // The framework service must return a defensive, caller-authorized copy of
+    // supplied capabilities.  Give the copy a sensitive SSID so this verifies
+    // actual redaction rather than merely accepting already-empty board state.
+    jclass capabilitiesClass = env->FindClass("android/net/NetworkCapabilities");
+    REQUIRE(capabilitiesClass);
+    auto capabilitiesCopy = env->GetMethodID(capabilitiesClass, "<init>",
+            "(Landroid/net/NetworkCapabilities;)V"); REQUIRE(capabilitiesCopy);
+    auto setSsid = env->GetMethodID(capabilitiesClass, "setSSID",
+            "(Ljava/lang/String;)Landroid/net/NetworkCapabilities;"); REQUIRE(setSsid);
+    auto getSsid = env->GetMethodID(capabilitiesClass, "getSsid", "()Ljava/lang/String;");
+    REQUIRE(getSsid);
+    jobject sensitiveCapabilities = env->NewObject(capabilitiesClass, capabilitiesCopy,
+            currentCapabilities); REQUIRE(sensitiveCapabilities);
+    jstring privateSsid = env->NewStringUTF("source-contract-private-ssid");
+    REQUIRE(privateSsid);
+    REQUIRE(env->CallObjectMethod(sensitiveCapabilities, setSsid, privateSsid));
+    auto redactedCapabilities = env->GetMethodID(connectivityInterface,
+            "getRedactedNetworkCapabilitiesForPackage",
+            "(Landroid/net/NetworkCapabilities;ILjava/lang/String;Ljava/lang/String;)"
+            "Landroid/net/NetworkCapabilities;");
+    REQUIRE(redactedCapabilities);
+    jclass binderClass = env->FindClass("android/os/Binder"); REQUIRE(binderClass);
+    auto callingUidMethod = env->GetStaticMethodID(binderClass, "getCallingUid", "()I");
+    REQUIRE(callingUidMethod);
+    jint callingUid = env->CallStaticIntMethod(binderClass, callingUidMethod);
+    REQUIRE(!env->ExceptionCheck());
+    jobject redacted = env->CallObjectMethod(connectivity, redactedCapabilities,
+            sensitiveCapabilities, callingUid, callingPackage, nullptr);
+    REQUIRE(redacted && !env->IsSameObject(redacted, sensitiveCapabilities));
+    REQUIRE(env->CallObjectMethod(redacted, getSsid) == nullptr);
+    jstring preservedSsid = static_cast<jstring>(env->CallObjectMethod(
+            sensitiveCapabilities, getSsid)); REQUIRE(preservedSsid);
+    jclass redactionStringClass = env->FindClass("java/lang/String");
+    REQUIRE(redactionStringClass);
+    auto redactionStringEquals = env->GetMethodID(redactionStringClass, "equals",
+            "(Ljava/lang/Object;)Z"); REQUIRE(redactionStringEquals);
+    REQUIRE(env->CallBooleanMethod(privateSsid, redactionStringEquals, preservedSsid));
+    jobject deniedRedaction = env->CallObjectMethod(connectivity, redactedCapabilities,
+            sensitiveCapabilities, callingUid + 1, callingPackage, nullptr);
+    if (deniedRedaction != nullptr || !env->ExceptionCheck()) {
+        fprintf(stderr, "SOURCE_FRAMEWORK_CONTRACT_FAIL line=%d: foreign UID redaction allowed\n",
+                __LINE__);
+        env->PopLocalFrame(nullptr);
+        return -1;
+    }
+    jthrowable denied = env->ExceptionOccurred();
+    env->ExceptionClear();
+    REQUIRE(denied);
+    jclass securityException = env->FindClass("java/lang/SecurityException");
+    REQUIRE(securityException && env->IsInstanceOf(denied, securityException));
+    fprintf(stderr, "SOURCE_CONNECTIVITY_REDACTION_PASS copy=1 ssid_cleared=1 source_preserved=1 foreign_uid_denied=1 uid=%d\n",
+            callingUid);
+
+    // Keep callback messages queued on this contract thread so their public
+    // ConnectivityManager callback codes can be inspected without a test-only
+    // adapter hook. An unsatisfiable cellular request must time out with
+    // CALLBACK_UNAVAIL, while releasing the same kind of request must suppress
+    // every subsequent callback.
+    auto hasTransport = env->GetMethodID(capabilitiesClass, "hasTransport", "(I)Z");
+    auto emptyCapabilities = env->GetMethodID(capabilitiesClass, "<init>", "()V");
+    auto addTransport = env->GetMethodID(capabilitiesClass, "addTransportType",
+            "(I)Landroid/net/NetworkCapabilities;");
+    REQUIRE(hasTransport && emptyCapabilities && addTransport);
+    auto cellularField = env->GetStaticFieldID(capabilitiesClass, "TRANSPORT_CELLULAR", "I");
+    REQUIRE(cellularField);
+    jint cellular = env->GetStaticIntField(capabilitiesClass, cellularField);
+    REQUIRE(!env->CallBooleanMethod(currentCapabilities, hasTransport, cellular));
+    jobject impossibleCapabilities = env->NewObject(capabilitiesClass, emptyCapabilities);
+    REQUIRE(impossibleCapabilities);
+    REQUIRE(env->CallObjectMethod(impossibleCapabilities, addTransport, cellular));
+
+    jclass looperClass = env->FindClass("android/os/Looper"); REQUIRE(looperClass);
+    auto myLooper = env->GetStaticMethodID(looperClass, "myLooper", "()Landroid/os/Looper;");
+    auto prepareLooper = env->GetStaticMethodID(looperClass, "prepare", "()V");
+    REQUIRE(myLooper && prepareLooper);
+    jobject callbackLooper = env->CallStaticObjectMethod(looperClass, myLooper);
+    REQUIRE(!env->ExceptionCheck());
+    if (callbackLooper == nullptr) {
+        env->CallStaticVoidMethod(looperClass, prepareLooper); REQUIRE(!env->ExceptionCheck());
+        callbackLooper = env->CallStaticObjectMethod(looperClass, myLooper);
+    }
+    REQUIRE(callbackLooper);
+    jclass handlerClass = env->FindClass("android/os/Handler"); REQUIRE(handlerClass);
+    auto handlerCtor = env->GetMethodID(handlerClass, "<init>", "(Landroid/os/Looper;)V");
+    auto hasMessages = env->GetMethodID(handlerClass, "hasMessages", "(I)Z");
+    auto removeMessages = env->GetMethodID(handlerClass, "removeCallbacksAndMessages",
+            "(Ljava/lang/Object;)V");
+    REQUIRE(handlerCtor && hasMessages && removeMessages);
+    jobject callbackHandler = env->NewObject(handlerClass, handlerCtor, callbackLooper);
+    REQUIRE(callbackHandler);
+    jclass messengerClass = env->FindClass("android/os/Messenger"); REQUIRE(messengerClass);
+    auto messengerCtor = env->GetMethodID(messengerClass, "<init>",
+            "(Landroid/os/Handler;)V"); REQUIRE(messengerCtor);
+    jobject callbackMessenger = env->NewObject(messengerClass, messengerCtor, callbackHandler);
+    REQUIRE(callbackMessenger);
+    jclass requestTypeClass = env->FindClass("android/net/NetworkRequest$Type");
+    REQUIRE(requestTypeClass);
+    auto requestTypeField = env->GetStaticFieldID(requestTypeClass, "REQUEST",
+            "Landroid/net/NetworkRequest$Type;"); REQUIRE(requestTypeField);
+    jobject requestType = env->GetStaticObjectField(requestTypeClass, requestTypeField);
+    REQUIRE(requestType);
+    jclass enumClass = env->FindClass("java/lang/Enum"); REQUIRE(enumClass);
+    auto enumOrdinal = env->GetMethodID(enumClass, "ordinal", "()I"); REQUIRE(enumOrdinal);
+    jint requestOrdinal = env->CallIntMethod(requestType, enumOrdinal);
+    REQUIRE(!env->ExceptionCheck());
+    auto requestNetwork = env->GetMethodID(connectivityInterface, "requestNetwork",
+            "(ILandroid/net/NetworkCapabilities;ILandroid/os/Messenger;ILandroid/os/IBinder;"
+            "IILjava/lang/String;Ljava/lang/String;)Landroid/net/NetworkRequest;");
+    auto releaseNetwork = env->GetMethodID(connectivityInterface, "releaseNetworkRequest",
+            "(Landroid/net/NetworkRequest;)V");
+    REQUIRE(requestNetwork && releaseNetwork);
+    constexpr jint callbackAvailable = 2;
+    constexpr jint callbackLost = 4;
+    constexpr jint callbackUnavailable = 5;
+    constexpr jint callbackCapabilitiesChanged = 6;
+    constexpr jint callbackLinkPropertiesChanged = 7;
+    jobject timeoutRequest = env->CallObjectMethod(connectivity, requestNetwork,
+            callingUid, impossibleCapabilities, requestOrdinal, callbackMessenger,
+            jint(250), nullptr, jint(-1), jint(0), callingPackage, nullptr);
+    REQUIRE(timeoutRequest);
+    usleep(1400000);
+    REQUIRE(env->CallBooleanMethod(callbackHandler, hasMessages, callbackUnavailable));
+    REQUIRE(!env->CallBooleanMethod(callbackHandler, hasMessages, callbackAvailable));
+    env->CallVoidMethod(callbackHandler, removeMessages, nullptr); REQUIRE(!env->ExceptionCheck());
+    // The adapter logs registered=false here, independently confirming that
+    // timeout removed the request before this public release call.
+    env->CallVoidMethod(connectivity, releaseNetwork, timeoutRequest);
+    REQUIRE(!env->ExceptionCheck());
+
+    jobject releasedRequest = env->CallObjectMethod(connectivity, requestNetwork,
+            callingUid, impossibleCapabilities, requestOrdinal, callbackMessenger,
+            jint(0), nullptr, jint(-1), jint(0), callingPackage, nullptr);
+    REQUIRE(releasedRequest);
+    env->CallVoidMethod(connectivity, releaseNetwork, releasedRequest);
+    REQUIRE(!env->ExceptionCheck());
+    usleep(1300000);
+    REQUIRE(!env->CallBooleanMethod(callbackHandler, hasMessages, callbackAvailable));
+    REQUIRE(!env->CallBooleanMethod(callbackHandler, hasMessages, callbackLost));
+    REQUIRE(!env->CallBooleanMethod(callbackHandler, hasMessages, callbackUnavailable));
+    REQUIRE(!env->CallBooleanMethod(callbackHandler, hasMessages,
+            callbackCapabilitiesChanged));
+    REQUIRE(!env->CallBooleanMethod(callbackHandler, hasMessages,
+            callbackLinkPropertiesChanged));
+    fprintf(stderr, "SOURCE_CONNECTIVITY_CALLBACKS_PASS unavailable=1 timeout_removed=1 release_suppressed=1 request_type=%d\n",
+            requestOrdinal);
 
     // SoundPool is a JNI-loaded Android library, but its compressed-audio
     // implementation belongs at the OH boundary. Prove both halves: the
