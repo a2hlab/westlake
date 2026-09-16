@@ -824,6 +824,56 @@ static void merge_observed_routes(NetConn_ConnectionProperties *destination,
     }
 }
 
+/* An OH default handle can be valid while its connection-properties response
+ * omits the link lists. Supplement only with the process's observed route
+ * interface; keep the real OH handle, capabilities, and metering result. */
+static void supplement_direct_oh_links(const NetConn_NetHandle *handle,
+        NetConn_ConnectionProperties *props)
+{
+    if (handle->netId <= 0 || props->ifaceName[0] == '\0' ||
+            strnlen(props->ifaceName, sizeof(props->ifaceName)) ==
+                    sizeof(props->ifaceName) ||
+            props->netAddrListSize < 0 || props->netAddrListSize > NETCONN_MAX_ADDR_SIZE ||
+            props->dnsListSize < 0 || props->dnsListSize > NETCONN_MAX_ADDR_SIZE ||
+            props->routeListSize < 0 || props->routeListSize > NETCONN_MAX_ROUTE_SIZE ||
+            (props->mtu != 0 && props->netAddrListSize != 0 &&
+             props->dnsListSize != 0 && props->routeListSize != 0)) return;
+
+    NetConn_ConnectionProperties *observed = calloc(1, sizeof(*observed));
+    if (observed == NULL) return;
+    NetConn_NetHandle observed_handle;
+    NetConn_NetCapabilities observed_caps;
+    memset(&observed_handle, 0, sizeof(observed_handle));
+    memset(&observed_caps, 0, sizeof(observed_caps));
+    int route_rc = kernel_route_snapshot(&observed_handle, &observed_caps, observed);
+    if (route_rc == 0 && strcmp(props->ifaceName, observed->ifaceName) == 0) {
+        int32_t oh_addresses = props->netAddrListSize;
+        int32_t oh_dns = props->dnsListSize;
+        int32_t oh_routes = props->routeListSize;
+        if (props->mtu == 0) props->mtu = observed->mtu;
+        merge_observed_addresses(props->netAddrList, &props->netAddrListSize,
+                observed->netAddrList, observed->netAddrListSize, 1);
+        merge_observed_addresses(props->dnsList, &props->dnsListSize,
+                observed->dnsList, observed->dnsListSize, 0);
+        merge_observed_routes(props, observed);
+        static char last_log[256];
+        char current_log[256];
+        int length = snprintf(current_log, sizeof(current_log),
+                "netId=%d iface=%s oh_counts=%d/%d/%d observed_counts=%d/%d/%d merged_counts=%d/%d/%d mtu=%u",
+                handle->netId, props->ifaceName, oh_addresses, oh_dns, oh_routes,
+                observed->netAddrListSize, observed->dnsListSize, observed->routeListSize,
+                props->netAddrListSize, props->dnsListSize, props->routeListSize,
+                (unsigned)props->mtu);
+        if (length > 0 && (size_t)length < sizeof(current_log) &&
+                strcmp(last_log, current_log) != 0) {
+            strncpy(last_log, current_log, sizeof(last_log) - 1);
+            fprintf(stderr, "[OhConnectivityState] OH direct default link reconciliation %s\n",
+                    current_log);
+        }
+    }
+    free(observed);
+}
+
 /* The inspected OH service source caches permission results for its default-net
  * calls, but checks the same permission without that cache for
  * GetAllNets/properties/capabilities. The deployed service may differ.
@@ -945,6 +995,7 @@ Java_adapter_core_OhConnectivityState_nativeSnapshot(JNIEnv *env, jclass klass)
     if (default_rc == 0 && handle.netId > 0) {
         caps_rc = OH_NetConn_GetNetCapabilities(&handle, &caps);
         props_rc = OH_NetConn_GetConnectionProperties(&handle, props);
+        if (props_rc == 0) supplement_direct_oh_links(&handle, props);
     } else {
         int route_rc = kernel_route_snapshot(&handle, &caps, props);
         if (route_rc == 0) {
