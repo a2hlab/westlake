@@ -5,11 +5,13 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <locale.h>
+#include <math.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
 #include <errno.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1343,4 +1345,159 @@ char *__strncpy_chk2(char *dst, const char *src, size_t count,
         }
     }
     return result;
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Residue measured on the OH 6.1 board while loading McDonald's 26.31.1
+ * (extractNativeLibs=false, ten prebuilt bionic-linked libraries). With this
+ * shim preloaded exactly as the launcher does, the complete set of unresolved
+ * bionic-private names across all ten libraries was thirteen symbols:
+ *
+ *   __sF (6 libs)  __system_property_foreach/_find_nth (2)  __pthread_cleanup_push/_pop (2/1)
+ *   isnan/isinf (1)  __get_h_errno (1)  four ASensor* and ALooper_pollAll (1 each; libandroid)
+ *
+ * Everything below implements the libc-side ones. The libandroid ones belong
+ * in libandroid_webview_shim.c. None of these are Android APIs the app called;
+ * they are what bionic's headers compile ordinary C into.
+ * ---------------------------------------------------------------------------
+ */
+
+/*
+ * __sF: old bionic exposed stdin/stdout/stderr as three inline FILE objects.
+ * Android code may pass &__sF[n] to stdio, but may not inspect FILE's bytes.
+ * Translate those three sentinel addresses at each stdio entry point and pass
+ * every ordinary FILE* through untouched. Same contract as
+ * appspawn-x/bionic_compat/src/bionic_stdio_compat.c, which is not part of
+ * this preload set.
+ */
+typedef struct WebviewBionicLegacyFile {
+    unsigned char opaque[152];
+} WebviewBionicLegacyFile;
+
+WebviewBionicLegacyFile __sF[3];
+
+static FILE *webview_translate_file(FILE *stream)
+{
+    if ((void *)stream == (void *)&__sF[0]) return stdin;
+    if ((void *)stream == (void *)&__sF[1]) return stdout;
+    if ((void *)stream == (void *)&__sF[2]) return stderr;
+    return stream;
+}
+
+#define WEBVIEW_STDIO_FORWARD(ret, name, params, args) \
+    ret name params \
+    { \
+        static ret (*real) params; \
+        if (real == NULL) { \
+            real = (ret (*) params)dlsym(RTLD_NEXT, #name); \
+        } \
+        return real args; \
+    }
+
+WEBVIEW_STDIO_FORWARD(int, vfprintf, (FILE *stream, const char *format, va_list ap),
+                      (webview_translate_file(stream), format, ap))
+WEBVIEW_STDIO_FORWARD(size_t, fread, (void *ptr, size_t size, size_t count, FILE *stream),
+                      (ptr, size, count, webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(size_t, fwrite, (const void *ptr, size_t size, size_t count, FILE *stream),
+                      (ptr, size, count, webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, fflush, (FILE *stream), (stream == NULL ? NULL : webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, fputc, (int c, FILE *stream), (c, webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, fputs, (const char *str, FILE *stream), (str, webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, fseek, (FILE *stream, long offset, int whence),
+                      (webview_translate_file(stream), offset, whence))
+WEBVIEW_STDIO_FORWARD(long, ftell, (FILE *stream), (webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, feof, (FILE *stream), (webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, ferror, (FILE *stream), (webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, fileno, (FILE *stream), (webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, fclose, (FILE *stream), (webview_translate_file(stream)))
+WEBVIEW_STDIO_FORWARD(int, setvbuf, (FILE *stream, char *buf, int mode, size_t size),
+                      (webview_translate_file(stream), buf, mode, size))
+
+int fprintf(FILE *stream, const char *format, ...)
+{
+    va_list ap;
+    va_start(ap, format);
+    int written = vfprintf(stream, format, ap);
+    va_end(ap);
+    return written;
+}
+
+/*
+ * pthread_cleanup_push/pop: bionic's headers expand these into calls that
+ * link a caller-owned record onto a per-thread list; musl keeps its own
+ * layout. bionic has no pthread_cancel, so only explicit pop runs handlers.
+ */
+typedef struct WebviewBionicCleanup {
+    struct WebviewBionicCleanup *prev;
+    void (*routine)(void *);
+    void *arg;
+} WebviewBionicCleanup;
+
+static __thread WebviewBionicCleanup *g_cleanup_head;
+
+void __pthread_cleanup_push(WebviewBionicCleanup *c, void (*routine)(void *), void *arg)
+{
+    c->routine = routine;
+    c->arg = arg;
+    c->prev = g_cleanup_head;
+    g_cleanup_head = c;
+}
+
+void __pthread_cleanup_pop(WebviewBionicCleanup *c, int execute)
+{
+    g_cleanup_head = c->prev;
+    if (execute) {
+        c->routine(c->arg);
+    }
+}
+
+/*
+ * Deprecated property enumeration. bionic keeps both for old NDK code;
+ * both are expressed over the cache this shim already maintains, so a
+ * property is only enumerable once something has looked it up.
+ */
+int __system_property_foreach(void (*callback)(const struct prop_info *, void *), void *cookie)
+{
+    if (callback == NULL) {
+        return -1;
+    }
+    pthread_mutex_lock(&g_property_mutex);
+    size_t count = g_property_count;
+    pthread_mutex_unlock(&g_property_mutex);
+    for (size_t i = 0; i < count; ++i) {
+        callback(&g_property_cache[i], cookie);
+    }
+    return 0;
+}
+
+const struct prop_info *__system_property_find_nth(unsigned n)
+{
+    pthread_mutex_lock(&g_property_mutex);
+    const struct prop_info *entry = n < g_property_count ? &g_property_cache[n] : NULL;
+    pthread_mutex_unlock(&g_property_mutex);
+    return entry;
+}
+
+/*
+ * bionic exports isnan/isinf as real functions; musl's math.h provides only
+ * macros, which is exactly why a bionic-built library cannot resolve them
+ * here. Undefine the macros so the functions can be declared.
+ */
+#undef isnan
+#undef isinf
+int isnan(double value)
+{
+    return __builtin_isnan(value);
+}
+
+int isinf(double value)
+{
+    return __builtin_isinf(value);
+}
+
+/* bionic's h_errno accessor; musl's h_errno is a plain thread-local. */
+int *__get_h_errno(void)
+{
+    return &h_errno;
 }
