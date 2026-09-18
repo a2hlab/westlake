@@ -196,7 +196,21 @@ public class AppSchedulerBridge {
             ai.dataDir = "/data/data/" + pkg;
             ai.deviceProtectedDataDir = ai.dataDir;
             ai.credentialProtectedDataDir = ai.dataDir;
-            try { new java.io.File(ai.dataDir).mkdirs(); } catch (Throwable ignore) {}
+            // /data/data is drwxrwx--x system:system, so an app uid cannot create its own
+            // directory there; the launcher stages it. Swallowing the failure here cost several
+            // launches to diagnose, because the first symptom is Realm's mkfifo reporting EACCES
+            // from inside onResume. Say so plainly instead.
+            try {
+                java.io.File dataDir = new java.io.File(ai.dataDir);
+                if (!dataDir.isDirectory() && !dataDir.mkdirs()) {
+                    System.err.println("[DIRECT-LAUNCH] WARNING data dir missing and not creatable: "
+                            + ai.dataDir + " — storage-backed startup (Realm, SQLite, keystore)"
+                            + " will fail later; the launcher should have staged it");
+                }
+            } catch (Throwable t) {
+                System.err.println("[DIRECT-LAUNCH] WARNING data dir check failed: " + ai.dataDir
+                        + ": " + t);
+            }
             ai.flags |= android.content.pm.ApplicationInfo.FLAG_HAS_CODE
                      |  android.content.pm.ApplicationInfo.FLAG_INSTALLED
                      |  android.content.pm.ApplicationInfo.FLAG_ALLOW_CLEAR_USER_DATA
@@ -216,8 +230,16 @@ public class AppSchedulerBridge {
                 adapter.packagemanager.OHUserManager.install();
                 ai = adapter.packagemanager.SourcePackageRegistry.register(ai);
             }
+            // Direct launch builds ApplicationInfo here rather than through
+            // PackageInfoBuilder, so the split resolver that runs there never sees it. Without
+            // splitSourceDirs the AssetManager opens only the base APK, and an app whose
+            // resources live in a density or language split cannot inflate its own layouts:
+            // McDonald's died in SplashActivity.onCreate with
+            // "Unable to find resource ID #0x7f080108", a drawable from split_config.xxxhdpi.
+            adapter.packagemanager.SplitApkResolver.populate(ai);
             sInjectedAppInfo = ai;
-            System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir);
+            System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir
+                    + " splits=" + (ai.splitSourceDirs == null ? 0 : ai.splitSourceDirs.length));
 
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
