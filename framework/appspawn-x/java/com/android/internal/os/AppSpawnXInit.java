@@ -1083,6 +1083,8 @@ public class AppSpawnXInit {
             // touches audio path via Button click-sound (we silently no-op).
             installAudioServiceStub();
             appLog("J_after_installAudioServiceStub");
+            installJobSchedulerStub();
+            appLog("J_after_installJobSchedulerStub");
             // B.14 (2026-04-28): OHServiceManager 真适配子类（extends IServiceManager.Stub
             // — Stub 这里是 AIDL server-side 抽象基类，与 ActivityManagerAdapter
             // extends IActivityManager.Stub 同 pattern；不是 stub 占位）。替代了
@@ -2042,6 +2044,113 @@ public class AppSpawnXInit {
      * handles call(method="GET_global"|"GET_secure"|"GET_system", arg=settingName)
      * by returning a Bundle{value=defaultValue}.
      */
+    /**
+     * Give getSystemService(JOB_SCHEDULER_SERVICE) something to return.
+     *
+     * <p>framework.jar carries AOSP's real JobSchedulerFrameworkInitializer, which registers
+     * the wrapper as a context-aware service resolved through ServiceManager("jobscheduler").
+     * OH has no such binder, so the fetcher throws ServiceNotFoundException and getSystemService
+     * hands back null. Apps that treat the platform contract as guaranteed then fail at the cast
+     * rather than at a null check: McDonald's 26.31.1 died during Application creation with
+     * "null cannot be cast to non-null type android.app.job.JobScheduler", thrown from Split.io
+     * inside androidx.startup, which aborted the whole startup chain.
+     *
+     * <p>This replaces the entry in SYSTEM_SERVICE_FETCHERS with one backed by a scheduler that
+     * accepts and remembers jobs but never runs them. Schedule, query and cancel stay coherent
+     * and jobs simply never fire, which is the honest behaviour for a device with no job service.
+     * Anything that depends on jobs actually executing needs a real OH-backed scheduler.
+     */
+    private static void installJobSchedulerStub() {
+        try {
+            Class<?> registry = Class.forName("android.app.SystemServiceRegistry");
+            Class<?> fetcherType =
+                    Class.forName("android.app.SystemServiceRegistry$ServiceFetcher");
+            Class<?> schedulerType = Class.forName("android.app.job.JobScheduler");
+            Class<?> ijs = Class.forName("android.app.job.IJobScheduler");
+            Class<?> implType = Class.forName("android.app.JobSchedulerImpl");
+
+            // AOSP: JobSchedulerImpl(Context, IJobScheduler). The service is context-aware, so
+            // build it lazily from the ContextImpl the registry passes in rather than eagerly
+            // with a null context.
+            final java.lang.reflect.Constructor<?> ctor =
+                    implType.getDeclaredConstructor(
+                            Class.forName("android.content.Context"), ijs);
+            ctor.setAccessible(true);
+            final Object binder = newNoopJobSchedulerBinder(ijs);
+            final Object[] cached = new Object[1];
+
+            Object fetcher = java.lang.reflect.Proxy.newProxyInstance(
+                    fetcherType.getClassLoader(), new Class<?>[] {fetcherType},
+                    (proxy, method, args) -> {
+                        String name = method.getName();
+                        if ("getService".equals(name)) {
+                            synchronized (cached) {
+                                if (cached[0] == null) {
+                                    Object ctx = (args != null && args.length > 0) ? args[0] : null;
+                                    cached[0] = ctor.newInstance(ctx, binder);
+                                }
+                                return cached[0];
+                            }
+                        }
+                        // This scheduler wants the ContextImpl, so do not claim otherwise.
+                        if ("supportsFetchWithoutContext".equals(name)) return Boolean.FALSE;
+                        if ("hashCode".equals(name)) return System.identityHashCode(proxy);
+                        if ("equals".equals(name)) return proxy == (args == null ? null : args[0]);
+                        if ("toString".equals(name)) return "[JobSchedulerStub fetcher]";
+                        Class<?> rt = method.getReturnType();
+                        if (rt == boolean.class) return Boolean.FALSE;
+                        if (rt.isPrimitive() && rt != void.class) return 0;
+                        return null;
+                    });
+
+            java.lang.reflect.Field fetchers =
+                    registry.getDeclaredField("SYSTEM_SERVICE_FETCHERS");
+            fetchers.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, Object> fetcherMap =
+                    (java.util.Map<String, Object>) fetchers.get(null);
+            fetcherMap.put("jobscheduler", fetcher);
+
+            java.lang.reflect.Field names = registry.getDeclaredField("SYSTEM_SERVICE_NAMES");
+            names.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            java.util.Map<Class<?>, String> nameMap =
+                    (java.util.Map<Class<?>, String>) names.get(null);
+            nameMap.put(schedulerType, "jobscheduler");
+
+            System.err.println("[JobSchedulerStub] installed local scheduler for jobscheduler");
+        } catch (Throwable t) {
+            // A missing JobScheduler is survivable for an app that null-checks; aborting child
+            // init over it is not.
+            System.err.println("[JobSchedulerStub] install FAIL: " + t);
+        }
+    }
+
+    /**
+     * A no-op IJobScheduler: accepts every schedule with RESULT_SUCCESS and reports nothing
+     * pending. JobSchedulerImpl forwards all of its API to this binder, so the app sees a
+     * coherent scheduler whose jobs never fire.
+     */
+    private static Object newNoopJobSchedulerBinder(Class<?> ijs) {
+        return java.lang.reflect.Proxy.newProxyInstance(
+                ijs.getClassLoader(), new Class<?>[] {ijs},
+                (proxy, method, args) -> {
+                    String name = method.getName();
+                    Class<?> rt = method.getReturnType();
+                    if ("schedule".equals(name) || "enqueue".equals(name)
+                            || "scheduleAsPackage".equals(name)) {
+                        return 1; // JobScheduler.RESULT_SUCCESS
+                    }
+                    if (java.util.List.class.isAssignableFrom(rt)) {
+                        return new java.util.ArrayList<>();
+                    }
+                    if ("asBinder".equals(name)) return null;
+                    if (rt == boolean.class) return Boolean.FALSE;
+                    if (rt.isPrimitive() && rt != void.class) return 0;
+                    return null;
+                });
+    }
+
     private static void installSettingsContentProviderStub() {
         System.err.println("[SettingsCache] installSettingsContentProviderStub enter");
         try {
