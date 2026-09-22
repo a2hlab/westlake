@@ -920,30 +920,31 @@ void *dlopen(const char *filename, int flags)
         return NULL;
     }
     /*
-     * Two libandroid.so ship: the runtime's, and the WebView one built from
-     * framework/webview-shim/libandroid_webview_shim.c.  Only the second exports the NDK
-     * SurfaceControl surface (27 entry points); the runtime's exports none of it.  Chromium
-     * reaches these with dlopen("libandroid.so") + dlsym, and LD_LIBRARY_PATH lists the runtime
-     * directory before webview-t-lib, so it gets the copy without them: the whole
-     * ASurfaceTransaction family fails to load and CrBrowserMain traps opening an article.
-     * Resolve the name against the WebView library directory for WebView's own callers, which is
-     * where its libraries are meant to come from.
+     * WebView's own libraries come from the WebView library directory, which the search path
+     * lists last.  Every name in it also exists in the runtime directory, which comes first, so a
+     * bare soname from a WebView caller resolves to the runtime's copy.  For libandroid.so that
+     * means the whole NDK SurfaceControl surface goes missing -- the runtime's exports none of
+     * its 27 entry points and the WebView one exports all of them -- and the same holds for
+     * libjnigraphics.so, which the boundaries probe found in the identical position before
+     * anything had tripped over it.
+     *
+     * So resolve any bare soname against that directory for WebView's callers, rather than
+     * naming libraries one at a time: the directory holds exactly the libraries WebView is meant
+     * to use, and a fix per library is a fix per outage.  Only bare names are redirected; a
+     * caller that passes a path has already chosen.
      */
-    static char webview_libandroid[512];
-    if (basename != NULL && strcmp(basename, "libandroid.so") == 0 &&
+    static char webview_library[512];
+    if (basename != NULL && basename == filename &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
         const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
         if (dir != NULL && dir[0] != '\0') {
-            snprintf(webview_libandroid, sizeof(webview_libandroid), "%s/libandroid.so", dir);
-            if (access(webview_libandroid, R_OK) == 0) {
-                actual_filename = webview_libandroid;
-                static int logged_libandroid;
-                if (!__atomic_exchange_n(&logged_libandroid, 1, __ATOMIC_RELAXED)) {
-                    fprintf(stderr,
-                            "[WESTLAKE-WEBVIEW-BIONIC] libandroid resolved %s -> %s "
-                            "for the WebView caller\n",
-                            filename, actual_filename);
-                }
+            snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
+            if (access(webview_library, R_OK) == 0) {
+                actual_filename = webview_library;
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] library resolved %s -> %s for the WebView "
+                        "caller\n",
+                        filename, actual_filename);
             }
         }
     }
