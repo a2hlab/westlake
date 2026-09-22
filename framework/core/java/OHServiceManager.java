@@ -134,6 +134,7 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "thermalservice":
             case "alarm":
             case "clipboard":
+            case "account":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

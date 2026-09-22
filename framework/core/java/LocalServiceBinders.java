@@ -70,6 +70,9 @@ public final class LocalServiceBinders {
                 case "clipboard":
                     binder = proxy(name, "android.content.IClipboard", LocalServiceBinders::clipboard);
                     break;
+                case "account":
+                    binder = proxy(name, "android.accounts.IAccountManager", LocalServiceBinders::account);
+                    break;
                 default:
                     return null;
             }
@@ -136,6 +139,23 @@ public final class LocalServiceBinders {
         return DEFAULT;   // set() is accepted, nothing is ever delivered; no next alarm clock
     }
 
+    private static Object account(String method, Object[] args) {
+        // There is no account database on the board and no authenticator to add one to, so the
+        // truthful answer is "signed in nowhere": an empty account list, no features, no token.
+        // Wikipedia asks through AccountManager.get(context) in BaseActivity.onCreate and never
+        // null-checks the manager, so the binder has to exist even though it owns nothing.
+        switch (method) {
+            case "addAccountExplicitly":
+            case "removeAccountExplicitly":
+            case "hasFeatures":
+            case "someUserHasAccount":
+            case "accountAuthenticated":
+                return Boolean.FALSE;
+            default:
+                return DEFAULT;   // arrays come back empty, everything else null or zero
+        }
+    }
+
     private static Object clipboard(String method, Object[] args) {
         ClipData clip = sClip;
         switch (method) {
@@ -160,6 +180,11 @@ public final class LocalServiceBinders {
     }
 
     private static Object defaultValue(Class<?> type) {
+        // An empty array, never null: callers iterate what a service hands back without checking,
+        // and a null Account[] from getAccounts() throws inside the caller rather than here.
+        if (type != null && type.isArray()) {
+            return java.lang.reflect.Array.newInstance(type.getComponentType(), 0);
+        }
         if (type == null || !type.isPrimitive()) return null;
         if (type == boolean.class) return Boolean.FALSE;
         if (type == byte.class) return (byte) 0;
