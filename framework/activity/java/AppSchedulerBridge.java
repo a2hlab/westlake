@@ -390,6 +390,14 @@ public class AppSchedulerBridge {
                     + " sourceDir=" + appInfo.sourceDir
                     + " nativeLibraryDir=" + appInfo.nativeLibraryDir);
 
+            // Android's zygote installs the "AndroidKeyStore" provider before any app code runs
+            // (ZygoteInit.warmUpJcaProviders); apps open it by name during startup.
+            try {
+                adapter.core.SoftwareAndroidKeyStore.install(new java.io.File(appInfo.dataDir, "no_backup"));
+            } catch (Throwable t) {
+                System.err.println("[WL-KEYSTORE] install failed: " + t);
+            }
+
             // 2. Build Android Configuration from OH key/value + display snapshot.
             // Inlined to avoid PathClassLoader cross-class resolution issue
             // (separate Oh* classes were ClassNotFoundException despite being
