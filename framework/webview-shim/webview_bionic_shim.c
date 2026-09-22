@@ -919,6 +919,34 @@ void *dlopen(const char *filename, int flags)
         }
         return NULL;
     }
+    /*
+     * Two libandroid.so ship: the runtime's, and the WebView one built from
+     * framework/webview-shim/libandroid_webview_shim.c.  Only the second exports the NDK
+     * SurfaceControl surface (27 entry points); the runtime's exports none of it.  Chromium
+     * reaches these with dlopen("libandroid.so") + dlsym, and LD_LIBRARY_PATH lists the runtime
+     * directory before webview-t-lib, so it gets the copy without them: the whole
+     * ASurfaceTransaction family fails to load and CrBrowserMain traps opening an article.
+     * Resolve the name against the WebView library directory for WebView's own callers, which is
+     * where its libraries are meant to come from.
+     */
+    static char webview_libandroid[512];
+    if (basename != NULL && strcmp(basename, "libandroid.so") == 0 &&
+        caller_is_webview(__builtin_return_address(0), NULL)) {
+        const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
+        if (dir != NULL && dir[0] != '\0') {
+            snprintf(webview_libandroid, sizeof(webview_libandroid), "%s/libandroid.so", dir);
+            if (access(webview_libandroid, R_OK) == 0) {
+                actual_filename = webview_libandroid;
+                static int logged_libandroid;
+                if (!__atomic_exchange_n(&logged_libandroid, 1, __ATOMIC_RELAXED)) {
+                    fprintf(stderr,
+                            "[WESTLAKE-WEBVIEW-BIONIC] libandroid resolved %s -> %s "
+                            "for the WebView caller\n",
+                            filename, actual_filename);
+                }
+            }
+        }
+    }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
