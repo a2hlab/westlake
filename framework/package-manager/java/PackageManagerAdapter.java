@@ -1056,8 +1056,17 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             PackageInfo info = SourcePackageRegistry.packageInfo(arg0.getPackageName(),
                     arg1 | android.content.pm.PackageManager.GET_SERVICES);
             if (info != null && info.services != null) for (ServiceInfo service : info.services) {
-                if (arg0.getClassName().equals(service.name)) return service;
+                if (arg0.getClassName().equals(service.name)) {
+                    System.err.println("[SOURCE-PM] getServiceInfo HIT " + arg0.getClassName()
+                            + " flags=0x" + Long.toHexString(arg1)
+                            + " meta=" + (service.metaData == null ? -1 : service.metaData.size()));
+                    return service;
+                }
             }
+            System.err.println("[SOURCE-PM] getServiceInfo MISS " + arg0
+                    + " flags=0x" + Long.toHexString(arg1)
+                    + " services=" + (info == null ? "null-info"
+                            : (info.services == null ? "null" : String.valueOf(info.services.length))));
             return null;
         }
         return ServiceInfoResolver.resolve(arg0, arg1);

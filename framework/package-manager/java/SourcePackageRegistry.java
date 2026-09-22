@@ -63,6 +63,36 @@ public final class SourcePackageRegistry {
         info.seInfoUser = "";
     }
 
+    /**
+     * PackageManagerService applies Direct Boot match defaults server-side before matching
+     * components. ApplicationPackageManager deliberately does not -- it only warns through
+     * onImplicitDirectBoot -- so a caller's flags arrive here with neither bit set. This
+     * adapter is the server side. Without the defaults every component fails
+     * PackageParser.isMatch (which requires one of the direct-boot bits), num stays 0, and
+     * ArrayUtils.trimToSize returns null for size 0 -- nulling out services, activities,
+     * receivers and providers wholesale. The source app runs with its credential-encrypted
+     * storage mounted, which is the unlocked-user case: match aware and unaware alike.
+     */
+    private static long withDirectBootMatchDefaults(long flags) {
+        if ((flags & (PackageManager.MATCH_DIRECT_BOOT_AWARE
+                | PackageManager.MATCH_DIRECT_BOOT_UNAWARE)) != 0) {
+            return flags;
+        }
+        return flags | PackageManager.MATCH_DIRECT_BOOT_AWARE
+                | PackageManager.MATCH_DIRECT_BOOT_UNAWARE;
+    }
+
+    /** Diagnostic: metadata size on Firebase's discovery service, or -1 / -2 when absent. */
+    private static int probeDiscoveryMeta(PackageInfo info) {
+        if (info == null || info.services == null) return -2;
+        for (android.content.pm.ServiceInfo s : info.services) {
+            if (s != null && s.name != null && s.name.endsWith("ComponentDiscoveryService")) {
+                return s.metaData == null ? -1 : s.metaData.size();
+            }
+        }
+        return -2;
+    }
+
     private static void applyLocation(ComponentInfo[] components) {
         if (components != null) for (ComponentInfo component : components) {
             applyLocation(component.applicationInfo);
@@ -71,6 +101,7 @@ public final class SourcePackageRegistry {
 
     public static synchronized PackageInfo packageInfo(String packageName, long flags) {
         if (!contains(packageName)) return null;
+        flags = withDirectBootMatchDefaults(flags);
         if ((flags & (PackageManager.GET_SIGNATURES | PackageManager.GET_SIGNING_CERTIFICATES)) != 0
                 && !certificatesCollected) {
             try {
@@ -90,6 +121,7 @@ public final class SourcePackageRegistry {
         PackageInfo value = PackageParser.generatePackageInfo(parsed, null, (int) flags,
                 0, 0, granted, FrameworkPackageUserState.DEFAULT, 0);
         if (value == null) return null;
+        int preMeta = probeDiscoveryMeta(value);
         // PackageParser can share objects with its resident state. Match Binder
         // value semantics so an app cannot mutate future package-manager results.
         Parcel parcel = Parcel.obtain();
@@ -99,6 +131,13 @@ public final class SourcePackageRegistry {
             value = PackageInfo.CREATOR.createFromParcel(parcel);
         } finally {
             parcel.recycle();
+        }
+        if ((flags & PackageManager.GET_SERVICES) != 0) {
+            System.err.println("[SOURCE-PKG] packageInfo flags=0x" + Long.toHexString(flags)
+                    + " parsedServices=" + (parsed.services == null ? -1 : parsed.services.size())
+                    + " genServices=" + (value.services == null ? -1 : value.services.length)
+                    + " discoveryMeta pre-parcel=" + preMeta
+                    + " post-parcel=" + probeDiscoveryMeta(value));
         }
         applyLocation(value.applicationInfo);
         applyLocation(value.activities);
