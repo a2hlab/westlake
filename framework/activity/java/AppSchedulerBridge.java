@@ -438,6 +438,37 @@ public class AppSchedulerBridge {
                     + " sourceDir=" + appInfo.sourceDir
                     + " nativeLibraryDir=" + appInfo.nativeLibraryDir);
 
+            // libcore's own natives. ART only resolves a native method from a library that has
+            // been loaded, so having the library on disk is not enough: java.lang.Math.rint
+            // stays unimplemented and the first app to reach it in the interpreter dies. The
+            // parent's preload is a no-op by design (an old musl dlopen SEGV), so it is loaded
+            // here, in the child, where the app's own libraries load without trouble.
+            //
+            // The file is deliberately not called libjavacore.so.  The runtime's own
+            // Runtime.nativeLoad answers "already registered" -- success, without opening
+            // anything -- for any path containing javacore, openjdk or icu_jni, on the assumption
+            // that those natives are statically linked into the runtime.  That assumption held
+            // until this library existed; under the old name the load reported success, JNI_OnLoad
+            // never ran, and Math.rint stayed unimplemented with nothing in the log to say so.
+            try {
+                String runtimeRoot = System.getenv("WESTLAKE_RUNTIME_ROOT");
+                String path = (runtimeRoot == null || runtimeRoot.isEmpty())
+                        ? "libwl_libcore_math.so" : runtimeRoot + "/libwl_libcore_math.so";
+                // System.load would register the library against this class's own loader, and
+                // java.lang.Math is a boot class: ART looks for its natives only in libraries the
+                // boot loader owns. Runtime.nativeLoad takes the loader explicitly, and null means
+                // the boot loader, which is the one that has to find Java_java_lang_Math_rint.
+                java.lang.reflect.Method load = Runtime.class.getDeclaredMethod(
+                        "nativeLoad", String.class, ClassLoader.class);
+                load.setAccessible(true);
+                Object error = load.invoke(null, path, null);
+                System.err.println(error == null
+                        ? "[WL-JAVACORE] libcore natives loaded for the boot loader"
+                        : "[WL-JAVACORE] not loaded: " + error);
+            } catch (Throwable t) {
+                System.err.println("[WL-JAVACORE] not loaded: " + t);
+            }
+
             // Android's zygote installs the "AndroidKeyStore" provider before any app code runs
             // (ZygoteInit.warmUpJcaProviders); apps open it by name during startup.
             try {
