@@ -93,9 +93,20 @@ public final class SourcePackageRegistry {
         return -2;
     }
 
+    /**
+     * PackageParser leaves processName null on a component without android:process;
+     * PackageManagerService fills in the application's process before anyone reads it.
+     * This registry is that server side. Without the default, AppSchedulerBridge's
+     * same-process filter drops every main-process provider at bind, so none is created
+     * before Application.onCreate (Firebase, Forter and ML Kit all initialize that way).
+     */
     private static void applyLocation(ComponentInfo[] components) {
         if (components != null) for (ComponentInfo component : components) {
             applyLocation(component.applicationInfo);
+            if (component.processName == null && component.applicationInfo != null) {
+                component.processName = component.applicationInfo.processName != null
+                        ? component.applicationInfo.processName : component.packageName;
+            }
         }
     }
 
