@@ -1237,6 +1237,15 @@ public class AppSpawnXInit {
                 }
                 if ("asBinder".equals(name))   return proxy;
                 if ("toString".equals(name))   return label;
+                // The direct-launch IActivityManager: a process-table query has an Android answer
+                // for an ordinary app (its own process), and null is not it.
+                if ("AdapterIAM-stub".equals(label)) {
+                    if ("getRunningAppProcesses".equals(name)) return adapter.activity.CallerProcess.runningAppProcesses();
+                    if ("getServices".equals(name)) return adapter.activity.CallerProcess.runningServices();
+                    if ("getProcessMemoryInfo".equals(name)) {
+                        return adapter.activity.CallerProcess.processMemoryInfo(args != null ? (int[]) args[0] : null);
+                    }
+                }
                 if ("hashCode".equals(name))   return System.identityHashCode(proxy);
                 if ("equals".equals(name))     return args != null && args.length == 1 && args[0] == proxy;
                 Class<?> rt = method.getReturnType();

@@ -593,14 +593,14 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     @Override
     public List<ActivityManager.RunningAppProcessInfo> getRunningAppProcesses() throws RemoteException {
         logBridged("getRunningAppProcesses", "-> OH IAppMgr.GetAllRunningProcesses");
-        return Collections.emptyList(); // Phase 1 stub
+        return CallerProcess.runningAppProcesses();
     }
 
     // [BRIDGED] getProcessMemoryInfo -> OH IAppMgr.DumpHeapMemory
     @Override
     public Debug.MemoryInfo[] getProcessMemoryInfo(int[] pids) throws RemoteException {
         logBridged("getProcessMemoryInfo", "-> OH IAppMgr.DumpHeapMemory");
-        return new Debug.MemoryInfo[0];
+        return CallerProcess.processMemoryInfo(pids);
     }
 
     // [BRIDGED] handleApplicationCrash -> OH IAppMgr.NotifyAppFault
