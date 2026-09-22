@@ -1112,6 +1112,96 @@ static const short westlake_bionic_sysconf[] = {
     [0x009d] = -2,  /* _SC_LEVEL4_CACHE_LINESIZE */
 };
 
+/*
+ * Bionic pathconf selector -> OH musl selector, matched by name (NDK r25 unistd.h and the
+ * OH 6.1 SDK's musl unistd.h). -1: no musl counterpart. Every value is shifted: bionic's
+ * _PC_NAME_MAX is 4, musl's is 3, so an untranslated call answers a different limit.
+ */
+static const short westlake_bionic_pathconf[] = {
+    [0x00] = 13,  /* _PC_FILESIZEBITS */
+    [0x01] = 0,  /* _PC_LINK_MAX */
+    [0x02] = 1,  /* _PC_MAX_CANON */
+    [0x03] = 2,  /* _PC_MAX_INPUT */
+    [0x04] = 3,  /* _PC_NAME_MAX */
+    [0x05] = 4,  /* _PC_PATH_MAX */
+    [0x06] = 5,  /* _PC_PIPE_BUF */
+    [0x07] = 20,  /* _PC_2_SYMLINKS */
+    [0x08] = 18,  /* _PC_ALLOC_SIZE_MIN */
+    [0x09] = 14,  /* _PC_REC_INCR_XFER_SIZE */
+    [0x0a] = 15,  /* _PC_REC_MAX_XFER_SIZE */
+    [0x0b] = 16,  /* _PC_REC_MIN_XFER_SIZE */
+    [0x0c] = 17,  /* _PC_REC_XFER_ALIGN */
+    [0x0d] = 19,  /* _PC_SYMLINK_MAX */
+    [0x0e] = 6,  /* _PC_CHOWN_RESTRICTED */
+    [0x0f] = 7,  /* _PC_NO_TRUNC */
+    [0x10] = 8,  /* _PC_VDISABLE */
+    [0x11] = 10,  /* _PC_ASYNC_IO */
+    [0x12] = 11,  /* _PC_PRIO_IO */
+    [0x13] = 9,  /* _PC_SYNC_IO */
+};
+
+/*
+ * pathconf/fpathconf carry the same kind of constant as sysconf and are numbered just as
+ * independently: two of McDonald's packaged libraries ask for a limit by bionic's number and OH
+ * musl answers a different one. Same caller rule as sysconf.
+ */
+static long westlake_translate_pathconf(int name, const char* caller_path, int* handled)
+{
+    *handled = 0;
+    if (caller_path == NULL) return -1;
+    if (name < 0 || (size_t)name >= sizeof(westlake_bionic_pathconf) / sizeof(westlake_bionic_pathconf[0])) {
+        *handled = 1;
+        errno = EINVAL;
+        return -1;
+    }
+    const int native_name = westlake_bionic_pathconf[name];
+    if (native_name < 0) {
+        *handled = 1;
+        errno = EINVAL;
+        return -1;
+    }
+    static unsigned int logged;
+    const unsigned int bit = 1U << (name % 32);
+    if ((__atomic_fetch_or(&logged, bit, __ATOMIC_RELAXED) & bit) == 0) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] pathconf selector=%d translated bionic->musl "
+                "selector=%d caller=%s\n", name, native_name, caller_path);
+        fflush(stderr);
+    }
+    return native_name;
+}
+
+long pathconf(const char* path, int name)
+{
+    typedef long (*PathconfFn)(const char*, int);
+    static PathconfFn real_pathconf;
+    if (real_pathconf == NULL) real_pathconf = (PathconfFn)dlsym(RTLD_NEXT, "pathconf");
+    if (real_pathconf == NULL) { errno = ENOSYS; return -1; }
+    const char* caller_path = NULL;
+    if (!caller_is_android_dso(__builtin_return_address(0), &caller_path)) {
+        return real_pathconf(path, name);
+    }
+    int handled = 0;
+    const long native_name = westlake_translate_pathconf(name, caller_path, &handled);
+    if (handled) return -1;
+    return real_pathconf(path, (int)native_name);
+}
+
+long fpathconf(int fd, int name)
+{
+    typedef long (*FpathconfFn)(int, int);
+    static FpathconfFn real_fpathconf;
+    if (real_fpathconf == NULL) real_fpathconf = (FpathconfFn)dlsym(RTLD_NEXT, "fpathconf");
+    if (real_fpathconf == NULL) { errno = ENOSYS; return -1; }
+    const char* caller_path = NULL;
+    if (!caller_is_android_dso(__builtin_return_address(0), &caller_path)) {
+        return real_fpathconf(fd, name);
+    }
+    int handled = 0;
+    const long native_name = westlake_translate_pathconf(name, caller_path, &handled);
+    if (handled) return -1;
+    return real_fpathconf(fd, (int)native_name);
+}
+
 long sysconf(int name)
 {
     typedef long (*SysconfFn)(int);
