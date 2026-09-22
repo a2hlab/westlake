@@ -297,6 +297,54 @@ public class AppSchedulerBridge {
      * exists to send FOREGROUND_NEW on the direct-launch path, so we self-schedule a
      * ResumeActivityItem on the token the launch stored under recordId.
      */
+    /**
+     * ART sampling method trace, on request, for asking what the app's own code actually ran.
+     *
+     * Class-load tracing answers "was this class loaded", which is not the same question: a startup
+     * step can be constructed and never complete. WESTLAKE_METHOD_TRACE=<milliseconds> samples the
+     * stack of every thread from bind until the time is up and writes an ART trace file next to the
+     * app's data, which `westlake-apk-gap trace-methods` decodes. Sampling costs a timer tick per
+     * interval rather than an event per call, so an app still behaves like itself while it runs.
+     */
+    private static void startMethodTraceIfRequested(String dataDir) {
+        String request = System.getenv("WESTLAKE_METHOD_TRACE");
+        if (request == null || request.isEmpty()) {
+            return;
+        }
+        try {
+            final int milliseconds = Integer.parseInt(request.trim());
+            java.io.File directory = new java.io.File(dataDir, "files");
+            directory.mkdirs();
+            final String path = new java.io.File(directory, "westlake-method-trace").getPath();
+            // 32 MB holds a few minutes of 1 ms samples; the interval is a compromise between
+            // seeing a short-lived startup step and slowing the app down enough to change it.
+            android.os.Debug.startMethodTracingSampling(path, 32 * 1024 * 1024, 1000);
+            System.err.println("[WL-METHOD-TRACE] sampling every 1ms for " + milliseconds
+                    + "ms -> " + path + ".trace");
+            Thread stopper = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Thread.sleep(milliseconds);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                    try {
+                        android.os.Debug.stopMethodTracing();
+                        System.err.println("[WL-METHOD-TRACE] written " + path + ".trace");
+                    } catch (Throwable t) {
+                        System.err.println("[WL-METHOD-TRACE] stop failed: " + t);
+                    }
+                    System.err.flush();
+                }
+            }, "westlake-method-trace");
+            stopper.setDaemon(true);
+            stopper.start();
+        } catch (Throwable t) {
+            System.err.println("[WL-METHOD-TRACE] not started: " + t);
+        }
+    }
+
     private static void directResume(int recordId) throws Exception {
         android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
         android.app.IApplicationThread appThread = at.getApplicationThread();
@@ -397,6 +445,8 @@ public class AppSchedulerBridge {
             } catch (Throwable t) {
                 System.err.println("[WL-KEYSTORE] install failed: " + t);
             }
+
+            startMethodTraceIfRequested(appInfo.dataDir);
 
             // 2. Build Android Configuration from OH key/value + display snapshot.
             // Inlined to avoid PathClassLoader cross-class resolution issue
