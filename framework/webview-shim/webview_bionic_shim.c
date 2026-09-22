@@ -1202,6 +1202,49 @@ long fpathconf(int fd, int name)
     return real_fpathconf(fd, (int)native_name);
 }
 
+/*
+ * Symbols an Android-built library imports that neither musl nor the staged runtime defines, and
+ * whose absence stops the library loading at all. libflutter.so is the case that found these: it
+ * imports the software-rendering pair and a FORTIFY open, so dlopen fails before Flutter ever
+ * chooses its GL path.
+ *
+ * __openat_2 is bionic's _FORTIFY_SOURCE wrapper and has openat's semantics exactly.
+ *
+ * ANativeWindow_lock/unlockAndPost belong to the CPU-rendering path: lock hands the caller a
+ * mapped buffer to draw into. Westlake's ANativeWindow adapter has the OH plumbing for that
+ * (request buffer, buffer handle, virAddr) but does not implement the pair, so these report the
+ * path as unavailable rather than pretending to render. A caller that only links them gets a
+ * loadable library; a caller that uses them gets a clear failure instead of a wrong picture.
+ */
+long __openat_2(int dirfd, const char* path, int flags)
+{
+    typedef int (*OpenatFn)(int, const char*, int, ...);
+    static OpenatFn real_openat;
+    if (real_openat == NULL) real_openat = (OpenatFn)dlsym(RTLD_NEXT, "openat");
+    if (real_openat == NULL) { errno = ENOSYS; return -1; }
+    return real_openat(dirfd, path, flags);
+}
+
+int ANativeWindow_lock(void* window, void* outBuffer, void* inOutDirtyBounds)
+{
+    (void)window; (void)outBuffer; (void)inOutDirtyBounds;
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        fprintf(stderr, "[WESTLAKE-ANW] ANativeWindow_lock: CPU rendering path not implemented; "
+                "callers with a GPU path are unaffected\n");
+        fflush(stderr);
+    }
+    errno = ENODEV;
+    return -ENODEV;
+}
+
+int ANativeWindow_unlockAndPost(void* window)
+{
+    (void)window;
+    errno = ENODEV;
+    return -ENODEV;
+}
+
 long sysconf(int name)
 {
     typedef long (*SysconfFn)(int);
