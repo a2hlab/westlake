@@ -132,6 +132,25 @@ public final class OhImeBridge {
         }});
     }
 
+    /**
+     * The keyboard's area over the edited window, reported by the native helper once the panel is
+     * shown (an empty rectangle once it is gone). Android resizes or pans the focused window for
+     * the keyboard from IME insets, so it is published as that window's IME insets source.
+     */
+    public static void nativeOnKeyboardArea(int windowId, int x, int y, int width, int height) {
+        try {
+            for (View root : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
+                if (root == null || root.getWindowToken() == null) continue;
+                if (InputEventBridge.getInstance().getSessionId(root.getWindowToken()) != windowId) continue;
+                OhInsetsBridge.occupiedRect(android.view.IWindow.Stub.asInterface(root.getWindowToken()),
+                        x, y, width, height);
+                return;
+            }
+        } catch (Throwable t) {
+            System.err.println("[OH_IME] keyboard area not applied: " + t);
+        }
+    }
+
     /** Resolve the focused Android window's own OH session, never the last-created window. */
     private static int windowId(View view) throws ReflectiveOperationException {
         Object root = View.class.getMethod("getViewRootImpl").invoke(view);

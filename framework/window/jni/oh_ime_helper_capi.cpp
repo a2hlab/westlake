@@ -4,11 +4,14 @@
  */
 #include <jni.h>
 #include <inputmethod/inputmethod_controller_capi.h>
+#include <window_manager/oh_window.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <dlfcn.h>
 #include <mutex>
+#include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -45,6 +48,10 @@ struct Env {
     ~Env() { if (attached) vm->DetachCurrentThread(); }
 };
 
+int32_t editedWindow() {
+    std::lock_guard<std::mutex> lock(callbackMutex);
+    return callbackWindow;
+}
 void active(bool value) {
     shown.store(value);
     auto set = reinterpret_cast<void (*)(int)>(dlsym(RTLD_DEFAULT, "oh_wm_set_ime_active"));
@@ -53,6 +60,40 @@ void active(bool value) {
 
 void exception(JNIEnv* env) {
     if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); }
+}
+// Android resizes or pans the edited window for the keyboard from the IME insets WMS sends it.
+// OH reports occupied-area changes only through the session stage, which SceneBoard does not call
+// for these windows, so once the panel is shown its avoid area over the edited window is read and
+// handed to Java, which publishes it as the IME insets source. An empty area means it is gone.
+void reportKeyboardArea(int32_t window, bool show) {
+    if (window <= 0) return;
+    std::thread([window, show]() {
+        WindowManager_AvoidArea area{};
+        bool found = false;
+        for (int attempt = 0; show && attempt < 20 && !found; ++attempt) {
+            usleep(50 * 1000);  // the panel is laid out after the SHOW status arrives
+            found = OH_WindowManager_GetWindowAvoidArea(
+                        window, WINDOW_MANAGER_AVOID_AREA_TYPE_KEYBOARD, &area) == 0
+                    && area.bottomRect.height > 0;
+        }
+        // Not found: OH delivers the area through the session stage as well; a failed query must
+        // not overwrite it with an empty one. Only a hidden keyboard reports an empty area.
+        if (show && !found) {
+            fprintf(stderr, "[OH_IME_CAPI] keyboard area window=%d not available\n", window);
+            return;
+        }
+        const WindowManager_Rect rect = found ? area.bottomRect : WindowManager_Rect{0, 0, 0, 0};
+        Env e;
+        if (!e.env || !bridge) return;
+        jmethodID id = e.env->GetStaticMethodID(bridge, "nativeOnKeyboardArea", "(IIIII)V");
+        if (id) {
+            e.env->CallStaticVoidMethod(bridge, id, window, rect.posX, rect.posY,
+                                        static_cast<jint>(rect.width), static_cast<jint>(rect.height));
+        }
+        exception(e.env);
+        fprintf(stderr, "[OH_IME_CAPI] keyboard area window=%d show=%d rect=%d,%d %ux%u\n",
+                window, show ? 1 : 0, rect.posX, rect.posY, rect.width, rect.height);
+    }).detach();
 }
 
 int getInt(const char* method) {
@@ -127,6 +168,7 @@ void status(InputMethod_TextEditorProxy* source, InputMethod_KeyboardStatus valu
     if (!generation(source)) return;
     active(value == IME_KEYBOARD_STATUS_SHOW);
     fprintf(stderr, "[OH_IME_CAPI] keyboard status=%d\n", value);
+    reportKeyboardArea(editedWindow(), value == IME_KEYBOARD_STATUS_SHOW);
 }
 void selection(InputMethod_TextEditorProxy* source, int start, int end) {
     operation(source, 6, start, nullptr, 0, end);
@@ -243,6 +285,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_adapter_window_OhImeBridge_nativeShow
 
 extern "C" JNIEXPORT jboolean JNICALL Java_adapter_window_OhImeBridge_nativeHideKeyboardCapi(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> lock(mutex);
+    reportKeyboardArea(editedWindow(), false);
     // Invalidate before IPC: an in-flight callback already has its own epoch,
     // and Java rejects it even if a different editor is now focused.
     identity(nullptr, 0, 0);
