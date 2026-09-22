@@ -60,6 +60,38 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // Track OH sessions created by this adapter, keyed by IWindow IBinder
     private final Map<IBinder, int[]> mSessionMap = new HashMap<>();
 
+    // Android gives a window no surface while its activity is not yet visible, and WindowToken
+    // stacks an activity's base window below the token's other windows. OpenHarmony stacks this
+    // app's windows by creation order (measured: raising, not raising and WINDOW_TYPE_MEDIA all
+    // leave the last-created window on top), so a dialog shown from onCreate/onResume, created
+    // before the activity's own window, ends up underneath it. Such a dialog is held back: it
+    // gets its input channel and frames at once, and its OH session right after the base window
+    // of its token has one, so creation order is Android's stacking order.
+    private static final long HELD_BACK_FALLBACK_MS = 3000;
+    private final java.util.Set<IBinder> mTokensWithBase = new java.util.HashSet<>();
+    private final Map<IBinder, IBinder> mBaseWindowTokens = new HashMap<>();
+    private final Map<IBinder, HeldBackWindow> mHeldBack = new java.util.LinkedHashMap<>();
+    private android.os.Handler mMainHandler;
+
+    private static final class HeldBackWindow {
+        final IWindow window;
+        final IBinder token;
+        final String bundleName, abilityName, moduleName, windowName;
+        final int windowType, layerStackId, width, height;
+        final long ohTokenAddr;
+        int lastWidth, lastHeight;
+
+        HeldBackWindow(IWindow window, IBinder token, String bundleName, String abilityName,
+                String moduleName, String windowName, int windowType, int layerStackId,
+                int width, int height, long ohTokenAddr) {
+            this.window = window; this.token = token; this.bundleName = bundleName;
+            this.abilityName = abilityName; this.moduleName = moduleName; this.windowName = windowName;
+            this.windowType = windowType; this.layerStackId = layerStackId; this.width = width;
+            this.height = height; this.ohTokenAddr = ohTokenAddr;
+            this.lastWidth = width; this.lastHeight = height;
+        }
+    }
+
     // [G2.8-RELAYOUT-LOOP 2026-06-01] Reverse-push IWindow.resized only ONCE per window
     // (bootstrap to escape ViewRootImpl's 0x0-frame spiral). Re-pushing every relayout
     // re-triggers a ViewRootImpl traversal → infinite relayout loop that churns the surface.
@@ -132,6 +164,101 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // §3.1.5.6.3 — Android attrs.type → "is this the main DecorView?" predicate.
     // Reuse path applies only to main windows; sub windows / system overlays
     // legitimately need their own SceneSession.
+    /** An application window on an activity token whose base window has no OH session yet. */
+    private boolean shouldHoldBack(int windowType, IBinder token) {
+        if (token == null
+                || windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                || windowType == WindowManager.LayoutParams.TYPE_APPLICATION_STARTING
+                || windowType < WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW
+                || windowType > WindowManager.LayoutParams.LAST_APPLICATION_WINDOW) {
+            return false;
+        }
+        synchronized (mHeldBack) {
+            return !mTokensWithBase.contains(token);
+        }
+    }
+
+    private int holdBack(final HeldBackWindow held, WindowManager.LayoutParams attrs,
+            InputChannel outInputChannel, InsetsState insetsState, Rect attachedFrame,
+            float[] sizeCompatScale) {
+        final IBinder key = held.window.asBinder();
+        synchronized (mHeldBack) {
+            mHeldBack.put(key, held);
+        }
+        System.err.println("[OH_WSA] holding back type=" + held.windowType + " '" + held.windowName
+                + "' until its activity's window has an OH session");
+        if (outInputChannel != null) {
+            InputEventBridge.getInstance().createUnboundInputChannelPair(key, held.windowName)
+                    .copyTo(outInputChannel);
+        }
+        if (insetsState != null) OhInsetsBridge.copyForWindow(held.window, insetsState);
+        if (sizeCompatScale != null && sizeCompatScale.length > 0) sizeCompatScale[0] = 1.0f;
+        if (attachedFrame != null) attachedFrame.set(0, 0, held.width, held.height);
+        if (mMainHandler == null) mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        // An activity that never adds a window of its own must not keep its dialog invisible.
+        mMainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                createHeldBackSession(key, "no base window after " + HELD_BACK_FALLBACK_MS + " ms");
+            }
+        }, HELD_BACK_FALLBACK_MS);
+        return buildAddDisplayFlags(attrs);
+    }
+
+    private void baseWindowAdded(IBinder baseWindow, IBinder token) {
+        java.util.List<IBinder> release = new java.util.ArrayList<>();
+        synchronized (mHeldBack) {
+            mTokensWithBase.add(token);
+            mBaseWindowTokens.put(baseWindow, token);
+            for (Map.Entry<IBinder, HeldBackWindow> entry : mHeldBack.entrySet()) {
+                if (entry.getValue().token == token) release.add(entry.getKey());
+            }
+        }
+        for (IBinder key : release) createHeldBackSession(key, "its activity's window now has one");
+    }
+
+    /** Create a held-back window's OH session, in the order it was added, and make it relayout. */
+    private void createHeldBackSession(IBinder key, String why) {
+        HeldBackWindow held;
+        synchronized (mHeldBack) {
+            held = mHeldBack.remove(key);
+        }
+        if (held == null) return;
+        int[] sessionInfo;
+        try {
+            sessionInfo = nativeCreateSession(key, held.bundleName, held.abilityName, held.moduleName,
+                    held.windowName, held.windowType, held.layerStackId, held.width, held.height,
+                    held.ohTokenAddr);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] held-back nativeCreateSession threw " + t);
+            return;
+        }
+        if (sessionInfo == null || sessionInfo.length < 6 || sessionInfo[0] < 0) {
+            System.err.println("[OH_WSA] held-back window got no OH session: "
+                    + (sessionInfo == null || sessionInfo.length < 6 ? "malformed" : "wsErr=" + sessionInfo[5]));
+            return;
+        }
+        mSessionMap.put(key, sessionInfo);
+        InputEventBridge.getInstance().bindInputChannel(key, sessionInfo[0]);
+        System.err.println("[OH_WSA] held-back type=" + held.windowType + " '" + held.windowName
+                + "' -> sessionId=" + sessionInfo[0] + " (" + why + ")");
+        // Its earlier relayouts returned no surface; a forced relayout now picks one up.
+        try {
+            ClientWindowFrames frames = new ClientWindowFrames();
+            frames.frame.set(0, 0, held.lastWidth, held.lastHeight);
+            frames.displayFrame.set(0, 0, held.lastWidth, held.lastHeight);
+            frames.parentFrame.set(0, 0, held.lastWidth, held.lastHeight);
+            frames.attachedFrame = new Rect(0, 0, held.lastWidth, held.lastHeight);
+            InsetsState insets = new InsetsState();
+            OhInsetsBridge.copyForWindow(held.window, insets);
+            held.window.resized(frames, false /* reportDraw */, new android.util.MergedConfiguration(),
+                    insets, true /* forceLayout */, false /* alwaysConsumeSystemBars */,
+                    0 /* displayId */, 0 /* syncSeqId */, false /* dragResizing */, null);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] held-back relayout request failed: " + t);
+        }
+    }
+
     private static boolean isMainAppWindow(int androidWindowType) {
         // TYPE_BASE_APPLICATION=1 / TYPE_APPLICATION=2 / TYPE_APPLICATION_STARTING=3
         return androidWindowType >= 1 && androidWindowType <= 3;
@@ -286,6 +413,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                         + existing + " (skipping CreateAndConnect)");
                 int[] reuseInfo = new int[] { existing, -1, layerStackId, width, height, 0 };
                 mSessionMap.put(window.asBinder(), reuseInfo);
+                if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION) {
+                    baseWindowAdded(window.asBinder(), attrs.token);
+                }
                 if (outInputChannel != null) {
                     InputChannel clientChannel = InputEventBridge.getInstance()
                             .createInputChannelPair(window.asBinder(), existing, windowName);
@@ -295,6 +425,12 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 if (sizeCompatScale != null && sizeCompatScale.length > 0) sizeCompatScale[0] = 1.0f;
                 return buildAddDisplayFlags(attrs);  // ADD_FLAG_APP_VISIBLE | IN_TOUCH_MODE
             }
+        }
+
+        if (shouldHoldBack(windowType, attrs.token)) {
+            return holdBack(new HeldBackWindow(window, attrs.token, bundleName, abilityName, moduleName,
+                    windowName, windowType, layerStackId, width, height, ohTokenAddr),
+                    attrs, outInputChannel, insetsState, attachedFrame, sizeCompatScale);
         }
 
         System.err.println("[OH_WSA] PRE-native nativeCreateSession");
@@ -338,6 +474,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 + sessionInfo[3] + "x" + sessionInfo[4]);
         mSessionMap.put(window.asBinder(), sessionInfo);
         System.err.println("[OH_WSA] step2 mSessionMap.put OK");
+        if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && attrs.token != null) {
+            baseWindowAdded(window.asBinder(), attrs.token);
+        }
 
         if (outInputChannel != null) {
             try {
@@ -488,6 +627,11 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      */
 
     public void remove(IWindow window) throws RemoteException {
+        synchronized (mHeldBack) {
+            mHeldBack.remove(window.asBinder());
+            IBinder token = mBaseWindowTokens.remove(window.asBinder());
+            if (token != null) mTokensWithBase.remove(token);
+        }
         OhWindowPolicy.remove(window);
         OhInsetsBridge.remove(window);
         logBridged("remove", "-> OH ISession.Disconnect");
@@ -533,6 +677,29 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             InsetsState insetsState, InsetsSourceControl.Array activeControls,
             Bundle bundle) throws RemoteException {
         logBridged("relayout", "-> OH ISession.UpdateSessionRect");
+
+        HeldBackWindow held;
+        synchronized (mHeldBack) {
+            held = mHeldBack.get(window.asBinder());
+        }
+        if (held != null) {
+            // What WMS does for a window whose activity is not visible yet: frames, no surface.
+            int[] display = getDefaultDisplaySize();
+            int width = resolveRelayoutDimension(attrs != null ? attrs.width : 0, requestedWidth, display[0]);
+            int height = resolveRelayoutDimension(attrs != null ? attrs.height : 0, requestedHeight, display[1]);
+            held.lastWidth = width;
+            held.lastHeight = height;
+            if (outFrames != null) {
+                outFrames.frame.set(0, 0, width, height);
+                outFrames.displayFrame.set(0, 0, width, height);
+                outFrames.parentFrame.set(0, 0, width, height);
+            }
+            fillMergedConfiguration(outMergedConfiguration, width, height);
+            if (insetsState != null) OhInsetsBridge.copyForWindow(window, insetsState);
+            System.err.println("[OH_WSA-relayout] held back " + width + "x" + height
+                    + ": no surface until its activity's window has an OH session");
+            return 0;
+        }
 
         int[] sessionInfo = mSessionMap.get(window.asBinder());
         if (sessionInfo == null) {
@@ -659,36 +826,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
 
         // Populate output MergedConfiguration with defaults
-        if (outMergedConfiguration != null) {
-            Configuration config = new Configuration();
-            config.screenWidthDp = width * 160 / 320; // approximate dp conversion
-            config.screenHeightDp = height * 160 / 320;
-            config.densityDpi = 320;
-            // 2026-05-11 G2.14as r6 — populate WindowConfiguration.mBounds.
-            // ViewRootImpl.relayoutWindow in LOCAL_LAYOUT mode calls
-            //   mWindowLayout.computeFrames(... winConfig.getBounds(),
-            //                                measuredWidth, measuredHeight, ..., mTmpFrames)
-            // to compute mTmpFrames.frame.  Without bounds in winConfig + with
-            // measuredWidth/Height=0 (first traversal before any successful
-            // measure), computeFrames returns frame=(0,0,0,0) → relayoutAsync=true
-            // → outFrames not propagated → mWinFrame stays 0×0 → next measure
-            // still 0 → death spiral.  Populating winConfig.mBounds with the
-            // real window bounds (matches the OH window rect this adapter
-            // owns) breaks the spiral.
-            Rect winBounds = new Rect(0, 0, width, height);
-            config.windowConfiguration.setBounds(winBounds);
-            config.windowConfiguration.setAppBounds(winBounds);
-            config.windowConfiguration.setMaxBounds(winBounds);
-            outMergedConfiguration.setOverrideConfiguration(config);
-            // Also set global side identically so both global/override paths
-            // are consistent (ViewRoot picks based on context).
-            Configuration globalConfig = new Configuration(config);
-            outMergedConfiguration.setGlobalConfiguration(globalConfig);
-            System.err.println("[OH_WSA-relayout] outMergedConfiguration set: "
-                    + "winConfig.mBounds=" + winBounds
-                    + " screenDp=" + config.screenWidthDp + "x" + config.screenHeightDp
-                    + " densityDpi=" + config.densityDpi);
-        }
+        fillMergedConfiguration(outMergedConfiguration, width, height);
 
         // Create a SurfaceControl backed by the OH RSSurfaceNode.  2026-05-02
         // G2.14r: outSurfaceControl is now stamped with sessionId via
@@ -745,6 +883,39 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
 
         return 0;
+    }
+
+    private static void fillMergedConfiguration(MergedConfiguration outMergedConfiguration,
+            int width, int height) {
+        if (outMergedConfiguration == null) return;
+        Configuration config = new Configuration();
+        config.screenWidthDp = width * 160 / 320; // approximate dp conversion
+        config.screenHeightDp = height * 160 / 320;
+        config.densityDpi = 320;
+        // 2026-05-11 G2.14as r6 — populate WindowConfiguration.mBounds.
+        // ViewRootImpl.relayoutWindow in LOCAL_LAYOUT mode calls
+        //   mWindowLayout.computeFrames(... winConfig.getBounds(),
+        //                                measuredWidth, measuredHeight, ..., mTmpFrames)
+        // to compute mTmpFrames.frame.  Without bounds in winConfig + with
+        // measuredWidth/Height=0 (first traversal before any successful
+        // measure), computeFrames returns frame=(0,0,0,0) → relayoutAsync=true
+        // → outFrames not propagated → mWinFrame stays 0×0 → next measure
+        // still 0 → death spiral.  Populating winConfig.mBounds with the
+        // real window bounds (matches the OH window rect this adapter
+        // owns) breaks the spiral.
+        Rect winBounds = new Rect(0, 0, width, height);
+        config.windowConfiguration.setBounds(winBounds);
+        config.windowConfiguration.setAppBounds(winBounds);
+        config.windowConfiguration.setMaxBounds(winBounds);
+        outMergedConfiguration.setOverrideConfiguration(config);
+        // Also set global side identically so both global/override paths
+        // are consistent (ViewRoot picks based on context).
+        Configuration globalConfig = new Configuration(config);
+        outMergedConfiguration.setGlobalConfiguration(globalConfig);
+        System.err.println("[OH_WSA-relayout] outMergedConfiguration set: "
+                + "winConfig.mBounds=" + winBounds
+                + " screenDp=" + config.screenWidthDp + "x" + config.screenHeightDp
+                + " densityDpi=" + config.densityDpi);
     }
 
     /**
