@@ -139,6 +139,7 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // the fetcher cannot find these, and the NPE lands wherever the app first touched it:
             // OONI Probe in its Application constructor, NewPipe starting its main activity.
             case "audio":
+            case "appops":
             case "locale":
             case "batterystats":
             case "batteryproperties":

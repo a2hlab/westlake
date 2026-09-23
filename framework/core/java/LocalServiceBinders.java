@@ -76,6 +76,10 @@ public final class LocalServiceBinders {
                 case "audio":
                     binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
                     break;
+                case "appops":
+                    binder = proxy(name, "com.android.internal.app.IAppOpsService",
+                            LocalServiceBinders::appOps);
+                    break;
                 case "locale":
                     binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
                     break;
@@ -193,6 +197,69 @@ public final class LocalServiceBinders {
      */
     private static Object audio(String method, Object[] args) {
         return DEFAULT;
+    }
+
+    /**
+     * The app-ops service, answered as a phone with no user overrides would answer it.
+     *
+     * Asked by every app in the corpus and survived by most -- which is why it looked harmless --
+     * but AnkiDroid's DeckPicker.onCreate reaches Environment.isExternalStorageLegacy, which calls
+     * AppOpsManager unconditionally, and the null manager killed the activity.
+     *
+     * Each op answers its platform default (AppOpsManager.opToDefaultMode). Where that default is
+     * MODE_DEFAULT, callers fall back to the permission check, which PermissionManagerAdapter
+     * answers. OP_LEGACY_STORAGE is the exception: on a real device StorageManagerService sets it
+     * per app, allowed only below target SDK 29, or at 29 with requestLegacyExternalStorage. An
+     * app told it has legacy storage when it does not goes looking for shared storage it cannot
+     * use, so that one is decided here the same way.
+     *
+     * note/start return a SyncNotedAppOp rather than a mode; null there NPEs inside AppOpsManager.
+     */
+    private static Object appOps(String method, Object[] args) {
+        Integer code = firstInt(args);
+        if (code == null) return DEFAULT;
+        int mode = appOpMode(code);
+        switch (method) {
+            case "checkOperation":
+            case "checkOperationRaw":
+            case "checkAudioOperation":
+                return mode;
+            case "noteOperation":
+            case "startOperation":
+            case "noteProxyOperation":
+            case "startProxyOperation":
+            case "startProxyOperationWithState":
+                return new android.app.SyncNotedAppOp(mode, code, null,
+                        android.app.ActivityThread.currentPackageName());
+            default:
+                return DEFAULT;   // watchers accepted, no history, checkPackage allowed
+        }
+    }
+
+    private static final int OP_LEGACY_STORAGE = 87;
+
+    private static int appOpMode(int code) {
+        if (code == OP_LEGACY_STORAGE) {
+            android.app.Application app = android.app.ActivityThread.currentApplication();
+            android.content.pm.ApplicationInfo info = app != null ? app.getApplicationInfo() : null;
+            if (info == null) return android.app.AppOpsManager.MODE_IGNORED;
+            boolean legacy = info.targetSdkVersion < android.os.Build.VERSION_CODES.Q
+                    || (info.targetSdkVersion == android.os.Build.VERSION_CODES.Q
+                        && info.hasRequestedLegacyExternalStorage());
+            return legacy ? android.app.AppOpsManager.MODE_ALLOWED
+                    : android.app.AppOpsManager.MODE_IGNORED;
+        }
+        try {
+            return android.app.AppOpsManager.opToDefaultMode(code);
+        } catch (RuntimeException unknownOp) {
+            return android.app.AppOpsManager.MODE_DEFAULT;
+        }
+    }
+
+    private static Integer firstInt(Object[] args) {
+        if (args == null) return null;
+        for (Object arg : args) if (arg instanceof Integer) return (Integer) arg;
+        return null;
     }
 
     private static Object batteryStats(String method, Object[] args) {
