@@ -933,6 +933,39 @@ void *dlopen(const char *filename, int flags)
      * to use, and a fix per library is a fix per outage.  Only bare names are redirected; a
      * caller that passes a path has already chosen.
      */
+    /*
+     * OH names several NDK libraries with a .z.so suffix that Android spells plainly, and an app
+     * asking for the Android name gets "No such file or directory" even though the library is
+     * there. LocalSend's Flutter engine looks up ANativeWindow_acquire and the AHardwareBuffer
+     * family in libnativewindow.so; /vendor/lib64/libnativewindow.z.so exports all of them.
+     *
+     * Tried only after the plain name fails to open, so a board that does ship the Android
+     * spelling keeps winning, and applied to any caller because the naming is the platform's, not
+     * WebView's.
+     */
+    static char suffixed[512];
+    if (basename != NULL && basename == filename) {
+        size_t length = strlen(filename);
+        if (length > 3 && strcmp(filename + length - 3, ".so") == 0 &&
+            (length < 5 || strcmp(filename + length - 5, ".z.so") != 0)) {
+            void *plain = real_dlopen(filename, flags);
+            if (plain != NULL) {
+                return plain;
+            }
+            snprintf(suffixed, sizeof(suffixed), "%.*s.z.so", (int) (length - 3), filename);
+            void *handle = real_dlopen(suffixed, flags);
+            if (handle != NULL) {
+                static int logged;
+                if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                    fprintf(stderr,
+                            "[WESTLAKE-WEBVIEW-BIONIC] OH library naming: %s -> %s\n",
+                            filename, suffixed);
+                }
+                return handle;
+            }
+        }
+    }
+
     static char webview_library[512];
     if (basename != NULL && basename == filename &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
