@@ -1,6 +1,7 @@
 package adapter.packagemanager;
 
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.IInterface;
 import android.os.IUserManager;
 import android.os.ServiceManager;
@@ -35,6 +36,41 @@ public final class OHUserManager {
                         // OH sets verified after successfully unlocking the account's
                         // storage key. Query it live; no Android cache is used here.
                         return state[1] != 0 && (name.equals("isUserRunning") || state[2] != 0);
+                    }
+                    // Restrictions and profile type have a truthful local answer: this process's
+                    // user is the device's only, unrestricted, full user, and no device-policy
+                    // app has set restrictions for any package. WebView reads them while it
+                    // starts (CombinedPolicyProvider), inside a JNI callback, where a throw aborts
+                    // Chromium.
+                    switch (name) {
+                        case "getApplicationRestrictions":
+                        case "getApplicationRestrictionsForUser":
+                        case "getUserRestrictions":
+                        case "getUserRestrictionSources":
+                            return method.getReturnType() == Bundle.class ? new Bundle() : null;
+                        case "hasUserRestriction":
+                        case "hasBaseUserRestriction":
+                        case "hasUserRestrictionOnAnyUser":
+                        case "isRestricted":
+                        case "isManagedProfile":
+                        case "isProfile":
+                        case "isCloneProfile":
+                        case "isMediaSharedWithParent":
+                        case "isDemoUser":
+                        case "isQuietModeEnabled":
+                            return Boolean.FALSE;
+                        // The serial number distinguishes a user from a later one that reused its
+                        // id. This device has one user that has never been removed, so its serial
+                        // is the primary user's, 0, and the mapping back from 0 is that same user.
+                        // Gecko asks for it while its profile starts and dies on the throw, in the
+                        // same way Chromium died on the window context: a strict answer here is
+                        // worse than a plain one, because the caller cannot tell them apart.
+                        case "getUserSerialNumber":
+                            return ((Integer) arguments[0]) == androidUser ? 0 : -1;
+                        case "getUserHandle":
+                            return ((Integer) arguments[0]) == 0 ? androidUser : -1;
+                        default:
+                            break;
                     }
                     throw new UnsupportedOperationException("OH user service does not implement " + name);
                 });

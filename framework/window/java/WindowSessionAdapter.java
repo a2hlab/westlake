@@ -36,6 +36,7 @@ import android.view.InsetsSourceControl;
 import android.view.InsetsState;
 import android.view.Surface;
 import android.view.SurfaceControl;
+import android.view.View;
 import android.view.WindowManager;
 import android.window.ClientWindowFrames;
 import android.window.OnBackInvokedCallbackInfo;
@@ -59,6 +60,50 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
 
     // Track OH sessions created by this adapter, keyed by IWindow IBinder
     private final Map<IBinder, int[]> mSessionMap = new HashMap<>();
+
+    // Android gives a window no surface while its activity is not yet visible, and WindowToken
+    // stacks an activity's base window below the token's other windows. OpenHarmony stacks this
+    // app's windows by creation order (measured: raising, not raising and WINDOW_TYPE_MEDIA all
+    // leave the last-created window on top), so a dialog shown from onCreate/onResume, created
+    // before the activity's own window, ends up underneath it. Such a dialog is held back: it
+    // gets its input channel and frames at once, and its OH session right after the base window
+    // of its token has one, so creation order is Android's stacking order.
+    private static final long HELD_BACK_FALLBACK_MS = 3000;
+    private static final long HELD_BACK_LIMIT_MS = 60000;
+    private final java.util.Set<IBinder> mTokensWithBase = new java.util.HashSet<>();
+    private final Map<IBinder, IBinder> mBaseWindowTokens = new HashMap<>();
+    private final Map<IBinder, HeldBackWindow> mHeldBack = new java.util.LinkedHashMap<>();
+    private android.os.Handler mMainHandler;
+
+    private static final class HeldBackWindow {
+        final IWindow window;
+        final IBinder token;
+        final String bundleName, abilityName, moduleName, windowName;
+        final int windowType, layerStackId, width, height;
+        final long ohTokenAddr;
+        final float dimAmount;
+        int lastWidth, lastHeight;
+
+        HeldBackWindow(IWindow window, IBinder token, String bundleName, String abilityName,
+                String moduleName, String windowName, int windowType, int layerStackId,
+                int width, int height, long ohTokenAddr) {
+            this.window = window; this.token = token; this.bundleName = bundleName;
+            this.abilityName = abilityName; this.moduleName = moduleName; this.windowName = windowName;
+            this.windowType = windowType; this.layerStackId = layerStackId; this.width = width;
+            this.height = height; this.ohTokenAddr = ohTokenAddr;
+            this.lastWidth = width; this.lastHeight = height;
+            this.dimAmount = 0f;
+        }
+
+        HeldBackWindow(HeldBackWindow held, float dimAmount) {
+            this.window = held.window; this.token = held.token; this.bundleName = held.bundleName;
+            this.abilityName = held.abilityName; this.moduleName = held.moduleName;
+            this.windowName = held.windowName; this.windowType = held.windowType;
+            this.layerStackId = held.layerStackId; this.width = held.width; this.height = held.height;
+            this.ohTokenAddr = held.ohTokenAddr; this.lastWidth = held.lastWidth;
+            this.lastHeight = held.lastHeight; this.dimAmount = dimAmount;
+        }
+    }
 
     // [G2.8-RELAYOUT-LOOP 2026-06-01] Reverse-push IWindow.resized only ONCE per window
     // (bootstrap to escape ViewRootImpl's 0x0-frame spiral). Re-pushing every relayout
@@ -132,6 +177,326 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // §3.1.5.6.3 — Android attrs.type → "is this the main DecorView?" predicate.
     // Reuse path applies only to main windows; sub windows / system overlays
     // legitimately need their own SceneSession.
+    // FLAG_DIM_BEHIND: WMS puts a dim layer under the window. OpenHarmony has no such flag, so
+    // the layer is a real window: a translucent black view added on the same token right before
+    // the dimming window gets its OH session, so creation order stacks it just below. As with
+    // Android's Dimmer, only the topmost visible dimming window of a token shows its layer.
+    private static final class DimLayer {
+        final IBinder token;
+        final View view;
+        final int color;
+        boolean ownerVisible = true;
+        boolean shown = true;
+
+        DimLayer(IBinder token, View view, int color) {
+            this.token = token;
+            this.view = view;
+            this.color = color;
+        }
+    }
+
+    private final Map<IBinder, DimLayer> mDimLayers = new java.util.LinkedHashMap<>();
+
+    // ViewRootImpl passes LayoutParams to relayout only when they changed (null otherwise), and
+    // placement needs gravity, x/y and flags on every relayout, so each window's are kept.
+    private final Map<IBinder, WindowManager.LayoutParams> mWindowAttrs = new HashMap<>();
+
+    private WindowManager.LayoutParams rememberAttrs(IWindow window, WindowManager.LayoutParams attrs) {
+        synchronized (mWindowAttrs) {
+            if (attrs != null) {
+                WindowManager.LayoutParams copy = new WindowManager.LayoutParams();
+                copy.copyFrom(attrs);
+                mWindowAttrs.put(window.asBinder(), copy);
+                return copy;
+            }
+            return mWindowAttrs.get(window.asBinder());
+        }
+    }
+
+    private static float dimAmountOf(WindowManager.LayoutParams attrs) {
+        return attrs != null && (attrs.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0
+                ? Math.max(0f, Math.min(1f, attrs.dimAmount)) : 0f;
+    }
+
+    private void addDimLayer(IBinder owner, IBinder token, float dimAmount, String ownerName) {
+        if (dimAmount <= 0f || token == null) return;
+        synchronized (mDimLayers) {
+            if (mDimLayers.containsKey(owner)) return;
+        }
+        try {
+            android.app.Application app = android.app.ActivityThread.currentApplication();
+            if (app == null) return;
+            View dim = new View(app);
+            int color = android.graphics.Color.argb(Math.round(dimAmount * 255f), 0, 0, 0);
+            dim.setBackgroundColor(color);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_APPLICATION,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            lp.token = token;
+            lp.windowAnimations = 0;
+            lp.setTitle("DimLayer:" + ownerName);
+            synchronized (mDimLayers) {
+                mDimLayers.put(owner, new DimLayer(token, dim, color));
+            }
+            ((WindowManager) app.getSystemService(android.content.Context.WINDOW_SERVICE)).addView(dim, lp);
+            System.err.println("[OH_WSA] dim layer " + dimAmount + " under '" + ownerName + "'");
+            updateDimLayers(token);
+        } catch (Throwable t) {
+            synchronized (mDimLayers) {
+                mDimLayers.remove(owner);
+            }
+            System.err.println("[OH_WSA] dim layer failed: " + t);
+        }
+    }
+
+    private void setDimOwnerVisible(IBinder owner, boolean visible) {
+        IBinder token;
+        synchronized (mDimLayers) {
+            DimLayer layer = mDimLayers.get(owner);
+            if (layer == null || layer.ownerVisible == visible) return;
+            layer.ownerVisible = visible;
+            token = layer.token;
+        }
+        updateDimLayers(token);
+    }
+
+    private void removeDimLayer(IBinder owner) {
+        final DimLayer layer;
+        synchronized (mDimLayers) {
+            layer = mDimLayers.remove(owner);
+        }
+        if (layer == null) return;
+        if (mMainHandler == null) mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        mMainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.app.Application app = android.app.ActivityThread.currentApplication();
+                    if (app != null && layer.view.isAttachedToWindow()) {
+                        ((WindowManager) app.getSystemService(android.content.Context.WINDOW_SERVICE))
+                                .removeView(layer.view);
+                    }
+                } catch (Throwable t) {
+                    System.err.println("[OH_WSA] dim layer removal failed: " + t);
+                }
+            }
+        });
+        updateDimLayers(layer.token);
+    }
+
+    /** Show only the topmost visible dimming window's layer on a token. */
+    private void updateDimLayers(IBinder token) {
+        java.util.List<DimLayer> layers = new java.util.ArrayList<>();
+        synchronized (mDimLayers) {
+            for (DimLayer layer : mDimLayers.values()) {
+                if (layer.token == token) layers.add(layer);
+            }
+        }
+        DimLayer top = null;
+        for (DimLayer layer : layers) {
+            if (layer.ownerVisible) top = layer;
+        }
+        // An inactive layer is drawn transparent rather than hidden: hiding an OH window does
+        // not take effect on this board (nativeHideWindow rc=1005), so its last frame would stay.
+        for (DimLayer layer : layers) {
+            final boolean show = layer == top;
+            if (layer.shown == show) continue;
+            layer.shown = show;
+            final View view = layer.view;
+            final int color = show ? layer.color : 0;
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                view.setBackgroundColor(color);
+            } else {
+                view.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        view.setBackgroundColor(color);
+                    }
+                });
+            }
+        }
+    }
+
+    /**
+     * Where WMS puts a window that does not fill the display: Android's own WindowLayout, from its
+     * gravity, x/y, margins and the system-bar insets it fits, so a dialog is centred. Windows
+     * that fill the display keep the full-display frame they have always had here. Only the
+     * position is taken; the size stays the one the surface is allocated with.
+     */
+    private static Rect placeWindow(IWindow window, WindowManager.LayoutParams attrs, int width, int height) {
+        Rect frame = new Rect(0, 0, width, height);
+        int[] display = getDefaultDisplaySize();
+        if (attrs == null || (attrs.width == WindowManager.LayoutParams.MATCH_PARENT
+                && attrs.height == WindowManager.LayoutParams.MATCH_PARENT)
+                || (width >= display[0] && height >= display[1])) {
+            return frame;
+        }
+        try {
+            InsetsState state = new InsetsState();
+            if (window != null) OhInsetsBridge.copyForWindow(window, state);
+            Rect bounds = new Rect(0, 0, display[0], display[1]);
+            Rect cutoutSafe = new Rect();
+            state.getDisplayCutoutSafe(cutoutSafe);
+            ClientWindowFrames frames = new ClientWindowFrames();
+            new android.view.WindowLayout().computeFrames(attrs, state, cutoutSafe, bounds,
+                    android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN, width, height,
+                    android.view.WindowInsets.Type.defaultVisible(), 1f, frames);
+            frame.offsetTo(frames.frame.left, frames.frame.top);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] window placement failed, keeping (0,0): " + t);
+        }
+        return frame;
+    }
+
+    /** Move a placed window's layer to its frame; a size update resets the layer to (0,0). */
+    private static void applyPosition(SurfaceControl sc, Rect frame) {
+        if (sc == null || !sc.isValid() || (frame.left == 0 && frame.top == 0)) return;
+        try {
+            new SurfaceControl.Transaction()
+                    .setBufferSize(sc, frame.width(), frame.height())
+                    .setPosition(sc, frame.left, frame.top)
+                    .apply();
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] layer position failed: " + t);
+        }
+    }
+
+    /** An application window on an activity token whose base window has no OH session yet. */
+    private boolean shouldHoldBack(int windowType, IBinder token) {
+        if (token == null
+                || windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                || windowType == WindowManager.LayoutParams.TYPE_APPLICATION_STARTING
+                || windowType < WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW
+                || windowType > WindowManager.LayoutParams.LAST_APPLICATION_WINDOW) {
+            return false;
+        }
+        synchronized (mHeldBack) {
+            return !mTokensWithBase.contains(token);
+        }
+    }
+
+    private int holdBack(final HeldBackWindow held, WindowManager.LayoutParams attrs,
+            InputChannel outInputChannel, InsetsState insetsState, Rect attachedFrame,
+            float[] sizeCompatScale) {
+        final IBinder key = held.window.asBinder();
+        synchronized (mHeldBack) {
+            mHeldBack.put(key, held);
+        }
+        System.err.println("[OH_WSA] holding back type=" + held.windowType + " '" + held.windowName
+                + "' until its activity's window has an OH session");
+        if (outInputChannel != null) {
+            InputEventBridge.getInstance().createUnboundInputChannelPair(key, held.windowName)
+                    .copyTo(outInputChannel);
+        }
+        if (insetsState != null) OhInsetsBridge.copyForWindow(held.window, insetsState);
+        if (sizeCompatScale != null && sizeCompatScale.length > 0) sizeCompatScale[0] = 1.0f;
+        if (attachedFrame != null) attachedFrame.set(0, 0, held.width, held.height);
+        if (mMainHandler == null) mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        scheduleHeldBackCheck(key, held.token, android.os.SystemClock.uptimeMillis());
+        return buildAddDisplayFlags(attrs);
+    }
+
+    /**
+     * An activity that never adds a window of its own (windowNoDisplay, or it finished) must not
+     * keep its dialogs invisible. One that is still launching will add its window when it
+     * resumes, however long its onCreate takes (McDonald's needs more than 3 s on this board), so
+     * the dialog keeps waiting for it, up to a limit.
+     */
+    private void scheduleHeldBackCheck(final IBinder key, final IBinder token, final long heldSince) {
+        mMainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (mHeldBack) {
+                    if (!mHeldBack.containsKey(key)) return;
+                }
+                long waited = android.os.SystemClock.uptimeMillis() - heldSince;
+                if (activityStillComing(token) && waited < HELD_BACK_LIMIT_MS) {
+                    scheduleHeldBackCheck(key, token, heldSince);
+                    return;
+                }
+                createHeldBackSession(key, "no base window after " + waited + " ms");
+            }
+        }, HELD_BACK_FALLBACK_MS);
+    }
+
+    /** The activity behind a token will still add its own window: alive, displayable, not resumed yet. */
+    private static boolean activityStillComing(IBinder token) {
+        try {
+            android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
+            android.app.Activity activity = thread != null ? thread.getActivity(token) : null;
+            if (activity == null || activity.isFinishing() || activity.isDestroyed()) return false;
+            java.lang.reflect.Field visible = android.app.Activity.class.getDeclaredField("mVisibleFromClient");
+            visible.setAccessible(true);
+            if (!visible.getBoolean(activity)) return false;
+            java.lang.reflect.Field resumed = android.app.Activity.class.getDeclaredField("mResumed");
+            resumed.setAccessible(true);
+            return !resumed.getBoolean(activity);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] activity state unreadable, releasing held-back window: " + t);
+            return false;
+        }
+    }
+
+    private void baseWindowAdded(IBinder baseWindow, IBinder token) {
+        java.util.List<IBinder> release = new java.util.ArrayList<>();
+        synchronized (mHeldBack) {
+            mTokensWithBase.add(token);
+            mBaseWindowTokens.put(baseWindow, token);
+            for (Map.Entry<IBinder, HeldBackWindow> entry : mHeldBack.entrySet()) {
+                if (entry.getValue().token == token) release.add(entry.getKey());
+            }
+        }
+        for (IBinder key : release) createHeldBackSession(key, "its activity's window now has one");
+    }
+
+    /** Create a held-back window's OH session, in the order it was added, and make it relayout. */
+    private void createHeldBackSession(IBinder key, String why) {
+        HeldBackWindow held;
+        synchronized (mHeldBack) {
+            held = mHeldBack.remove(key);
+        }
+        if (held == null) return;
+        addDimLayer(key, held.token, held.dimAmount, held.windowName);
+        int[] sessionInfo;
+        try {
+            sessionInfo = nativeCreateSession(key, held.bundleName, held.abilityName, held.moduleName,
+                    held.windowName, held.windowType, held.layerStackId, held.width, held.height,
+                    held.ohTokenAddr);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] held-back nativeCreateSession threw " + t);
+            return;
+        }
+        if (sessionInfo == null || sessionInfo.length < 6 || sessionInfo[0] < 0) {
+            System.err.println("[OH_WSA] held-back window got no OH session: "
+                    + (sessionInfo == null || sessionInfo.length < 6 ? "malformed" : "wsErr=" + sessionInfo[5]));
+            return;
+        }
+        mSessionMap.put(key, sessionInfo);
+        InputEventBridge.getInstance().bindInputChannel(key, sessionInfo[0]);
+        System.err.println("[OH_WSA] held-back type=" + held.windowType + " '" + held.windowName
+                + "' -> sessionId=" + sessionInfo[0] + " (" + why + ")");
+        // Its earlier relayouts returned no surface; a forced relayout now picks one up.
+        try {
+            ClientWindowFrames frames = new ClientWindowFrames();
+            frames.frame.set(0, 0, held.lastWidth, held.lastHeight);
+            frames.displayFrame.set(0, 0, held.lastWidth, held.lastHeight);
+            frames.parentFrame.set(0, 0, held.lastWidth, held.lastHeight);
+            frames.attachedFrame = new Rect(0, 0, held.lastWidth, held.lastHeight);
+            InsetsState insets = new InsetsState();
+            OhInsetsBridge.copyForWindow(held.window, insets);
+            held.window.resized(frames, false /* reportDraw */, new android.util.MergedConfiguration(),
+                    insets, true /* forceLayout */, false /* alwaysConsumeSystemBars */,
+                    0 /* displayId */, 0 /* syncSeqId */, false /* dragResizing */, null);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] held-back relayout request failed: " + t);
+        }
+    }
+
     private static boolean isMainAppWindow(int androidWindowType) {
         // TYPE_BASE_APPLICATION=1 / TYPE_APPLICATION=2 / TYPE_APPLICATION_STARTING=3
         return androidWindowType >= 1 && androidWindowType <= 3;
@@ -232,6 +597,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                         & WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED) != 0)
                 + ")");
         logBridged("addToDisplay", "-> OH ISceneSessionManager.CreateAndConnectSpecificSession");
+        rememberAttrs(window, attrs);
 
         String windowName = attrs.getTitle() != null ? attrs.getTitle().toString() : "AndroidWindow";
         int windowType = attrs.type;
@@ -286,6 +652,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                         + existing + " (skipping CreateAndConnect)");
                 int[] reuseInfo = new int[] { existing, -1, layerStackId, width, height, 0 };
                 mSessionMap.put(window.asBinder(), reuseInfo);
+                if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION) {
+                    baseWindowAdded(window.asBinder(), attrs.token);
+                }
                 if (outInputChannel != null) {
                     InputChannel clientChannel = InputEventBridge.getInstance()
                             .createInputChannelPair(window.asBinder(), existing, windowName);
@@ -297,6 +666,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             }
         }
 
+        // A dim layer is created right before the window it dims and must stay right under it.
+        boolean dimLayer = attrs.getTitle() != null && attrs.getTitle().toString().startsWith("DimLayer:");
+        if (!dimLayer && shouldHoldBack(windowType, attrs.token)) {
+            return holdBack(new HeldBackWindow(new HeldBackWindow(window, attrs.token, bundleName,
+                    abilityName, moduleName, windowName, windowType, layerStackId, width, height,
+                    ohTokenAddr), dimAmountOf(attrs)),
+                    attrs, outInputChannel, insetsState, attachedFrame, sizeCompatScale);
+        }
+
+        addDimLayer(window.asBinder(), attrs.token, dimAmountOf(attrs), windowName);
         System.err.println("[OH_WSA] PRE-native nativeCreateSession");
         int[] sessionInfo;
         try {
@@ -338,6 +717,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 + sessionInfo[3] + "x" + sessionInfo[4]);
         mSessionMap.put(window.asBinder(), sessionInfo);
         System.err.println("[OH_WSA] step2 mSessionMap.put OK");
+        if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && attrs.token != null) {
+            baseWindowAdded(window.asBinder(), attrs.token);
+        }
 
         if (outInputChannel != null) {
             try {
@@ -488,6 +870,15 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      */
 
     public void remove(IWindow window) throws RemoteException {
+        synchronized (mHeldBack) {
+            mHeldBack.remove(window.asBinder());
+            IBinder token = mBaseWindowTokens.remove(window.asBinder());
+            if (token != null) mTokensWithBase.remove(token);
+        }
+        removeDimLayer(window.asBinder());
+        synchronized (mWindowAttrs) {
+            mWindowAttrs.remove(window.asBinder());
+        }
         OhWindowPolicy.remove(window);
         OhInsetsBridge.remove(window);
         logBridged("remove", "-> OH ISession.Disconnect");
@@ -533,6 +924,30 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             InsetsState insetsState, InsetsSourceControl.Array activeControls,
             Bundle bundle) throws RemoteException {
         logBridged("relayout", "-> OH ISession.UpdateSessionRect");
+
+        final WindowManager.LayoutParams windowAttrs = rememberAttrs(window, attrs);
+        HeldBackWindow held;
+        synchronized (mHeldBack) {
+            held = mHeldBack.get(window.asBinder());
+        }
+        if (held != null) {
+            // What WMS does for a window whose activity is not visible yet: frames, no surface.
+            int[] display = getDefaultDisplaySize();
+            int width = resolveRelayoutDimension(attrs != null ? attrs.width : 0, requestedWidth, display[0]);
+            int height = resolveRelayoutDimension(attrs != null ? attrs.height : 0, requestedHeight, display[1]);
+            held.lastWidth = width;
+            held.lastHeight = height;
+            if (outFrames != null) {
+                outFrames.frame.set(placeWindow(window, windowAttrs, width, height));
+                outFrames.displayFrame.set(0, 0, display[0], display[1]);
+                outFrames.parentFrame.set(0, 0, display[0], display[1]);
+            }
+            fillMergedConfiguration(outMergedConfiguration, width, height);
+            if (insetsState != null) OhInsetsBridge.copyForWindow(window, insetsState);
+            System.err.println("[OH_WSA-relayout] held back " + width + "x" + height
+                    + ": no surface until its activity's window has an OH session");
+            return 0;
+        }
 
         int[] sessionInfo = mSessionMap.get(window.asBinder());
         if (sessionInfo == null) {
@@ -603,13 +1018,21 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
 
         // Update surface size if dimensions changed
         nativeUpdateSurfaceSize(sessionId, width, height);
+        final Rect placed = placeWindow(window, windowAttrs, width, height);
+        setDimOwnerVisible(window.asBinder(), viewVisibility == android.view.View.VISIBLE);
 
         // Populate output frames
         if (outFrames != null) {
-            Rect frame = new Rect(0, 0, width, height);
+            Rect frame = new Rect(placed);
             outFrames.frame.set(frame);
-            outFrames.displayFrame.set(frame);
-            outFrames.parentFrame.set(frame);
+            if (placed.left != 0 || placed.top != 0) {
+                int[] display = getDefaultDisplaySize();
+                outFrames.displayFrame.set(0, 0, display[0], display[1]);
+                outFrames.parentFrame.set(0, 0, display[0], display[1]);
+            } else {
+                outFrames.displayFrame.set(frame);
+                outFrames.parentFrame.set(frame);
+            }
             // G2.14as r3 — verify outFrames really populated
             System.err.println("[OH_WSA-relayout] outFrames populated: frame=" + outFrames.frame
                     + " displayFrame=" + outFrames.displayFrame
@@ -633,7 +1056,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         if (!mReversePushed.contains(window.asBinder())) {
             try {
                 ClientWindowFrames pushedFrames = new ClientWindowFrames();
-                pushedFrames.frame.set(0, 0, width, height);
+                pushedFrames.frame.set(placed);
                 pushedFrames.displayFrame.set(0, 0, width, height);
                 pushedFrames.parentFrame.set(0, 0, width, height);
                 pushedFrames.attachedFrame = new Rect(0, 0, width, height);
@@ -659,36 +1082,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
 
         // Populate output MergedConfiguration with defaults
-        if (outMergedConfiguration != null) {
-            Configuration config = new Configuration();
-            config.screenWidthDp = width * 160 / 320; // approximate dp conversion
-            config.screenHeightDp = height * 160 / 320;
-            config.densityDpi = 320;
-            // 2026-05-11 G2.14as r6 — populate WindowConfiguration.mBounds.
-            // ViewRootImpl.relayoutWindow in LOCAL_LAYOUT mode calls
-            //   mWindowLayout.computeFrames(... winConfig.getBounds(),
-            //                                measuredWidth, measuredHeight, ..., mTmpFrames)
-            // to compute mTmpFrames.frame.  Without bounds in winConfig + with
-            // measuredWidth/Height=0 (first traversal before any successful
-            // measure), computeFrames returns frame=(0,0,0,0) → relayoutAsync=true
-            // → outFrames not propagated → mWinFrame stays 0×0 → next measure
-            // still 0 → death spiral.  Populating winConfig.mBounds with the
-            // real window bounds (matches the OH window rect this adapter
-            // owns) breaks the spiral.
-            Rect winBounds = new Rect(0, 0, width, height);
-            config.windowConfiguration.setBounds(winBounds);
-            config.windowConfiguration.setAppBounds(winBounds);
-            config.windowConfiguration.setMaxBounds(winBounds);
-            outMergedConfiguration.setOverrideConfiguration(config);
-            // Also set global side identically so both global/override paths
-            // are consistent (ViewRoot picks based on context).
-            Configuration globalConfig = new Configuration(config);
-            outMergedConfiguration.setGlobalConfiguration(globalConfig);
-            System.err.println("[OH_WSA-relayout] outMergedConfiguration set: "
-                    + "winConfig.mBounds=" + winBounds
-                    + " screenDp=" + config.screenWidthDp + "x" + config.screenHeightDp
-                    + " densityDpi=" + config.densityDpi);
-        }
+        fillMergedConfiguration(outMergedConfiguration, width, height);
 
         // Create a SurfaceControl backed by the OH RSSurfaceNode.  2026-05-02
         // G2.14r: outSurfaceControl is now stamped with sessionId via
@@ -727,6 +1121,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 // noice's 2nd window (AppIntro vs Main) collided on the 1st window's already-
                 // EGL-bound nw -> 2nd eglCreateWindowSurface failed -> libhwui abort.
                 nativeAttachSessionToSc(outSurfaceControl, sessionId);
+                applyPosition(outSurfaceControl, placed);
 
                 // G2.14r: instead of adding a new BCP native method (which
                 // requires boot image rebuild), the session ID is communicated
@@ -745,6 +1140,39 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
 
         return 0;
+    }
+
+    private static void fillMergedConfiguration(MergedConfiguration outMergedConfiguration,
+            int width, int height) {
+        if (outMergedConfiguration == null) return;
+        Configuration config = new Configuration();
+        config.screenWidthDp = width * 160 / 320; // approximate dp conversion
+        config.screenHeightDp = height * 160 / 320;
+        config.densityDpi = 320;
+        // 2026-05-11 G2.14as r6 — populate WindowConfiguration.mBounds.
+        // ViewRootImpl.relayoutWindow in LOCAL_LAYOUT mode calls
+        //   mWindowLayout.computeFrames(... winConfig.getBounds(),
+        //                                measuredWidth, measuredHeight, ..., mTmpFrames)
+        // to compute mTmpFrames.frame.  Without bounds in winConfig + with
+        // measuredWidth/Height=0 (first traversal before any successful
+        // measure), computeFrames returns frame=(0,0,0,0) → relayoutAsync=true
+        // → outFrames not propagated → mWinFrame stays 0×0 → next measure
+        // still 0 → death spiral.  Populating winConfig.mBounds with the
+        // real window bounds (matches the OH window rect this adapter
+        // owns) breaks the spiral.
+        Rect winBounds = new Rect(0, 0, width, height);
+        config.windowConfiguration.setBounds(winBounds);
+        config.windowConfiguration.setAppBounds(winBounds);
+        config.windowConfiguration.setMaxBounds(winBounds);
+        outMergedConfiguration.setOverrideConfiguration(config);
+        // Also set global side identically so both global/override paths
+        // are consistent (ViewRoot picks based on context).
+        Configuration globalConfig = new Configuration(config);
+        outMergedConfiguration.setGlobalConfiguration(globalConfig);
+        System.err.println("[OH_WSA-relayout] outMergedConfiguration set: "
+                + "winConfig.mBounds=" + winBounds
+                + " screenDp=" + config.screenWidthDp + "x" + config.screenHeightDp
+                + " densityDpi=" + config.densityDpi);
     }
 
     /**
@@ -1179,7 +1607,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      * CLAUDE.md).  An earlier dayu210 hardcode (1080×2340) caused TextViews /
      * Buttons to render outside the HWC-composited 720×1280 visible region.
      */
-    private static int[] getDefaultDisplaySize() {
+    static int[] getDefaultDisplaySize() {
         try {
             android.view.Display d = android.hardware.display.DisplayManagerGlobal
                     .getInstance()

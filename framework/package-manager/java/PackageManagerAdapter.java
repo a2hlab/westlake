@@ -655,6 +655,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      */
     private static final java.util.concurrent.ConcurrentHashMap<String, String> sManifestCache =
             new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Packages BMS has already said it does not have. Nothing installs packages into a running
+     * child, and an app that polls for an absent one (a Play-services check, typically) otherwise
+     * pays a full APK path resolution and manifest query on every call.
+     */
+    private static final java.util.Set<String> sAbsentPackages =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
     public static String getApkManifestJson(String packageName) {
         if (packageName == null || packageName.isEmpty()) return "";
         String cached = sManifestCache.get(packageName);
@@ -693,9 +701,15 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
                     + System.getenv("ASX_WEBVIEW_APK"));
             return getSideloadedWebViewPackageInfo();
         }
+        if (sAbsentPackages.contains(packageName)) {
+            return null;   // asked and answered; see sAbsentPackages
+        }
         String json = nativeGetBundleInfo(packageName, (int) flags);
         if (json == null || json.isEmpty()) {
-            Log.w(TAG, "getPackageInfo: not found: " + packageName);
+            if (sAbsentPackages.add(packageName)) {
+                Log.w(TAG, "getPackageInfo: not found: " + packageName
+                        + " (remembered; later lookups answer null without re-resolving the APK)");
+            }
             return null;
         }
         PackageInfo result = PackageInfoBuilder.fromBundleInfo(json);
@@ -738,8 +752,12 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (cached != null) {
             return cached;
         }
+        if (sAbsentPackages.contains(packageName)) {
+            return null;   // asked and answered; see sAbsentPackages
+        }
         String json = nativeGetApplicationInfo(packageName, (int) flags);
         if (json == null || json.isEmpty()) {
+            sAbsentPackages.add(packageName);
             return null;
         }
         PackageInfo pi = PackageInfoBuilder.fromBundleInfo(json);
@@ -963,12 +981,40 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         return sb.toString();
     }
 
+    // An app that asks the same question in a loop must not fill the log with the answer.
+    // McDonald's polls getPackageInfo("com.android.vending") ~300 times a second while Play
+    // services are absent: one run wrote 59k copies of each trace line and pushed every other
+    // process's logs out of the hilog ring, which is where a diagnosis has to come from.
+    private static final int TRACE_REPEAT_LIMIT = 3;
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>
+            sTraceCounts = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static boolean traceAllowed(String key) {
+        int seen = sTraceCounts.computeIfAbsent(key, unused -> new java.util.concurrent.atomic.AtomicInteger())
+                .incrementAndGet();
+        if (seen <= TRACE_REPEAT_LIMIT) {
+            return true;
+        }
+        // One note per key that the rest are suppressed, then silence.
+        return false;
+    }
+
     private void logBridged(String method, String detail) {
-        Log.d(TAG, "[BRIDGED] " + method + ": " + detail);
+        String key = "B:" + method + ":" + detail;
+        if (traceAllowed(key)) {
+            Log.d(TAG, "[BRIDGED] " + method + ": " + detail);
+        } else if (sTraceCounts.get(key).get() == TRACE_REPEAT_LIMIT + 1) {
+            Log.d(TAG, "[BRIDGED] " + method + ": " + detail + " (repeats suppressed)");
+        }
     }
 
     private void logStub(String method, String detail) {
-        Log.d(TAG, "[STUB] " + method + ": " + detail);
+        String key = "S:" + method + ":" + detail;
+        if (traceAllowed(key)) {
+            Log.d(TAG, "[STUB] " + method + ": " + detail);
+        } else if (sTraceCounts.get(key).get() == TRACE_REPEAT_LIMIT + 1) {
+            Log.d(TAG, "[STUB] " + method + ": " + detail + " (repeats suppressed)");
+        }
     }
 
 
@@ -1056,8 +1102,17 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             PackageInfo info = SourcePackageRegistry.packageInfo(arg0.getPackageName(),
                     arg1 | android.content.pm.PackageManager.GET_SERVICES);
             if (info != null && info.services != null) for (ServiceInfo service : info.services) {
-                if (arg0.getClassName().equals(service.name)) return service;
+                if (arg0.getClassName().equals(service.name)) {
+                    System.err.println("[SOURCE-PM] getServiceInfo HIT " + arg0.getClassName()
+                            + " flags=0x" + Long.toHexString(arg1)
+                            + " meta=" + (service.metaData == null ? -1 : service.metaData.size()));
+                    return service;
+                }
             }
+            System.err.println("[SOURCE-PM] getServiceInfo MISS " + arg0
+                    + " flags=0x" + Long.toHexString(arg1)
+                    + " services=" + (info == null ? "null-info"
+                            : (info.services == null ? "null" : String.valueOf(info.services.length))));
             return null;
         }
         return ServiceInfoResolver.resolve(arg0, arg1);
