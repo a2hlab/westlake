@@ -159,6 +159,7 @@ extern int register_android_view_KeyCharacterMap(JNIEnv* env);
 // to avoid pulling libinput.so / libui.so / ui::Transform / HmacKeyManager /
 // IInputConstants AIDL chain into liboh_android_runtime.
 extern int register_android_view_MotionEvent(JNIEnv* env);
+extern int register_android_view_VelocityTracker(JNIEnv* env);
 // WESTLAKE §700: stock android.graphics.SurfaceTexture Java lifecycle backed by an
 // OHOS in-process consumer/producer surface pair at the native boundary.
 extern int register_android_graphics_SurfaceTexture_oh(JNIEnv* env);
@@ -258,6 +259,10 @@ static const RegJNIRec kRegJNI[] = {
     // android_view_MotionEvent_aosp.cpp (replaces AOSP direct-reference
     // MotionEvent.cpp; class layout under adapter control, no ABI drift).
     { "register_android_view_MotionEvent",    register_android_view_MotionEvent },
+    // Registered at runtime startup, not lazily from the touch paths in
+    // oh_input_bridge.cpp: apps call VelocityTracker.obtain() while attaching
+    // their first view hierarchy, before any injected input exists.
+    { "register_android_view_VelocityTracker", register_android_view_VelocityTracker },
     { "register_android_view_InputEventReceiver", register_android_view_InputEventReceiver },
     { "register_android_content_AssetManager", register_android_content_AssetManager },
     { "register_android_os_MessageQueue",     register_android_os_MessageQueue },

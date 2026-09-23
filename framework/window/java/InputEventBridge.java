@@ -32,6 +32,9 @@ public class InputEventBridge {
 
     // Maps window token -> session ID for input routing
     private final Map<IBinder, Integer> mWindowSessionMap = new ConcurrentHashMap<>();
+    // Server ends for windows whose OH session does not exist yet (WindowSessionAdapter holds a
+    // dialog back until its activity's window has one). Registered once the session id is known.
+    private final Map<IBinder, InputChannel> mUnboundServerChannels = new ConcurrentHashMap<>();
 
     // Maps session ID -> server-side InputChannel
     private final Map<Integer, InputChannel> mServerChannels = new ConcurrentHashMap<>();
@@ -193,6 +196,10 @@ public class InputEventBridge {
      * Remove an InputChannel pair when a window is destroyed.
      */
     public void destroyInputChannel(IBinder windowToken) {
+        InputChannel unbound = mUnboundServerChannels.remove(windowToken);
+        if (unbound != null) {
+            unbound.dispose();
+        }
         Integer sessionId = mWindowSessionMap.remove(windowToken);
         if (sessionId != null) {
             InputChannel serverChannel = mServerChannels.remove(sessionId);
@@ -202,6 +209,28 @@ public class InputEventBridge {
             }
             Log.i(TAG, "InputChannel destroyed: session=" + sessionId);
         }
+    }
+
+    /**
+     * Create the pair for a window whose OH session comes later: ViewRootImpl gets its client end
+     * now, as addToDisplay requires; the server end waits for {@link #bindInputChannel}.
+     */
+    public InputChannel createUnboundInputChannelPair(IBinder windowToken, String windowName) {
+        InputChannel[] channels = InputChannel.openInputChannelPair(windowName + " (OH session pending)");
+        mUnboundServerChannels.put(windowToken, channels[0]);
+        return channels[1];
+    }
+
+    /** Register a pending window's server end under the OH session it now has. */
+    public void bindInputChannel(IBinder windowToken, int sessionId) {
+        InputChannel serverChannel = mUnboundServerChannels.remove(windowToken);
+        if (serverChannel == null) {
+            return;
+        }
+        mServerChannels.put(sessionId, serverChannel);
+        mWindowSessionMap.put(windowToken, sessionId);
+        nativeRegisterInputChannel(sessionId, serverChannel);
+        Log.i(TAG, "InputChannel bound: session=" + sessionId);
     }
 
     /**

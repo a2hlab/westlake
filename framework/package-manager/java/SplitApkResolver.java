@@ -12,8 +12,20 @@ public final class SplitApkResolver {
     private SplitApkResolver() {}
 
     public static void populate(PackageInfo packageInfo) {
-        if (packageInfo == null || packageInfo.applicationInfo == null) return;
-        ApplicationInfo info = packageInfo.applicationInfo;
+        if (packageInfo == null) return;
+        populate(packageInfo, packageInfo.applicationInfo);
+    }
+
+    /**
+     * Direct launch builds an ApplicationInfo without a surrounding PackageInfo, so the
+     * per-package split fields have no carrier. Resolve against the ApplicationInfo alone.
+     */
+    public static void populate(ApplicationInfo info) {
+        populate(null, info);
+    }
+
+    private static void populate(PackageInfo packageInfo, ApplicationInfo info) {
+        if (info == null) return;
         String basePath = info.sourceDir;
         if (basePath == null || basePath.isEmpty()) return;
 
@@ -102,8 +114,10 @@ public final class SplitApkResolver {
         info.splitNames = names;
         info.splitSourceDirs = paths;
         info.splitPublicSourceDirs = paths.clone();
-        packageInfo.splitNames = names.clone();
-        packageInfo.splitRevisionCodes = new int[count];
+        if (packageInfo != null) {
+            packageInfo.splitNames = names.clone();
+            packageInfo.splitRevisionCodes = new int[count];
+        }
         System.err.println("[WESTLAKE-PM] split APKs " + info.packageName
                 + " source=" + source + " count=" + count
                 + " paths=" + java.util.Arrays.toString(paths));

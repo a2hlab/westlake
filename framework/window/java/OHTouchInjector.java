@@ -95,6 +95,23 @@ public final class OHTouchInjector {
         }
     }
 
+    /** The focused TextView of the window that has input focus, as an IME would target. */
+    private static View focusedEditable() {
+        View fallback = null;
+        try {
+            for (View root : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
+                if (root == null || !root.isAttachedToWindow()) continue;
+                View focus = root.findFocus();
+                if (!(focus instanceof TextView) || !((TextView) focus).onCheckIsTextEditor()) continue;
+                if (root.hasWindowFocus()) return focus;
+                fallback = focus;
+            }
+        } catch (Throwable throwable) {
+            lastTextCommit = "focus-search:" + throwable;
+        }
+        return fallback;
+    }
+
     static final class TextTask implements Runnable {
         private final View root;
         private final String text;
@@ -108,6 +125,10 @@ public final class OHTouchInjector {
         public void run() {
             try {
                 View focused = root.findFocus();
+                if (!(focused instanceof TextView) || !root.hasWindowFocus()) {
+                    View other = focusedEditable();
+                    if (other != null) focused = other;
+                }
                 if (!(focused instanceof TextView)) {
                     lastTextCommit = "focused="
                             + (focused == null ? "null" : focused.getClass().getName());
@@ -176,7 +197,12 @@ public final class OHTouchInjector {
             }
             runCount++;
             try {
-                lastHandled = view.dispatchTouchEvent(event) ? 1 : 0;
+                View target = targetFor(view, event)[0];
+                event.offsetLocation(-gestureLeft, -gestureTop);
+                lastHandled = target.dispatchTouchEvent(event) ? 1 : 0;
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    gestureView = null;
+                }
                 lastEx = "none";
                 if (action == MotionEvent.ACTION_DOWN) {
                     lastDownDispatchUptime = SystemClock.uptimeMillis();
@@ -184,7 +210,7 @@ public final class OHTouchInjector {
                     lastDownDispatchUptime = 0;
                 }
                 if (action == MotionEvent.ACTION_UP && FORCE_PERFORM_CLICK) {
-                    forceClickAt(view, event.getX(), event.getY());
+                    forceClickAt(target, event.getX(), event.getY());
                 }
             } catch (Throwable throwable) {
                 lastHandled = -1;
@@ -192,6 +218,62 @@ public final class OHTouchInjector {
             }
         }
     }
+
+    // The native tap channel knows one view root and raw screen coordinates. Android's
+    // InputDispatcher instead picks the topmost touchable window under the pointer, or a
+    // touch-modal window anywhere, and delivers the event in that window's coordinates; the
+    // window keeps the gesture until UP. OpenHarmony stacks this app's windows in creation
+    // order, which is OH session order, so the topmost window is the one with the highest
+    // session id.
+    private static View gestureView;
+    private static int gestureLeft, gestureTop;
+
+    private static View[] targetFor(View fallback, MotionEvent event) {
+        final int action = event.getActionMasked();
+        if (action != MotionEvent.ACTION_DOWN && gestureView != null) {
+            return new View[] { gestureView };
+        }
+        View chosen = null;
+        int chosenSession = -1;
+        int[] loc = new int[2];
+        try {
+            java.util.List<View> roots =
+                    android.view.WindowManagerGlobal.getInstance().getWindowViews();
+            float x = event.getX();
+            float y = event.getY();
+            for (View root : roots) {
+                if (root == null || !root.isAttachedToWindow() || root.getVisibility() != View.VISIBLE) continue;
+                if (!(root.getLayoutParams() instanceof android.view.WindowManager.LayoutParams)) continue;
+                android.view.WindowManager.LayoutParams lp =
+                        (android.view.WindowManager.LayoutParams) root.getLayoutParams();
+                if ((lp.flags & android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) != 0) continue;
+                int session = InputEventBridge.getInstance().getSessionId(root.getWindowToken());
+                if (session <= chosenSession) continue;
+                root.getLocationOnScreen(loc);
+                boolean inside = x >= loc[0] && y >= loc[1]
+                        && x < loc[0] + root.getWidth() && y < loc[1] + root.getHeight();
+                boolean touchModal = (lp.flags & (android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)) == 0;
+                if (inside || touchModal) {
+                    chosen = root;
+                    chosenSession = session;
+                }
+            }
+        } catch (Throwable throwable) {
+            lastEx = "route:" + throwable;
+        }
+        if (chosen == null) chosen = fallback;
+        chosen.getLocationOnScreen(loc);
+        gestureView = chosen;
+        gestureLeft = loc[0];
+        gestureTop = loc[1];
+        lastRoute = chosen.getClass().getSimpleName() + " session="
+                + InputEventBridge.getInstance().getSessionId(chosen.getWindowToken())
+                + " at " + loc[0] + "," + loc[1];
+        return new View[] { chosen };
+    }
+
+    public static String lastRoute = "none";
 
     private static boolean forceClickAt(View view, float x, float y) {
         if (view instanceof ViewGroup) {
