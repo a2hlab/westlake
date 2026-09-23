@@ -932,7 +932,29 @@ void *dlopen(const char *filename, int flags)
      * naming libraries one at a time: the directory holds exactly the libraries WebView is meant
      * to use, and a fix per library is a fix per outage.  Only bare names are redirected; a
      * caller that passes a path has already chosen.
+     *
+     * This must run BEFORE the .z.so probe below.  That probe opens the plain name first and
+     * returns the handle when it succeeds, and for every name in the WebView directory the plain
+     * name does succeed -- out of the runtime directory, which the search path lists first.  With
+     * the probe in front, this block was unreachable for exactly the libraries it exists to fix:
+     * NewPipe and AnkiDroid both lost all fourteen ASurfaceTransaction entry points Chromium
+     * looks up and died on SIGTRAP in CrBrowserMain, with "library resolved" never once logged.
      */
+    static char webview_library[512];
+    if (basename != NULL && basename == filename &&
+        caller_is_webview(__builtin_return_address(0), NULL)) {
+        const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
+        if (dir != NULL && dir[0] != '\0') {
+            snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
+            if (access(webview_library, R_OK) == 0) {
+                actual_filename = webview_library;
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] library resolved %s -> %s for the WebView "
+                        "caller\n",
+                        filename, actual_filename);
+            }
+        }
+    }
     /*
      * OH names several NDK libraries with a .z.so suffix that Android spells plainly, and an app
      * asking for the Android name gets "No such file or directory" even though the library is
@@ -941,14 +963,15 @@ void *dlopen(const char *filename, int flags)
      *
      * Tried only after the plain name fails to open, so a board that does ship the Android
      * spelling keeps winning, and applied to any caller because the naming is the platform's, not
-     * WebView's.
+     * WebView's.  Opens actual_filename, so a WebView redirect decided above is what gets tried;
+     * the .z.so spelling is only ever derived from a bare name the caller passed.
      */
     static char suffixed[512];
     if (basename != NULL && basename == filename) {
         size_t length = strlen(filename);
         if (length > 3 && strcmp(filename + length - 3, ".so") == 0 &&
             (length < 5 || strcmp(filename + length - 5, ".z.so") != 0)) {
-            void *plain = real_dlopen(filename, flags);
+            void *plain = real_dlopen(actual_filename, flags);
             if (plain != NULL) {
                 return plain;
             }
@@ -962,22 +985,6 @@ void *dlopen(const char *filename, int flags)
                             filename, suffixed);
                 }
                 return handle;
-            }
-        }
-    }
-
-    static char webview_library[512];
-    if (basename != NULL && basename == filename &&
-        caller_is_webview(__builtin_return_address(0), NULL)) {
-        const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
-        if (dir != NULL && dir[0] != '\0') {
-            snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
-            if (access(webview_library, R_OK) == 0) {
-                actual_filename = webview_library;
-                fprintf(stderr,
-                        "[WESTLAKE-WEBVIEW-BIONIC] library resolved %s -> %s for the WebView "
-                        "caller\n",
-                        filename, actual_filename);
             }
         }
     }
