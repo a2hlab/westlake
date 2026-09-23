@@ -1268,6 +1268,13 @@ public class AppSpawnXInit {
                     }
                     // Nothing is held for an in-process binding, so releasing one always succeeds.
                     if ("unbindService".equals(name)) return Boolean.TRUE;
+                    // Called by ActivityThread.installContentProviders on the main thread, after
+                    // the Application is made and before its onCreate -- the only point of ours
+                    // in that window. Used to end the pre-bind WebView hold; see AppSchedulerBridge.
+                    if ("publishContentProviders".equals(name)) {
+                        adapter.activity.AppSchedulerBridge.releaseWebViewSupportHoldBeforeOnCreate();
+                        return null;
+                    }
                 }
                 if ("hashCode".equals(name))   return System.identityHashCode(proxy);
                 if ("equals".equals(name))     return args != null && args.length == 1 && args[0] == proxy;
