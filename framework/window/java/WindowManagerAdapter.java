@@ -1323,19 +1323,41 @@ public class WindowManagerAdapter extends IWindowManager.Stub {
         throw new UnsupportedOperationException("OpenHarmony input consumer token teardown is not connected");
     }
 
+    /**
+     * A window context is answered with the configuration this process is already running under.
+     *
+     * OH has no display area to attach a client token to, and throwing here is worse than having
+     * no answer: Chromium asks for a window context from DisplayAndroidManager while its browser
+     * process starts, and every JNI return path runs CheckException, so a throw anywhere below
+     * becomes an immediate abort rather than a degraded display. Wikipedia dies opening an article
+     * and Gecko dies the same way, both inside this method.
+     *
+     * What comes back is real but not a connection: the system Configuration, which the bind path
+     * built from the OH display, plus the display the caller asked about. Nothing is registered
+     * with OH, so a later configuration change is not delivered to this token -- callers that only
+     * read metrics and a display id from the context are served, and callers that expect to be
+     * told when the display area changes are not.
+     */
+    private static android.window.WindowContextInfo windowContextInfo(int displayId) {
+        Configuration configuration =
+                new Configuration(android.content.res.Resources.getSystem().getConfiguration());
+        return new android.window.WindowContextInfo(configuration,
+                displayId >= 0 ? displayId : android.view.Display.DEFAULT_DISPLAY);
+    }
+
     @Override
     public android.window.WindowContextInfo attachWindowContextToDisplayArea(android.app.IApplicationThread appThread, android.os.IBinder clientToken, int type, int displayId, android.os.Bundle options) throws android.os.RemoteException {
-        throw new UnsupportedOperationException("OpenHarmony window context attachment is not connected");
+        return windowContextInfo(displayId);
     }
 
     @Override
     public android.window.WindowContextInfo attachWindowContextToWindowToken(android.app.IApplicationThread appThread, android.os.IBinder clientToken, android.os.IBinder token) throws android.os.RemoteException {
-        throw new UnsupportedOperationException("OpenHarmony window context attachment is not connected");
+        return windowContextInfo(android.view.Display.DEFAULT_DISPLAY);
     }
 
     @Override
     public android.window.WindowContextInfo attachWindowContextToDisplayContent(android.app.IApplicationThread appThread, android.os.IBinder clientToken, int displayId) throws android.os.RemoteException {
-        throw new UnsupportedOperationException("OpenHarmony window context attachment is not connected");
+        return windowContextInfo(displayId);
     }
 
     @Override

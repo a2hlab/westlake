@@ -127,6 +127,15 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // before first frame (McDonald's, AnalyticsHelper on splash).
             case "location":
                 return LocationManagerAdapter.getBinder();
+            // No OH service to route to, and a null manager throws in Kotlin callers
+            // (`as UiModeManager`): answered in process, see LocalServiceBinders.
+            case "uimode":
+            case "power":
+            case "thermalservice":
+            case "alarm":
+            case "clipboard":
+            case "account":
+                return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
             case "network_management":

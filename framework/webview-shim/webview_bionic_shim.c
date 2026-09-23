@@ -34,8 +34,8 @@ static int caller_is_webview(void *return_address, const char **caller_path)
     return 1;
 }
 
-static int caller_uses_bionic_signal_abi(void *return_address,
-                                         const char **caller_path)
+/* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
+static int caller_is_android_dso(void *return_address, const char **caller_path)
 {
     Dl_info caller = {0};
     if (dladdr(return_address, &caller) == 0 || caller.dli_fname == NULL) {
@@ -49,6 +49,12 @@ static int caller_uses_bionic_signal_abi(void *return_address,
         *caller_path = caller.dli_fname;
     }
     return 1;
+}
+
+static int caller_uses_bionic_signal_abi(void *return_address,
+                                         const char **caller_path)
+{
+    return caller_is_android_dso(return_address, caller_path);
 }
 
 /*
@@ -913,6 +919,68 @@ void *dlopen(const char *filename, int flags)
         }
         return NULL;
     }
+    /*
+     * WebView's own libraries come from the WebView library directory, which the search path
+     * lists last.  Every name in it also exists in the runtime directory, which comes first, so a
+     * bare soname from a WebView caller resolves to the runtime's copy.  For libandroid.so that
+     * means the whole NDK SurfaceControl surface goes missing -- the runtime's exports none of
+     * its 27 entry points and the WebView one exports all of them -- and the same holds for
+     * libjnigraphics.so, which the boundaries probe found in the identical position before
+     * anything had tripped over it.
+     *
+     * So resolve any bare soname against that directory for WebView's callers, rather than
+     * naming libraries one at a time: the directory holds exactly the libraries WebView is meant
+     * to use, and a fix per library is a fix per outage.  Only bare names are redirected; a
+     * caller that passes a path has already chosen.
+     */
+    /*
+     * OH names several NDK libraries with a .z.so suffix that Android spells plainly, and an app
+     * asking for the Android name gets "No such file or directory" even though the library is
+     * there. LocalSend's Flutter engine looks up ANativeWindow_acquire and the AHardwareBuffer
+     * family in libnativewindow.so; /vendor/lib64/libnativewindow.z.so exports all of them.
+     *
+     * Tried only after the plain name fails to open, so a board that does ship the Android
+     * spelling keeps winning, and applied to any caller because the naming is the platform's, not
+     * WebView's.
+     */
+    static char suffixed[512];
+    if (basename != NULL && basename == filename) {
+        size_t length = strlen(filename);
+        if (length > 3 && strcmp(filename + length - 3, ".so") == 0 &&
+            (length < 5 || strcmp(filename + length - 5, ".z.so") != 0)) {
+            void *plain = real_dlopen(filename, flags);
+            if (plain != NULL) {
+                return plain;
+            }
+            snprintf(suffixed, sizeof(suffixed), "%.*s.z.so", (int) (length - 3), filename);
+            void *handle = real_dlopen(suffixed, flags);
+            if (handle != NULL) {
+                static int logged;
+                if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                    fprintf(stderr,
+                            "[WESTLAKE-WEBVIEW-BIONIC] OH library naming: %s -> %s\n",
+                            filename, suffixed);
+                }
+                return handle;
+            }
+        }
+    }
+
+    static char webview_library[512];
+    if (basename != NULL && basename == filename &&
+        caller_is_webview(__builtin_return_address(0), NULL)) {
+        const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
+        if (dir != NULL && dir[0] != '\0') {
+            snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
+            if (access(webview_library, R_OK) == 0) {
+                actual_filename = webview_library;
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] library resolved %s -> %s for the WebView "
+                        "caller\n",
+                        filename, actual_filename);
+            }
+        }
+    }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
@@ -928,49 +996,319 @@ void *dlopen(const char *filename, int flags)
 }
 
 /*
- * WESTLAKE §680: translate Android/bionic sysconf selectors at the WebView
- * libc boundary.
+ * WESTLAKE §680: translate Android/bionic sysconf selectors at the libc boundary.
  *
- * Bionic assigns _SC_PAGESIZE=39 and _SC_PAGE_SIZE=40.  OH musl assigns both
- * spellings value 30; its selectors 39 and 40 mean unrelated limits.  Passing
- * Chromium's selector 39 straight to musl therefore reports 1000 bytes, which
- * violates Chromium's allocator alignment invariant and deliberately traps.
+ * Bionic and OH musl number sysconf selectors independently: bionic's _SC_PAGESIZE is 39, and
+ * musl's 39 is _SC_BC_STRING_MAX, so an Android-built caller asking for the page size gets 1000.
+ * Chromium's allocator traps on that; McDonald's Realm rounds its mmap offsets with it and the
+ * kernel rejects the unaligned offset (EINVAL) when the home dashboard opens its database. The CPU
+ * count, physical-memory and clock-tick selectors differ the same way.
  *
- * The memory selectors differ too. Bionic uses 98 and 99 for _SC_PHYS_PAGES
- * and _SC_AVPHYS_PAGES, while OH musl uses its own selector namespace. Passing
- * Chromium's _SC_PHYS_PAGES straight through makes its physical-memory query
- * fail and collapses Blink's maximum decoded-image budget to zero; valid JPEG
- * files then fail JPEGImageDecoder::SetSize before pixel decoding starts.
- *
- * This shim is process-wide through LD_PRELOAD, so do not globally reinterpret
- * bionic selector numbers: OH-native libraries legitimately use the musl
- * namespace. Translate only direct callers from the Android-built WebView DSO,
- * and pass every other call to the next (musl) definition unchanged.
+ * This shim is process-wide through LD_PRELOAD, and OH-native libraries legitimately use the
+ * musl numbering, so only direct callers built against bionic are translated: the WebView DSO and
+ * the app's own libraries. Everything else goes to musl unchanged.
  */
+/*
+ * Bionic sysconf selector -> OH musl selector, matched by name (generated from the NDK r25
+ * sysroot's bits/sysconf.h and the OH 6.1 SDK's musl unistd.h). -2: a cache-geometry query
+ * musl lacks, which bionic itself answers 0 when unknown; -1: no musl counterpart.
+ */
+static const short westlake_bionic_sysconf[] = {
+    [0x0000] = 0,  /* _SC_ARG_MAX */
+    [0x0001] = 36,  /* _SC_BC_BASE_MAX */
+    [0x0002] = 37,  /* _SC_BC_DIM_MAX */
+    [0x0003] = 38,  /* _SC_BC_SCALE_MAX */
+    [0x0004] = 39,  /* _SC_BC_STRING_MAX */
+    [0x0005] = 1,  /* _SC_CHILD_MAX */
+    [0x0006] = 2,  /* _SC_CLK_TCK */
+    [0x0007] = 40,  /* _SC_COLL_WEIGHTS_MAX */
+    [0x0008] = 42,  /* _SC_EXPR_NEST_MAX */
+    [0x0009] = 43,  /* _SC_LINE_MAX */
+    [0x000a] = 3,  /* _SC_NGROUPS_MAX */
+    [0x000b] = 4,  /* _SC_OPEN_MAX */
+    [0x000c] = 88,  /* _SC_PASS_MAX */
+    [0x000d] = 47,  /* _SC_2_C_BIND */
+    [0x000e] = 48,  /* _SC_2_C_DEV */
+    [0x000f] = -1,  /* _SC_2_C_VERSION */
+    [0x0010] = 95,  /* _SC_2_CHAR_TERM */
+    [0x0011] = 49,  /* _SC_2_FORT_DEV */
+    [0x0012] = 50,  /* _SC_2_FORT_RUN */
+    [0x0013] = 52,  /* _SC_2_LOCALEDEF */
+    [0x0014] = 51,  /* _SC_2_SW_DEV */
+    [0x0015] = 97,  /* _SC_2_UPE */
+    [0x0016] = 46,  /* _SC_2_VERSION */
+    [0x0017] = 7,  /* _SC_JOB_CONTROL */
+    [0x0018] = 8,  /* _SC_SAVED_IDS */
+    [0x0019] = 29,  /* _SC_VERSION */
+    [0x001a] = 44,  /* _SC_RE_DUP_MAX */
+    [0x001b] = 5,  /* _SC_STREAM_MAX */
+    [0x001c] = 6,  /* _SC_TZNAME_MAX */
+    [0x001d] = 92,  /* _SC_XOPEN_CRYPT */
+    [0x001e] = 93,  /* _SC_XOPEN_ENH_I18N */
+    [0x001f] = 94,  /* _SC_XOPEN_SHM */
+    [0x0020] = 89,  /* _SC_XOPEN_VERSION */
+    [0x0021] = 90,  /* _SC_XOPEN_XCU_VERSION */
+    [0x0022] = 130,  /* _SC_XOPEN_REALTIME */
+    [0x0023] = 131,  /* _SC_XOPEN_REALTIME_THREADS */
+    [0x0024] = 129,  /* _SC_XOPEN_LEGACY */
+    [0x0025] = 87,  /* _SC_ATEXIT_MAX */
+    [0x0026] = 60,  /* _SC_IOV_MAX */
+    [0x0027] = 30,  /* _SC_PAGESIZE */
+    [0x0028] = 30,  /* _SC_PAGE_SIZE */
+    [0x0029] = 91,  /* _SC_XOPEN_UNIX */
+    [0x002a] = 125,  /* _SC_XBS5_ILP32_OFF32 */
+    [0x002b] = 126,  /* _SC_XBS5_ILP32_OFFBIG */
+    [0x002c] = 127,  /* _SC_XBS5_LP64_OFF64 */
+    [0x002d] = 128,  /* _SC_XBS5_LPBIG_OFFBIG */
+    [0x002e] = 23,  /* _SC_AIO_LISTIO_MAX */
+    [0x002f] = 24,  /* _SC_AIO_MAX */
+    [0x0030] = 25,  /* _SC_AIO_PRIO_DELTA_MAX */
+    [0x0031] = 26,  /* _SC_DELAYTIMER_MAX */
+    [0x0032] = 27,  /* _SC_MQ_OPEN_MAX */
+    [0x0033] = 28,  /* _SC_MQ_PRIO_MAX */
+    [0x0034] = 31,  /* _SC_RTSIG_MAX */
+    [0x0035] = 32,  /* _SC_SEM_NSEMS_MAX */
+    [0x0036] = 33,  /* _SC_SEM_VALUE_MAX */
+    [0x0037] = 34,  /* _SC_SIGQUEUE_MAX */
+    [0x0038] = 35,  /* _SC_TIMER_MAX */
+    [0x0039] = 12,  /* _SC_ASYNCHRONOUS_IO */
+    [0x003a] = 15,  /* _SC_FSYNC */
+    [0x003b] = 16,  /* _SC_MAPPED_FILES */
+    [0x003c] = 17,  /* _SC_MEMLOCK */
+    [0x003d] = 18,  /* _SC_MEMLOCK_RANGE */
+    [0x003e] = 19,  /* _SC_MEMORY_PROTECTION */
+    [0x003f] = 20,  /* _SC_MESSAGE_PASSING */
+    [0x0040] = 13,  /* _SC_PRIORITIZED_IO */
+    [0x0041] = 10,  /* _SC_PRIORITY_SCHEDULING */
+    [0x0042] = 9,  /* _SC_REALTIME_SIGNALS */
+    [0x0043] = 21,  /* _SC_SEMAPHORES */
+    [0x0044] = 22,  /* _SC_SHARED_MEMORY_OBJECTS */
+    [0x0045] = 14,  /* _SC_SYNCHRONIZED_IO */
+    [0x0046] = 11,  /* _SC_TIMERS */
+    [0x0047] = 69,  /* _SC_GETGR_R_SIZE_MAX */
+    [0x0048] = 70,  /* _SC_GETPW_R_SIZE_MAX */
+    [0x0049] = 71,  /* _SC_LOGIN_NAME_MAX */
+    [0x004a] = 73,  /* _SC_THREAD_DESTRUCTOR_ITERATIONS */
+    [0x004b] = 74,  /* _SC_THREAD_KEYS_MAX */
+    [0x004c] = 75,  /* _SC_THREAD_STACK_MIN */
+    [0x004d] = 76,  /* _SC_THREAD_THREADS_MAX */
+    [0x004e] = 72,  /* _SC_TTY_NAME_MAX */
+    [0x004f] = 67,  /* _SC_THREADS */
+    [0x0050] = 77,  /* _SC_THREAD_ATTR_STACKADDR */
+    [0x0051] = 78,  /* _SC_THREAD_ATTR_STACKSIZE */
+    [0x0052] = 79,  /* _SC_THREAD_PRIORITY_SCHEDULING */
+    [0x0053] = 80,  /* _SC_THREAD_PRIO_INHERIT */
+    [0x0054] = 81,  /* _SC_THREAD_PRIO_PROTECT */
+    [0x0055] = 68,  /* _SC_THREAD_SAFE_FUNCTIONS */
+    [0x0056] = -1,
+    [0x0057] = -1,
+    [0x0058] = -1,
+    [0x0059] = -1,
+    [0x005a] = -1,
+    [0x005b] = -1,
+    [0x005c] = -1,
+    [0x005d] = -1,
+    [0x005e] = -1,
+    [0x005f] = -1,
+    [0x0060] = 83,  /* _SC_NPROCESSORS_CONF */
+    [0x0061] = 84,  /* _SC_NPROCESSORS_ONLN */
+    [0x0062] = 85,  /* _SC_PHYS_PAGES */
+    [0x0063] = 86,  /* _SC_AVPHYS_PAGES */
+    [0x0064] = 149,  /* _SC_MONOTONIC_CLOCK */
+    [0x0065] = 168,  /* _SC_2_PBS */
+    [0x0066] = 169,  /* _SC_2_PBS_ACCOUNTING */
+    [0x0067] = 175,  /* _SC_2_PBS_CHECKPOINT */
+    [0x0068] = 170,  /* _SC_2_PBS_LOCATE */
+    [0x0069] = 171,  /* _SC_2_PBS_MESSAGE */
+    [0x006a] = 172,  /* _SC_2_PBS_TRACK */
+    [0x006b] = 132,  /* _SC_ADVISORY_INFO */
+    [0x006c] = 133,  /* _SC_BARRIERS */
+    [0x006d] = 137,  /* _SC_CLOCK_SELECTION */
+    [0x006e] = 138,  /* _SC_CPUTIME */
+    [0x006f] = 180,  /* _SC_HOST_NAME_MAX */
+    [0x0070] = 235,  /* _SC_IPV6 */
+    [0x0071] = 236,  /* _SC_RAW_SOCKETS */
+    [0x0072] = 153,  /* _SC_READER_WRITER_LOCKS */
+    [0x0073] = 155,  /* _SC_REGEXP */
+    [0x0074] = 157,  /* _SC_SHELL */
+    [0x0075] = 159,  /* _SC_SPAWN */
+    [0x0076] = 154,  /* _SC_SPIN_LOCKS */
+    [0x0077] = 160,  /* _SC_SPORADIC_SERVER */
+    [0x0078] = 241,  /* _SC_SS_REPL_MAX */
+    [0x0079] = 173,  /* _SC_SYMLOOP_MAX */
+    [0x007a] = 139,  /* _SC_THREAD_CPUTIME */
+    [0x007b] = 82,  /* _SC_THREAD_PROCESS_SHARED */
+    [0x007c] = 247,  /* _SC_THREAD_ROBUST_PRIO_INHERIT */
+    [0x007d] = 248,  /* _SC_THREAD_ROBUST_PRIO_PROTECT */
+    [0x007e] = 161,  /* _SC_THREAD_SPORADIC_SERVER */
+    [0x007f] = 164,  /* _SC_TIMEOUTS */
+    [0x0080] = 181,  /* _SC_TRACE */
+    [0x0081] = 182,  /* _SC_TRACE_EVENT_FILTER */
+    [0x0082] = 242,  /* _SC_TRACE_EVENT_NAME_MAX */
+    [0x0083] = 183,  /* _SC_TRACE_INHERIT */
+    [0x0084] = 184,  /* _SC_TRACE_LOG */
+    [0x0085] = 243,  /* _SC_TRACE_NAME_MAX */
+    [0x0086] = 244,  /* _SC_TRACE_SYS_MAX */
+    [0x0087] = 245,  /* _SC_TRACE_USER_EVENT_MAX */
+    [0x0088] = 165,  /* _SC_TYPED_MEMORY_OBJECTS */
+    [0x0089] = 237,  /* _SC_V7_ILP32_OFF32 */
+    [0x008a] = 238,  /* _SC_V7_ILP32_OFFBIG */
+    [0x008b] = 239,  /* _SC_V7_LP64_OFF64 */
+    [0x008c] = 240,  /* _SC_V7_LPBIG_OFFBIG */
+    [0x008d] = 246,  /* _SC_XOPEN_STREAMS */
+    [0x008e] = -1,  /* _SC_XOPEN_UUCP */
+    [0x008f] = -2,  /* _SC_LEVEL1_ICACHE_SIZE */
+    [0x0090] = -2,  /* _SC_LEVEL1_ICACHE_ASSOC */
+    [0x0091] = -2,  /* _SC_LEVEL1_ICACHE_LINESIZE */
+    [0x0092] = -2,  /* _SC_LEVEL1_DCACHE_SIZE */
+    [0x0093] = -2,  /* _SC_LEVEL1_DCACHE_ASSOC */
+    [0x0094] = -2,  /* _SC_LEVEL1_DCACHE_LINESIZE */
+    [0x0095] = -2,  /* _SC_LEVEL2_CACHE_SIZE */
+    [0x0096] = -2,  /* _SC_LEVEL2_CACHE_ASSOC */
+    [0x0097] = -2,  /* _SC_LEVEL2_CACHE_LINESIZE */
+    [0x0098] = -2,  /* _SC_LEVEL3_CACHE_SIZE */
+    [0x0099] = -2,  /* _SC_LEVEL3_CACHE_ASSOC */
+    [0x009a] = -2,  /* _SC_LEVEL3_CACHE_LINESIZE */
+    [0x009b] = -2,  /* _SC_LEVEL4_CACHE_SIZE */
+    [0x009c] = -2,  /* _SC_LEVEL4_CACHE_ASSOC */
+    [0x009d] = -2,  /* _SC_LEVEL4_CACHE_LINESIZE */
+};
+
+/*
+ * Bionic pathconf selector -> OH musl selector, matched by name (NDK r25 unistd.h and the
+ * OH 6.1 SDK's musl unistd.h). -1: no musl counterpart. Every value is shifted: bionic's
+ * _PC_NAME_MAX is 4, musl's is 3, so an untranslated call answers a different limit.
+ */
+static const short westlake_bionic_pathconf[] = {
+    [0x00] = 13,  /* _PC_FILESIZEBITS */
+    [0x01] = 0,  /* _PC_LINK_MAX */
+    [0x02] = 1,  /* _PC_MAX_CANON */
+    [0x03] = 2,  /* _PC_MAX_INPUT */
+    [0x04] = 3,  /* _PC_NAME_MAX */
+    [0x05] = 4,  /* _PC_PATH_MAX */
+    [0x06] = 5,  /* _PC_PIPE_BUF */
+    [0x07] = 20,  /* _PC_2_SYMLINKS */
+    [0x08] = 18,  /* _PC_ALLOC_SIZE_MIN */
+    [0x09] = 14,  /* _PC_REC_INCR_XFER_SIZE */
+    [0x0a] = 15,  /* _PC_REC_MAX_XFER_SIZE */
+    [0x0b] = 16,  /* _PC_REC_MIN_XFER_SIZE */
+    [0x0c] = 17,  /* _PC_REC_XFER_ALIGN */
+    [0x0d] = 19,  /* _PC_SYMLINK_MAX */
+    [0x0e] = 6,  /* _PC_CHOWN_RESTRICTED */
+    [0x0f] = 7,  /* _PC_NO_TRUNC */
+    [0x10] = 8,  /* _PC_VDISABLE */
+    [0x11] = 10,  /* _PC_ASYNC_IO */
+    [0x12] = 11,  /* _PC_PRIO_IO */
+    [0x13] = 9,  /* _PC_SYNC_IO */
+};
+
+/*
+ * pathconf/fpathconf carry the same kind of constant as sysconf and are numbered just as
+ * independently: two of McDonald's packaged libraries ask for a limit by bionic's number and OH
+ * musl answers a different one. Same caller rule as sysconf.
+ */
+static long westlake_translate_pathconf(int name, const char* caller_path, int* handled)
+{
+    *handled = 0;
+    if (caller_path == NULL) return -1;
+    if (name < 0 || (size_t)name >= sizeof(westlake_bionic_pathconf) / sizeof(westlake_bionic_pathconf[0])) {
+        *handled = 1;
+        errno = EINVAL;
+        return -1;
+    }
+    const int native_name = westlake_bionic_pathconf[name];
+    if (native_name < 0) {
+        *handled = 1;
+        errno = EINVAL;
+        return -1;
+    }
+    static unsigned int logged;
+    const unsigned int bit = 1U << (name % 32);
+    if ((__atomic_fetch_or(&logged, bit, __ATOMIC_RELAXED) & bit) == 0) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] pathconf selector=%d translated bionic->musl "
+                "selector=%d caller=%s\n", name, native_name, caller_path);
+        fflush(stderr);
+    }
+    return native_name;
+}
+
+long pathconf(const char* path, int name)
+{
+    typedef long (*PathconfFn)(const char*, int);
+    static PathconfFn real_pathconf;
+    if (real_pathconf == NULL) real_pathconf = (PathconfFn)dlsym(RTLD_NEXT, "pathconf");
+    if (real_pathconf == NULL) { errno = ENOSYS; return -1; }
+    const char* caller_path = NULL;
+    if (!caller_is_android_dso(__builtin_return_address(0), &caller_path)) {
+        return real_pathconf(path, name);
+    }
+    int handled = 0;
+    const long native_name = westlake_translate_pathconf(name, caller_path, &handled);
+    if (handled) return -1;
+    return real_pathconf(path, (int)native_name);
+}
+
+long fpathconf(int fd, int name)
+{
+    typedef long (*FpathconfFn)(int, int);
+    static FpathconfFn real_fpathconf;
+    if (real_fpathconf == NULL) real_fpathconf = (FpathconfFn)dlsym(RTLD_NEXT, "fpathconf");
+    if (real_fpathconf == NULL) { errno = ENOSYS; return -1; }
+    const char* caller_path = NULL;
+    if (!caller_is_android_dso(__builtin_return_address(0), &caller_path)) {
+        return real_fpathconf(fd, name);
+    }
+    int handled = 0;
+    const long native_name = westlake_translate_pathconf(name, caller_path, &handled);
+    if (handled) return -1;
+    return real_fpathconf(fd, (int)native_name);
+}
+
+/*
+ * Symbols an Android-built library imports that neither musl nor the staged runtime defines, and
+ * whose absence stops the library loading at all. libflutter.so is the case that found these: it
+ * imports the software-rendering pair and a FORTIFY open, so dlopen fails before Flutter ever
+ * chooses its GL path.
+ *
+ * __openat_2 is bionic's _FORTIFY_SOURCE wrapper and has openat's semantics exactly.
+ *
+ * ANativeWindow_lock/unlockAndPost belong to the CPU-rendering path: lock hands the caller a
+ * mapped buffer to draw into. Westlake's ANativeWindow adapter has the OH plumbing for that
+ * (request buffer, buffer handle, virAddr) but does not implement the pair, so these report the
+ * path as unavailable rather than pretending to render. A caller that only links them gets a
+ * loadable library; a caller that uses them gets a clear failure instead of a wrong picture.
+ */
+long __openat_2(int dirfd, const char* path, int flags)
+{
+    typedef int (*OpenatFn)(int, const char*, int, ...);
+    static OpenatFn real_openat;
+    if (real_openat == NULL) real_openat = (OpenatFn)dlsym(RTLD_NEXT, "openat");
+    if (real_openat == NULL) { errno = ENOSYS; return -1; }
+    return real_openat(dirfd, path, flags);
+}
+
+int ANativeWindow_lock(void* window, void* outBuffer, void* inOutDirtyBounds)
+{
+    (void)window; (void)outBuffer; (void)inOutDirtyBounds;
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        fprintf(stderr, "[WESTLAKE-ANW] ANativeWindow_lock: CPU rendering path not implemented; "
+                "callers with a GPU path are unaffected\n");
+        fflush(stderr);
+    }
+    errno = ENODEV;
+    return -ENODEV;
+}
+
+int ANativeWindow_unlockAndPost(void* window)
+{
+    (void)window;
+    errno = ENODEV;
+    return -ENODEV;
+}
+
 long sysconf(int name)
 {
-    enum {
-        BIONIC_SC_PAGESIZE = 0x27,
-        BIONIC_SC_PAGE_SIZE = 0x28,
-        BIONIC_SC_PHYS_PAGES = 0x62,
-        BIONIC_SC_AVPHYS_PAGES = 0x63,
-    };
-
-    const char *caller_path = NULL;
-    if (caller_is_webview(__builtin_return_address(0), &caller_path)) {
-        if (name == BIONIC_SC_PAGESIZE || name == BIONIC_SC_PAGE_SIZE) {
-            long page_size = getpagesize();
-            static int logged;
-            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-                fprintf(stderr,
-                        "[WESTLAKE-WEBVIEW-BIONIC] sysconf selector=%d "
-                        "translated bionic->musl page_size=%ld caller=%s\n",
-                        name, page_size, caller_path);
-            }
-            return page_size;
-        }
-    }
-
     typedef long (*SysconfFn)(int);
     static SysconfFn real_sysconf;
     if (real_sysconf == NULL) {
@@ -981,37 +1319,33 @@ long sysconf(int name)
         return -1;
     }
 
-    if (caller_path != NULL) {
-        int native_name = -1;
-        unsigned int log_bit = 0;
-        switch (name) {
-            case BIONIC_SC_PHYS_PAGES:
-                native_name = _SC_PHYS_PAGES;
-                log_bit = 1U << 0;
-                break;
-            case BIONIC_SC_AVPHYS_PAGES:
-                native_name = _SC_AVPHYS_PAGES;
-                log_bit = 1U << 1;
-                break;
-            default:
-                break;
-        }
-        if (native_name >= 0) {
-            long result = real_sysconf(native_name);
-            static unsigned int logged_mask;
-            unsigned int previous = __atomic_fetch_or(
-                    &logged_mask, log_bit, __ATOMIC_RELAXED);
-            if ((previous & log_bit) == 0) {
-                fprintf(stderr,
-                        "[WESTLAKE-WEBVIEW-BIONIC] sysconf selector=%d "
-                        "translated bionic->musl selector=%d result=%ld "
-                        "caller=%s\n",
-                        name, native_name, result, caller_path);
-            }
-            return result;
+    const char *caller_path = NULL;
+    if (!caller_is_android_dso(__builtin_return_address(0), &caller_path)) {
+        return real_sysconf(name);
+    }
+    const int known = name >= 0 &&
+            (size_t)name < sizeof(westlake_bionic_sysconf) / sizeof(westlake_bionic_sysconf[0]);
+    const int native_name = known ? westlake_bionic_sysconf[name] : -1;
+    long result;
+    if (native_name >= 0) {
+        result = real_sysconf(native_name);
+    } else if (native_name == -2) {
+        result = 0;
+    } else {
+        errno = EINVAL;
+        result = -1;
+    }
+    static unsigned char logged[256 / 8];
+    if (known && name < 256) {
+        unsigned char bit = (unsigned char)(1U << (name % 8));
+        if ((__atomic_fetch_or(&logged[name / 8], bit, __ATOMIC_RELAXED) & bit) == 0) {
+            fprintf(stderr,
+                    "[WESTLAKE-WEBVIEW-BIONIC] sysconf selector=%d translated bionic->musl "
+                    "selector=%d result=%ld caller=%s\n",
+                    name, native_name, result, caller_path);
         }
     }
-    return real_sysconf(name);
+    return result;
 }
 
 /*
@@ -1021,15 +1355,51 @@ long sysconf(int name)
  * appspawn-x must use ANDROID_ROOT=/system/android for its staged ART/runtime
  * files. Chromium's Android Skia backend, however, computes its font directory
  * as getenv("ANDROID_ROOT") + "/fonts". On this OH board the Android-standard
- * font/config view is assembled under /data/local/tmp/asx/android-root. Its
- * fonts entry points at the board's /system/fonts and its etc/fonts.xml is the
- * complete adapter configuration. The system partition contains an older,
+ * font/config view is the staged runtime directory itself: it holds a fonts/
+ * directory beside an etc/fonts.xml that is the complete adapter
+ * configuration. The system partition contains an older,
  * read-only bootstrap fonts.xml without script-fallback families, so returning
  * /system would make Chromium render Latin while dropping every CJK glyph.
  *
  * Translate only direct calls from libwebviewchromium.so. All framework, ART,
  * and OH-native callers continue to see the real process environment.
  */
+/*
+ * The Android root Skia should see: the runtime directory itself.
+ *
+ * It already has the layout Skia expects -- etc/fonts.xml beside a fonts/ directory -- because
+ * that is how the launcher stages it. An earlier layout put those under an android-root/
+ * subdirectory and this shim named it outright; the launcher stopped staging it and the constant
+ * stayed, so every font configuration Skia tried failed to open, it ended up with no font
+ * families at all, and drawing an article's first text dereferenced null.
+ *
+ * Derived from WESTLAKE_RUNTIME_ROOT rather than named, and returned only when the font
+ * configuration is really there, so a layout that moves again degrades to the real environment
+ * instead of silently pointing at nothing.
+ */
+static const char *westlake_android_root(void)
+{
+    static char root[256];
+    static int resolved;
+    if (!resolved) {
+        typedef char *(*GetenvFn)(const char *);
+        GetenvFn real_getenv = (GetenvFn)dlsym(RTLD_NEXT, "getenv");
+        const char *configured = real_getenv != NULL ? real_getenv("WESTLAKE_RUNTIME_ROOT") : NULL;
+        if (configured == NULL || configured[0] == '\0') {
+            configured = "/data/local/tmp/asx";
+        }
+        char candidate[256];
+        snprintf(candidate, sizeof(candidate), "%s/etc/fonts.xml", configured);
+        if (access(candidate, R_OK) == 0) {
+            snprintf(root, sizeof(root), "%s", configured);
+        } else {
+            root[0] = '\0';
+        }
+        resolved = 1;
+    }
+    return root[0] != '\0' ? root : NULL;
+}
+
 char *getenv(const char *name)
 {
     typedef char *(*GetenvFn)(const char *);
@@ -1041,15 +1411,17 @@ char *getenv(const char *name)
     char *value = real_getenv != NULL ? real_getenv(name) : NULL;
     if (name != NULL && strcmp(name, "ANDROID_ROOT") == 0 &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
-        static char android_root[] = "/data/local/tmp/asx/android-root";
-        static int logged;
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            fprintf(stderr,
-                    "[WESTLAKE-WEBVIEW-BIONIC] ANDROID_ROOT translated "
-                    "%s -> %s for libwebviewchromium.so\n",
-                    value != NULL ? value : "<unset>", android_root);
+        const char *android_root = westlake_android_root();
+        if (android_root != NULL) {
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] ANDROID_ROOT translated "
+                        "%s -> %s for libwebviewchromium.so\n",
+                        value != NULL ? value : "<unset>", android_root);
+            }
+            return (char *) android_root;
         }
-        return android_root;
     }
     return value;
 }
@@ -1079,12 +1451,17 @@ FILE *fopen(const char *path, const char *mode)
     const char *actual_path = path;
     if (path != NULL && strcmp(path, "/system/etc/fonts.xml") == 0 &&
         from_webview) {
-        actual_path = "/data/local/tmp/asx/android-root/etc/fonts.xml";
-        static int logged;
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            fprintf(stderr,
-                    "[WESTLAKE-WEBVIEW-BIONIC] font config translated %s -> %s\n",
-                    path, actual_path);
+        const char *android_root = westlake_android_root();
+        static char font_config[288];
+        if (android_root != NULL) {
+            snprintf(font_config, sizeof(font_config), "%s/etc/fonts.xml", android_root);
+            actual_path = font_config;
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] font config translated %s -> %s\n",
+                        path, actual_path);
+            }
         }
     }
     return real_fopen(actual_path, mode);
@@ -1182,12 +1559,52 @@ static int read_oh_property(const char *name, char *value, size_t value_size)
     return (int)strlen(value);
 }
 
+/*
+ * Android-shaped property names OH's parameter store does not hold.
+ *
+ * Every name an Android caller asks for is absent from OH's store, so each read came back empty:
+ * Chromium's sys_info_android.cc logged "Can't parse dalvik.vm.heapsize" and the four build
+ * properties it reads for its own version gating were empty too. Worse than empty, they
+ * disagreed with the process: android.os.SystemProperties answers these from a table in
+ * framework/android-runtime/src/android_os_SystemProperties.cpp, so Java said SDK 34 while
+ * native said nothing at all, and a caller that gates on one and branches on the other sees a
+ * device that cannot exist.
+ *
+ * The values below are that table's, and must track it. Only names absent from OH's store fall
+ * through to here, so a board that really does answer one wins.
+ *
+ * ro.arch and dalvik.vm.heapsize are not in that table because nothing in Java asks for them.
+ * The heap size is a hint Chromium clamps into a sane range rather than a number it trusts; it is
+ * reported as a plain Android default instead of a measurement, because this runtime's ART heap
+ * ceiling is not the app's to know.
+ */
+static const struct {
+    const char *name;
+    const char *value;
+} g_android_properties[] = {
+    { "ro.build.version.sdk",      "34" },
+    { "ro.build.version.release",  "14" },
+    { "ro.build.version.codename", "REL" },
+    { "ro.build.id",               "oh-adapter" },
+    { "ro.arch",                   "arm64" },
+    { "dalvik.vm.heapsize",        "512m" },
+};
+
 int __system_property_get(const char *name, char *value)
 {
     if (name == NULL || value == NULL) {
         return 0;
     }
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
+    if (length == 0) {
+        for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+            if (strcmp(name, g_android_properties[i].name) == 0) {
+                snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
+                length = (int)strlen(value);
+                break;
+            }
+        }
+    }
     fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s=%s\n", name, value);
     return length;
 }

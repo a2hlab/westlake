@@ -2429,10 +2429,14 @@ public class AppSpawnXInit {
             try {
                 System.err.println("[UNCAUGHT] thread='" + t.getName() + "' "
                         + e.getClass().getName() + ": " + e.getMessage());
+                // The frames, walked by hand: printStackTrace is a noop in this runtime, and
+                // without them a swallowed exception says nothing about which call failed.
+                printUncaughtFrames(e);
                 Throwable c = e.getCause();
                 while (c != null) {
                     System.err.println("[UNCAUGHT]   caused by: "
                             + c.getClass().getName() + ": " + c.getMessage());
+                    printUncaughtFrames(c);
                     c = c.getCause();
                 }
                 System.err.flush();
@@ -2444,6 +2448,18 @@ public class AppSpawnXInit {
         // - Configure log redirects (stdout/stderr -> Android log)
         // - Initialize security providers
         Log.d(TAG, "Common runtime initialized");
+    }
+
+    /** Print an uncaught throwable's frames, capped so a deep recursion cannot flood the log. */
+    private static void printUncaughtFrames(Throwable t) {
+        StackTraceElement[] frames = t.getStackTrace();
+        int limit = frames.length < 48 ? frames.length : 48;
+        for (int i = 0; i < limit; i++) {
+            System.err.println("[UNCAUGHT]   at " + frames[i]);
+        }
+        if (frames.length > limit) {
+            System.err.println("[UNCAUGHT]   ... " + (frames.length - limit) + " more");
+        }
     }
 
     /**
