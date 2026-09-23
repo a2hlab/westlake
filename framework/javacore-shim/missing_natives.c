@@ -1,13 +1,22 @@
 /*
- * The handful of libcore natives the staged runtime never shipped.
+ * Platform natives the staged runtime declares but never registers.
  *
- * AOSP puts java.lang.Math's native methods in libjavacore.so, which this runtime does not build:
- * deploy-check has reported it missing for months and nothing needed it, because ART intrinsifies
- * most of these when it compiles a method. The interpreter does not, so the first app to reach one
- * before it is compiled dies -- Wikipedia on Math.rint, in its first activity.
+ * Two kinds so far, and they arrive the same way: a method is native in the boot classpath, the
+ * library that would register it is not built here, and the first app to reach the method dies on
+ * UnsatisfiedLinkError with nothing earlier to warn of it.
  *
- * Every one of them is a libm call with the same meaning, so this is a forwarding library, not an
- * implementation: the semantics are libm's, which is what java.lang.Math specifies anyway.
+ *   java.lang.Math and StrictMath -- the runtime's own openjdk stub registers most of these from a
+ *   built-in table, but not all: rint is missing from Math, IEEEremainder and hypot from
+ *   StrictMath. ART intrinsifies them when it compiles a method, so nothing noticed until an app
+ *   reached one in the interpreter first -- Wikipedia, on Math.rint, in its first activity. Each
+ *   is a libm call with the same meaning, so these are forwarders, not implementations.
+ *
+ *   android.view.SurfaceControl.nativeSetDesiredHdrHeadroom -- registered by
+ *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
+ *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
+ *
+ * Bound with RegisterNatives rather than left to be found by name, which is what lets this library
+ * supply a method belonging to a boot class without being the library that owns it.
  */
 #include <jni.h>
 #include <math.h>
@@ -113,6 +122,21 @@ JNIEXPORT jdouble JNICALL Java_java_lang_StrictMath_pow(JNIEnv* env, jclass c, j
  * that is not declared native in this runtime's libcore would otherwise fail the whole table and
  * leave every other method unbound.
  */
+/*
+ * Setting a desired HDR headroom is a hint: it asks the compositor to reserve dynamic range for a
+ * surface. This board composites without it, so doing nothing is the honest answer rather than a
+ * missing one -- the app gets standard range, which is what it would get anyway. The signature is
+ * the AOSP one, (long, long, float): transaction, surface control, headroom.
+ */
+JNIEXPORT void JNICALL Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadroom(
+        JNIEnv* env, jclass c, jlong transaction, jlong surface, jfloat headroom)
+{ (void)env; (void)c; (void)transaction; (void)surface; (void)headroom; }
+
+static const JNINativeMethod kSurfaceControl[] = {
+    { "nativeSetDesiredHdrHeadroom", "(JJF)V",
+      (void*) Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadroom },
+};
+
 #define M(name, sig)      { #name, sig, (void*) Java_java_lang_Math_##name }
 #define SM(name, sig)     { #name, sig, (void*) Java_java_lang_StrictMath_##name }
 
@@ -146,7 +170,7 @@ static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int 
     int i;
     if (c == NULL) {
         (*env)->ExceptionClear(env);
-        note("[WL-JAVACORE] class not found\n");
+        note("[WL-NATIVES] class not found\n");
         return 0;
     }
     for (i = 0; i < count; i++) {
@@ -166,7 +190,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
     JNIEnv* env = NULL;
     (void) reserved;
     if ((*vm)->GetEnv(vm, (void**) &env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {
-        note("[WL-JAVACORE] no JNIEnv in JNI_OnLoad\n");
+        note("[WL-NATIVES] no JNIEnv in JNI_OnLoad\n");
         return JNI_VERSION_1_6;
     }
     {
@@ -174,9 +198,13 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int m = bind(env, "java/lang/Math", kMath, (int) (sizeof(kMath) / sizeof(kMath[0])));
         int s = bind(env, "java/lang/StrictMath", kStrictMath,
                      (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
-        snprintf(line, sizeof(line), "[WL-JAVACORE] bound Math=%d/%d StrictMath=%d/%d\n",
+        int v = bind(env, "android/view/SurfaceControl", kSurfaceControl,
+                     (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])));
+        snprintf(line, sizeof(line),
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
-                 s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
+                 s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
+                 v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])));
         note(line);
     }
     return JNI_VERSION_1_6;

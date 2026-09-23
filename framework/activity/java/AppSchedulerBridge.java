@@ -438,9 +438,12 @@ public class AppSchedulerBridge {
                     + " sourceDir=" + appInfo.sourceDir
                     + " nativeLibraryDir=" + appInfo.nativeLibraryDir);
 
-            // libcore's own natives. ART only resolves a native method from a library that has
-            // been loaded, so having the library on disk is not enough: java.lang.Math.rint
-            // stays unimplemented and the first app to reach it in the interpreter dies. The
+            // Platform natives the runtime declares but never registers: libcore's math, and
+            // SurfaceControl.nativeSetDesiredHdrHeadroom, whose owning library no longer builds.
+            // ART only resolves a native method from a library that has been loaded, so having
+            // the library on disk is not enough -- the method stays unimplemented and the first
+            // app to reach it dies, Wikipedia on Math.rint and LocalSend's Flutter engine on the
+            // SurfaceControl one, both before a first frame. The
             // parent's preload is a no-op by design (an old musl dlopen SEGV), so it is loaded
             // here, in the child, where the app's own libraries load without trouble.
             //
@@ -453,7 +456,7 @@ public class AppSchedulerBridge {
             try {
                 String runtimeRoot = System.getenv("WESTLAKE_RUNTIME_ROOT");
                 String path = (runtimeRoot == null || runtimeRoot.isEmpty())
-                        ? "libwl_libcore_math.so" : runtimeRoot + "/libwl_libcore_math.so";
+                        ? "libwl_missing_natives.so" : runtimeRoot + "/libwl_missing_natives.so";
                 // System.load would register the library against this class's own loader, and
                 // java.lang.Math is a boot class: ART looks for its natives only in libraries the
                 // boot loader owns. Runtime.nativeLoad takes the loader explicitly, and null means
