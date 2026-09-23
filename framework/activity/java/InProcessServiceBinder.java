@@ -68,7 +68,12 @@ public class InProcessServiceBinder implements Runnable {
             if (svc == null) {
                 Class<?> svcClass = app.getClassLoader().loadClass(cls);
                 svc = (Service) svcClass.newInstance();
-                svc.attach(app, thread, cls, new Binder(), app, null);
+                // The last argument is the IActivityManager the service reports to. Null made
+                // Service.startForeground NPE on setServiceForeground -- every foreground service
+                // (Termux's session service, media players, downloaders) died in onCreate. Hand it
+                // the process's own manager, as ActivityThread.handleCreateService does.
+                svc.attach(app, thread, cls, new Binder(), app,
+                        android.app.ActivityManager.getService());
                 svc.onCreate();
                 sServices.put(cls, svc);
                 Log.i(TAG, "created in-process service " + cls);
