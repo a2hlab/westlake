@@ -1322,15 +1322,51 @@ long sysconf(int name)
  * appspawn-x must use ANDROID_ROOT=/system/android for its staged ART/runtime
  * files. Chromium's Android Skia backend, however, computes its font directory
  * as getenv("ANDROID_ROOT") + "/fonts". On this OH board the Android-standard
- * font/config view is assembled under /data/local/tmp/asx/android-root. Its
- * fonts entry points at the board's /system/fonts and its etc/fonts.xml is the
- * complete adapter configuration. The system partition contains an older,
+ * font/config view is the staged runtime directory itself: it holds a fonts/
+ * directory beside an etc/fonts.xml that is the complete adapter
+ * configuration. The system partition contains an older,
  * read-only bootstrap fonts.xml without script-fallback families, so returning
  * /system would make Chromium render Latin while dropping every CJK glyph.
  *
  * Translate only direct calls from libwebviewchromium.so. All framework, ART,
  * and OH-native callers continue to see the real process environment.
  */
+/*
+ * The Android root Skia should see: the runtime directory itself.
+ *
+ * It already has the layout Skia expects -- etc/fonts.xml beside a fonts/ directory -- because
+ * that is how the launcher stages it. An earlier layout put those under an android-root/
+ * subdirectory and this shim named it outright; the launcher stopped staging it and the constant
+ * stayed, so every font configuration Skia tried failed to open, it ended up with no font
+ * families at all, and drawing an article's first text dereferenced null.
+ *
+ * Derived from WESTLAKE_RUNTIME_ROOT rather than named, and returned only when the font
+ * configuration is really there, so a layout that moves again degrades to the real environment
+ * instead of silently pointing at nothing.
+ */
+static const char *westlake_android_root(void)
+{
+    static char root[256];
+    static int resolved;
+    if (!resolved) {
+        typedef char *(*GetenvFn)(const char *);
+        GetenvFn real_getenv = (GetenvFn)dlsym(RTLD_NEXT, "getenv");
+        const char *configured = real_getenv != NULL ? real_getenv("WESTLAKE_RUNTIME_ROOT") : NULL;
+        if (configured == NULL || configured[0] == '\0') {
+            configured = "/data/local/tmp/asx";
+        }
+        char candidate[256];
+        snprintf(candidate, sizeof(candidate), "%s/etc/fonts.xml", configured);
+        if (access(candidate, R_OK) == 0) {
+            snprintf(root, sizeof(root), "%s", configured);
+        } else {
+            root[0] = '\0';
+        }
+        resolved = 1;
+    }
+    return root[0] != '\0' ? root : NULL;
+}
+
 char *getenv(const char *name)
 {
     typedef char *(*GetenvFn)(const char *);
@@ -1342,15 +1378,17 @@ char *getenv(const char *name)
     char *value = real_getenv != NULL ? real_getenv(name) : NULL;
     if (name != NULL && strcmp(name, "ANDROID_ROOT") == 0 &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
-        static char android_root[] = "/data/local/tmp/asx/android-root";
-        static int logged;
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            fprintf(stderr,
-                    "[WESTLAKE-WEBVIEW-BIONIC] ANDROID_ROOT translated "
-                    "%s -> %s for libwebviewchromium.so\n",
-                    value != NULL ? value : "<unset>", android_root);
+        const char *android_root = westlake_android_root();
+        if (android_root != NULL) {
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] ANDROID_ROOT translated "
+                        "%s -> %s for libwebviewchromium.so\n",
+                        value != NULL ? value : "<unset>", android_root);
+            }
+            return (char *) android_root;
         }
-        return android_root;
     }
     return value;
 }
@@ -1380,12 +1418,17 @@ FILE *fopen(const char *path, const char *mode)
     const char *actual_path = path;
     if (path != NULL && strcmp(path, "/system/etc/fonts.xml") == 0 &&
         from_webview) {
-        actual_path = "/data/local/tmp/asx/android-root/etc/fonts.xml";
-        static int logged;
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            fprintf(stderr,
-                    "[WESTLAKE-WEBVIEW-BIONIC] font config translated %s -> %s\n",
-                    path, actual_path);
+        const char *android_root = westlake_android_root();
+        static char font_config[288];
+        if (android_root != NULL) {
+            snprintf(font_config, sizeof(font_config), "%s/etc/fonts.xml", android_root);
+            actual_path = font_config;
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] font config translated %s -> %s\n",
+                        path, actual_path);
+            }
         }
     }
     return real_fopen(actual_path, mode);
@@ -1483,12 +1526,52 @@ static int read_oh_property(const char *name, char *value, size_t value_size)
     return (int)strlen(value);
 }
 
+/*
+ * Android-shaped property names OH's parameter store does not hold.
+ *
+ * Every name an Android caller asks for is absent from OH's store, so each read came back empty:
+ * Chromium's sys_info_android.cc logged "Can't parse dalvik.vm.heapsize" and the four build
+ * properties it reads for its own version gating were empty too. Worse than empty, they
+ * disagreed with the process: android.os.SystemProperties answers these from a table in
+ * framework/android-runtime/src/android_os_SystemProperties.cpp, so Java said SDK 34 while
+ * native said nothing at all, and a caller that gates on one and branches on the other sees a
+ * device that cannot exist.
+ *
+ * The values below are that table's, and must track it. Only names absent from OH's store fall
+ * through to here, so a board that really does answer one wins.
+ *
+ * ro.arch and dalvik.vm.heapsize are not in that table because nothing in Java asks for them.
+ * The heap size is a hint Chromium clamps into a sane range rather than a number it trusts; it is
+ * reported as a plain Android default instead of a measurement, because this runtime's ART heap
+ * ceiling is not the app's to know.
+ */
+static const struct {
+    const char *name;
+    const char *value;
+} g_android_properties[] = {
+    { "ro.build.version.sdk",      "34" },
+    { "ro.build.version.release",  "14" },
+    { "ro.build.version.codename", "REL" },
+    { "ro.build.id",               "oh-adapter" },
+    { "ro.arch",                   "arm64" },
+    { "dalvik.vm.heapsize",        "512m" },
+};
+
 int __system_property_get(const char *name, char *value)
 {
     if (name == NULL || value == NULL) {
         return 0;
     }
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
+    if (length == 0) {
+        for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+            if (strcmp(name, g_android_properties[i].name) == 0) {
+                snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
+                length = (int)strlen(value);
+                break;
+            }
+        }
+    }
     fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s=%s\n", name, value);
     return length;
 }
