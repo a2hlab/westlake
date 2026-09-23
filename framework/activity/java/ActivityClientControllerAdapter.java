@@ -349,13 +349,37 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
                 Log.i(TAG, "finishActivity: OH TerminateAbility(token=0x"
                         + Long.toHexString(ohAddr) + ", code=" + code + ") rc=" + rc);
             } else {
-                Log.w(TAG, "finishActivity: no OH token mapping for "
-                        + token + " — finish-only Android-side");
+                // Direct launch: no OH ability stands behind this activity, so nothing on the OH
+                // side will destroy it, and its window would stay on screen. Do what ATMS does
+                // for a finishing activity: send it a destroy transaction (the executor walks it
+                // through pause and stop first). Posted, so finish() returns first, as on Android.
+                scheduleLocalDestroy(token);
             }
         } catch (Throwable t) {
             Log.e(TAG, "finishActivity reverse callback failed", t);
         }
         return true;
+    }
+
+    private static void scheduleLocalDestroy(final IBinder token) {
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
+                    if (thread == null || thread.getActivity(token) == null) return;
+                    android.app.IApplicationThread app = thread.getApplicationThread();
+                    android.app.servertransaction.ClientTransaction transaction =
+                            android.app.servertransaction.ClientTransaction.obtain(app);
+                    transaction.addTransactionItem(
+                            android.app.servertransaction.DestroyActivityItem.obtain(token, true));
+                    app.scheduleTransaction(transaction);
+                    Log.i(TAG, "finishActivity: no OH ability; local destroy scheduled for " + token);
+                } catch (Throwable t) {
+                    Log.e(TAG, "finishActivity: local destroy failed", t);
+                }
+            }
+        });
     }
 
     @Override

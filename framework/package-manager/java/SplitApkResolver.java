@@ -12,12 +12,58 @@ public final class SplitApkResolver {
     private SplitApkResolver() {}
 
     public static void populate(PackageInfo packageInfo) {
-        if (packageInfo == null || packageInfo.applicationInfo == null) return;
-        ApplicationInfo info = packageInfo.applicationInfo;
+        if (packageInfo == null) return;
+        populate(packageInfo, packageInfo.applicationInfo);
+    }
+
+    /**
+     * Direct launch builds an ApplicationInfo without a surrounding PackageInfo, so the
+     * per-package split fields have no carrier. Resolve against the ApplicationInfo alone.
+     */
+    public static void populate(ApplicationInfo info) {
+        populate(null, info);
+    }
+
+    private static void populate(PackageInfo packageInfo, ApplicationInfo info) {
+        if (info == null) return;
         String basePath = info.sourceDir;
         if (basePath == null || basePath.isEmpty()) return;
 
         File base = new File(basePath);
+
+        // The launcher knows exactly which splits belong to this app and exports them, which
+        // is authoritative where the sibling scan below can only guess. Direct-launch staging
+        // puts every app's APKs in one shared directory, and staged names carry the app key as
+        // a prefix ("mcdonalds.split_config.arm64_v8a.apk"), so neither the "split_" convention
+        // nor a package-named parent identifies them.
+        String declared = System.getenv("ASX_SPLIT_APK_PATHS");
+        if (declared != null && !declared.isEmpty()) {
+            TreeMap<String, String> explicit = new TreeMap<>();
+            String basePrefix = base.getName().endsWith(".apk")
+                    ? base.getName().substring(0, base.getName().length() - 4) + "."
+                    : null;
+            for (String path : declared.split(":")) {
+                if (path.isEmpty()) continue;
+                File candidate = new File(path);
+                if (!candidate.isFile()) {
+                    System.err.println("[WESTLAKE-PM] declared split missing: " + path);
+                    continue;
+                }
+                String name = candidate.getName();
+                if (!name.endsWith(".apk")) continue;
+                String splitName = name.substring(0, name.length() - 4);
+                // Recover the real split name from the staged "<app>.<split>.apk" form.
+                if (basePrefix != null && splitName.startsWith(basePrefix)) {
+                    splitName = splitName.substring(basePrefix.length());
+                }
+                if (!splitName.isEmpty()) explicit.put(splitName, candidate.getAbsolutePath());
+            }
+            if (!explicit.isEmpty()) {
+                apply(packageInfo, info, explicit, "declared");
+                return;
+            }
+        }
+
         File parent = base.getParentFile();
         File[] siblings = parent != null ? parent.listFiles() : null;
         if (siblings == null || siblings.length == 0) return;
@@ -50,6 +96,11 @@ public final class SplitApkResolver {
             if (!splitName.isEmpty()) splits.put(splitName, candidate.getAbsolutePath());
         }
 
+        apply(packageInfo, info, splits, "scanned");
+    }
+
+    private static void apply(PackageInfo packageInfo, ApplicationInfo info,
+            TreeMap<String, String> splits, String source) {
         int count = splits.size();
         String[] names = new String[count];
         String[] paths = new String[count];
@@ -63,9 +114,12 @@ public final class SplitApkResolver {
         info.splitNames = names;
         info.splitSourceDirs = paths;
         info.splitPublicSourceDirs = paths.clone();
-        packageInfo.splitNames = names.clone();
-        packageInfo.splitRevisionCodes = new int[count];
+        if (packageInfo != null) {
+            packageInfo.splitNames = names.clone();
+            packageInfo.splitRevisionCodes = new int[count];
+        }
         System.err.println("[WESTLAKE-PM] split APKs " + info.packageName
-                + " count=" + count + " paths=" + java.util.Arrays.toString(paths));
+                + " source=" + source + " count=" + count
+                + " paths=" + java.util.Arrays.toString(paths));
     }
 }

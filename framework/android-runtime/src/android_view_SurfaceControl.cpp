@@ -479,6 +479,12 @@ void SC_nativeUnsetBuffer(JNIEnv*, jclass, jlong, jlong) { }
 void SC_nativeSetBufferTransform(JNIEnv*, jclass, jlong, jlong, jint) { }
 void SC_nativeSetDataSpace(JNIEnv*, jclass, jlong, jlong, jint) { }
 void SC_nativeSetExtendedRangeBrightness(JNIEnv*, jclass, jlong, jlong, jfloat, jfloat) { }
+
+// Android 15 HDR headroom request. OH's render service has no equivalent knob and the caller
+// treats it as advisory, so accepting it and doing nothing matches what a display without HDR
+// does. Flutter asks for it while creating its surface, and an unregistered native aborts the
+// process before the first frame.
+void SC_nativeSetDesiredHdrHeadroom(JNIEnv*, jclass, jlong, jlong, jfloat) { }
 void SC_nativeSetCachingHint(JNIEnv*, jclass, jlong, jlong, jint) { }
 void SC_nativeSetDamageRegion(JNIEnv*, jclass, jlong, jlong, jobject) { }
 void SC_nativeSetDimmingEnabled(JNIEnv*, jclass, jlong, jlong, jboolean) { }
@@ -875,6 +881,8 @@ const JNINativeMethod kSurfaceControlMethods[] = {
       reinterpret_cast<void*>(SC_nativeSetDataSpace) },
     { "nativeSetExtendedRangeBrightness", "(JJFF)V",
       reinterpret_cast<void*>(SC_nativeSetExtendedRangeBrightness) },
+    { "nativeSetDesiredHdrHeadroom", "(JJF)V",
+      reinterpret_cast<void*>(SC_nativeSetDesiredHdrHeadroom) },
     { "nativeSetCachingHint", "(JJI)V",
       reinterpret_cast<void*>(SC_nativeSetCachingHint) },
     { "nativeSetDamageRegion", "(JJLandroid/graphics/Region;)V",

@@ -25,6 +25,7 @@
     "westlake/framework/android-runtime/src/android_view_InputEventReceiver.cpp",
     "westlake/framework/android-runtime/src/android_view_KeyCharacterMap_aosp.cpp",
     "westlake/framework/android-runtime/src/android_view_MotionEvent_aosp.cpp",
+    "westlake/framework/android-runtime/src/android_view_VelocityTracker.cpp",
     "westlake/framework/android-runtime/src/android_view_SurfaceControl.cpp",
     "westlake/framework/android-runtime/src/android_view_SurfaceSession.cpp",
     "westlake/framework/android-runtime/src/class_library_services.cpp",

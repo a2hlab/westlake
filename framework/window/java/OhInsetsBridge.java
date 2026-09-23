@@ -4,7 +4,6 @@ import android.graphics.Rect;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.util.DisplayMetrics;
 import android.view.IWindow;
 import android.view.InsetsSource;
 import android.view.InsetsState;
@@ -70,17 +69,27 @@ public final class OhInsetsBridge {
                     ArrayList<?> roots = (ArrayList<?>) rootsField.get(global);
                     Field windowField = ViewRootImpl.class.getDeclaredField("mWindow");
                     windowField.setAccessible(true);
+                    // The keyboard serves the window that has input focus (Android's IME
+                    // target), whichever window's session reported the occupied area.
+                    ViewRootImpl reported = null, focused = null;
                     for (Object item : roots.toArray()) {
                         ViewRootImpl root = (ViewRootImpl) item;
                         IWindow candidate = (IWindow) windowField.get(root);
-                        if (!candidate.asBinder().equals(window.asBinder())) continue;
+                        if (candidate.asBinder().equals(window.asBinder())) reported = root;
+                        if (root.getView() != null && root.getView().hasWindowFocus()) focused = root;
+                    }
+                    ViewRootImpl imeTarget = focused != null ? focused : reported;
+                    if (imeTarget != null) {
+                        ViewRootImpl root = imeTarget;
+                        IWindow targetWindow = (IWindow) windowField.get(root);
                         View view = root.getView();
-                        if (view == null || view.getDisplay() == null) return;
-                        DisplayMetrics metrics = new DisplayMetrics();
-                        view.getDisplay().getRealMetrics(metrics);
-                        int h = Math.min(height, metrics.heightPixels);
-                        Rect display = new Rect(0,0,metrics.widthPixels,metrics.heightPixels);
-                        Rect area = occupied == null ? new Rect(0,metrics.heightPixels-h,metrics.widthPixels,metrics.heightPixels)
+                        if (view == null) return;
+                        // The physical display, not view.getDisplay(): for a dialog window that
+                        // reports the window's own size here, and the keyboard never intersects it.
+                        int[] size = WindowSessionAdapter.getDefaultDisplaySize();
+                        int h = Math.min(height, size[1]);
+                        Rect display = new Rect(0, 0, size[0], size[1]);
+                        Rect area = occupied == null ? new Rect(0, size[1] - h, size[0], size[1])
                                 : new Rect(occupied);
                         Rect frame = insetFrame(display, area);
                         InsetsState state = new InsetsState(root.getInsetsController().getState(), true);
@@ -88,8 +97,8 @@ public final class OhInsetsBridge {
                         state.getOrCreateSource(InsetsSource.ID_IME, WindowInsets.Type.ime())
                                 .setFrame(frame).setVisible(!area.isEmpty());
                         synchronized (STATES) {
-                            STATES.put(window.asBinder(), new InsetsState(state, true));
-                            OCCUPIED.put(window.asBinder(), area);
+                            STATES.put(targetWindow.asBinder(), new InsetsState(state, true));
+                            OCCUPIED.put(targetWindow.asBinder(), area);
                         }
                         // On the UI thread; retain all non-IME source controls.
                         // Relayout uses the same stored state, not an empty one.

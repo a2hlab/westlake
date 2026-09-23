@@ -196,7 +196,21 @@ public class AppSchedulerBridge {
             ai.dataDir = "/data/data/" + pkg;
             ai.deviceProtectedDataDir = ai.dataDir;
             ai.credentialProtectedDataDir = ai.dataDir;
-            try { new java.io.File(ai.dataDir).mkdirs(); } catch (Throwable ignore) {}
+            // /data/data is drwxrwx--x system:system, so an app uid cannot create its own
+            // directory there; the launcher stages it. Swallowing the failure here cost several
+            // launches to diagnose, because the first symptom is Realm's mkfifo reporting EACCES
+            // from inside onResume. Say so plainly instead.
+            try {
+                java.io.File dataDir = new java.io.File(ai.dataDir);
+                if (!dataDir.isDirectory() && !dataDir.mkdirs()) {
+                    System.err.println("[DIRECT-LAUNCH] WARNING data dir missing and not creatable: "
+                            + ai.dataDir + " — storage-backed startup (Realm, SQLite, keystore)"
+                            + " will fail later; the launcher should have staged it");
+                }
+            } catch (Throwable t) {
+                System.err.println("[DIRECT-LAUNCH] WARNING data dir check failed: " + ai.dataDir
+                        + ": " + t);
+            }
             ai.flags |= android.content.pm.ApplicationInfo.FLAG_HAS_CODE
                      |  android.content.pm.ApplicationInfo.FLAG_INSTALLED
                      |  android.content.pm.ApplicationInfo.FLAG_ALLOW_CLEAR_USER_DATA
@@ -216,8 +230,16 @@ public class AppSchedulerBridge {
                 adapter.packagemanager.OHUserManager.install();
                 ai = adapter.packagemanager.SourcePackageRegistry.register(ai);
             }
+            // Direct launch builds ApplicationInfo here rather than through
+            // PackageInfoBuilder, so the split resolver that runs there never sees it. Without
+            // splitSourceDirs the AssetManager opens only the base APK, and an app whose
+            // resources live in a density or language split cannot inflate its own layouts:
+            // McDonald's died in SplashActivity.onCreate with
+            // "Unable to find resource ID #0x7f080108", a drawable from split_config.xxxhdpi.
+            adapter.packagemanager.SplitApkResolver.populate(ai);
             sInjectedAppInfo = ai;
-            System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir);
+            System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir
+                    + " splits=" + (ai.splitSourceDirs == null ? 0 : ai.splitSourceDirs.length));
 
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
@@ -275,6 +297,54 @@ public class AppSchedulerBridge {
      * exists to send FOREGROUND_NEW on the direct-launch path, so we self-schedule a
      * ResumeActivityItem on the token the launch stored under recordId.
      */
+    /**
+     * ART sampling method trace, on request, for asking what the app's own code actually ran.
+     *
+     * Class-load tracing answers "was this class loaded", which is not the same question: a startup
+     * step can be constructed and never complete. WESTLAKE_METHOD_TRACE=<milliseconds> samples the
+     * stack of every thread from bind until the time is up and writes an ART trace file next to the
+     * app's data, which `westlake-apk-gap trace-methods` decodes. Sampling costs a timer tick per
+     * interval rather than an event per call, so an app still behaves like itself while it runs.
+     */
+    private static void startMethodTraceIfRequested(String dataDir) {
+        String request = System.getenv("WESTLAKE_METHOD_TRACE");
+        if (request == null || request.isEmpty()) {
+            return;
+        }
+        try {
+            final int milliseconds = Integer.parseInt(request.trim());
+            java.io.File directory = new java.io.File(dataDir, "files");
+            directory.mkdirs();
+            final String path = new java.io.File(directory, "westlake-method-trace").getPath();
+            // 32 MB holds a few minutes of 1 ms samples; the interval is a compromise between
+            // seeing a short-lived startup step and slowing the app down enough to change it.
+            android.os.Debug.startMethodTracingSampling(path, 32 * 1024 * 1024, 1000);
+            System.err.println("[WL-METHOD-TRACE] sampling every 1ms for " + milliseconds
+                    + "ms -> " + path + ".trace");
+            Thread stopper = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Thread.sleep(milliseconds);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                    try {
+                        android.os.Debug.stopMethodTracing();
+                        System.err.println("[WL-METHOD-TRACE] written " + path + ".trace");
+                    } catch (Throwable t) {
+                        System.err.println("[WL-METHOD-TRACE] stop failed: " + t);
+                    }
+                    System.err.flush();
+                }
+            }, "westlake-method-trace");
+            stopper.setDaemon(true);
+            stopper.start();
+        } catch (Throwable t) {
+            System.err.println("[WL-METHOD-TRACE] not started: " + t);
+        }
+    }
+
     private static void directResume(int recordId) throws Exception {
         android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
         android.app.IApplicationThread appThread = at.getApplicationThread();
@@ -367,6 +437,50 @@ public class AppSchedulerBridge {
                     + " targetSdk=" + appInfo.targetSdkVersion
                     + " sourceDir=" + appInfo.sourceDir
                     + " nativeLibraryDir=" + appInfo.nativeLibraryDir);
+
+            // Platform natives the runtime declares but never registers: libcore's math, and
+            // SurfaceControl.nativeSetDesiredHdrHeadroom, whose owning library no longer builds.
+            // ART only resolves a native method from a library that has been loaded, so having
+            // the library on disk is not enough -- the method stays unimplemented and the first
+            // app to reach it dies, Wikipedia on Math.rint and LocalSend's Flutter engine on the
+            // SurfaceControl one, both before a first frame. The
+            // parent's preload is a no-op by design (an old musl dlopen SEGV), so it is loaded
+            // here, in the child, where the app's own libraries load without trouble.
+            //
+            // The file is deliberately not called libjavacore.so.  The runtime's own
+            // Runtime.nativeLoad answers "already registered" -- success, without opening
+            // anything -- for any path containing javacore, openjdk or icu_jni, on the assumption
+            // that those natives are statically linked into the runtime.  That assumption held
+            // until this library existed; under the old name the load reported success, JNI_OnLoad
+            // never ran, and Math.rint stayed unimplemented with nothing in the log to say so.
+            try {
+                String runtimeRoot = System.getenv("WESTLAKE_RUNTIME_ROOT");
+                String path = (runtimeRoot == null || runtimeRoot.isEmpty())
+                        ? "libwl_missing_natives.so" : runtimeRoot + "/libwl_missing_natives.so";
+                // System.load would register the library against this class's own loader, and
+                // java.lang.Math is a boot class: ART looks for its natives only in libraries the
+                // boot loader owns. Runtime.nativeLoad takes the loader explicitly, and null means
+                // the boot loader, which is the one that has to find Java_java_lang_Math_rint.
+                java.lang.reflect.Method load = Runtime.class.getDeclaredMethod(
+                        "nativeLoad", String.class, ClassLoader.class);
+                load.setAccessible(true);
+                Object error = load.invoke(null, path, null);
+                System.err.println(error == null
+                        ? "[WL-JAVACORE] libcore natives loaded for the boot loader"
+                        : "[WL-JAVACORE] not loaded: " + error);
+            } catch (Throwable t) {
+                System.err.println("[WL-JAVACORE] not loaded: " + t);
+            }
+
+            // Android's zygote installs the "AndroidKeyStore" provider before any app code runs
+            // (ZygoteInit.warmUpJcaProviders); apps open it by name during startup.
+            try {
+                adapter.core.SoftwareAndroidKeyStore.install(new java.io.File(appInfo.dataDir, "no_backup"));
+            } catch (Throwable t) {
+                System.err.println("[WL-KEYSTORE] install failed: " + t);
+            }
+
+            startMethodTraceIfRequested(appInfo.dataDir);
 
             // 2. Build Android Configuration from OH key/value + display snapshot.
             // Inlined to avoid PathClassLoader cross-class resolution issue
