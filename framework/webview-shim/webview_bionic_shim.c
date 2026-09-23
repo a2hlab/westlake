@@ -852,6 +852,43 @@ int wl_conn(int fd, const struct sockaddr *address, socklen_t address_length)
  * libwebviewchromium callers.  OH-native code and every other library request
  * retain the system loader's normal behavior.
  */
+
+/*
+ * Libraries refused rather than loaded.
+ *
+ * Some app libraries are self-decrypting and inspect the host before unpacking.
+ * When they judge the environment not to be stock Android they finish DT_INIT
+ * without producing plaintext, and the first .init_array constructor then
+ * executes ciphertext: SIGILL, raised inside dlopen, which no Java caller can
+ * catch. The process dies.
+ *
+ * Returning NULL instead turns that uncatchable crash into the ordinary
+ * UnsatisfiedLinkError such an SDK already handles, because a library missing
+ * from the device is a case it must support. Measured on Android 11 with
+ * libakamaibmp.so forced to fail: com.mcdonalds.app catches it, continues, and
+ * reaches HomeDashboardActivity with no exception logged.
+ *
+ * Add an entry only with evidence for both halves: that the library traps on
+ * this runtime, and that the app tolerates its absence. Toutiao's
+ * libmetasec_ml.so was checked and loads cleanly here, so it is not listed.
+ */
+static const char *const g_refused_libraries[] = {
+    "libakamaibmp.so", /* Akamai Bot Manager (CyberFend); telemetry only */
+};
+
+static int westlake_library_is_refused(const char *basename)
+{
+    if (basename == NULL) {
+        return 0;
+    }
+    for (size_t i = 0; i < sizeof(g_refused_libraries) / sizeof(g_refused_libraries[0]); ++i) {
+        if (strcmp(basename, g_refused_libraries[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void *dlopen(const char *filename, int flags)
 {
     typedef void *(*DlopenFn)(const char *, int);
@@ -867,6 +904,15 @@ void *dlopen(const char *filename, int flags)
     const char *actual_filename = filename;
     const char *basename = filename != NULL ? strrchr(filename, '/') : NULL;
     basename = basename != NULL ? basename + 1 : filename;
+    if (basename != NULL && westlake_library_is_refused(basename)) {
+        static int refused_logged;
+        if (!__atomic_exchange_n(&refused_logged, 1, __ATOMIC_RELAXED)) {
+            fprintf(stderr,
+                    "[WESTLAKE-LOADER] refusing self-trapping library: %s\n",
+                    filename);
+        }
+        return NULL;
+    }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
