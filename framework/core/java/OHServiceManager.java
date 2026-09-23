@@ -138,6 +138,7 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // A manager an app dereferences without checking. getSystemService returns null when
             // the fetcher cannot find these, and the NPE lands wherever the app first touched it:
             // OONI Probe in its Application constructor, NewPipe starting its main activity.
+            case "audio":
             case "locale":
             case "batterystats":
             case "batteryproperties":

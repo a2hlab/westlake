@@ -73,6 +73,9 @@ public final class LocalServiceBinders {
                 case "account":
                     binder = proxy(name, "android.accounts.IAccountManager", LocalServiceBinders::account);
                     break;
+                case "audio":
+                    binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
+                    break;
                 case "locale":
                     binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
                     break;
@@ -176,6 +179,22 @@ public final class LocalServiceBinders {
         }
     }
 
+    /**
+     * Every SoundPool, MediaPlayer and AudioTrack is a PlayerBase, and PlayerBase registers itself
+     * with IAudioService.trackPlayer through its OWN cached copy of the service, fetched from
+     * ServiceManager. AppSpawnXInit stamps a stub into AudioManager's cache only, so that path
+     * still got null: Termux's TermuxActivity.onResume builds a SoundPool for its bell and died on
+     * the NPE. Answering the name here gives every cache the same binder.
+     *
+     * Nothing reaches OH audio through this interface; actual playback is the SoundPool/AVPlayer
+     * backend's business. So it answers as the stub it replaces did, with defaults: no players
+     * tracked, no sound effects, nothing muted. trackPlayer's 0 is a player id the caller only
+     * hands back later.
+     */
+    private static Object audio(String method, Object[] args) {
+        return DEFAULT;
+    }
+
     private static Object batteryStats(String method, Object[] args) {
         // Only needed so BatteryManager's fetcher can be satisfied; nothing reads it here.
         return DEFAULT;
@@ -256,6 +275,11 @@ public final class LocalServiceBinders {
         if (type != null && type.isArray()) {
             return java.lang.reflect.Array.newInstance(type.getComponentType(), 0);
         }
+        // Collections likewise: an empty one is what a service with nothing to report returns, and
+        // a null List of audio devices or playback configurations throws in the caller's loop.
+        if (type == java.util.List.class) return new ArrayList<>();
+        if (type == java.util.Map.class) return new HashMap<>();
+        if (type == java.util.Set.class) return new HashSet<>();
         if (type == null || !type.isPrimitive()) return null;
         if (type == boolean.class) return Boolean.FALSE;
         if (type == byte.class) return (byte) 0;
