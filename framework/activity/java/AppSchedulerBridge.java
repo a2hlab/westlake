@@ -573,7 +573,16 @@ public class AppSchedulerBridge {
             // Autofill / ContentCapture: A_ONLY_SYNTH — disabled but non-null.
             setField(data, "autofillOptions", buildDisabledAutofillOptions());
             setField(data, "contentCaptureOptions", buildDisabledContentCaptureOptions());
-            setField(data, "disabledCompatChanges", new long[0]);
+            // What system_server's PlatformCompat would disable for this app's target SDK. An empty
+            // list is not "let AOSP decide": in-process, AppCompatCallbacks only honours what it is
+            // told is disabled, so it enabled every Android 12-15 behaviour change for every app.
+            // Termux targets 28 and threw from its service's onCreate on the SDK 31 PendingIntent
+            // mutability rule; the 64 @Disabled changes were on for everyone as well.
+            long[] disabled = CompatChangeTable.disabledFor(appInfo.targetSdkVersion);
+            setField(data, "disabledCompatChanges", disabled);
+            System.err.println("[B43-BIND] compat: targetSdk=" + appInfo.targetSdkVersion
+                    + " disabled " + disabled.length + " of " + CompatChangeTable.size()
+                    + " gated changes");
             setField(data, "mLoggableCompatChanges", new long[0]);
             setField(data, "mSerializedSystemFontMap", null);
             setField(data, "startRequestedElapsedTime", android.os.SystemClock.elapsedRealtime());
