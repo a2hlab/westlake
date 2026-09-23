@@ -73,6 +73,19 @@ public final class LocalServiceBinders {
                 case "account":
                     binder = proxy(name, "android.accounts.IAccountManager", LocalServiceBinders::account);
                     break;
+                case "locale":
+                    binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
+                    break;
+                // BatteryManager's fetcher requires two services and throws if either is missing,
+                // so registering one of them changes nothing.
+                case "batterystats":
+                    binder = proxy(name, "com.android.internal.app.IBatteryStats",
+                            LocalServiceBinders::batteryStats);
+                    break;
+                case "batteryproperties":
+                    binder = proxy(name, "android.os.IBatteryPropertiesRegistrar",
+                            LocalServiceBinders::batteryProperties);
+                    break;
                 default:
                     return null;
             }
@@ -137,6 +150,64 @@ public final class LocalServiceBinders {
 
     private static Object alarm(String method, Object[] args) {
         return DEFAULT;   // set() is accepted, nothing is ever delivered; no next alarm clock
+    }
+
+    /**
+     * OONI Probe calls setOverrideLocaleConfig while its Application is constructed and does not
+     * null-check the manager, so the missing binder took the whole binding down before any
+     * activity started. AndroidX does the same through AppLocalesMetadataHolderService.
+     *
+     * Per-app locale overrides are stored by the real service and read back later; nothing here
+     * stores anything, so a set is accepted and a get reports no override. That is a truthful
+     * answer for a board with no per-app locale database, not a placeholder -- an app that sets
+     * an override and reads it back will see it absent, which is the same as a user never having
+     * chosen one.
+     */
+    private static Object locale(String method, Object[] args) {
+        switch (method) {
+            case "getSystemLocales":
+                return Resources.getSystem().getConfiguration().getLocales();
+            case "getApplicationLocales":
+                return android.os.LocaleList.getEmptyLocaleList();
+            default:
+                // setApplicationLocales / setOverrideLocaleConfig accepted and dropped;
+                // getOverrideLocaleConfig answers null -- no override was ever recorded.
+                return DEFAULT;
+        }
+    }
+
+    private static Object batteryStats(String method, Object[] args) {
+        // Only needed so BatteryManager's fetcher can be satisfied; nothing reads it here.
+        return DEFAULT;
+    }
+
+    /**
+     * NewPipe reads BatteryManager.getIntProperty while starting its main activity and does not
+     * null-check the manager either.
+     *
+     * The values are those of an idle, fully charged phone, matching what the rest of this class
+     * reports. They are invented rather than read from OH: the board does expose battery state,
+     * and wiring that through is worth doing, but a plausible constant is enough to stop an app
+     * that only wants to know whether it should throttle background work.
+     */
+    private static Object batteryProperties(String method, Object[] args) {
+        if (!"getProperty".equals(method) || args == null || args.length < 2) {
+            return DEFAULT;   // scheduleUpdate is oneway and has nothing to schedule
+        }
+        final long value;
+        switch ((Integer) args[0]) {
+            case 1:  value = 3_000_000L; break;   // CHARGE_COUNTER, uAh
+            case 2:                               // CURRENT_NOW, uA -- idle, neither in nor out
+            case 3:  value = 0L; break;           // CURRENT_AVERAGE
+            case 4:  value = 100L; break;         // CAPACITY, percent
+            case 6:  value = 5L; break;           // STATUS = BATTERY_STATUS_FULL
+            default:
+                // Unsupported ids are a real answer on real hardware: a non-zero status makes
+                // getIntProperty return Integer.MIN_VALUE, which callers already handle.
+                return 1;
+        }
+        ((android.os.BatteryProperty) args[1]).setLong(value);
+        return 0;
     }
 
     private static Object account(String method, Object[] args) {

@@ -135,6 +135,12 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "alarm":
             case "clipboard":
             case "account":
+            // A manager an app dereferences without checking. getSystemService returns null when
+            // the fetcher cannot find these, and the NPE lands wherever the app first touched it:
+            // OONI Probe in its Application constructor, NewPipe starting its main activity.
+            case "locale":
+            case "batterystats":
+            case "batteryproperties":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
