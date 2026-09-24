@@ -15,6 +15,9 @@
  *   and Clock.systemUTC(). Feeder's view model reads it before its first frame. It is a
  *   @CriticalNative, so it is bound with the critical-native calling convention.
  *
+ *   java.lang.ProcessEnvironment.environ -- behind System.getenv(); Briar reads its environment
+ *   while its Application is created. Ported from libcore's ProcessEnvironment_md.c.
+ *
  *   android.view.SurfaceControl.nativeSetDesiredHdrHeadroom -- registered by
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
  *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
@@ -24,6 +27,7 @@
  */
 #include <jni.h>
 #include <math.h>
+#include <string.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
@@ -157,6 +161,45 @@ static jlong wl_getNanoTimeAdjustment(jlong offset)
     return diff * 1000000000LL + (jlong) ts.tv_nsec;
 }
 
+/* The process environment as alternating name and value byte arrays; entries without '=' are
+ * skipped, as libcore's own implementation does. */
+extern char** environ;
+static jobjectArray wl_environ(JNIEnv* env, jclass c)
+{
+    jsize count = 0, i, j;
+    jobjectArray result;
+    jclass bytes = (*env)->FindClass(env, "[B");
+    (void)c;
+    if (bytes == NULL) return NULL;
+    for (i = 0; environ[i]; i++) if (strchr(environ[i], '=') != NULL) count++;
+    result = (*env)->NewObjectArray(env, 2 * count, bytes, NULL);
+    if (result == NULL) return NULL;
+    for (i = 0, j = 0; environ[i]; i++) {
+        const char* end = strchr(environ[i], '=');
+        jbyteArray name, value;
+        jsize nameLength, valueLength;
+        if (end == NULL) continue;
+        nameLength = (jsize) (end - environ[i]);
+        valueLength = (jsize) strlen(end + 1);
+        name = (*env)->NewByteArray(env, nameLength);
+        if (name == NULL) return NULL;
+        value = (*env)->NewByteArray(env, valueLength);
+        if (value == NULL) return NULL;
+        (*env)->SetByteArrayRegion(env, name, 0, nameLength, (const jbyte*) environ[i]);
+        (*env)->SetByteArrayRegion(env, value, 0, valueLength, (const jbyte*) (end + 1));
+        (*env)->SetObjectArrayElement(env, result, 2 * j, name);
+        (*env)->SetObjectArrayElement(env, result, 2 * j + 1, value);
+        (*env)->DeleteLocalRef(env, name);
+        (*env)->DeleteLocalRef(env, value);
+        j++;
+    }
+    return result;
+}
+
+static const JNINativeMethod kProcessEnvironment[] = {
+    { "environ", "()[[B", (void*) wl_environ },
+};
+
 static const JNINativeMethod kVm[] = {
     { "getNanoTimeAdjustment", "(J)J", (void*) wl_getNanoTimeAdjustment },
 };
@@ -230,12 +273,14 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int v = bind(env, "android/view/SurfaceControl", kSurfaceControl,
                      (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])));
         int t = bind(env, "jdk/internal/misc/VM", kVm, (int) (sizeof(kVm) / sizeof(kVm[0])));
+        int e = bind(env, "java/lang/ProcessEnvironment", kProcessEnvironment,
+                     (int) (sizeof(kProcessEnvironment) / sizeof(kProcessEnvironment[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
-                 t, (int) (sizeof(kVm) / sizeof(kVm[0])));
+                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e);
         note(line);
     }
     return JNI_VERSION_1_6;

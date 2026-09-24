@@ -161,6 +161,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "wifi":
             // MediaRouter registers its client with the service in its constructor (RadioDroid).
             case "media_router":
+            // KeyguardManager's constructor requires the trust service (Nextcloud Talk casts the
+            // manager non-null).
+            case "trust":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

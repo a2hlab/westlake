@@ -100,6 +100,9 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "trust":
+                    binder = proxy(name, "android.app.trust.ITrustManager", LocalServiceBinders::trust);
+                    break;
                 case "media_router":
                     binder = proxy(name, "android.media.IMediaRouterService", LocalServiceBinders::mediaRouter);
                     break;
@@ -227,6 +230,11 @@ public final class LocalServiceBinders {
      */
     private static Object role(String method, Object[] args) {
         return DEFAULT;   // isRoleAvailable/isRoleHeld false, getRoleHolders empty
+    }
+
+    /** No trust agents and no secure lock: listeners register and nothing is ever trusted. */
+    private static Object trust(String method, Object[] args) {
+        return DEFAULT;
     }
 
     /** No remote routes: clients register and discover nothing; playback stays on the device. */

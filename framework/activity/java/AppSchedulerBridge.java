@@ -934,6 +934,17 @@ public class AppSchedulerBridge {
                             + " (ability record had 0x" + Integer.toHexString(target.theme) + ")");
                     target.theme = theme;
                 }
+                // An app that declares no application theme died in AppCompat ("You need to use a
+                // Theme.AppCompat theme") although its activity's theme is an AppCompat descendant:
+                // Seal, FFUpdater, Jami, mpv -- and only such apps; every app that declares an
+                // application theme was fine. Some step of this launch path styles the activity
+                // from its ApplicationInfo's theme rather than the activity's; where exactly is not
+                // yet located. Giving that ApplicationInfo the activity's theme made FFUpdater draw.
+                // Only this activity's copy changes, and only when the manifest has no application
+                // theme to lose.
+                if (appTheme == 0 && theme != 0 && target.applicationInfo != null) {
+                    target.applicationInfo.theme = theme;
+                }
                 return;
             }
         } catch (Throwable t) {
