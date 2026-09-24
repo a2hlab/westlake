@@ -913,6 +913,28 @@ public class AppSchedulerBridge {
      * non-null again, then clear it. The watcher does not fire twice, so nothing re-pins after.
      * Apps with no content providers never reach this hook and keep the previous behaviour.
      */
+    /** Theme and label the APK's manifest gives this activity, where the ability record has none. */
+    private static void fillFromManifest(android.content.pm.ActivityInfo target) {
+        try {
+            if (target == null || target.packageName == null
+                    || !adapter.packagemanager.SourcePackageRegistry.contains(target.packageName)) return;
+            android.content.pm.PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
+                    target.packageName, android.content.pm.PackageManager.GET_ACTIVITIES);
+            if (info == null || info.activities == null) return;
+            for (android.content.pm.ActivityInfo declared : info.activities) {
+                if (!declared.name.equals(target.name)) continue;
+                if (target.theme == 0 && declared.theme != 0) target.theme = declared.theme;
+                if (target.labelRes == 0 && target.nonLocalizedLabel == null) {
+                    target.labelRes = declared.labelRes;
+                    target.nonLocalizedLabel = declared.nonLocalizedLabel;
+                }
+                return;
+            }
+        } catch (Throwable t) {
+            System.err.println("[B47-SLA] manifest theme/label lookup failed: " + t);
+        }
+    }
+
     public static void releaseWebViewSupportHoldBeforeOnCreate() {
         try {
             java.lang.reflect.Field supported =
@@ -1893,6 +1915,12 @@ public class AppSchedulerBridge {
             // dispatch — whatever value is here is what mActivityInfo will
             // see in performLaunchActivity → initWindowDecorActionBar.
             android.content.pm.ApplicationInfo aiApp = activityInfo.applicationInfo;
+            // The ActivityInfo here comes from OH's ability record, which carries no per-activity
+            // theme or label. An app that themes the activity rather than the application (Seal:
+            // MainActivity has Theme.Seal, the application none) then launched with no theme at
+            // all, and AppCompat refused it; one without an activity label showed its class name
+            // as the title (Catima). Take both from the APK's own manifest, as PackageManager would.
+            fillFromManifest(activityInfo);
             int aiIconBefore = activityInfo.icon;
             int aiIconResBefore = activityInfo.getIconResource();  // method, not field
             int appIconBefore = aiApp != null ? aiApp.icon : -1;

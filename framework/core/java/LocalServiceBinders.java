@@ -100,6 +100,15 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "media_router":
+                    binder = proxy(name, "android.media.IMediaRouterService", LocalServiceBinders::mediaRouter);
+                    break;
+                case "wallpaper":
+                    binder = proxy(name, "android.app.IWallpaperManager", LocalServiceBinders::wallpaper);
+                    break;
+                case "wifi":
+                    binder = proxy(name, "android.net.wifi.IWifiManager", LocalServiceBinders::wifi);
+                    break;
                 case "notification":
                     binder = proxy(name, "android.app.INotificationManager",
                             LocalServiceBinders::notification);
@@ -218,6 +227,25 @@ public final class LocalServiceBinders {
      */
     private static Object role(String method, Object[] args) {
         return DEFAULT;   // isRoleAvailable/isRoleHeld false, getRoleHolders empty
+    }
+
+    /** No remote routes: clients register and discover nothing; playback stays on the device. */
+    private static Object mediaRouter(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /** No wallpaper and no wallpaper colours: the framework's nullable answers. */
+    private static Object wallpaper(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * Wi-Fi as this process can see it through Android's interface: nothing, because OH's
+     * wifi manager is not bridged. isWifiEnabled answers false and scans are empty; an app that
+     * needs Wi-Fi state learns it is unavailable rather than crashing on a null manager.
+     */
+    private static Object wifi(String method, Object[] args) {
+        return DEFAULT;
     }
 
     /** No searchable activities registered system-wide; an app's own search UI is unaffected. */

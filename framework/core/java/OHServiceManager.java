@@ -155,6 +155,12 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // RoleManager's constructor requires it; Fossify Messages asks whether it holds the
             // SMS role before its first screen.
             case "role":
+            // WallpaperManager's globals dereference the service (Retro Music); Kotlin casts the
+            // WifiManager non-null (openHAB).
+            case "wallpaper":
+            case "wifi":
+            // MediaRouter registers its client with the service in its constructor (RadioDroid).
+            case "media_router":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

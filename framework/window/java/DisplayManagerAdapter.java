@@ -315,7 +315,12 @@ public final class DisplayManagerAdapter extends IDisplayManager.Stub {
     @Override public void forgetWifiDisplay(String address) {}
     @Override public void pauseWifiDisplay() {}
     @Override public void resumeWifiDisplay() {}
-    @Override public android.hardware.display.WifiDisplayStatus getWifiDisplayStatus() { return null; }
+    // No Wi-Fi display support: the status a device without the feature reports (FEATURE_STATE
+    // UNAVAILABLE, nothing scanned or connected). MediaRouter dereferences it; RadioDroid's
+    // cast button died on the null.
+    @Override public android.hardware.display.WifiDisplayStatus getWifiDisplayStatus() {
+        return new android.hardware.display.WifiDisplayStatus();
+    }
     @Override public void setUserDisabledHdrTypes(int[] userDisabledTypes) {}
     @Override public void setAreUserDisabledHdrTypesAllowed(boolean v) {}
     @Override public boolean areUserDisabledHdrTypesAllowed() { return false; }
