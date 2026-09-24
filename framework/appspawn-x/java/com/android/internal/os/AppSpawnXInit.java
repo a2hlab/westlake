@@ -2250,9 +2250,16 @@ public class AppSpawnXInit {
             java.lang.reflect.InvocationHandler h = (proxy, method, args) -> {
                 String mname = method.getName();
                 if ("call".equals(mname)) {
-                    // Build empty Bundle as response (lookup miss = use default)
-                    Class<?> bundleCls = Class.forName("android.os.Bundle");
-                    Object b = bundleCls.getConstructor().newInstance();
+                    // Empty Bundle = lookup miss, the caller's default -- except the few values
+                    // Android never leaves unset (ANDROID_ID), answered by WlSettingsProvider.
+                    // call(attributionSource, authority, method, arg, extras): the last two Strings.
+                    android.os.Bundle b = new android.os.Bundle();
+                    String settingsMethod = null, settingsArg = null;
+                    for (Object a : args == null ? new Object[0] : args) {
+                        if (a instanceof String) { settingsMethod = settingsArg; settingsArg = (String) a; }
+                    }
+                    String value = adapter.activity.WlSettingsProvider.answer(settingsMethod, settingsArg);
+                    if (value != null) b.putString("value", value);
                     return b;
                 }
                 if ("query".equals(mname)) return null;

@@ -509,7 +509,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public IPackageInstaller getPackageInstaller() {
-        return null;
+        // PackageInstaller's constructor requires one; see LocalServiceBinders.packageInstaller.
+        return (IPackageInstaller) adapter.core.LocalServiceBinders.packageInstaller();
     }
 
     @Override
@@ -1238,15 +1239,15 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public android.content.pm.ResolveInfo resolveService(android.content.Intent arg0, java.lang.String arg1, long arg2, int arg3) throws android.os.RemoteException {
-        logStub("resolveService", "");
-        return null;
+        java.util.List<android.content.pm.ResolveInfo> found = SourcePackageRegistry.queryServices(arg0, arg1, arg2);
+        return found.isEmpty() ? null : found.get(0);
     }
 
 
     @Override
     public android.content.pm.ParceledListSlice queryIntentServices(android.content.Intent arg0, java.lang.String arg1, long arg2, int arg3) throws android.os.RemoteException {
-        logStub("queryIntentServices", "");
-        return null;
+        // The app's own services, matched against their manifest intent filters.
+        return new android.content.pm.ParceledListSlice<>(SourcePackageRegistry.queryServices(arg0, arg1, arg2));
     }
 
 

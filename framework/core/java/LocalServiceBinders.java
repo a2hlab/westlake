@@ -83,6 +83,20 @@ public final class LocalServiceBinders {
                 case "locale":
                     binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
                     break;
+                case "appwidget":
+                    binder = proxy(name, "com.android.internal.appwidget.IAppWidgetService",
+                            LocalServiceBinders::appWidget);
+                    break;
+                case "deviceidle":
+                    binder = proxy(name, "android.os.IDeviceIdleController", LocalServiceBinders::deviceIdle);
+                    break;
+                case "search":
+                    binder = proxy(name, "android.app.ISearchManager", LocalServiceBinders::search);
+                    break;
+                case "domain_verification":
+                    binder = proxy(name, "android.content.pm.verify.domain.IDomainVerificationManager",
+                            LocalServiceBinders::domainVerification);
+                    break;
                 case "notification":
                     binder = proxy(name, "android.app.INotificationManager",
                             LocalServiceBinders::notification);
@@ -185,6 +199,71 @@ public final class LocalServiceBinders {
                 // getOverrideLocaleConfig answers null -- no override was ever recorded.
                 return DEFAULT;
         }
+    }
+
+    /**
+     * A launcher with no widgets placed: no widget ids, no providers bound, updates accepted and
+     * dropped. Catima refreshes its home-screen widget from MainActivity.onResume.
+     */
+    private static Object appWidget(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /** No searchable activities registered system-wide; an app's own search UI is unaffected. */
+    private static Object search(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * An app's link handling as a fresh install sees it: allowed, every declared web host
+     * listed, none verified.
+     * getDomainVerificationUserState is nullable in the API, but Aurora Store's settings read it
+     * without checking; Android always answers for the calling package itself.
+     */
+    private static Object domainVerification(String method, Object[] args) {
+        if ("getDomainVerificationUserState".equals(method) && args != null && args.length > 0
+                && args[0] instanceof String) {
+            String pkg = (String) args[0];
+            // Every web host the manifest declares, none verified or selected (STATE_NONE, 0).
+            Map<String, Integer> hosts = new HashMap<>();
+            for (String host : adapter.packagemanager.SourcePackageRegistry.webHosts()) hosts.put(host, 0);
+            return new android.content.pm.verify.domain.DomainVerificationUserState(
+                    java.util.UUID.nameUUIDFromBytes(pkg.getBytes()), pkg,
+                    android.os.Process.myUserHandle(), true, hosts);
+        }
+        return DEFAULT;
+    }
+
+    /**
+     * Doze with no exemptions granted: no app is on the power-save allowlist, which is what a newly
+     * installed app sees on Android. DAVx5 asks whether it is exempt before its intro screen.
+     */
+    private static Object deviceIdle(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * PackageManager.getPackageInstaller(): PackageInstaller's constructor rejects a null
+     * IPackageInstaller, so the null the adapter used to return threw inside the framework (Aurora
+     * Store's Application.onCreate). This installer has no sessions, and installing is refused
+     * with a reason: this platform installs nothing on an app's behalf.
+     */
+    public static synchronized IInterface packageInstaller() {
+        IBinder binder = sBinders.get("package-installer");
+        if (binder == null) {
+            try {
+                binder = proxy("package-installer", "android.content.pm.IPackageInstaller", (method, args) -> {
+                    if ("createSession".equals(method)) {
+                        throw new IllegalStateException("package installation is not available on this platform");
+                    }
+                    return DEFAULT;
+                });
+            } catch (ClassNotFoundException e) {
+                return null;
+            }
+            sBinders.put("package-installer", binder);
+        }
+        return binder.queryLocalInterface("android.content.pm.IPackageInstaller");
     }
 
     /**

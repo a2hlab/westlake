@@ -143,6 +143,15 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "locale":
             case "batterystats":
             case "batteryproperties":
+            // Their managers are dereferenced inside the framework itself:
+            // AppWidgetManager.getInstance (Catima's widget refresh in onResume) and
+            // PowerManager.isIgnoringBatteryOptimizations (DAVx5's intro).
+            case "appwidget":
+            case "deviceidle":
+            // SearchManager's fetcher requires "search" (Catima); Aurora Store dereferences
+            // DomainVerificationManager.
+            case "search":
+            case "domain_verification":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
