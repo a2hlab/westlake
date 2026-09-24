@@ -913,7 +913,7 @@ public class AppSchedulerBridge {
      * non-null again, then clear it. The watcher does not fire twice, so nothing re-pins after.
      * Apps with no content providers never reach this hook and keep the previous behaviour.
      */
-    /** Theme and label the APK's manifest gives this activity, where the ability record has none. */
+    /** The theme the APK's manifest gives this activity (or its application), over the ability record's. */
     private static void fillFromManifest(android.content.pm.ActivityInfo target) {
         try {
             if (target == null || target.packageName == null
@@ -921,12 +921,18 @@ public class AppSchedulerBridge {
             android.content.pm.PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
                     target.packageName, android.content.pm.PackageManager.GET_ACTIVITIES);
             if (info == null || info.activities == null) return;
+            // The manifest decides the theme outright. OH's record carries a theme id from its own
+            // resource numbering: FFUpdater launched with 0x7f150013, which does not exist in its
+            // APK (its activities use 0x7f120254), and AppCompat refused the unresolvable theme.
+            int appTheme = info.applicationInfo != null ? info.applicationInfo.theme : 0;
+            if (target.applicationInfo != null && appTheme != 0) target.applicationInfo.theme = appTheme;
             for (android.content.pm.ActivityInfo declared : info.activities) {
                 if (!declared.name.equals(target.name)) continue;
-                if (target.theme == 0 && declared.theme != 0) target.theme = declared.theme;
-                if (target.labelRes == 0 && target.nonLocalizedLabel == null) {
-                    target.labelRes = declared.labelRes;
-                    target.nonLocalizedLabel = declared.nonLocalizedLabel;
+                int theme = declared.theme != 0 ? declared.theme : appTheme;
+                if (theme != 0 && theme != target.theme) {
+                    System.err.println("[B47-SLA] theme from the manifest: 0x" + Integer.toHexString(theme)
+                            + " (ability record had 0x" + Integer.toHexString(target.theme) + ")");
+                    target.theme = theme;
                 }
                 return;
             }
@@ -1916,10 +1922,9 @@ public class AppSchedulerBridge {
             // see in performLaunchActivity → initWindowDecorActionBar.
             android.content.pm.ApplicationInfo aiApp = activityInfo.applicationInfo;
             // The ActivityInfo here comes from OH's ability record, which carries no per-activity
-            // theme or label. An app that themes the activity rather than the application (Seal:
-            // MainActivity has Theme.Seal, the application none) then launched with no theme at
-            // all, and AppCompat refused it; one without an activity label showed its class name
-            // as the title (Catima). Take both from the APK's own manifest, as PackageManager would.
+            // theme. An app that themes the activity rather than the application (Seal: MainActivity
+            // has Theme.Seal, the application none) then launched with no theme at all. Take it from
+            // the APK's own manifest, as PackageManager would.
             fillFromManifest(activityInfo);
             int aiIconBefore = activityInfo.icon;
             int aiIconResBefore = activityInfo.getIconResource();  // method, not field
