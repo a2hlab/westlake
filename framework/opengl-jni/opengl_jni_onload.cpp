@@ -1,6 +1,7 @@
 // Registers Android's Java OpenGL bindings onto the framework classes.
 //
-// The runtime's libandroid_runtime ships none of them -- EGLImpl, GLImpl, android.opengl.GLES* --
+// The runtime's libandroid_runtime ships none of them -- EGLImpl, GLImpl, android.opengl.EGL14/15,
+// EGLExt and GLES* --
 // so GLSurfaceView and every android.opengl call failed with "No implementation found".
 // AppSchedulerBridge loads this library through Runtime.nativeLoad with the boot class loader, so
 // FindClass here resolves the framework classes, exactly as libwl_missing_natives does.
@@ -19,6 +20,9 @@ int register_android_opengl_jni_GLES30(JNIEnv*);
 int register_android_opengl_jni_GLES31(JNIEnv*);
 int register_android_opengl_jni_GLES31Ext(JNIEnv*);
 int register_android_opengl_jni_GLES32(JNIEnv*);
+int register_android_opengl_jni_EGL14(JNIEnv*);
+int register_android_opengl_jni_EGL15(JNIEnv*);
+int register_android_opengl_jni_EGLExt(JNIEnv*);
 
 struct Registration { const char* name; int (*fn)(JNIEnv*); };
 
@@ -34,6 +38,9 @@ static const Registration kRegistrations[] = {
     {"GLES31", register_android_opengl_jni_GLES31},
     {"GLES31Ext", register_android_opengl_jni_GLES31Ext},
     {"GLES32", register_android_opengl_jni_GLES32},
+    {"EGL14", register_android_opengl_jni_EGL14},
+    {"EGL15", register_android_opengl_jni_EGL15},
+    {"EGLExt", register_android_opengl_jni_EGLExt},
 };
 
 extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
