@@ -83,6 +83,10 @@ public final class LocalServiceBinders {
                 case "locale":
                     binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
                     break;
+                case "notification":
+                    binder = proxy(name, "android.app.INotificationManager",
+                            LocalServiceBinders::notification);
+                    break;
                 // BatteryManager's fetcher requires two services and throws if either is missing,
                 // so registering one of them changes nothing.
                 case "batterystats":
@@ -181,6 +185,20 @@ public final class LocalServiceBinders {
                 // getOverrideLocaleConfig answers null -- no override was ever recorded.
                 return DEFAULT;
         }
+    }
+
+    /**
+     * Tusky's Application.onCreate reads its notification channels; NotificationManager unwraps the
+     * ParceledListSlice the service returns, and the plain Binder that used to stand in for the
+     * service decoded every reply to null, so the NPE landed inside the framework, during bind.
+     *
+     * No notification reaches OH through this interface. Posts and channel changes are accepted
+     * and dropped; queries answer what a service with nothing stored reports: no channels, no
+     * active notifications, notifications not enabled (targetSdk 33+ apps start without
+     * POST_NOTIFICATIONS), zen mode off.
+     */
+    private static Object notification(String method, Object[] args) {
+        return DEFAULT;
     }
 
     /**
@@ -347,6 +365,11 @@ public final class LocalServiceBinders {
         if (type == java.util.List.class) return new ArrayList<>();
         if (type == java.util.Map.class) return new HashMap<>();
         if (type == java.util.Set.class) return new HashSet<>();
+        // AIDL list results travel as a ParceledListSlice, which the manager unwraps with getList()
+        // before the app sees anything: a null throws inside the framework.
+        if (type == android.content.pm.ParceledListSlice.class) {
+            return android.content.pm.ParceledListSlice.emptyList();
+        }
         if (type == null || !type.isPrimitive()) return null;
         if (type == boolean.class) return Boolean.FALSE;
         if (type == byte.class) return (byte) 0;
