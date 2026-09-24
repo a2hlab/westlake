@@ -741,11 +741,38 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         logStub("suppressResizeConfigChanges", "No OH equivalent");
     }
 
-    /** [STUB] getDeviceConfigurationInfo - OH config managed differently */
+    /**
+     * The device's input and GL capabilities, as ActivityManager.getDeviceConfigurationInfo()
+     * reports them.
+     *
+     * Games read reqGlEsVersion here to pick a renderer, and PPSSPP's detectOpenGLES20 reads it
+     * without a null check, so the null this used to return ended its activity in onCreate.
+     *
+     * Input fields come from the current Configuration, as ActivityTaskManagerService fills them.
+     * reqGlEsVersion is what Android takes from ro.opengles.version; OH sets no such property, so
+     * the value is the board's measured one: an EGL context on the Mali-G57 reports
+     * "OpenGL ES 3.2" (major 3, minor 2), encoded as 0x00030002.
+     */
+    private static final int BOARD_GLES_VERSION = 0x00030002;
+
     @Override
     public ConfigurationInfo getDeviceConfigurationInfo() throws RemoteException {
-        logStub("getDeviceConfigurationInfo", "OH config managed differently");
-        return null;
+        ConfigurationInfo info = new ConfigurationInfo();
+        android.content.res.Configuration config =
+                android.content.res.Resources.getSystem().getConfiguration();
+        info.reqTouchScreen = config.touchscreen;
+        info.reqKeyboardType = config.keyboard;
+        info.reqNavigation = config.navigation;
+        if (config.navigation == android.content.res.Configuration.NAVIGATION_DPAD
+                || config.navigation == android.content.res.Configuration.NAVIGATION_TRACKBALL) {
+            info.reqInputFeatures |= ConfigurationInfo.INPUT_FEATURE_FIVE_WAY_NAV;
+        }
+        if (config.keyboard != android.content.res.Configuration.KEYBOARD_UNDEFINED
+                && config.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS) {
+            info.reqInputFeatures |= ConfigurationInfo.INPUT_FEATURE_HARD_KEYBOARD;
+        }
+        info.reqGlEsVersion = BOARD_GLES_VERSION;
+        return info;
     }
 
     // ====================================================================
