@@ -472,6 +472,24 @@ public class AppSchedulerBridge {
                 System.err.println("[WL-JAVACORE] not loaded: " + t);
             }
 
+            // Android's Java OpenGL bindings -- EGLImpl behind GLSurfaceView, GLImpl, and
+            // android.opengl.GLES10..32 -- are absent from the runtime's libandroid_runtime, so
+            // every GLSurfaceView app died on EGLImpl._nativeClassInit (PPSSPP, Mindustry).
+            // libwl_opengl_jni registers them from its JNI_OnLoad onto these boot classes; same
+            // boot-loader load as above, for the same reason.
+            try {
+                String runtimeRoot = System.getenv("WESTLAKE_RUNTIME_ROOT");
+                String path = (runtimeRoot == null || runtimeRoot.isEmpty())
+                        ? "libwl_opengl_jni.so" : runtimeRoot + "/libwl_opengl_jni.so";
+                java.lang.reflect.Method load = Runtime.class.getDeclaredMethod(
+                        "nativeLoad", String.class, ClassLoader.class);
+                load.setAccessible(true);
+                Object error = load.invoke(null, path, null);
+                if (error != null) System.err.println("[WL-OPENGL] not loaded: " + error);
+            } catch (Throwable t) {
+                System.err.println("[WL-OPENGL] not loaded: " + t);
+            }
+
             // Android's zygote installs the "AndroidKeyStore" provider before any app code runs
             // (ZygoteInit.warmUpJcaProviders); apps open it by name during startup.
             try {

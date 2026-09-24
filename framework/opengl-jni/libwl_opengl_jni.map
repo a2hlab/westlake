@@ -1,0 +1,3 @@
+/* Only the JNI entry point. The GL forwarders exist to satisfy this library's own references and
+ * must not be visible to other libraries' symbol lookups. */
+{ global: JNI_OnLoad; local: *; };
