@@ -12,7 +12,8 @@
  *   is a libm call with the same meaning, so these are forwarders, not implementations.
  *
  *   jdk.internal.misc.VM.getNanoTimeAdjustment -- the wall clock behind java.time.Instant.now()
- *   and Clock.systemUTC(). Feeder's view model reads it before its first frame.
+ *   and Clock.systemUTC(). Feeder's view model reads it before its first frame. It is a
+ *   @CriticalNative, so it is bound with the critical-native calling convention.
  *
  *   android.view.SurfaceControl.nativeSetDesiredHdrHeadroom -- registered by
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
@@ -140,13 +141,16 @@ JNIEXPORT void JNICALL Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadr
  * OpenJDK's contract: the current wall-clock time as nanoseconds since offsetInSeconds, or -1 when
  * that difference does not fit (more than 2^32 seconds either way); Instant.now() then re-reads
  * with a nearer offset.
+ *
+ * libcore declares it @CriticalNative: ART calls it with the Java arguments only, no JNIEnv and no
+ * jclass. With the ordinary JNI signature the offset was read from the wrong register, the answer
+ * was -1 for every offset, and Clock.currentInstant threw "Offset ... is not in range" (Tasks.org).
  */
-JNIEXPORT jlong JNICALL Java_jdk_internal_misc_VM_getNanoTimeAdjustment(JNIEnv* env, jclass c, jlong offset)
+static jlong wl_getNanoTimeAdjustment(jlong offset)
 {
     const jlong max_diff = 0x0100000000LL;
     struct timespec ts;
     jlong diff;
-    (void)env; (void)c;
     if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
     diff = (jlong) ts.tv_sec - offset;
     if (diff >= max_diff || diff <= -max_diff) return -1;
@@ -154,7 +158,7 @@ JNIEXPORT jlong JNICALL Java_jdk_internal_misc_VM_getNanoTimeAdjustment(JNIEnv* 
 }
 
 static const JNINativeMethod kVm[] = {
-    { "getNanoTimeAdjustment", "(J)J", (void*) Java_jdk_internal_misc_VM_getNanoTimeAdjustment },
+    { "getNanoTimeAdjustment", "(J)J", (void*) wl_getNanoTimeAdjustment },
 };
 
 static const JNINativeMethod kSurfaceControl[] = {

@@ -1814,6 +1814,33 @@ public class AppSpawnXInit {
                     if ("getVolumeState".equals(name)) {
                         return "mounted";
                     }
+                    // The private internal volume, at /data. StorageManager.getUuidForPath
+                    // first checks Environment.getDataDirectory(), which appspawn-x points at the
+                    // stage (ANDROID_DATA), so an app's own /data/data path falls through to
+                    // this list: with no volume here it threw "Failed to find a storage device"
+                    // (LibreTube's Coil disk cache, in Application.onCreate).
+                    if ("getVolumes".equals(name)) {
+                        android.os.storage.VolumeInfo internal = new android.os.storage.VolumeInfo(
+                                android.os.storage.VolumeInfo.ID_PRIVATE_INTERNAL,
+                                android.os.storage.VolumeInfo.TYPE_PRIVATE, null, null);
+                        internal.path = "/data";
+                        internal.state = android.os.storage.VolumeInfo.STATE_MOUNTED;
+                        return new android.os.storage.VolumeInfo[] {internal};
+                    }
+                    // What the app's own storage really has free, rather than 0.
+                    if ("getAllocatableBytes".equals(name)) {
+                        long free = 0L;
+                        try {
+                            android.app.Application app = android.app.ActivityThread.currentApplication();
+                            String dir = app != null ? app.getDataDir().getPath()
+                                    : android.os.Environment.getDataDirectory().getPath();
+                            free = new android.os.StatFs(dir).getAvailableBytes();
+                        } catch (Throwable t) {
+                            System.err.println("[WESTLAKE-STORAGE-750] getAllocatableBytes: " + t);
+                        }
+                        System.err.println("[WESTLAKE-STORAGE-750] getAllocatableBytes=" + free);
+                        return Long.valueOf(free);
+                    }
                     if ("isUserKeyUnlocked".equals(name)) {
                         return Boolean.TRUE;
                     }
