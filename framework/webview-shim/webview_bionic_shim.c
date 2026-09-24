@@ -1003,6 +1003,76 @@ void *dlopen(const char *filename, int flags)
 }
 
 /*
+ * bionic's extended dlopen. PPSSPP's libppsspp_jni.so imports android_dlopen_ext@LIBC, OH's musl
+ * loader has no such symbol, and the whole library failed to relocate -- the emulator reported
+ * "LoadLibrary failed" before it could draw anything.
+ *
+ * The extinfo fields are mostly hints this loader cannot act on and the caller does not depend on:
+ * a reserved address (with or without HINT), RELRO sharing, and the linker namespace all describe
+ * where or how bionic should load, not what. Those are ignored and the library is opened normally,
+ * through the dlopen above so OH's .z.so naming still applies. A library passed by file descriptor
+ * is opened via /proc/self/fd. Loading at an offset inside that file (an uncompressed .so inside an
+ * APK) is the one request this cannot meet, and it fails with that reason rather than opening the
+ * wrong bytes.
+ */
+/*
+ * Android's OpenSL ES extension interface ID for the simple buffer queue. Android's libOpenSLES
+ * exports it; OH's exports the Khronos IDs plus its own SL_IID_OH_BUFFERQUEUE, not this one.
+ * PPSSPP's libppsspp_jni.so and Mindustry's libarc.so both import it, so neither library could
+ * even be relocated -- the same one symbol blocked two unrelated apps.
+ *
+ * Exporting the ID (Android's value, from SLES/OpenSLES_Android.h) lets them load. It does not
+ * make the interface work: asking OH's player object for it returns SL_RESULT_FEATURE_UNSUPPORTED,
+ * so audio through this path stays off. Backing it with OH's buffer queue is the next step.
+ */
+struct westlake_sl_interface_id {
+    uint32_t time_low;
+    uint16_t time_mid;
+    uint16_t time_hi_and_version;
+    uint16_t clock_seq;
+    uint8_t node[6];
+};
+static const struct westlake_sl_interface_id westlake_sl_iid_android_simple_buffer_queue = {
+    0x198e4940, 0xc5d7, 0x11df, 0xa2a6, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
+const struct westlake_sl_interface_id *const SL_IID_ANDROIDSIMPLEBUFFERQUEUE =
+    &westlake_sl_iid_android_simple_buffer_queue;
+
+typedef struct {
+    uint64_t flags;
+    void *reserved_addr;
+    size_t reserved_size;
+    int relro_fd;
+    int library_fd;
+    int64_t library_fd_offset;
+    void *library_namespace;
+} westlake_android_dlextinfo;
+
+#define WESTLAKE_DLEXT_USE_LIBRARY_FD        0x10
+#define WESTLAKE_DLEXT_USE_LIBRARY_FD_OFFSET 0x20
+
+static __thread char westlake_dlext_error[160];
+
+void *android_dlopen_ext(const char *filename, int flags, const westlake_android_dlextinfo *extinfo)
+{
+    if (extinfo != NULL && (extinfo->flags & WESTLAKE_DLEXT_USE_LIBRARY_FD)) {
+        if ((extinfo->flags & WESTLAKE_DLEXT_USE_LIBRARY_FD_OFFSET) && extinfo->library_fd_offset != 0) {
+            snprintf(westlake_dlext_error, sizeof(westlake_dlext_error),
+                     "android_dlopen_ext: loading %s at offset %lld in fd %d is not supported",
+                     filename != NULL ? filename : "(fd)", (long long) extinfo->library_fd_offset,
+                     extinfo->library_fd);
+            fprintf(stderr, "[WESTLAKE-BIONIC] %s\n", westlake_dlext_error);
+            errno = ENOSYS;
+            return NULL;
+        }
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/self/fd/%d", extinfo->library_fd);
+        return dlopen(path, flags);
+    }
+    return dlopen(filename, flags);
+}
+
+
+/*
  * WESTLAKE §680: translate Android/bionic sysconf selectors at the libc boundary.
  *
  * Bionic and OH musl number sysconf selectors independently: bionic's _SC_PAGESIZE is 39, and
