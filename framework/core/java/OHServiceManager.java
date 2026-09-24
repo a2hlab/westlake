@@ -152,6 +152,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // DomainVerificationManager.
             case "search":
             case "domain_verification":
+            // RoleManager's constructor requires it; Fossify Messages asks whether it holds the
+            // SMS role before its first screen.
+            case "role":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

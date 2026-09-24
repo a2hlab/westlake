@@ -97,6 +97,9 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.content.pm.verify.domain.IDomainVerificationManager",
                             LocalServiceBinders::domainVerification);
                     break;
+                case "role":
+                    binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
+                    break;
                 case "notification":
                     binder = proxy(name, "android.app.INotificationManager",
                             LocalServiceBinders::notification);
@@ -207,6 +210,14 @@ public final class LocalServiceBinders {
      */
     private static Object appWidget(String method, Object[] args) {
         return DEFAULT;
+    }
+
+    /**
+     * Roles on a board with no telephony: no role is available (so none is offered to the user)
+     * and none is held. An SMS or dialer app sees that it is not the default and cannot become it.
+     */
+    private static Object role(String method, Object[] args) {
+        return DEFAULT;   // isRoleAvailable/isRoleHeld false, getRoleHolders empty
     }
 
     /** No searchable activities registered system-wide; an app's own search UI is unaffected. */
