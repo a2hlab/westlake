@@ -1015,27 +1015,7 @@ void *dlopen(const char *filename, int flags)
  * APK) is the one request this cannot meet, and it fails with that reason rather than opening the
  * wrong bytes.
  */
-/*
- * Android's OpenSL ES extension interface ID for the simple buffer queue. Android's libOpenSLES
- * exports it; OH's exports the Khronos IDs plus its own SL_IID_OH_BUFFERQUEUE, not this one.
- * PPSSPP's libppsspp_jni.so and Mindustry's libarc.so both import it, so neither library could
- * even be relocated -- the same one symbol blocked two unrelated apps.
- *
- * Exporting the ID (Android's value, from SLES/OpenSLES_Android.h) lets them load. It does not
- * make the interface work: asking OH's player object for it returns SL_RESULT_FEATURE_UNSUPPORTED,
- * so audio through this path stays off. Backing it with OH's buffer queue is the next step.
- */
-struct westlake_sl_interface_id {
-    uint32_t time_low;
-    uint16_t time_mid;
-    uint16_t time_hi_and_version;
-    uint16_t clock_seq;
-    uint8_t node[6];
-};
-static const struct westlake_sl_interface_id westlake_sl_iid_android_simple_buffer_queue = {
-    0x198e4940, 0xc5d7, 0x11df, 0xa2a6, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
-const struct westlake_sl_interface_id *const SL_IID_ANDROIDSIMPLEBUFFERQUEUE =
-    &westlake_sl_iid_android_simple_buffer_queue;
+/* SL_IID_ANDROIDSIMPLEBUFFERQUEUE and the buffer queue behind it: opensles_android_adapter.c. */
 
 typedef struct {
     uint64_t flags;
