@@ -73,6 +73,26 @@ public final class LocalServiceBinders {
                 case "account":
                     binder = proxy(name, "android.accounts.IAccountManager", LocalServiceBinders::account);
                     break;
+                case "audio":
+                    binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
+                    break;
+                case "appops":
+                    binder = proxy(name, "com.android.internal.app.IAppOpsService",
+                            LocalServiceBinders::appOps);
+                    break;
+                case "locale":
+                    binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
+                    break;
+                // BatteryManager's fetcher requires two services and throws if either is missing,
+                // so registering one of them changes nothing.
+                case "batterystats":
+                    binder = proxy(name, "com.android.internal.app.IBatteryStats",
+                            LocalServiceBinders::batteryStats);
+                    break;
+                case "batteryproperties":
+                    binder = proxy(name, "android.os.IBatteryPropertiesRegistrar",
+                            LocalServiceBinders::batteryProperties);
+                    break;
                 default:
                     return null;
             }
@@ -139,6 +159,143 @@ public final class LocalServiceBinders {
         return DEFAULT;   // set() is accepted, nothing is ever delivered; no next alarm clock
     }
 
+    /**
+     * OONI Probe calls setOverrideLocaleConfig while its Application is constructed and does not
+     * null-check the manager, so the missing binder took the whole binding down before any
+     * activity started. AndroidX does the same through AppLocalesMetadataHolderService.
+     *
+     * Per-app locale overrides are stored by the real service and read back later; nothing here
+     * stores anything, so a set is accepted and a get reports no override. That is a truthful
+     * answer for a board with no per-app locale database, not a placeholder -- an app that sets
+     * an override and reads it back will see it absent, which is the same as a user never having
+     * chosen one.
+     */
+    private static Object locale(String method, Object[] args) {
+        switch (method) {
+            case "getSystemLocales":
+                return Resources.getSystem().getConfiguration().getLocales();
+            case "getApplicationLocales":
+                return android.os.LocaleList.getEmptyLocaleList();
+            default:
+                // setApplicationLocales / setOverrideLocaleConfig accepted and dropped;
+                // getOverrideLocaleConfig answers null -- no override was ever recorded.
+                return DEFAULT;
+        }
+    }
+
+    /**
+     * Every SoundPool, MediaPlayer and AudioTrack is a PlayerBase, and PlayerBase registers itself
+     * with IAudioService.trackPlayer through its OWN cached copy of the service, fetched from
+     * ServiceManager. AppSpawnXInit stamps a stub into AudioManager's cache only, so that path
+     * still got null: Termux's TermuxActivity.onResume builds a SoundPool for its bell and died on
+     * the NPE. Answering the name here gives every cache the same binder.
+     *
+     * Nothing reaches OH audio through this interface; actual playback is the SoundPool/AVPlayer
+     * backend's business. So it answers as the stub it replaces did, with defaults: no players
+     * tracked, no sound effects, nothing muted. trackPlayer's 0 is a player id the caller only
+     * hands back later.
+     */
+    private static Object audio(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * The app-ops service, answered as a phone with no user overrides would answer it.
+     *
+     * Asked by every app in the corpus and survived by most -- which is why it looked harmless --
+     * but AnkiDroid's DeckPicker.onCreate reaches Environment.isExternalStorageLegacy, which calls
+     * AppOpsManager unconditionally, and the null manager killed the activity.
+     *
+     * Each op answers its platform default (AppOpsManager.opToDefaultMode). Where that default is
+     * MODE_DEFAULT, callers fall back to the permission check, which PermissionManagerAdapter
+     * answers. OP_LEGACY_STORAGE is the exception: on a real device StorageManagerService sets it
+     * per app, allowed only below target SDK 29, or at 29 with requestLegacyExternalStorage. An
+     * app told it has legacy storage when it does not goes looking for shared storage it cannot
+     * use, so that one is decided here the same way.
+     *
+     * note/start return a SyncNotedAppOp rather than a mode; null there NPEs inside AppOpsManager.
+     */
+    private static Object appOps(String method, Object[] args) {
+        Integer code = firstInt(args);
+        if (code == null) return DEFAULT;
+        int mode = appOpMode(code);
+        switch (method) {
+            case "checkOperation":
+            case "checkOperationRaw":
+            case "checkAudioOperation":
+                return mode;
+            case "noteOperation":
+            case "startOperation":
+            case "noteProxyOperation":
+            case "startProxyOperation":
+            case "startProxyOperationWithState":
+                return new android.app.SyncNotedAppOp(mode, code, null,
+                        android.app.ActivityThread.currentPackageName());
+            default:
+                return DEFAULT;   // watchers accepted, no history, checkPackage allowed
+        }
+    }
+
+    private static final int OP_LEGACY_STORAGE = 87;
+
+    private static int appOpMode(int code) {
+        if (code == OP_LEGACY_STORAGE) {
+            android.app.Application app = android.app.ActivityThread.currentApplication();
+            android.content.pm.ApplicationInfo info = app != null ? app.getApplicationInfo() : null;
+            if (info == null) return android.app.AppOpsManager.MODE_IGNORED;
+            boolean legacy = info.targetSdkVersion < android.os.Build.VERSION_CODES.Q
+                    || (info.targetSdkVersion == android.os.Build.VERSION_CODES.Q
+                        && info.hasRequestedLegacyExternalStorage());
+            return legacy ? android.app.AppOpsManager.MODE_ALLOWED
+                    : android.app.AppOpsManager.MODE_IGNORED;
+        }
+        try {
+            return android.app.AppOpsManager.opToDefaultMode(code);
+        } catch (RuntimeException unknownOp) {
+            return android.app.AppOpsManager.MODE_DEFAULT;
+        }
+    }
+
+    private static Integer firstInt(Object[] args) {
+        if (args == null) return null;
+        for (Object arg : args) if (arg instanceof Integer) return (Integer) arg;
+        return null;
+    }
+
+    private static Object batteryStats(String method, Object[] args) {
+        // Only needed so BatteryManager's fetcher can be satisfied; nothing reads it here.
+        return DEFAULT;
+    }
+
+    /**
+     * NewPipe reads BatteryManager.getIntProperty while starting its main activity and does not
+     * null-check the manager either.
+     *
+     * The values are those of an idle, fully charged phone, matching what the rest of this class
+     * reports. They are invented rather than read from OH: the board does expose battery state,
+     * and wiring that through is worth doing, but a plausible constant is enough to stop an app
+     * that only wants to know whether it should throttle background work.
+     */
+    private static Object batteryProperties(String method, Object[] args) {
+        if (!"getProperty".equals(method) || args == null || args.length < 2) {
+            return DEFAULT;   // scheduleUpdate is oneway and has nothing to schedule
+        }
+        final long value;
+        switch ((Integer) args[0]) {
+            case 1:  value = 3_000_000L; break;   // CHARGE_COUNTER, uAh
+            case 2:                               // CURRENT_NOW, uA -- idle, neither in nor out
+            case 3:  value = 0L; break;           // CURRENT_AVERAGE
+            case 4:  value = 100L; break;         // CAPACITY, percent
+            case 6:  value = 5L; break;           // STATUS = BATTERY_STATUS_FULL
+            default:
+                // Unsupported ids are a real answer on real hardware: a non-zero status makes
+                // getIntProperty return Integer.MIN_VALUE, which callers already handle.
+                return 1;
+        }
+        ((android.os.BatteryProperty) args[1]).setLong(value);
+        return 0;
+    }
+
     private static Object account(String method, Object[] args) {
         // There is no account database on the board and no authenticator to add one to, so the
         // truthful answer is "signed in nowhere": an empty account list, no features, no token.
@@ -185,6 +342,11 @@ public final class LocalServiceBinders {
         if (type != null && type.isArray()) {
             return java.lang.reflect.Array.newInstance(type.getComponentType(), 0);
         }
+        // Collections likewise: an empty one is what a service with nothing to report returns, and
+        // a null List of audio devices or playback configurations throws in the caller's loop.
+        if (type == java.util.List.class) return new ArrayList<>();
+        if (type == java.util.Map.class) return new HashMap<>();
+        if (type == java.util.Set.class) return new HashSet<>();
         if (type == null || !type.isPrimitive()) return null;
         if (type == boolean.class) return Boolean.FALSE;
         if (type == byte.class) return (byte) 0;

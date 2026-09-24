@@ -1285,9 +1285,37 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * Providers resolve themselves by authority here, not by ComponentName.
+     *
+     * androidx FileProvider.parsePathStrategy calls resolveContentProvider(authority,
+     * GET_META_DATA) and throws IllegalArgumentException("Couldn't find meta-data for provider
+     * with authority ...") when it gets null. Newer androidx does that from attachInfo, so the
+     * throw lands during handleBindApplication and takes the whole binding down before any
+     * activity starts — markor and anki both died there with no other gap in front of it.
+     *
+     * The component-keyed path (ProviderInfoResolver) already builds these entries from the APK
+     * manifest with authority and metaData filled in. This is the same set, keyed the other way.
+     */
     @Override
-    public android.content.pm.ProviderInfo resolveContentProvider(java.lang.String arg0, long arg1, int arg2) throws android.os.RemoteException {
-        logStub("resolveContentProvider", "");
+    public android.content.pm.ProviderInfo resolveContentProvider(java.lang.String authority, long flags, int userId) throws android.os.RemoteException {
+        String packageName = SourcePackageRegistry.packageForUid(android.os.Process.myUid());
+        if (authority == null || authority.isEmpty() || packageName == null) {
+            logStub("resolveContentProvider", "");
+            return null;
+        }
+        for (android.content.pm.ProviderInfo info : getProvidersForPackage(packageName)) {
+            if (info == null || info.authority == null) continue;
+            // android:authorities is a semicolon-separated list; any segment names the provider.
+            for (String declared : info.authority.split(";")) {
+                if (!authority.equals(declared.trim())) continue;
+                System.err.println("[WESTLAKE-PM] resolveContentProvider " + authority
+                        + " -> " + info.name
+                        + " metadata=" + (info.metaData != null ? info.metaData.size() : 0));
+                return info;
+            }
+        }
+        System.err.println("[WESTLAKE-PM] resolveContentProvider not found: " + authority);
         return null;
     }
 

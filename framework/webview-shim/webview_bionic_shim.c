@@ -932,7 +932,29 @@ void *dlopen(const char *filename, int flags)
      * naming libraries one at a time: the directory holds exactly the libraries WebView is meant
      * to use, and a fix per library is a fix per outage.  Only bare names are redirected; a
      * caller that passes a path has already chosen.
+     *
+     * This must run BEFORE the .z.so probe below.  That probe opens the plain name first and
+     * returns the handle when it succeeds, and for every name in the WebView directory the plain
+     * name does succeed -- out of the runtime directory, which the search path lists first.  With
+     * the probe in front, this block was unreachable for exactly the libraries it exists to fix:
+     * NewPipe and AnkiDroid both lost all fourteen ASurfaceTransaction entry points Chromium
+     * looks up and died on SIGTRAP in CrBrowserMain, with "library resolved" never once logged.
      */
+    static char webview_library[512];
+    if (basename != NULL && basename == filename &&
+        caller_is_webview(__builtin_return_address(0), NULL)) {
+        const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
+        if (dir != NULL && dir[0] != '\0') {
+            snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
+            if (access(webview_library, R_OK) == 0) {
+                actual_filename = webview_library;
+                fprintf(stderr,
+                        "[WESTLAKE-WEBVIEW-BIONIC] library resolved %s -> %s for the WebView "
+                        "caller\n",
+                        filename, actual_filename);
+            }
+        }
+    }
     /*
      * OH names several NDK libraries with a .z.so suffix that Android spells plainly, and an app
      * asking for the Android name gets "No such file or directory" even though the library is
@@ -941,14 +963,15 @@ void *dlopen(const char *filename, int flags)
      *
      * Tried only after the plain name fails to open, so a board that does ship the Android
      * spelling keeps winning, and applied to any caller because the naming is the platform's, not
-     * WebView's.
+     * WebView's.  Opens actual_filename, so a WebView redirect decided above is what gets tried;
+     * the .z.so spelling is only ever derived from a bare name the caller passed.
      */
     static char suffixed[512];
     if (basename != NULL && basename == filename) {
         size_t length = strlen(filename);
         if (length > 3 && strcmp(filename + length - 3, ".so") == 0 &&
             (length < 5 || strcmp(filename + length - 5, ".z.so") != 0)) {
-            void *plain = real_dlopen(filename, flags);
+            void *plain = real_dlopen(actual_filename, flags);
             if (plain != NULL) {
                 return plain;
             }
@@ -965,22 +988,6 @@ void *dlopen(const char *filename, int flags)
             }
         }
     }
-
-    static char webview_library[512];
-    if (basename != NULL && basename == filename &&
-        caller_is_webview(__builtin_return_address(0), NULL)) {
-        const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
-        if (dir != NULL && dir[0] != '\0') {
-            snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
-            if (access(webview_library, R_OK) == 0) {
-                actual_filename = webview_library;
-                fprintf(stderr,
-                        "[WESTLAKE-WEBVIEW-BIONIC] library resolved %s -> %s for the WebView "
-                        "caller\n",
-                        filename, actual_filename);
-            }
-        }
-    }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
         caller_is_webview(__builtin_return_address(0), NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
@@ -994,6 +1001,56 @@ void *dlopen(const char *filename, int flags)
     }
     return real_dlopen(actual_filename, flags);
 }
+
+/*
+ * bionic's extended dlopen. PPSSPP's libppsspp_jni.so imports android_dlopen_ext@LIBC, OH's musl
+ * loader has no such symbol, and the whole library failed to relocate -- the emulator reported
+ * "LoadLibrary failed" before it could draw anything.
+ *
+ * The extinfo fields are mostly hints this loader cannot act on and the caller does not depend on:
+ * a reserved address (with or without HINT), RELRO sharing, and the linker namespace all describe
+ * where or how bionic should load, not what. Those are ignored and the library is opened normally,
+ * through the dlopen above so OH's .z.so naming still applies. A library passed by file descriptor
+ * is opened via /proc/self/fd. Loading at an offset inside that file (an uncompressed .so inside an
+ * APK) is the one request this cannot meet, and it fails with that reason rather than opening the
+ * wrong bytes.
+ */
+/* SL_IID_ANDROIDSIMPLEBUFFERQUEUE and the buffer queue behind it: opensles_android_adapter.c. */
+
+typedef struct {
+    uint64_t flags;
+    void *reserved_addr;
+    size_t reserved_size;
+    int relro_fd;
+    int library_fd;
+    int64_t library_fd_offset;
+    void *library_namespace;
+} westlake_android_dlextinfo;
+
+#define WESTLAKE_DLEXT_USE_LIBRARY_FD        0x10
+#define WESTLAKE_DLEXT_USE_LIBRARY_FD_OFFSET 0x20
+
+static __thread char westlake_dlext_error[160];
+
+void *android_dlopen_ext(const char *filename, int flags, const westlake_android_dlextinfo *extinfo)
+{
+    if (extinfo != NULL && (extinfo->flags & WESTLAKE_DLEXT_USE_LIBRARY_FD)) {
+        if ((extinfo->flags & WESTLAKE_DLEXT_USE_LIBRARY_FD_OFFSET) && extinfo->library_fd_offset != 0) {
+            snprintf(westlake_dlext_error, sizeof(westlake_dlext_error),
+                     "android_dlopen_ext: loading %s at offset %lld in fd %d is not supported",
+                     filename != NULL ? filename : "(fd)", (long long) extinfo->library_fd_offset,
+                     extinfo->library_fd);
+            fprintf(stderr, "[WESTLAKE-BIONIC] %s\n", westlake_dlext_error);
+            errno = ENOSYS;
+            return NULL;
+        }
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/self/fd/%d", extinfo->library_fd);
+        return dlopen(path, flags);
+    }
+    return dlopen(filename, flags);
+}
+
 
 /*
  * WESTLAKE §680: translate Android/bionic sysconf selectors at the libc boundary.

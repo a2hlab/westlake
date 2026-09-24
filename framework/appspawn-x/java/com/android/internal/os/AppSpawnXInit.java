@@ -1245,6 +1245,36 @@ public class AppSpawnXInit {
                     if ("getProcessMemoryInfo".equals(name)) {
                         return adapter.activity.CallerProcess.processMemoryInfo(args != null ? (int[]) args[0] : null);
                     }
+                    // An app binding one of its OWN services. The type default (0) reads as "bind
+                    // failed" to ContextImpl, and Termux throws on that from TermuxActivity.onCreate,
+                    // so the activity never starts. ActivityManagerAdapter already binds in-app
+                    // services in process, but direct launch installs this stub instead of it, so
+                    // that path was unreachable here. Same binder, same asynchronous delivery on the
+                    // main looper. Args 2 and 4 are the Intent and IServiceConnection in both
+                    // bindService and bindServiceInstance. A service in another package still
+                    // answers 0: there is nothing on this side to connect it to.
+                    if (("bindService".equals(name) || "bindServiceInstance".equals(name))
+                            && args != null && args.length > 4) {
+                        android.content.Intent service = (android.content.Intent) args[2];
+                        android.app.IServiceConnection connection = (android.app.IServiceConnection) args[4];
+                        android.content.ComponentName comp = service != null ? service.getComponent() : null;
+                        if (connection != null && adapter.activity.InProcessServiceBinder.isInApp(comp)) {
+                            System.err.println("[" + label + "] " + name + " -> in-process " + comp);
+                            new android.os.Handler(android.os.Looper.getMainLooper()).post(
+                                    new adapter.activity.InProcessServiceBinder(service, comp, connection));
+                            return 1;
+                        }
+                        return 0;
+                    }
+                    // Nothing is held for an in-process binding, so releasing one always succeeds.
+                    if ("unbindService".equals(name)) return Boolean.TRUE;
+                    // Called by ActivityThread.installContentProviders on the main thread, after
+                    // the Application is made and before its onCreate -- the only point of ours
+                    // in that window. Used to end the pre-bind WebView hold; see AppSchedulerBridge.
+                    if ("publishContentProviders".equals(name)) {
+                        adapter.activity.AppSchedulerBridge.releaseWebViewSupportHoldBeforeOnCreate();
+                        return null;
+                    }
                 }
                 if ("hashCode".equals(name))   return System.identityHashCode(proxy);
                 if ("equals".equals(name))     return args != null && args.length == 1 && args[0] == proxy;

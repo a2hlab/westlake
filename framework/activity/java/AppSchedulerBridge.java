@@ -472,6 +472,24 @@ public class AppSchedulerBridge {
                 System.err.println("[WL-JAVACORE] not loaded: " + t);
             }
 
+            // Android's Java OpenGL bindings -- EGLImpl behind GLSurfaceView, GLImpl, and
+            // android.opengl.GLES10..32 -- are absent from the runtime's libandroid_runtime, so
+            // every GLSurfaceView app died on EGLImpl._nativeClassInit (PPSSPP, Mindustry).
+            // libwl_opengl_jni registers them from its JNI_OnLoad onto these boot classes; same
+            // boot-loader load as above, for the same reason.
+            try {
+                String runtimeRoot = System.getenv("WESTLAKE_RUNTIME_ROOT");
+                String path = (runtimeRoot == null || runtimeRoot.isEmpty())
+                        ? "libwl_opengl_jni.so" : runtimeRoot + "/libwl_opengl_jni.so";
+                java.lang.reflect.Method load = Runtime.class.getDeclaredMethod(
+                        "nativeLoad", String.class, ClassLoader.class);
+                load.setAccessible(true);
+                Object error = load.invoke(null, path, null);
+                if (error != null) System.err.println("[WL-OPENGL] not loaded: " + error);
+            } catch (Throwable t) {
+                System.err.println("[WL-OPENGL] not loaded: " + t);
+            }
+
             // Android's zygote installs the "AndroidKeyStore" provider before any app code runs
             // (ZygoteInit.warmUpJcaProviders); apps open it by name during startup.
             try {
@@ -573,7 +591,16 @@ public class AppSchedulerBridge {
             // Autofill / ContentCapture: A_ONLY_SYNTH — disabled but non-null.
             setField(data, "autofillOptions", buildDisabledAutofillOptions());
             setField(data, "contentCaptureOptions", buildDisabledContentCaptureOptions());
-            setField(data, "disabledCompatChanges", new long[0]);
+            // What system_server's PlatformCompat would disable for this app's target SDK. An empty
+            // list is not "let AOSP decide": in-process, AppCompatCallbacks only honours what it is
+            // told is disabled, so it enabled every Android 12-15 behaviour change for every app.
+            // Termux targets 28 and threw from its service's onCreate on the SDK 31 PendingIntent
+            // mutability rule; the 64 @Disabled changes were on for everyone as well.
+            long[] disabled = CompatChangeTable.disabledFor(appInfo.targetSdkVersion);
+            setField(data, "disabledCompatChanges", disabled);
+            System.err.println("[B43-BIND] compat: targetSdk=" + appInfo.targetSdkVersion
+                    + " disabled " + disabled.length + " of " + CompatChangeTable.size()
+                    + " gated changes");
             setField(data, "mLoggableCompatChanges", new long[0]);
             setField(data, "mSerializedSystemFontMap", null);
             setField(data, "startRequestedElapsedTime", android.os.SystemClock.elapsedRealtime());
@@ -626,6 +653,7 @@ public class AppSchedulerBridge {
                     ActivityThread.class.getDeclaredMethod(
                             "handleBindApplication", appBindDataCls);
             handleBind.setAccessible(true);
+            releaseWebViewSupportHold();
             bindPhase = "handleBindApplication";
             handleBind.invoke(activityThread, data);
 
@@ -859,6 +887,61 @@ public class AppSchedulerBridge {
     private static int parseInt(String s, int fb) {
         if (s == null || s.isEmpty()) return fb;
         try { return Integer.parseInt(s); } catch (NumberFormatException e) { return fb; }
+    }
+
+    /**
+     * Undo the pre-bind WebView hold before the Application runs.
+     *
+     * Before bind, the native bridge pins WebViewFactory.sWebViewSupported to FALSE so that a
+     * CookieManager call made while the Application is still being constructed cannot start
+     * Chromium without an Application context, then publishes TRUE after bind. That window covered
+     * Application.onCreate as well, where Android allows WebView and ActivityThread already has its
+     * initial Application -- the condition the hold exists to wait for. AnkiDroid asks for
+     * CookieManager in Application.onCreate, got UnsupportedOperationException, and refused to run
+     * with "the System WebView is unavailable".
+     *
+     * Clearing the cached value (to null, not TRUE) hands the decision back to WebViewFactory's own
+     * check, which now runs with a real Application and asks PackageManager for the feature.
+     */
+    /**
+     * Second half of the release, run on the main thread from the direct-launch activity
+     * manager's publishContentProviders: after makeApplication, before Application.onCreate.
+     *
+     * The native bind watcher re-pins FALSE exactly once, as soon as currentApplication() is set
+     * -- the one moment WebView becomes legal -- and that races Application.onCreate. Clearing the
+     * field before bind (above) makes its re-pin observable: wait, bounded, until the field is
+     * non-null again, then clear it. The watcher does not fire twice, so nothing re-pins after.
+     * Apps with no content providers never reach this hook and keep the previous behaviour.
+     */
+    public static void releaseWebViewSupportHoldBeforeOnCreate() {
+        try {
+            java.lang.reflect.Field supported =
+                    android.webkit.WebViewFactory.class.getDeclaredField("sWebViewSupported");
+            supported.setAccessible(true);
+            long deadline = android.os.SystemClock.uptimeMillis() + 500;
+            while (supported.get(null) == null && android.os.SystemClock.uptimeMillis() < deadline) {
+                Thread.sleep(2);
+            }
+            Object before = supported.get(null);
+            supported.set(null, null);
+            System.err.println("[B43-BIND] WebView support hold released before onCreate (was "
+                    + before + ")");
+        } catch (Throwable t) {
+            System.err.println("[B43-BIND] WebView support hold not released before onCreate: " + t);
+        }
+    }
+
+    private static void releaseWebViewSupportHold() {
+        try {
+            java.lang.reflect.Field supported =
+                    android.webkit.WebViewFactory.class.getDeclaredField("sWebViewSupported");
+            supported.setAccessible(true);
+            Object before = supported.get(null);
+            supported.set(null, null);
+            System.err.println("[B43-BIND] WebView support hold released (was " + before + ")");
+        } catch (Throwable t) {
+            System.err.println("[B43-BIND] WebView support hold not released: " + t);
+        }
     }
 
     private static android.content.res.CompatibilityInfo buildCompatInfo(
