@@ -100,6 +100,9 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "uri_grants":
+                    binder = proxy(name, "android.app.IUriGrantsManager", LocalServiceBinders::uriGrants);
+                    break;
                 case "trust":
                     binder = proxy(name, "android.app.trust.ITrustManager", LocalServiceBinders::trust);
                     break;
@@ -230,6 +233,14 @@ public final class LocalServiceBinders {
      */
     private static Object role(String method, Object[] args) {
         return DEFAULT;   // isRoleAvailable/isRoleHeld false, getRoleHolders empty
+    }
+
+    /**
+     * No persisted URI permissions: an app that never took one sees an empty list, and a take or
+     * release is accepted. Nothing crosses to OH's own URI permission service.
+     */
+    private static Object uriGrants(String method, Object[] args) {
+        return DEFAULT;
     }
 
     /** No trust agents and no secure lock: listeners register and nothing is ever trusted. */

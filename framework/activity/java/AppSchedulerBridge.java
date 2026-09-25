@@ -942,7 +942,13 @@ public class AppSchedulerBridge {
                 // yet located. Giving that ApplicationInfo the activity's theme made FFUpdater draw.
                 // Only this activity's copy changes, and only when the manifest has no application
                 // theme to lose.
-                if (appTheme == 0 && theme != 0 && target.applicationInfo != null) {
+                // The same step, seen from the other side: AdAway and Briar declare an application
+                // theme with an action bar and a NoActionBar activity theme, and their windows came
+                // up with the application's action bar ("already has an action bar supplied by the
+                // window decor"). So the activity's own theme is what this copy carries whenever
+                // the activity declares one.
+                if (theme != 0 && target.applicationInfo != null
+                        && (appTheme == 0 || declared.theme != 0)) {
                     target.applicationInfo.theme = theme;
                 }
                 return;
@@ -1396,6 +1402,14 @@ public class AppSchedulerBridge {
                         adapter.activity.IntentWantConverter.abilityNameToClassName(
                                 packageName, defaultClassName)));
             }
+        }
+        // No Want: this is the app being started from the launcher, and a launcher always sends
+        // ACTION_MAIN in CATEGORY_LAUNCHER on a new task. Apps read it: Editor switches on the
+        // intent's action in onCreate and died on the null.
+        if ((wantJson == null || wantJson.isEmpty()) && intent.getAction() == null) {
+            intent.setAction(Intent.ACTION_MAIN);
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         }
         return intent;
     }

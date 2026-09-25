@@ -164,6 +164,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // KeyguardManager's constructor requires the trust service (Nextcloud Talk casts the
             // manager non-null).
             case "trust":
+            // ContentResolver.getPersistedUriPermissions goes straight to it (Fossify Voice
+            // Recorder; Voice logged the same null).
+            case "uri_grants":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
