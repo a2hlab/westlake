@@ -63,6 +63,11 @@ def main():
     cc, cxx = sdk / 'llvm/bin/clang', sdk / 'llvm/bin/clang++'
     flags = ['-O2', '-fPIC', '-D_GNU_SOURCE', '-D_POSIX_C_SOURCE=200809L', '-DNDEBUG', '-D_FILE_OFFSET_BITS=64',
              '-Werror=date-time', '-ffile-prefix-map=' + str(workspace) + '=/src',
+             # AOSP builds all native code with zero-initialized locals, and its sources rely on
+             # it (libicu_jni's ScopedIcuLocale reads an uninitialized UErrorCode). clang 15 wants
+             # the opt-in switch; AOSP passed it too until clang made the flag permanent.
+             '-ftrivial-auto-var-init=zero',
+             '-enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang',
              '-ffile-prefix-map=' + str(output) + '=/build/native-support']
     cpp = ['-std=gnu++20', '-nostdinc++']
     cflags = ['-std=gnu11']

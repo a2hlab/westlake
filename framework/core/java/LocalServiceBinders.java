@@ -83,6 +83,42 @@ public final class LocalServiceBinders {
                 case "locale":
                     binder = proxy(name, "android.app.ILocaleManager", LocalServiceBinders::locale);
                     break;
+                case "appwidget":
+                    binder = proxy(name, "com.android.internal.appwidget.IAppWidgetService",
+                            LocalServiceBinders::appWidget);
+                    break;
+                case "deviceidle":
+                    binder = proxy(name, "android.os.IDeviceIdleController", LocalServiceBinders::deviceIdle);
+                    break;
+                case "search":
+                    binder = proxy(name, "android.app.ISearchManager", LocalServiceBinders::search);
+                    break;
+                case "domain_verification":
+                    binder = proxy(name, "android.content.pm.verify.domain.IDomainVerificationManager",
+                            LocalServiceBinders::domainVerification);
+                    break;
+                case "role":
+                    binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
+                    break;
+                case "uri_grants":
+                    binder = proxy(name, "android.app.IUriGrantsManager", LocalServiceBinders::uriGrants);
+                    break;
+                case "trust":
+                    binder = proxy(name, "android.app.trust.ITrustManager", LocalServiceBinders::trust);
+                    break;
+                case "media_router":
+                    binder = proxy(name, "android.media.IMediaRouterService", LocalServiceBinders::mediaRouter);
+                    break;
+                case "wallpaper":
+                    binder = proxy(name, "android.app.IWallpaperManager", LocalServiceBinders::wallpaper);
+                    break;
+                case "wifi":
+                    binder = proxy(name, "android.net.wifi.IWifiManager", LocalServiceBinders::wifi);
+                    break;
+                case "notification":
+                    binder = proxy(name, "android.app.INotificationManager",
+                            LocalServiceBinders::notification);
+                    break;
                 // BatteryManager's fetcher requires two services and throws if either is missing,
                 // so registering one of them changes nothing.
                 case "batterystats":
@@ -181,6 +217,125 @@ public final class LocalServiceBinders {
                 // getOverrideLocaleConfig answers null -- no override was ever recorded.
                 return DEFAULT;
         }
+    }
+
+    /**
+     * A launcher with no widgets placed: no widget ids, no providers bound, updates accepted and
+     * dropped. Catima refreshes its home-screen widget from MainActivity.onResume.
+     */
+    private static Object appWidget(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * Roles on a board with no telephony: no role is available (so none is offered to the user)
+     * and none is held. An SMS or dialer app sees that it is not the default and cannot become it.
+     */
+    private static Object role(String method, Object[] args) {
+        return DEFAULT;   // isRoleAvailable/isRoleHeld false, getRoleHolders empty
+    }
+
+    /**
+     * No persisted URI permissions: an app that never took one sees an empty list, and a take or
+     * release is accepted. Nothing crosses to OH's own URI permission service.
+     */
+    private static Object uriGrants(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /** No trust agents and no secure lock: listeners register and nothing is ever trusted. */
+    private static Object trust(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /** No remote routes: clients register and discover nothing; playback stays on the device. */
+    private static Object mediaRouter(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /** No wallpaper and no wallpaper colours: the framework's nullable answers. */
+    private static Object wallpaper(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * Wi-Fi as this process can see it through Android's interface: nothing, because OH's
+     * wifi manager is not bridged. isWifiEnabled answers false and scans are empty; an app that
+     * needs Wi-Fi state learns it is unavailable rather than crashing on a null manager.
+     */
+    private static Object wifi(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /** No searchable activities registered system-wide; an app's own search UI is unaffected. */
+    private static Object search(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * An app's link handling as a fresh install sees it: allowed, every declared web host
+     * listed, none verified.
+     * getDomainVerificationUserState is nullable in the API, but Aurora Store's settings read it
+     * without checking; Android always answers for the calling package itself.
+     */
+    private static Object domainVerification(String method, Object[] args) {
+        if ("getDomainVerificationUserState".equals(method) && args != null && args.length > 0
+                && args[0] instanceof String) {
+            String pkg = (String) args[0];
+            // Every web host the manifest declares, none verified or selected (STATE_NONE, 0).
+            Map<String, Integer> hosts = new HashMap<>();
+            for (String host : adapter.packagemanager.SourcePackageRegistry.webHosts()) hosts.put(host, 0);
+            return new android.content.pm.verify.domain.DomainVerificationUserState(
+                    java.util.UUID.nameUUIDFromBytes(pkg.getBytes()), pkg,
+                    android.os.Process.myUserHandle(), true, hosts);
+        }
+        return DEFAULT;
+    }
+
+    /**
+     * Doze with no exemptions granted: no app is on the power-save allowlist, which is what a newly
+     * installed app sees on Android. DAVx5 asks whether it is exempt before its intro screen.
+     */
+    private static Object deviceIdle(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * PackageManager.getPackageInstaller(): PackageInstaller's constructor rejects a null
+     * IPackageInstaller, so the null the adapter used to return threw inside the framework (Aurora
+     * Store's Application.onCreate). This installer has no sessions, and installing is refused
+     * with a reason: this platform installs nothing on an app's behalf.
+     */
+    public static synchronized IInterface packageInstaller() {
+        IBinder binder = sBinders.get("package-installer");
+        if (binder == null) {
+            try {
+                binder = proxy("package-installer", "android.content.pm.IPackageInstaller", (method, args) -> {
+                    if ("createSession".equals(method)) {
+                        throw new IllegalStateException("package installation is not available on this platform");
+                    }
+                    return DEFAULT;
+                });
+            } catch (ClassNotFoundException e) {
+                return null;
+            }
+            sBinders.put("package-installer", binder);
+        }
+        return binder.queryLocalInterface("android.content.pm.IPackageInstaller");
+    }
+
+    /**
+     * Tusky's Application.onCreate reads its notification channels; NotificationManager unwraps the
+     * ParceledListSlice the service returns, and the plain Binder that used to stand in for the
+     * service decoded every reply to null, so the NPE landed inside the framework, during bind.
+     *
+     * No notification reaches OH through this interface. Posts and channel changes are accepted
+     * and dropped; queries answer what a service with nothing stored reports: no channels, no
+     * active notifications, notifications not enabled (targetSdk 33+ apps start without
+     * POST_NOTIFICATIONS), zen mode off.
+     */
+    private static Object notification(String method, Object[] args) {
+        return DEFAULT;
     }
 
     /**
@@ -347,6 +502,11 @@ public final class LocalServiceBinders {
         if (type == java.util.List.class) return new ArrayList<>();
         if (type == java.util.Map.class) return new HashMap<>();
         if (type == java.util.Set.class) return new HashSet<>();
+        // AIDL list results travel as a ParceledListSlice, which the manager unwraps with getList()
+        // before the app sees anything: a null throws inside the framework.
+        if (type == android.content.pm.ParceledListSlice.class) {
+            return android.content.pm.ParceledListSlice.emptyList();
+        }
         if (type == null || !type.isPrimitive()) return null;
         if (type == boolean.class) return Boolean.FALSE;
         if (type == byte.class) return (byte) 0;

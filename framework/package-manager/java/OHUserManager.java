@@ -69,6 +69,11 @@ public final class OHUserManager {
                             return ((Integer) arguments[0]) == androidUser ? 0 : -1;
                         case "getUserHandle":
                             return ((Integer) arguments[0]) == 0 ? androidUser : -1;
+                        // UserManager's contract: "" for a user that is not a profile, null for
+                        // one that does not exist. isProfile() and hasBadge() read it; Breezy
+                        // Weather reaches it through PackageManager.getUserBadgedIcon at launch.
+                        case "getProfileType":
+                            return ((Integer) arguments[0]) == androidUser ? "" : null;
                         default:
                             break;
                     }

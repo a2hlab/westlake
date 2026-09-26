@@ -17,13 +17,52 @@ package adapter.activity;
  * Semantics: every read reports "unset" — GET_* methods return a Bundle without a
  * value entry (getString -> null), LIST_* methods return an empty serializable map.
  * Callers then take their documented defaults, exactly like a fresh device image.
+ *
+ * One exception: Settings.Secure.ANDROID_ID. Android never leaves it unset; every app gets a
+ * 64-bit value, stable for that app on that device. Jellyfin's API client builds its device
+ * identity from it and dies on the null. It is generated once and kept in the app's no_backup
+ * directory, so it survives restarts and differs between devices, as Android's does.
  */
 public class WlSettingsProvider extends android.content.ContentProvider {
     @Override public boolean onCreate() { return true; }
 
+    private static String sAndroidId;
+
+    /** Settings.Secure.ANDROID_ID for this app: 16 hex digits, created on first read. */
+    public static synchronized String androidId() {
+        if (sAndroidId != null) return sAndroidId;
+        java.io.File file = null;
+        try {
+            android.app.Application app = android.app.ActivityThread.currentApplication();
+            if (app != null) file = new java.io.File(app.getDataDir(), "no_backup/westlake-android-id");
+            if (file != null && file.isFile()) {
+                String saved = new String(java.nio.file.Files.readAllBytes(file.toPath())).trim();
+                if (saved.matches("[0-9a-f]{16}")) return sAndroidId = saved;
+            }
+        } catch (Throwable ignored) {
+        }
+        String id = String.format("%016x", new java.security.SecureRandom().nextLong());
+        if (file != null) {
+            try {
+                file.getParentFile().mkdirs();
+                java.nio.file.Files.write(file.toPath(), id.getBytes());
+            } catch (Throwable ignored) {
+                // Not persisted: stable for this process only.
+            }
+        }
+        return sAndroidId = id;
+    }
+
+    /** The value a GET_* call answers, or null for "unset". */
+    public static String answer(String method, String name) {
+        return "GET_secure".equals(method) && "android_id".equals(name) ? androidId() : null;
+    }
+
     @Override
     public android.os.Bundle call(String method, String arg, android.os.Bundle extras) {
         android.os.Bundle b = new android.os.Bundle();
+        String value = answer(method, arg);
+        if (value != null) b.putString("value", value);
         if (method != null && method.startsWith("LIST")) {
             b.putSerializable("value", new java.util.HashMap<String, String>());
         }

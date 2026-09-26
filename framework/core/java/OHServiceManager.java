@@ -143,6 +143,30 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "locale":
             case "batterystats":
             case "batteryproperties":
+            // Their managers are dereferenced inside the framework itself:
+            // AppWidgetManager.getInstance (Catima's widget refresh in onResume) and
+            // PowerManager.isIgnoringBatteryOptimizations (DAVx5's intro).
+            case "appwidget":
+            case "deviceidle":
+            // SearchManager's fetcher requires "search" (Catima); Aurora Store dereferences
+            // DomainVerificationManager.
+            case "search":
+            case "domain_verification":
+            // RoleManager's constructor requires it; Fossify Messages asks whether it holds the
+            // SMS role before its first screen.
+            case "role":
+            // WallpaperManager's globals dereference the service (Retro Music); Kotlin casts the
+            // WifiManager non-null (openHAB).
+            case "wallpaper":
+            case "wifi":
+            // MediaRouter registers its client with the service in its constructor (RadioDroid).
+            case "media_router":
+            // KeyguardManager's constructor requires the trust service (Nextcloud Talk casts the
+            // manager non-null).
+            case "trust":
+            // ContentResolver.getPersistedUriPermissions goes straight to it (Fossify Voice
+            // Recorder; Voice logged the same null).
+            case "uri_grants":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

@@ -144,6 +144,24 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             IBinder resultTo, String resultWho, int requestCode,
             int flags, ProfilerInfo profilerInfo, Bundle options) throws RemoteException {
         logBridged("startActivity", "-> OH IAbilityManager.StartAbility / StartAbilityInMission");
+        // In-process launch executes the launch transaction on the calling thread. From a worker
+        // thread that builds the activity off the main looper, and its lifecycle registry throws
+        // ("addObserver must be called on the main thread", "Can't create handler inside thread"):
+        // AndStatus's first activity, Fennec's crash reporter. Android's ActivityManager is
+        // asynchronous to the caller anyway, so hand the start to the main thread.
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            final Intent started = intent;
+            final int startFlags = flags;
+            final IBinder from = resultTo;
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                try {
+                    bridgeStartActivityWithStack(started, startFlags, from);
+                } catch (Throwable t) {
+                    System.err.println("[ATMA] deferred startActivity failed: " + t);
+                }
+            });
+            return 0;   // ActivityManager.START_SUCCESS
+        }
         return bridgeStartActivityWithStack(intent, flags, resultTo);
     }
 

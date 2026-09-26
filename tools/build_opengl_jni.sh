@@ -1,7 +1,7 @@
 #!/bin/bash
 # build_opengl_jni.sh <android-source> <oh-sdk-native> <out-dir>
-# Builds libwl_opengl_jni.so: AOSP's generated GL JNI sources compiled unchanged, the OH port of
-# EGLImpl, and forwarders for GL functions OH's libGLESv3 lacks, linked against OH's public libEGL/libGLESv3 and the runtime's
+# Builds libwl_opengl_jni.so: AOSP's generated GL JNI sources compiled unchanged, the OH ports of
+# EGLImpl, EGL14, EGL15 and EGLExt, and forwarders for GL functions OH's libGLESv3 lacks, linked against OH's public libEGL/libGLESv3 and the runtime's
 # libnativehelper and liblog.
 set -e
 SRC=$1; SDK=$2; OUT=$3
@@ -25,7 +25,9 @@ for f in com_google_android_gles_jni_GLImpl android_opengl_GLES10 android_opengl
          android_opengl_GLES31 android_opengl_GLES31Ext android_opengl_GLES32; do
   $CXX $INC -c $J/$f.cpp -o $OUT/obj/$f.o; objs+=($OUT/obj/$f.o)
 done
-$CXX $INC -c $D/oh_egl_impl.cpp -o $OUT/obj/oh_egl_impl.o; objs+=($OUT/obj/oh_egl_impl.o)
+for f in oh_egl_impl oh_egl14 oh_egl15 oh_eglext oh_surface_window; do
+  $CXX $INC -c $D/$f.cpp -o $OUT/obj/$f.o; objs+=($OUT/obj/$f.o)
+done
 $CXX $INC -c $D/opengl_jni_onload.cpp -o $OUT/obj/onload.o; objs+=($OUT/obj/onload.o)
 # Forwarders cover what the SDK's public libGLESv3 does not export -- the link-time contract, not
 # what a particular board happens to export -- and resolve those through eglGetProcAddress.

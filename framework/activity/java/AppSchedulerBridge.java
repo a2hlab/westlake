@@ -913,6 +913,51 @@ public class AppSchedulerBridge {
      * non-null again, then clear it. The watcher does not fire twice, so nothing re-pins after.
      * Apps with no content providers never reach this hook and keep the previous behaviour.
      */
+    /** The theme the APK's manifest gives this activity (or its application), over the ability record's. */
+    private static void fillFromManifest(android.content.pm.ActivityInfo target) {
+        try {
+            if (target == null || target.packageName == null
+                    || !adapter.packagemanager.SourcePackageRegistry.contains(target.packageName)) return;
+            android.content.pm.PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
+                    target.packageName, android.content.pm.PackageManager.GET_ACTIVITIES);
+            if (info == null || info.activities == null) return;
+            // The manifest decides the theme outright. OH's record carries a theme id from its own
+            // resource numbering: FFUpdater launched with 0x7f150013, which does not exist in its
+            // APK (its activities use 0x7f120254), and AppCompat refused the unresolvable theme.
+            int appTheme = info.applicationInfo != null ? info.applicationInfo.theme : 0;
+            if (target.applicationInfo != null && appTheme != 0) target.applicationInfo.theme = appTheme;
+            for (android.content.pm.ActivityInfo declared : info.activities) {
+                if (!declared.name.equals(target.name)) continue;
+                int theme = declared.theme != 0 ? declared.theme : appTheme;
+                if (theme != 0 && theme != target.theme) {
+                    System.err.println("[B47-SLA] theme from the manifest: 0x" + Integer.toHexString(theme)
+                            + " (ability record had 0x" + Integer.toHexString(target.theme) + ")");
+                    target.theme = theme;
+                }
+                // An app that declares no application theme died in AppCompat ("You need to use a
+                // Theme.AppCompat theme") although its activity's theme is an AppCompat descendant:
+                // Seal, FFUpdater, Jami, mpv -- and only such apps; every app that declares an
+                // application theme was fine. Some step of this launch path styles the activity
+                // from its ApplicationInfo's theme rather than the activity's; where exactly is not
+                // yet located. Giving that ApplicationInfo the activity's theme made FFUpdater draw.
+                // Only this activity's copy changes, and only when the manifest has no application
+                // theme to lose.
+                // The same step, seen from the other side: AdAway and Briar declare an application
+                // theme with an action bar and a NoActionBar activity theme, and their windows came
+                // up with the application's action bar ("already has an action bar supplied by the
+                // window decor"). So the activity's own theme is what this copy carries whenever
+                // the activity declares one.
+                if (theme != 0 && target.applicationInfo != null
+                        && (appTheme == 0 || declared.theme != 0)) {
+                    target.applicationInfo.theme = theme;
+                }
+                return;
+            }
+        } catch (Throwable t) {
+            System.err.println("[B47-SLA] manifest theme/label lookup failed: " + t);
+        }
+    }
+
     public static void releaseWebViewSupportHoldBeforeOnCreate() {
         try {
             java.lang.reflect.Field supported =
@@ -1357,6 +1402,14 @@ public class AppSchedulerBridge {
                         adapter.activity.IntentWantConverter.abilityNameToClassName(
                                 packageName, defaultClassName)));
             }
+        }
+        // No Want: this is the app being started from the launcher, and a launcher always sends
+        // ACTION_MAIN in CATEGORY_LAUNCHER on a new task. Apps read it: Editor switches on the
+        // intent's action in onCreate and died on the null.
+        if ((wantJson == null || wantJson.isEmpty()) && intent.getAction() == null) {
+            intent.setAction(Intent.ACTION_MAIN);
+            intent.addCategory(Intent.CATEGORY_LAUNCHER);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         }
         return intent;
     }
@@ -1893,6 +1946,11 @@ public class AppSchedulerBridge {
             // dispatch — whatever value is here is what mActivityInfo will
             // see in performLaunchActivity → initWindowDecorActionBar.
             android.content.pm.ApplicationInfo aiApp = activityInfo.applicationInfo;
+            // The ActivityInfo here comes from OH's ability record, which carries no per-activity
+            // theme. An app that themes the activity rather than the application (Seal: MainActivity
+            // has Theme.Seal, the application none) then launched with no theme at all. Take it from
+            // the APK's own manifest, as PackageManager would.
+            fillFromManifest(activityInfo);
             int aiIconBefore = activityInfo.icon;
             int aiIconResBefore = activityInfo.getIconResource();  // method, not field
             int appIconBefore = aiApp != null ? aiApp.icon : -1;

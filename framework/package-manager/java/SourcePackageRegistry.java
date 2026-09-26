@@ -110,6 +110,71 @@ public final class SourcePackageRegistry {
         }
     }
 
+    /**
+     * Web hosts the app's activities declare in http/https intent filters: the domains Android
+     * tracks for its link handling (DomainVerificationUserState's host map).
+     */
+    public static synchronized java.util.Set<String> webHosts() {
+        java.util.Set<String> hosts = new java.util.TreeSet<>();
+        if (parsed == null || parsed.activities == null) return hosts;
+        for (PackageParser.Activity activity : parsed.activities) {
+            for (PackageParser.ActivityIntentInfo filter : activity.intents) {
+                if (!filter.hasDataScheme("http") && !filter.hasDataScheme("https")) continue;
+                for (int i = 0; i < filter.countDataAuthorities(); i++) {
+                    String host = filter.getDataAuthority(i).getHost();
+                    if (host != null && !host.isEmpty()) hosts.add(host);
+                }
+            }
+        }
+        return hosts;
+    }
+
+    /**
+     * The app's own services an intent resolves to, from their manifest intent filters.
+     *
+     * queryIntentServices answered null, so every library that looks up its own service by action
+     * found nothing. Media3 resolves the app's MediaSessionService that way while the Application
+     * is created, and Fossify Music Player died on "Failed to resolve SessionToken". Only this
+     * package's services are known here; an intent for another package matches nothing.
+     */
+    public static synchronized java.util.List<android.content.pm.ResolveInfo> queryServices(
+            android.content.Intent intent, String resolvedType, long flags) {
+        java.util.List<android.content.pm.ResolveInfo> out = new java.util.ArrayList<>();
+        if (parsed == null || intent == null || parsed.services == null) return out;
+        android.content.ComponentName component = intent.getComponent();
+        String target = component != null ? component.getPackageName() : intent.getPackage();
+        if (target != null && !target.equals(parsed.packageName)) return out;
+        PackageInfo info = packageInfo(parsed.packageName, flags | PackageManager.GET_SERVICES);
+        if (info == null || info.services == null) return out;
+        String type = resolvedType != null ? resolvedType : intent.getType();
+        for (PackageParser.Service service : parsed.services) {
+            android.content.IntentFilter matched = null;
+            if (component != null) {
+                if (!component.getClassName().equals(service.info.name)) continue;
+            } else {
+                for (PackageParser.ServiceIntentInfo filter : service.intents) {
+                    if (filter.match(intent.getAction(), type, intent.getScheme(), intent.getData(),
+                            intent.getCategories(), "WESTLAKE-PM") >= 0) {
+                        matched = filter;
+                        break;
+                    }
+                }
+                if (matched == null) continue;
+            }
+            for (android.content.pm.ServiceInfo generated : info.services) {
+                if (generated.name.equals(service.info.name)) {
+                    android.content.pm.ResolveInfo resolved = new android.content.pm.ResolveInfo();
+                    resolved.serviceInfo = generated;
+                    if ((flags & PackageManager.GET_RESOLVED_FILTER) != 0) resolved.filter = matched;
+                    if (matched != null) resolved.priority = matched.getPriority();
+                    out.add(resolved);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
     public static synchronized PackageInfo packageInfo(String packageName, long flags) {
         if (!contains(packageName)) return null;
         flags = withDirectBootMatchDefaults(flags);

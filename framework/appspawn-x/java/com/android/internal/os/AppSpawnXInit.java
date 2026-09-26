@@ -1098,6 +1098,10 @@ public class AppSpawnXInit {
             // service-boundary adapter before any WebView can attach.
             installContentServiceAdapter();
             appLog("J_after_installContentServiceAdapter");
+            // The native runtime seeds "notification" with a plain Binder, whose replies decode to
+            // null; NotificationManager dereferences them (Tusky). Replace it with the in-process
+            // service, which answers empty lists.
+            publishLocalService("notification");
             // WESTLAKE §750: Android's stock StorageManager must see a real
             // mount-service boundary.  A plain Binder makes Stub.asInterface()
             // non-null but returns a null StorageVolume[] from getVolumeList(),
@@ -1268,6 +1272,30 @@ public class AppSpawnXInit {
                     }
                     // Nothing is held for an in-process binding, so releasing one always succeeds.
                     if ("unbindService".equals(name)) return Boolean.TRUE;
+                    // PendingIntents: a null sender made every PendingIntent factory return null
+                    // (Element hands one to AlarmManager.cancel from onResume). getIntentSender's
+                    // args are (type, package, token, resultWho, requestCode, intents, types,
+                    // flags, ...); the WithFeature variant inserts featureId after the package.
+                    if (("getIntentSender".equals(name) || "getIntentSenderWithFeature".equals(name))
+                            && args != null) {
+                        int f = "getIntentSenderWithFeature".equals(name) ? 1 : 0;
+                        return adapter.activity.LocalIntentSenders.get((Integer) args[0], (String) args[1],
+                                (Integer) args[4 + f], (android.content.Intent[]) args[5 + f],
+                                (Integer) args[7 + f]);
+                    }
+                    if ("cancelIntentSender".equals(name) && args != null) {
+                        adapter.activity.LocalIntentSenders.cancel((android.content.IIntentSender) args[0]);
+                        return null;
+                    }
+                    if ("getInfoForIntentSender".equals(name) && args != null) {
+                        return adapter.activity.LocalIntentSenders.info((android.content.IIntentSender) args[0]);
+                    }
+                    if ("getIntentForIntentSender".equals(name) && args != null) {
+                        return adapter.activity.LocalIntentSenders.intent((android.content.IIntentSender) args[0]);
+                    }
+                    if ("sendIntentSender".equals(name) && args != null) {
+                        return adapter.activity.LocalIntentSenders.send((android.content.IIntentSender) args[1]);
+                    }
                     // Called by ActivityThread.installContentProviders on the main thread, after
                     // the Application is made and before its onCreate -- the only point of ours
                     // in that window. Used to end the pre-bind WebView hold; see AppSchedulerBridge.
@@ -1786,6 +1814,33 @@ public class AppSpawnXInit {
                     if ("getVolumeState".equals(name)) {
                         return "mounted";
                     }
+                    // The private internal volume, at /data. StorageManager.getUuidForPath
+                    // first checks Environment.getDataDirectory(), which appspawn-x points at the
+                    // stage (ANDROID_DATA), so an app's own /data/data path falls through to
+                    // this list: with no volume here it threw "Failed to find a storage device"
+                    // (LibreTube's Coil disk cache, in Application.onCreate).
+                    if ("getVolumes".equals(name)) {
+                        android.os.storage.VolumeInfo internal = new android.os.storage.VolumeInfo(
+                                android.os.storage.VolumeInfo.ID_PRIVATE_INTERNAL,
+                                android.os.storage.VolumeInfo.TYPE_PRIVATE, null, null);
+                        internal.path = "/data";
+                        internal.state = android.os.storage.VolumeInfo.STATE_MOUNTED;
+                        return new android.os.storage.VolumeInfo[] {internal};
+                    }
+                    // What the app's own storage really has free, rather than 0.
+                    if ("getAllocatableBytes".equals(name)) {
+                        long free = 0L;
+                        try {
+                            android.app.Application app = android.app.ActivityThread.currentApplication();
+                            String dir = app != null ? app.getDataDir().getPath()
+                                    : android.os.Environment.getDataDirectory().getPath();
+                            free = new android.os.StatFs(dir).getAvailableBytes();
+                        } catch (Throwable t) {
+                            System.err.println("[WESTLAKE-STORAGE-750] getAllocatableBytes: " + t);
+                        }
+                        System.err.println("[WESTLAKE-STORAGE-750] getAllocatableBytes=" + free);
+                        return Long.valueOf(free);
+                    }
                     if ("isUserKeyUnlocked".equals(name)) {
                         return Boolean.TRUE;
                     }
@@ -1864,6 +1919,22 @@ public class AppSpawnXInit {
      * sync APIs return type-correct empty defaults.  Application and WebView
      * code remain unchanged.
      */
+    private static void publishLocalService(String name) {
+        try {
+            android.os.IBinder binder = adapter.core.LocalServiceBinders.get(name);
+            if (binder == null) throw new IllegalStateException("no local binder");
+            Field cacheField = Class.forName("android.os.ServiceManager").getDeclaredField("sCache");
+            cacheField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            java.util.Map<String, android.os.IBinder> cache =
+                    (java.util.Map<String, android.os.IBinder>) cacheField.get(null);
+            cache.put(name, binder);
+            System.err.println("[WESTLAKE-LOCAL-SERVICE] " + name + " published to ServiceManager.sCache");
+        } catch (Throwable t) {
+            System.err.println("[WESTLAKE-LOCAL-SERVICE] " + name + " not published: " + t);
+        }
+    }
+
     private static void installContentServiceAdapter() {
         final String descriptor = "android.content.IContentService";
         try {
@@ -2183,6 +2254,15 @@ public class AppSpawnXInit {
                     if (java.util.List.class.isAssignableFrom(rt)) {
                         return new java.util.ArrayList<>();
                     }
+                    // getAllPendingJobs answers a ParceledListSlice, which JobSchedulerImpl
+                    // unwraps before the app sees it: null threw inside the framework (Fossify
+                    // Gallery's MainActivity.onCreate).
+                    if (rt == android.content.pm.ParceledListSlice.class) {
+                        return android.content.pm.ParceledListSlice.emptyList();
+                    }
+                    if (java.util.Map.class.isAssignableFrom(rt)) {
+                        return new java.util.HashMap<>();
+                    }
                     if ("asBinder".equals(name)) return null;
                     if (rt == boolean.class) return Boolean.FALSE;
                     if (rt.isPrimitive() && rt != void.class) return 0;
@@ -2197,9 +2277,16 @@ public class AppSpawnXInit {
             java.lang.reflect.InvocationHandler h = (proxy, method, args) -> {
                 String mname = method.getName();
                 if ("call".equals(mname)) {
-                    // Build empty Bundle as response (lookup miss = use default)
-                    Class<?> bundleCls = Class.forName("android.os.Bundle");
-                    Object b = bundleCls.getConstructor().newInstance();
+                    // Empty Bundle = lookup miss, the caller's default -- except the few values
+                    // Android never leaves unset (ANDROID_ID), answered by WlSettingsProvider.
+                    // call(attributionSource, authority, method, arg, extras): the last two Strings.
+                    android.os.Bundle b = new android.os.Bundle();
+                    String settingsMethod = null, settingsArg = null;
+                    for (Object a : args == null ? new Object[0] : args) {
+                        if (a instanceof String) { settingsMethod = settingsArg; settingsArg = (String) a; }
+                    }
+                    String value = adapter.activity.WlSettingsProvider.answer(settingsMethod, settingsArg);
+                    if (value != null) b.putString("value", value);
                     return b;
                 }
                 if ("query".equals(mname)) return null;

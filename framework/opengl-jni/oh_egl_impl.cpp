@@ -27,35 +27,10 @@
 #include <map>
 #include <mutex>
 
-// OH port: the window a Java Surface carries, resolved the way the runtime's hwui resolves it.
-// Looked up at run time so this library has no link-time dependency on the runtime's internals.
-struct ANativeWindow;
+// OH port: the OH window a Java Surface carries (oh_surface_window.cpp, shared with EGL14).
+extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);
 static void* oh_window_from_surface(JNIEnv* env, jobject surface) {
-    typedef ANativeWindow* (*FromSurface)(JNIEnv*, jobject);
-    typedef void* (*Unwrap)(ANativeWindow*);
-    static FromSurface from_surface =
-            reinterpret_cast<FromSurface>(dlsym(RTLD_DEFAULT, "ANativeWindow_fromSurface"));
-    // The unwrapper lives in liboh_adapter_bridge.so, which is not in the global scope: a
-    // RTLD_DEFAULT lookup misses it, and the adapter's wrapper then reached OH's EGL, which
-    // rejected it ("eglCreateWindowSurface error"). Ask that library directly.
-    static Unwrap unwrap = [] {
-        void* fn = dlsym(RTLD_DEFAULT, "oh_anw_get_oh");
-        if (fn == nullptr) {
-            void* bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
-            if (bridge != nullptr) fn = dlsym(bridge, "oh_anw_get_oh");
-        }
-        return reinterpret_cast<Unwrap>(fn);
-    }();
-    if (from_surface == nullptr) {
-        fprintf(stderr, "[WL-OPENGL] ANativeWindow_fromSurface not found\n");
-        return nullptr;
-    }
-    ANativeWindow* window = from_surface(env, surface);
-    if (window == nullptr) return nullptr;
-    void* oh = unwrap != nullptr ? unwrap(window) : nullptr;
-    fprintf(stderr, "[WL-OPENGL] window surface: anw=%p oh=%p unwrap=%s\n",
-            static_cast<void*>(window), oh, unwrap != nullptr ? "found" : "MISSING");
-    return oh != nullptr ? oh : static_cast<void*>(window);
+    return wl_window_from_surface(env, surface);
 }
 
 // OH port: AOSP reads the EGL loader's private per-display init count. Keep our own, maintained

@@ -11,6 +11,13 @@
  *   reached one in the interpreter first -- Wikipedia, on Math.rint, in its first activity. Each
  *   is a libm call with the same meaning, so these are forwarders, not implementations.
  *
+ *   jdk.internal.misc.VM.getNanoTimeAdjustment -- the wall clock behind java.time.Instant.now()
+ *   and Clock.systemUTC(). Feeder's view model reads it before its first frame. It is a
+ *   @CriticalNative, so it is bound with the critical-native calling convention.
+ *
+ *   java.lang.ProcessEnvironment.environ -- behind System.getenv(); Briar reads its environment
+ *   while its Application is created. Ported from libcore's ProcessEnvironment_md.c.
+ *
  *   android.view.SurfaceControl.nativeSetDesiredHdrHeadroom -- registered by
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
  *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
@@ -20,7 +27,9 @@
  */
 #include <jni.h>
 #include <math.h>
+#include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_acos(JNIEnv* env, jclass c, jdouble a)
 { (void)env; (void)c; return acos(a); }
@@ -132,6 +141,69 @@ JNIEXPORT void JNICALL Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadr
         JNIEnv* env, jclass c, jlong transaction, jlong surface, jfloat headroom)
 { (void)env; (void)c; (void)transaction; (void)surface; (void)headroom; }
 
+/*
+ * OpenJDK's contract: the current wall-clock time as nanoseconds since offsetInSeconds, or -1 when
+ * that difference does not fit (more than 2^32 seconds either way); Instant.now() then re-reads
+ * with a nearer offset.
+ *
+ * libcore declares it @CriticalNative: ART calls it with the Java arguments only, no JNIEnv and no
+ * jclass. With the ordinary JNI signature the offset was read from the wrong register, the answer
+ * was -1 for every offset, and Clock.currentInstant threw "Offset ... is not in range" (Tasks.org).
+ */
+static jlong wl_getNanoTimeAdjustment(jlong offset)
+{
+    const jlong max_diff = 0x0100000000LL;
+    struct timespec ts;
+    jlong diff;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0) return -1;
+    diff = (jlong) ts.tv_sec - offset;
+    if (diff >= max_diff || diff <= -max_diff) return -1;
+    return diff * 1000000000LL + (jlong) ts.tv_nsec;
+}
+
+/* The process environment as alternating name and value byte arrays; entries without '=' are
+ * skipped, as libcore's own implementation does. */
+extern char** environ;
+static jobjectArray wl_environ(JNIEnv* env, jclass c)
+{
+    jsize count = 0, i, j;
+    jobjectArray result;
+    jclass bytes = (*env)->FindClass(env, "[B");
+    (void)c;
+    if (bytes == NULL) return NULL;
+    for (i = 0; environ[i]; i++) if (strchr(environ[i], '=') != NULL) count++;
+    result = (*env)->NewObjectArray(env, 2 * count, bytes, NULL);
+    if (result == NULL) return NULL;
+    for (i = 0, j = 0; environ[i]; i++) {
+        const char* end = strchr(environ[i], '=');
+        jbyteArray name, value;
+        jsize nameLength, valueLength;
+        if (end == NULL) continue;
+        nameLength = (jsize) (end - environ[i]);
+        valueLength = (jsize) strlen(end + 1);
+        name = (*env)->NewByteArray(env, nameLength);
+        if (name == NULL) return NULL;
+        value = (*env)->NewByteArray(env, valueLength);
+        if (value == NULL) return NULL;
+        (*env)->SetByteArrayRegion(env, name, 0, nameLength, (const jbyte*) environ[i]);
+        (*env)->SetByteArrayRegion(env, value, 0, valueLength, (const jbyte*) (end + 1));
+        (*env)->SetObjectArrayElement(env, result, 2 * j, name);
+        (*env)->SetObjectArrayElement(env, result, 2 * j + 1, value);
+        (*env)->DeleteLocalRef(env, name);
+        (*env)->DeleteLocalRef(env, value);
+        j++;
+    }
+    return result;
+}
+
+static const JNINativeMethod kProcessEnvironment[] = {
+    { "environ", "()[[B", (void*) wl_environ },
+};
+
+static const JNINativeMethod kVm[] = {
+    { "getNanoTimeAdjustment", "(J)J", (void*) wl_getNanoTimeAdjustment },
+};
+
 static const JNINativeMethod kSurfaceControl[] = {
     { "nativeSetDesiredHdrHeadroom", "(JJF)V",
       (void*) Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadroom },
@@ -200,11 +272,15 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                      (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
         int v = bind(env, "android/view/SurfaceControl", kSurfaceControl,
                      (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])));
+        int t = bind(env, "jdk/internal/misc/VM", kVm, (int) (sizeof(kVm) / sizeof(kVm[0])));
+        int e = bind(env, "java/lang/ProcessEnvironment", kProcessEnvironment,
+                     (int) (sizeof(kProcessEnvironment) / sizeof(kProcessEnvironment[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
-                 v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])));
+                 v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
+                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e);
         note(line);
     }
     return JNI_VERSION_1_6;
