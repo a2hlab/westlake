@@ -228,6 +228,91 @@ static const JNINativeMethod kStrictMath[] = {
     SM(pow, "(DD)D"),
 };
 
+/*
+ * libcore.io.Memory's bulk copies between native memory and Java arrays. NIO's direct buffers
+ * use them for every bulk put/get (FloatBuffer.put(float[]) and the like), and this runtime's
+ * libcore registers none: libGDX's Mindustry died in FloatBuffer.put on pokeFloatArray, Unciv on
+ * pokeShortArray. As AOSP's libcore_io_Memory.cpp: a plain copy, or a per-element byte swap
+ * when the buffer's order is not the platform's.
+ */
+#define WL_MEMORY_ARRAY(Name, T, JArray, Get, Set, Swap)                                           \
+    static void wl_peek##Name##Array(JNIEnv* env, jclass c, jlong address, JArray dst,           \
+                                     jint offset, jint count, jboolean swap) {                   \
+        const T* src = (const T*) (intptr_t) address;                                            \
+        (void) c;                                                                                  \
+        if (!swap) {                                                                               \
+            (*env)->Set(env, dst, offset, count, src);                                             \
+            return;                                                                                \
+        }                                                                                          \
+        for (jint i = 0; i < count; i++) {                                                         \
+            T value;                                                                               \
+            memcpy(&value, &src[i], sizeof value);                                                 \
+            value = Swap(value);                                                                   \
+            (*env)->Set(env, dst, offset + i, 1, &value);                                          \
+        }                                                                                          \
+    }                                                                                              \
+    static void wl_poke##Name##Array(JNIEnv* env, jclass c, jlong address, JArray src,           \
+                                     jint offset, jint count, jboolean swap) {                   \
+        T* dst = (T*) (intptr_t) address;                                                          \
+        (void) c;                                                                                  \
+        if (!swap) {                                                                               \
+            (*env)->Get(env, src, offset, count, dst);                                             \
+            return;                                                                                \
+        }                                                                                          \
+        for (jint i = 0; i < count; i++) {                                                         \
+            T value;                                                                               \
+            (*env)->Get(env, src, offset + i, 1, &value);                                          \
+            value = Swap(value);                                                                   \
+            memcpy(&dst[i], &value, sizeof value);                                                 \
+        }                                                                                          \
+    }
+
+static inline jchar wl_swap16c(jchar v) { return (jchar) __builtin_bswap16(v); }
+static inline jshort wl_swap16(jshort v) { return (jshort) __builtin_bswap16((uint16_t) v); }
+static inline jint wl_swap32(jint v) { return (jint) __builtin_bswap32((uint32_t) v); }
+static inline jlong wl_swap64(jlong v) { return (jlong) __builtin_bswap64((uint64_t) v); }
+static inline jfloat wl_swapf(jfloat v) {
+    uint32_t bits;
+    memcpy(&bits, &v, sizeof bits);
+    bits = __builtin_bswap32(bits);
+    memcpy(&v, &bits, sizeof v);
+    return v;
+}
+static inline jdouble wl_swapd(jdouble v) {
+    uint64_t bits;
+    memcpy(&bits, &v, sizeof bits);
+    bits = __builtin_bswap64(bits);
+    memcpy(&v, &bits, sizeof v);
+    return v;
+}
+
+WL_MEMORY_ARRAY(Char, jchar, jcharArray, GetCharArrayRegion, SetCharArrayRegion, wl_swap16c)
+WL_MEMORY_ARRAY(Short, jshort, jshortArray, GetShortArrayRegion, SetShortArrayRegion, wl_swap16)
+WL_MEMORY_ARRAY(Int, jint, jintArray, GetIntArrayRegion, SetIntArrayRegion, wl_swap32)
+WL_MEMORY_ARRAY(Long, jlong, jlongArray, GetLongArrayRegion, SetLongArrayRegion, wl_swap64)
+WL_MEMORY_ARRAY(Float, jfloat, jfloatArray, GetFloatArrayRegion, SetFloatArrayRegion, wl_swapf)
+WL_MEMORY_ARRAY(Double, jdouble, jdoubleArray, GetDoubleArrayRegion, SetDoubleArrayRegion, wl_swapd)
+
+static void wl_peekByteArray(JNIEnv* env, jclass c, jlong address, jbyteArray dst, jint offset, jint count) {
+    (void) c;
+    (*env)->SetByteArrayRegion(env, dst, offset, count, (const jbyte*) (intptr_t) address);
+}
+static void wl_pokeByteArray(JNIEnv* env, jclass c, jlong address, jbyteArray src, jint offset, jint count) {
+    (void) c;
+    (*env)->GetByteArrayRegion(env, src, offset, count, (jbyte*) (intptr_t) address);
+}
+
+#define MEM(Name, Sig) { #Name, Sig, (void*) wl_##Name }
+static const JNINativeMethod kMemory[] = {
+    MEM(peekByteArray, "(J[BII)V"), MEM(pokeByteArray, "(J[BII)V"),
+    MEM(peekCharArray, "(J[CIIZ)V"), MEM(pokeCharArray, "(J[CIIZ)V"),
+    MEM(peekShortArray, "(J[SIIZ)V"), MEM(pokeShortArray, "(J[SIIZ)V"),
+    MEM(peekIntArray, "(J[IIIZ)V"), MEM(pokeIntArray, "(J[IIIZ)V"),
+    MEM(peekLongArray, "(J[JIIZ)V"), MEM(pokeLongArray, "(J[JIIZ)V"),
+    MEM(peekFloatArray, "(J[FIIZ)V"), MEM(pokeFloatArray, "(J[FIIZ)V"),
+    MEM(peekDoubleArray, "(J[DIIZ)V"), MEM(pokeDoubleArray, "(J[DIIZ)V"),
+};
+
 static void note(const char* text)
 {
     size_t n = 0;
@@ -275,12 +360,13 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int t = bind(env, "jdk/internal/misc/VM", kVm, (int) (sizeof(kVm) / sizeof(kVm[0])));
         int e = bind(env, "java/lang/ProcessEnvironment", kProcessEnvironment,
                      (int) (sizeof(kProcessEnvironment) / sizeof(kProcessEnvironment[0])));
+        int mem = bind(env, "libcore/io/Memory", kMemory, (int) (sizeof(kMemory) / sizeof(kMemory[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
-                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e);
+                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])));
         note(line);
     }
     return JNI_VERSION_1_6;
