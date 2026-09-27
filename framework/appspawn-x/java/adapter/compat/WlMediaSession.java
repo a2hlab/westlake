@@ -38,6 +38,12 @@ public final class WlMediaSession {
             if (type == long.class) return Long.valueOf(0L);
             if (type == float.class) return Float.valueOf(0f);
             if (type == double.class) return Double.valueOf(0d);
+            // A method that hands out a binder (ISession.getBinderForSetQueue: MediaSession.setQueue
+            // streams the queue to it) gets a local Binder that accepts the transactions. make()
+            // below cannot build it -- a Proxy of {IBinder, IBinder} repeats an interface and
+            // throws -- and the null it fell back to killed audio_service apps (mucke, LibriVox)
+            // with an NPE in ParcelableListBinder.send.
+            if (type == IBinder.class) return new LocalBinder();
             if (type.isInterface()) {
                 Object value = make(loader, type.getName(), "Wl" + type.getSimpleName());
                 if (value != null) return value;
