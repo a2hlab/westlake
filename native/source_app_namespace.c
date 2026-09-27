@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <sched.h>
 #include <stdio.h>
@@ -12,6 +14,44 @@
 static int owned_directory(const char* path, uid_t uid) {
     struct stat st;
     return lstat(path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == uid;
+}
+
+// Android's system trust store lives at /system/etc/security/cacerts, a path Dart's TLS reads
+// verbatim; OH has /system/etc/security without it, read-only. When the runtime carries one
+// (<root>/etc/security/cacerts), cover /system/etc/security with <root>/etc/security holding that
+// directory plus a bind of every OH entry, so OH's own files stay where they were.
+static int overlay_security(const char* root) {
+    char security[PATH_MAX], cacerts[PATH_MAX], original[PATH_MAX], from[PATH_MAX], to[PATH_MAX];
+    struct stat st;
+    if (snprintf(security, sizeof(security), "%s/etc/security", root) >= (int) sizeof(security) ||
+        snprintf(cacerts, sizeof(cacerts), "%s/cacerts", security) >= (int) sizeof(cacerts) ||
+        snprintf(original, sizeof(original), "%s/security-oh", root) >= (int) sizeof(original)) return -1;
+    if (lstat(cacerts, &st) || !S_ISDIR(st.st_mode)) return 0;
+    if ((mkdir(original, 0755) && errno != EEXIST) ||
+        mount("/system/etc/security", original, NULL, MS_BIND, NULL)) return -1;
+    DIR* dir = opendir(original);
+    if (!dir) return -1;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        const char* name = entry->d_name;
+        if (!strcmp(name, ".") || !strcmp(name, "..") || !strcmp(name, "cacerts")) continue;
+        if (snprintf(from, sizeof(from), "%s/%s", original, name) >= (int) sizeof(from) ||
+            snprintf(to, sizeof(to), "%s/%s", security, name) >= (int) sizeof(to) || stat(from, &st)) {
+            closedir(dir);
+            return -1;
+        }
+        if (S_ISDIR(st.st_mode) ? (mkdir(to, 0755) && errno != EEXIST)
+                                : ((close(open(to, O_WRONLY | O_CREAT, 0644)) && errno != EEXIST))) {
+            closedir(dir);
+            return -1;
+        }
+        if (mount(from, to, NULL, MS_BIND, NULL)) {
+            closedir(dir);
+            return -1;
+        }
+    }
+    closedir(dir);
+    return mount(security, "/system/etc/security", NULL, MS_BIND | MS_REC, NULL) ? -1 : 1;
 }
 
 // Mount only this candidate's runtime and empty application data in a private
@@ -41,8 +81,12 @@ int main(int argc, char** argv) {
         mount(icu_data, "/system/usr/icu", NULL, MS_BIND, NULL)) {
         perror("source application namespace"); return 1;
     }
-    fprintf(stderr, "SOURCE_APP_NAMESPACE uid=%lu mount=%lu->%lu runtime=%s icu=%s\n",
-            uid, before.st_ino, after.st_ino, root, icu_data);
+    int security = overlay_security(root);
+    if (security < 0) {
+        perror("source application trust store"); return 1;
+    }
+    fprintf(stderr, "SOURCE_APP_NAMESPACE uid=%lu mount=%lu->%lu runtime=%s icu=%s cacerts=%s\n",
+            uid, before.st_ino, after.st_ino, root, icu_data, security ? "mounted" : "absent");
     execvp(argv[3], argv + 3);
     perror("source app exec");
     return 1;
