@@ -1528,7 +1528,15 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public android.content.pm.InstallSourceInfo getInstallSourceInfo(java.lang.String arg0, int arg1) throws android.os.RemoteException {
-        logStub("getInstallSourceInfo", "");
+        // ApplicationPackageManager turns null into NameNotFoundException, which told apps their
+        // own package was not installed: package_info_plus failed with PlatformException(Name not
+        // found, <package>) and FOSS Warn, mucke and Cardabase stopped at startup. The launched
+        // APK was placed by the launcher, not by an installer app, so its truthful source is
+        // "none known" -- every field null, as PackageManagerService reports for such installs.
+        if (arg0 != null && SourcePackageRegistry.contains(arg0)) {
+            return new android.content.pm.InstallSourceInfo(null, null, null, null);
+        }
+        logStub("getInstallSourceInfo", arg0 == null ? "" : arg0);
         return null;
     }
 
