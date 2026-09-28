@@ -2021,3 +2021,17 @@ int *__get_h_errno(void)
 {
     return &h_errno;
 }
+
+/*
+ * libandroid's NDK trace API (android/trace.h). In the Android namespace libandroid.so is the
+ * WebView shim's, which has none of it, so a library that imports ATrace_* fails to relocate:
+ * React Native's libworklets.so (Reanimated) did, and Nori, Rush Hour and Marlin aborted on the
+ * JniException. This preloaded shim supplies them as Android behaves with tracing off:
+ * ATrace_isEnabled() is false and the section calls do nothing.
+ */
+bool ATrace_isEnabled(void) { return false; }
+void ATrace_beginSection(const char *section_name) { (void)section_name; }
+void ATrace_endSection(void) {}
+void ATrace_beginAsyncSection(const char *section_name, int32_t cookie) { (void)section_name; (void)cookie; }
+void ATrace_endAsyncSection(const char *section_name, int32_t cookie) { (void)section_name; (void)cookie; }
+void ATrace_setCounter(const char *counter_name, int64_t counter_value) { (void)counter_name; (void)counter_value; }
