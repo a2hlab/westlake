@@ -29,6 +29,14 @@
  *   AOSP's for a track that cannot loop, ERROR_INVALID_OPERATION: the sound plays once. That is
  *   an approximation, not looping, and stays an open gap.
  *
+ *   AudioTrack.native_write_native_bytes -- ByteBuffer writes, ExoPlayer's path. The AudioTrack shim
+ *   in the native bridge plays 16-bit PCM and converts float[] writes, but passed a ByteBuffer's
+ *   bytes through whatever the encoding: float PCM played as loud noise at twice the length
+ *   (probes/audio-tone: a 2500 Hz float tone came out as broadband noise, 7 s for 4). The
+ *   bridge's library cannot be rebuilt here, so this binding replaces its ByteBuffer write: it
+ *   converts float and 8-bit PCM to 16-bit and hands the samples to the bridge's own 16-bit
+ *   write (native_write_short), returning the bytes of the caller's encoding it consumed.
+ *
  *   AudioSystem.getParameters / setParameters -- vendor key/value strings passed to the audio HAL.
  *   ExoPlayer asks for one on its playback thread (Mouse Pounce). No key is known here, which a
  *   HAL answers with an empty string; setParameters accepts and ignores, as HALs do for keys they
@@ -100,7 +108,47 @@ static jint wl_track_set_loop(JNIEnv* env, jobject thiz, jint start, jint end, j
     return -3; /* AudioTrack.ERROR_INVALID_OPERATION */
 }
 
+static jmethodID g_write_short;
+
+static jint wl_track_write_bytes(JNIEnv* env, jobject thiz, jobject buffer, jint position, jint size,
+                                 jint format, jboolean blocking)
+{
+    const uint8_t* base;
+    int bytes_per_sample = format == 4 ? 4 : format == 3 ? 1 : 2; /* FLOAT, 8BIT, else 16BIT */
+    jint samples, written;
+    jshortArray array;
+    jshort* out;
+    if (g_write_short == NULL || buffer == NULL || size < 0) return -2;          /* ERROR_BAD_VALUE */
+    base = (const uint8_t*) (*env)->GetDirectBufferAddress(env, buffer);
+    if (base == NULL) return -1;                                                 /* ERROR */
+    base += position;
+    samples = size / bytes_per_sample;
+    if (samples == 0) return 0;
+    array = (*env)->NewShortArray(env, samples);
+    if (array == NULL) return -1;
+    out = (*env)->GetShortArrayElements(env, array, NULL);
+    if (out == NULL) { (*env)->DeleteLocalRef(env, array); return -1; }
+    for (jint i = 0; i < samples; i++) {
+        if (format == 4) {
+            float v;
+            memcpy(&v, base + 4 * i, sizeof(v));
+            v = v > 1.f ? 1.f : v < -1.f ? -1.f : v;
+            out[i] = (jshort) (v * 32767.f);
+        } else if (format == 3) {
+            out[i] = (jshort) (((int) base[i] - 128) << 8);
+        } else {
+            memcpy(&out[i], base + 2 * i, sizeof(jshort));
+        }
+    }
+    (*env)->ReleaseShortArrayElements(env, array, out, 0);
+    written = (*env)->CallIntMethod(env, thiz, g_write_short, array, 0, samples, 2 /* 16BIT */, blocking);
+    (*env)->DeleteLocalRef(env, array);
+    if ((*env)->ExceptionCheck(env)) return -1;
+    return written < 0 ? written : written * bytes_per_sample;
+}
+
 static const JNINativeMethod kAudioTrack[] = {
+    { "native_write_native_bytes", "(Ljava/nio/ByteBuffer;IIIZ)I", (void*) wl_track_write_bytes },
     { "native_set_loop", "(III)I", (void*) wl_track_set_loop },
     { "native_get_buffer_size_frames", "()I", (void*) wl_track_frames },
     { "native_set_buffer_size_frames", "(I)I", (void*) wl_track_set_frames },
@@ -1062,7 +1110,18 @@ void wl_register_media(JNIEnv* env, JavaVM* vm)
     jclass player, fd;
     int t, s, m = 0;
     g_vm = vm;
-    t = bind_class(env, "android/media/AudioTrack", kAudioTrack, COUNT(kAudioTrack));
+    {
+        /* The bridge's 16-bit write, which the ByteBuffer binding hands its samples to. Looked up
+         * first: without it the bridge's own ByteBuffer write is left in place. */
+        jclass track = (*env)->FindClass(env, "android/media/AudioTrack");
+        if (track != NULL) {
+            g_write_short = (*env)->GetMethodID(env, track, "native_write_short", "([SIIIZ)I");
+            (*env)->DeleteLocalRef(env, track);
+        }
+        (*env)->ExceptionClear(env);
+    }
+    t = bind_class(env, "android/media/AudioTrack", kAudioTrack + (g_write_short != NULL ? 0 : 1),
+                   COUNT(kAudioTrack) - (g_write_short != NULL ? 0 : 1));
     s = bind_class(env, "android/media/AudioSystem", kAudioSystem, COUNT(kAudioSystem));
     player = (*env)->FindClass(env, "android/media/MediaPlayer");
     fd = (*env)->FindClass(env, "java/io/FileDescriptor");
