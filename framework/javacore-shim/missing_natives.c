@@ -22,6 +22,18 @@
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
  *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
  *
+ *   android.app.ActivityThread.nPurgePendingResources / nInitZygoteChildHeapProfiling -- the
+ *   framework calls the first itself, from its low-memory purge, so no app code names it and any
+ *   app can reach it once the system is short of memory: RedReader died on it before its first
+ *   screen. AOSP's version asks the allocator to release free memory and ignores the result;
+ *   OH's musl has no M_PURGE, so here it does nothing, which is the same outcome for the app. The
+ *   second sets up heap profiling for zygote children, which is not configured here.
+ *
+ *   android.database.sqlite.SQLiteGlobal.nativeReleaseMemory -- the same kind: ActivityThread's
+ *   low-memory handler calls it for every app. AOSP returns the bytes SQLite freed; this answers
+ *   0, nothing released, which callers only log. Found by the harness's lifecycle-natives check,
+ *   before any app died on it.
+ *
  *   android.media -- MediaPlayer, and the AudioTrack and AudioSystem natives the AudioTrack shim
  *   leaves out: see media_natives.c.
  *
@@ -207,6 +219,20 @@ static const JNINativeMethod kVm[] = {
     { "getNanoTimeAdjustment", "(J)J", (void*) wl_getNanoTimeAdjustment },
 };
 
+static void wl_purgePendingResources(JNIEnv* env, jclass c) { (void) env; (void) c; }
+static void wl_initZygoteChildHeapProfiling(JNIEnv* env, jclass c) { (void) env; (void) c; }
+
+static jint wl_sqliteReleaseMemory(JNIEnv* env, jclass c) { (void) env; (void) c; return 0; }
+
+static const JNINativeMethod kSqliteGlobal[] = {
+    { "nativeReleaseMemory", "()I", (void*) wl_sqliteReleaseMemory },
+};
+
+static const JNINativeMethod kActivityThread[] = {
+    { "nPurgePendingResources", "()V", (void*) wl_purgePendingResources },
+    { "nInitZygoteChildHeapProfiling", "()V", (void*) wl_initZygoteChildHeapProfiling },
+};
+
 static const JNINativeMethod kSurfaceControl[] = {
     { "nativeSetDesiredHdrHeadroom", "(JJF)V",
       (void*) Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadroom },
@@ -356,7 +382,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         return JNI_VERSION_1_6;
     }
     {
-        char line[128];
+        char line[192];
         int m = bind(env, "java/lang/Math", kMath, (int) (sizeof(kMath) / sizeof(kMath[0])));
         int s = bind(env, "java/lang/StrictMath", kStrictMath,
                      (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
@@ -366,12 +392,17 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int e = bind(env, "java/lang/ProcessEnvironment", kProcessEnvironment,
                      (int) (sizeof(kProcessEnvironment) / sizeof(kProcessEnvironment[0])));
         int mem = bind(env, "libcore/io/Memory", kMemory, (int) (sizeof(kMemory) / sizeof(kMemory[0])));
+        int at = bind(env, "android/app/ActivityThread", kActivityThread,
+                      (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])));
+        int sq = bind(env, "android/database/sqlite/SQLiteGlobal", kSqliteGlobal,
+                      (int) (sizeof(kSqliteGlobal) / sizeof(kSqliteGlobal[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
-                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])));
+                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq);
         note(line);
     }
     wl_register_media(env, vm);
