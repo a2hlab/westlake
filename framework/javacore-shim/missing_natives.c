@@ -22,6 +22,9 @@
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
  *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
  *
+ *   android.media -- MediaPlayer, and the AudioTrack and AudioSystem natives the AudioTrack shim
+ *   leaves out: see media_natives.c.
+ *
  * Bound with RegisterNatives rather than left to be found by name, which is what lets this library
  * supply a method belonging to a boot class without being the library that owns it.
  */
@@ -342,6 +345,8 @@ static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int 
     return bound;
 }
 
+void wl_register_media(JNIEnv* env, JavaVM* vm);
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     JNIEnv* env = NULL;
@@ -369,5 +374,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])));
         note(line);
     }
+    wl_register_media(env, vm);
     return JNI_VERSION_1_6;
 }
