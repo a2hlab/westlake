@@ -37,6 +37,13 @@
  *   converts float and 8-bit PCM to 16-bit and hands the samples to the bridge's own 16-bit
  *   write (native_write_short), returning the bytes of the caller's encoding it consumed.
  *
+ *   MediaDrm / MediaCrypto -- none of their natives is registered, so MediaDrm's static initializer
+ *   threw and apps that only ask which DRM schemes exist died at startup (X, Uber). There is no DRM
+ *   plugin here, and these answer what AOSP's JNI answers on a device without one: no scheme is
+ *   supported, the scheme list is empty, and constructing either object throws the exception its
+ *   Java API documents (UnsupportedSchemeException, MediaCryptoException). No instance can exist,
+ *   so the per-instance natives are never reached; release and finalize are bound anyway.
+ *
  *   AudioSystem.getParameters / setParameters -- vendor key/value strings passed to the audio HAL.
  *   ExoPlayer asks for one on its playback thread (Mouse Pounce). No key is known here, which a
  *   HAL answers with an empty string; setParameters accepts and ignores, as HALs do for keys they
@@ -199,6 +206,49 @@ static const JNINativeMethod kAudioSystem[] = {
     /* AudioSystem.AUDIO_HW_SYNC_INVALID */
     { "getAudioHwSyncForSession", "(I)I", (void*) wl_audio_zero_i },
     { "isHapticPlaybackSupported", "()Z", (void*) wl_audio_false },
+};
+
+/* ---- MediaDrm / MediaCrypto: a device without a DRM plugin ------------------------------ */
+
+static void drm_throw(JNIEnv* env, const char* cls, const char* msg)
+{
+    jclass c = (*env)->FindClass(env, cls);
+    if (c != NULL) (*env)->ThrowNew(env, c, msg);
+}
+
+static void drm_init(JNIEnv* env, jclass c) { (void) env; (void) c; }
+static void drm_release(JNIEnv* env, jobject thiz) { (void) env; (void) thiz; }
+static void drm_setup(JNIEnv* env, jobject thiz, jobject weak, jbyteArray uuid, jstring package)
+{
+    (void) thiz; (void) weak; (void) uuid; (void) package;
+    drm_throw(env, "android/media/UnsupportedSchemeException", "Failed to instantiate drm object.");
+}
+static jboolean drm_scheme_supported(JNIEnv* env, jclass c, jbyteArray uuid, jstring mime, jint level)
+{ (void) env; (void) c; (void) uuid; (void) mime; (void) level; return JNI_FALSE; }
+static jbyteArray drm_schemes(JNIEnv* env, jclass c) { (void) c; return (*env)->NewByteArray(env, 0); }
+
+static const JNINativeMethod kMediaDrm[] = {
+    { "native_init", "()V", (void*) drm_init },
+    { "native_setup", "(Ljava/lang/Object;[BLjava/lang/String;)V", (void*) drm_setup },
+    { "native_release", "()V", (void*) drm_release },
+    { "isCryptoSchemeSupportedNative", "([BLjava/lang/String;I)Z", (void*) drm_scheme_supported },
+    { "getSupportedCryptoSchemesNative", "()[B", (void*) drm_schemes },
+};
+
+static void crypto_setup(JNIEnv* env, jobject thiz, jbyteArray uuid, jbyteArray data)
+{
+    (void) thiz; (void) uuid; (void) data;
+    drm_throw(env, "android/media/MediaCryptoException", "Failed to instantiate crypto object.");
+}
+static jboolean crypto_scheme_supported(JNIEnv* env, jclass c, jbyteArray uuid)
+{ (void) env; (void) c; (void) uuid; return JNI_FALSE; }
+
+static const JNINativeMethod kMediaCrypto[] = {
+    { "native_init", "()V", (void*) drm_init },
+    { "native_setup", "([B[B)V", (void*) crypto_setup },
+    { "native_finalize", "()V", (void*) drm_release },
+    { "release", "()V", (void*) drm_release },
+    { "isCryptoSchemeSupportedNative", "([B)Z", (void*) crypto_scheme_supported },
 };
 
 /* ---- MediaPlayer over OH AVPlayer ---------------------------------------------------------- */
@@ -1123,6 +1173,11 @@ void wl_register_media(JNIEnv* env, JavaVM* vm)
     t = bind_class(env, "android/media/AudioTrack", kAudioTrack + (g_write_short != NULL ? 0 : 1),
                    COUNT(kAudioTrack) - (g_write_short != NULL ? 0 : 1));
     s = bind_class(env, "android/media/AudioSystem", kAudioSystem, COUNT(kAudioSystem));
+    {
+        int d = bind_class(env, "android/media/MediaDrm", kMediaDrm, COUNT(kMediaDrm));
+        int c = bind_class(env, "android/media/MediaCrypto", kMediaCrypto, COUNT(kMediaCrypto));
+        mlog("[WL-NATIVES] bound MediaDrm=%d/%d MediaCrypto=%d/%d", d, COUNT(kMediaDrm), c, COUNT(kMediaCrypto));
+    }
     player = (*env)->FindClass(env, "android/media/MediaPlayer");
     fd = (*env)->FindClass(env, "java/io/FileDescriptor");
     if (player != NULL && fd != NULL) {

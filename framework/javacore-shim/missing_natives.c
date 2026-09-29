@@ -34,18 +34,49 @@
  *   0, nothing released, which callers only log. Found by the harness's lifecycle-natives check,
  *   before any app died on it.
  *
+ *   android.os.SystemProperties.native_get(String, String) -- wrapped, not replaced. Its table (in
+ *   liboh_android_runtime.so, which cannot be rebuilt here) has no dalvik.vm heap sizes, so
+ *   ActivityManager.getMemoryClass() and getLargeMemoryClass() answered 0: CNN's Application built
+ *   an LruCache of that size and threw "maxSize <= 0"; Glide sizes its caches the same way. The
+ *   registered implementation is taken from ART's method record (a jmethodID is the ArtMethod;
+ *   its JNI entry point, data_, is at offset 16 in this ART) and used only if it lies in
+ *   liboh_android_runtime.so; the wrapper returns it unchanged unless it answers nothing for
+ *   one of these keys, then the value an 8 GB Android device reports. Same heap size as the
+ *   bionic shim's table.
+ *
+ *   java.io.UnixFileSystem.setPermission0 / setReadOnly0 -- File.setWritable, setReadable,
+ *   setExecutable and setReadOnly returned false on every file and directory (Os.chmod on the same
+ *   paths works): Facebook and Messenger (SoLoader making lib-compressed read-only) and CapCut died
+ *   on it. Replaced with libcore's own logic (UnixFileSystem_md.c): stat, add or clear the owner or
+ *   everyone bits, chmod.
+ *
+ *   The loading thread's Java priority -- not a native, a value. libart.so's PaletteSchedGetPriority
+ *   is a weak stub that returns success without writing a priority, so ART gives every thread it
+ *   attaches, the main thread included, Java priority 0 (Android's main thread has 5), and every
+ *   Java thread created from them inherits 0. Code that saves a thread's priority and restores it
+ *   calls Thread.setPriority(0), which throws "Priority out of range: 0": Instagram's Application
+ *   constructor and CapCut's ByteDance thread pool died on it. This library loads on the main
+ *   thread before the app starts, so it sets that thread to NORM_PRIORITY when it reads 0; threads
+ *   created from it then inherit 5. Threads ART attaches later (render, binder) still read 0 --
+ *   fixing those needs the palette in libart.
+ *
+ *   android.text.AndroidCharacter -- see text_natives.c.
+ *
  *   android.media -- MediaPlayer, and the AudioTrack and AudioSystem natives the AudioTrack shim
  *   leaves out: see media_natives.c.
  *
  * Bound with RegisterNatives rather than left to be found by name, which is what lets this library
  * supply a method belonging to a boot class without being the library that owns it.
  */
+#define _GNU_SOURCE
+#include <dlfcn.h>
 #include <jni.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_acos(JNIEnv* env, jclass c, jdouble a)
 { (void)env; (void)c; return acos(a); }
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_asin(JNIEnv* env, jclass c, jdouble a)
@@ -222,6 +253,75 @@ static const JNINativeMethod kVm[] = {
 static void wl_purgePendingResources(JNIEnv* env, jclass c) { (void) env; (void) c; }
 static void wl_initZygoteChildHeapProfiling(JNIEnv* env, jclass c) { (void) env; (void) c; }
 
+typedef jstring (*PropGetFn)(JNIEnv*, jclass, jstring, jstring);
+static PropGetFn g_prop_get;
+
+static const struct { const char* key; const char* value; } kHeapProps[] = {
+    { "dalvik.vm.heapgrowthlimit", "256m" },
+    { "dalvik.vm.heapsize", "512m" },
+};
+
+static jstring wl_prop_get(JNIEnv* env, jclass c, jstring key, jstring def)
+{
+    jstring answer = g_prop_get(env, c, key, def);
+    const char* k;
+    const char* a;
+    int missing;
+    size_t i;
+    if ((*env)->ExceptionCheck(env) || key == NULL) return answer;
+    /* Missing means empty, or the caller's own default handed back: getLargeMemoryClass asks for
+     * dalvik.vm.heapsize with "16m" as the default and got 16 back. */
+    a = answer != NULL ? (*env)->GetStringUTFChars(env, answer, NULL) : NULL;
+    missing = a == NULL || a[0] == '\0';
+    if (!missing && def != NULL) {
+        const char* d = (*env)->GetStringUTFChars(env, def, NULL);
+        if (d != NULL) {
+            missing = strcmp(a, d) == 0;
+            (*env)->ReleaseStringUTFChars(env, def, d);
+        }
+    }
+    if (a != NULL) (*env)->ReleaseStringUTFChars(env, answer, a);
+    if (!missing) return answer;
+    k = (*env)->GetStringUTFChars(env, key, NULL);
+    if (k == NULL) return answer;
+    for (i = 0; i < sizeof(kHeapProps) / sizeof(kHeapProps[0]); i++) {
+        if (strcmp(k, kHeapProps[i].key) == 0) {
+            (*env)->ReleaseStringUTFChars(env, key, k);
+            return (*env)->NewStringUTF(env, kHeapProps[i].value);
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, key, k);
+    return answer;
+}
+
+/* Wraps SystemProperties.native_get(String, String) if its registered implementation can be found
+ * and is liboh_android_runtime's; otherwise leaves it alone. Returns 1 when wrapped. */
+static int wrap_system_properties(JNIEnv* env)
+{
+    static const JNINativeMethod wrapped = {
+        "native_get", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", (void*) wl_prop_get };
+    jclass c = (*env)->FindClass(env, "android/os/SystemProperties");
+    jmethodID m;
+    void* entry;
+    Dl_info info;
+    int ok = 0;
+    if (c == NULL) { (*env)->ExceptionClear(env); return 0; }
+    m = (*env)->GetStaticMethodID(env, c, wrapped.name, wrapped.signature);
+    if (m == NULL) {
+        (*env)->ExceptionClear(env);
+    } else {
+        entry = *(void* const*) ((const char*) m + 16);   /* ArtMethod::ptr_sized_fields_.data_ */
+        if (entry != NULL && dladdr(entry, &info) != 0 && info.dli_fname != NULL
+                && strstr(info.dli_fname, "liboh_android_runtime") != NULL) {
+            g_prop_get = (PropGetFn) entry;
+            ok = (*env)->RegisterNatives(env, c, &wrapped, 1) == JNI_OK;
+            if (!ok) (*env)->ExceptionClear(env);
+        }
+    }
+    (*env)->DeleteLocalRef(env, c);
+    return ok;
+}
+
 static jint wl_sqliteReleaseMemory(JNIEnv* env, jclass c) { (void) env; (void) c; return 0; }
 
 static const JNINativeMethod kSqliteGlobal[] = {
@@ -372,6 +472,78 @@ static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int 
 }
 
 void wl_register_media(JNIEnv* env, JavaVM* vm);
+int wl_register_text(JNIEnv* env);
+
+static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
+{
+    jclass c = (*env)->GetObjectClass(env, file);
+    jmethodID getPath = (*env)->GetMethodID(env, c, "getPath", "()Ljava/lang/String;");
+    jstring path;
+    const char* chars;
+    (*env)->DeleteLocalRef(env, c);
+    if (getPath == NULL) { (*env)->ExceptionClear(env); return 0; }
+    path = (jstring) (*env)->CallObjectMethod(env, file, getPath);
+    if (path == NULL || (*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); return 0; }
+    chars = (*env)->GetStringUTFChars(env, path, NULL);
+    if (chars == NULL) { (*env)->DeleteLocalRef(env, path); return 0; }
+    snprintf(out, size, "%s", chars);
+    (*env)->ReleaseStringUTFChars(env, path, chars);
+    (*env)->DeleteLocalRef(env, path);
+    return out[0] != '\0';
+}
+
+/* java.io.FileSystem's ACCESS_READ, ACCESS_WRITE, ACCESS_EXECUTE. */
+static jboolean wl_setPermission0(JNIEnv* env, jobject self, jobject file, jint access, jboolean enable,
+                                  jboolean owner_only)
+{
+    char path[4096];
+    struct stat st;
+    mode_t bits = 0;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || stat(path, &st) != 0) return JNI_FALSE;
+    if (access & 4) bits |= owner_only ? S_IRUSR : (S_IRUSR | S_IRGRP | S_IROTH);
+    if (access & 2) bits |= owner_only ? S_IWUSR : (S_IWUSR | S_IWGRP | S_IWOTH);
+    if (access & 1) bits |= owner_only ? S_IXUSR : (S_IXUSR | S_IXGRP | S_IXOTH);
+    return chmod(path, enable ? (st.st_mode | bits) : (st.st_mode & ~bits)) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean wl_setReadOnly0(JNIEnv* env, jobject self, jobject file)
+{
+    char path[4096];
+    struct stat st;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || stat(path, &st) != 0) return JNI_FALSE;
+    return chmod(path, st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH)) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static const JNINativeMethod kUnixFileSystem[] = {
+    { "setPermission0", "(Ljava/io/File;IZZ)Z", (void*) wl_setPermission0 },
+    { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
+};
+
+/* Returns the priority it found (before any change). */
+static int normalize_thread_priority(JNIEnv* env)
+{
+    jclass thread = (*env)->FindClass(env, "java/lang/Thread");
+    jmethodID current, get, set;
+    jobject self;
+    int priority = -1;
+    if (thread == NULL) { (*env)->ExceptionClear(env); return -1; }
+    current = (*env)->GetStaticMethodID(env, thread, "currentThread", "()Ljava/lang/Thread;");
+    get = (*env)->GetMethodID(env, thread, "getPriority", "()I");
+    set = (*env)->GetMethodID(env, thread, "setPriority", "(I)V");
+    if (current != NULL && get != NULL && set != NULL
+            && (self = (*env)->CallStaticObjectMethod(env, thread, current)) != NULL) {
+        priority = (*env)->CallIntMethod(env, self, get);
+        if (priority < 1) {
+            (*env)->CallVoidMethod(env, self, set, 5 /* Thread.NORM_PRIORITY */);
+        }
+        (*env)->DeleteLocalRef(env, self);
+    }
+    (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, thread);
+    return priority;
+}
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
@@ -382,7 +554,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         return JNI_VERSION_1_6;
     }
     {
-        char line[192];
+        char line[256];
         int m = bind(env, "java/lang/Math", kMath, (int) (sizeof(kMath) / sizeof(kMath[0])));
         int s = bind(env, "java/lang/StrictMath", kStrictMath,
                      (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
@@ -396,13 +568,18 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                       (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])));
         int sq = bind(env, "android/database/sqlite/SQLiteGlobal", kSqliteGlobal,
                       (int) (sizeof(kSqliteGlobal) / sizeof(kSqliteGlobal[0])));
+        int sp = wrap_system_properties(env);
+        int pr = normalize_thread_priority(env);
+        int fs = bind(env, "java/io/UnixFileSystem", kUnixFileSystem,
+                      (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
+        int tx = wl_register_text(env);
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx);
         note(line);
     }
     wl_register_media(env, vm);
