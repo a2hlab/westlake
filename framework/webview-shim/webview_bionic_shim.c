@@ -920,6 +920,32 @@ void *dlopen(const char *filename, int flags)
         return NULL;
     }
     /*
+     * OpenSL ES through dlopen. Oboe (Rhythm Engine) does not link libOpenSLES: it dlopens it and
+     * looks up slCreateEngine and the SL_IID_* by handle, which reaches OH's library directly and
+     * skips the Android-ABI adapter this shim exports -- OH then refused Oboe's engine interface
+     * (SL_RESULT_FEATURE_UNSUPPORTED) and the app died. An app's dlopen of libOpenSLES.so is
+     * answered with this shim's own handle. The shim depends on OH's libOpenSLES, and a lookup by
+     * handle searches a library before its dependencies, so the adapter's slCreateEngine and
+     * Android's own IDs are found here and every other SL_IID_* in OH's library behind it. The
+     * adapter's own dlopen, from inside this shim, still gets OH's library.
+     */
+    if (basename != NULL && strcmp(basename, "libOpenSLES.so") == 0) {
+        Dl_info self, caller;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
+            !(dladdr(__builtin_return_address(0), &caller) != 0 &&
+              caller.dli_fbase == self.dli_fbase)) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                static int logged;
+                if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                    fprintf(stderr, "[WESTLAKE-SLES] dlopen %s -> the Android OpenSL ES adapter\n",
+                            filename);
+                }
+                return handle;
+            }
+        }
+    }
+    /*
      * WebView's own libraries come from the WebView library directory, which the search path
      * lists last.  Every name in it also exists in the runtime directory, which comes first, so a
      * bare soname from a WebView caller resolves to the runtime's copy.  For libandroid.so that

@@ -315,8 +315,16 @@ static a_result sbq_get_state(ASbqItf self, ASbqState *state)
     return SL_RESULT_SUCCESS;
 }
 
-/* OH wants data: fill its buffer from queued app buffers, then report each consumed buffer to
- * the app outside the lock, because the app enqueues its next buffer from that callback. */
+/* OH wants data: fill its buffer from queued app buffers. Each consumed buffer is reported to the
+ * app outside the lock, because the app enqueues its next buffer from that callback -- and then
+ * filling continues, so the buffers the app has just queued go into this same OH buffer.
+ *
+ * OH's buffers are much larger than a game's: Godot and Oboe double-buffer about 1024 frames, and
+ * OH pulled several times that. Filling only what was queued when OH asked, and padding the rest
+ * with silence, played audio for half the time or less -- choppy sound heard on Ball2Box, and on a
+ * 1 kHz test tone 50% (48 kHz) and 73% (44.1 kHz) of 10 ms windows were silent. Android's
+ * AudioTrack has a deep buffer behind the queue; this loop gives OH's pull the same depth. Silence
+ * is written only when the app stops supplying data. */
 static void sbq_on_oh_need(SLOHBufferQueueItf caller, void *context, SLuint32 want)
 {
     (void) want;
@@ -325,28 +333,32 @@ static void sbq_on_oh_need(SLOHBufferQueueItf caller, void *context, SLuint32 wa
     SLuint32 out_size = 0;
     if ((*caller)->GetBuffer(caller, &out, &out_size) != SL_RESULT_SUCCESS || out == NULL) return;
     SLuint32 filled = 0;
-    a_u32 finished = 0;
-    pthread_mutex_lock(&a->lock);
-    while (filled < out_size && a->count > 0) {
-        a_u32 left = a->size[a->head] - a->offset;
-        SLuint32 n = left < out_size - filled ? left : out_size - filled;
-        memcpy(out + filled, (const SLuint8 *) a->buf[a->head] + a->offset, n);
-        filled += n;
-        a->offset += (a_u32) n;
-        if (a->offset == a->size[a->head]) {
-            a->head = (a->head + 1) % SBQ_MAX;
-            a->count--;
-            a->offset = 0;
-            a->consumed++;
-            finished++;
+    for (;;) {
+        a_u32 finished = 0;
+        pthread_mutex_lock(&a->lock);
+        while (filled < out_size && a->count > 0) {
+            a_u32 left = a->size[a->head] - a->offset;
+            SLuint32 n = left < out_size - filled ? left : out_size - filled;
+            memcpy(out + filled, (const SLuint8 *) a->buf[a->head] + a->offset, n);
+            filled += n;
+            a->offset += (a_u32) n;
+            if (a->offset == a->size[a->head]) {
+                a->head = (a->head + 1) % SBQ_MAX;
+                a->count--;
+                a->offset = 0;
+                a->consumed++;
+                finished++;
+            }
         }
+        ASbqCallback cb = a->callback;
+        void *ctx = a->context;
+        pthread_mutex_unlock(&a->lock);
+        for (a_u32 i = 0; cb != NULL && i < finished; i++) cb((ASbqItf) &a->itf, ctx);
+        /* Done when full, or when nothing was consumed: the app has nothing more queued. */
+        if (filled >= out_size || finished == 0) break;
     }
-    ASbqCallback cb = a->callback;
-    void *ctx = a->context;
-    pthread_mutex_unlock(&a->lock);
     if (filled < out_size) memset(out + filled, 0, out_size - filled);   /* underrun: silence */
     (*caller)->Enqueue(caller, out, out_size);
-    for (a_u32 i = 0; cb != NULL && i < finished; i++) cb((ASbqItf) &a->itf, ctx);
 }
 
 static a_result sbq_register_callback(ASbqItf self, ASbqCallback callback, void *context)
