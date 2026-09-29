@@ -15,6 +15,20 @@
  *    with FEATURE_UNSUPPORTED and offers SL_IID_OH_BUFFERQUEUE, which pulls: OH calls back when it
  *    wants data, the app takes a buffer with GetBuffer, fills it and Enqueues it.
  *
+ * 3. Android's configuration interface, SL_IID_ANDROIDCONFIGURATION. OH's library has no such
+ *    symbol, so Godot's and Oboe's libraries, which import it, failed to load at all (Ball2Box,
+ *    Jigsaw, V3, Rhythm Engine). It is Android-only: the ID is exported here with AOSP's value,
+ *    kept out of the interface lists OH sees, and answered by a per-object interface that takes
+ *    and reports the keys AOSP's player and recorder take (stream type, recording preset,
+ *    performance mode). They are hints to Android's audio policy; OH's player has no
+ *    equivalent, so they are recorded, not applied. The Java-proxy calls are unsupported.
+ *
+ * 4. Interface IDs by address. OH's library compares an interface ID by its address, not its
+ *    contents. An app library loaded in the isolated Android namespace binds its SL_IID_*
+ *    references to that namespace's copy of libOpenSLES, whose IDs have other addresses, so OH
+ *    refused Godot's own SL_IID_ENGINE (Ball2Box: "res != 0" at audio_driver_opensl.cpp:120, no
+ *    audio). Every ID handed to OH is first swapped for OH's own by its contents.
+ *
  * Mindustry's audio engine (SoLoud) was refused a player, ignored the refusal, and called through
  * the null interface -- a SIGSEGV at address 0 on its main thread.
  *
@@ -54,6 +68,14 @@ typedef const struct AEngineItf_ *const *AEngineItf;
 typedef const struct APlayItf_ *const *APlayItf;
 typedef const struct AVolumeItf_ *const *AVolumeItf;
 typedef const struct ASbqItf_ *const *ASbqItf;
+typedef const struct AConfigItf_ *const *AConfigItf;
+
+struct AConfigItf_ {
+    a_result (*SetConfiguration)(AConfigItf, const SLchar *, const void *, a_u32);
+    a_result (*GetConfiguration)(AConfigItf, const SLchar *, a_u32 *, void *);
+    a_result (*AcquireJavaProxy)(AConfigItf, a_u32, void **);
+    a_result (*ReleaseJavaProxy)(AConfigItf, a_u32);
+};
 
 typedef void (*AObjectCallback)(AObjectItf caller, const void *context, a_u32 event, a_result result,
                                 a_u32 param, void *itf);
@@ -163,6 +185,7 @@ static struct {
     SLresult (*create_engine)(SLObjectItf *, SLuint32, const SLEngineOption *, SLuint32,
                               const SLInterfaceID *, const SLboolean *);
     SLInterfaceID engine, play, volume, oh_bq, std_bq;
+    void *lib;
 } oh;
 
 static int oh_resolve(void)
@@ -178,6 +201,7 @@ static int oh_resolve(void)
                         *s = dlsym(lib, "SL_IID_BUFFERQUEUE");
     ok = oh.create_engine && e && q;
     if (!ok) { sles_log("OH OpenSL ES symbols missing"); return 0; }
+    oh.lib = lib;
     oh.engine = *e; oh.oh_bq = *q;
     oh.play = p ? *p : NULL; oh.volume = v ? *v : NULL; oh.std_bq = s ? *s : NULL;
     return ok;
@@ -192,6 +216,50 @@ const SLInterfaceID SL_IID_ANDROIDSIMPLEBUFFERQUEUE = &westlake_sl_iid_android_s
 static int iid_is(SLInterfaceID a, SLInterfaceID b)
 {
     return a != NULL && b != NULL && (a == b || memcmp(a, b, sizeof(*a)) == 0);
+}
+
+/* Android's configuration interface ID, from AOSP frameworks/wilhelm src/OpenSLES_IID.cpp. */
+static const struct SLInterfaceID_ westlake_sl_iid_android_config = {
+    0x89f6a7e0, 0xbeac, 0x11df, 0x8b5c, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
+const SLInterfaceID SL_IID_ANDROIDCONFIGURATION = &westlake_sl_iid_android_config;
+
+static const char *const oh_iid_names[] = {
+    "SL_IID_3DCOMMIT", "SL_IID_3DDOPPLER", "SL_IID_3DGROUPING", "SL_IID_3DLOCATION",
+    "SL_IID_3DMACROSCOPIC", "SL_IID_3DSOURCE", "SL_IID_AUDIODECODERCAPABILITIES",
+    "SL_IID_AUDIOENCODER", "SL_IID_AUDIOENCODERCAPABILITIES", "SL_IID_AUDIOIODEVICECAPABILITIES",
+    "SL_IID_BASSBOOST", "SL_IID_BUFFERQUEUE", "SL_IID_DEVICEVOLUME",
+    "SL_IID_DYNAMICINTERFACEMANAGEMENT", "SL_IID_DYNAMICSOURCE", "SL_IID_EFFECTSEND",
+    "SL_IID_ENGINE", "SL_IID_ENGINECAPABILITIES", "SL_IID_ENVIRONMENTALREVERB",
+    "SL_IID_EQUALIZER", "SL_IID_LED", "SL_IID_METADATAEXTRACTION", "SL_IID_METADATATRAVERSAL",
+    "SL_IID_MIDIMESSAGE", "SL_IID_MIDIMUTESOLO", "SL_IID_MIDITEMPO", "SL_IID_MIDITIME",
+    "SL_IID_MUTESOLO", "SL_IID_NULL", "SL_IID_OBJECT", "SL_IID_OH_BUFFERQUEUE", "SL_IID_OUTPUTMIX",
+    "SL_IID_PITCH", "SL_IID_PLAY", "SL_IID_PLAYBACKRATE", "SL_IID_PREFETCHSTATUS",
+    "SL_IID_PRESETREVERB", "SL_IID_RATEPITCH", "SL_IID_RECORD", "SL_IID_SEEK",
+    "SL_IID_THREADSYNC", "SL_IID_VIBRA", "SL_IID_VIRTUALIZER", "SL_IID_VISUALIZATION",
+    "SL_IID_VOLUME"};
+#define OH_IID_COUNT ((int) (sizeof(oh_iid_names) / sizeof(oh_iid_names[0])))
+static SLInterfaceID oh_iids[OH_IID_COUNT];
+static pthread_once_t oh_iids_once = PTHREAD_ONCE_INIT;
+
+static void oh_iids_fill(void)
+{
+    for (int i = 0; i < OH_IID_COUNT; i++) {
+        const SLInterfaceID *sym = dlsym(oh.lib, oh_iid_names[i]);
+        oh_iids[i] = sym != NULL ? *sym : NULL;
+    }
+}
+
+/* OH's own ID with the same contents as the app's, or the app's if OH has none. */
+static SLInterfaceID canon_iid(SLInterfaceID id)
+{
+    if (id == NULL || oh.lib == NULL) return id;
+    pthread_once(&oh_iids_once, oh_iids_fill);
+    for (int i = 0; i < OH_IID_COUNT; i++) {
+        if (oh_iids[i] != NULL && (oh_iids[i] == id || memcmp(oh_iids[i], id, sizeof(*id)) == 0)) {
+            return oh_iids[i];
+        }
+    }
+    return id;
 }
 
 static int iid_is_android_queue(SLInterfaceID id)
@@ -300,6 +368,13 @@ typedef struct { const struct AEngineItf_ *itf; SLEngineItf real; } EngineW;
 typedef struct { const struct APlayItf_ *itf; SLPlayItf real; APlayCallback cb; void *ctx; } PlayW;
 typedef struct { const struct AVolumeItf_ *itf; SLVolumeItf real; } VolumeW;
 
+enum { OBJ_OTHER, OBJ_PLAYER, OBJ_RECORDER };
+typedef struct {
+    const struct AConfigItf_ *itf;   /* first: AConfigItf points here */
+    int kind;
+    a_i32 stream_type, recording_preset, performance_mode;
+} ConfigW;
+
 struct Obj {
     const struct AObjectItf_ *itf;   /* first: AObjectItf points here */
     SLObjectItf real;
@@ -307,6 +382,8 @@ struct Obj {
     PlayW *play;
     VolumeW *volume;
     SbqAdapter *sbq;
+    ConfigW *config;
+    int kind;
     AObjectCallback cb;
     void *ctx;
 };
@@ -345,12 +422,16 @@ typedef struct {
 static SLuint32 widen_interfaces(OhInterfaceList *out, a_u32 n, const SLInterfaceID *ids,
                                  const a_bool *required)
 {
+    SLuint32 m = 0;
     if (n > 32) n = 32;
     for (a_u32 i = 0; i < n; i++) {
-        out->ids[i] = ids != NULL && iid_is_android_queue(ids[i]) ? oh.oh_bq : (ids ? ids[i] : NULL);
-        out->required[i] = required != NULL ? (SLboolean) required[i] : SL_BOOLEAN_FALSE;
+        /* Answered here, not by OH, which would refuse an ID it does not know. */
+        if (ids != NULL && iid_is(ids[i], SL_IID_ANDROIDCONFIGURATION)) continue;
+        out->ids[m] = ids != NULL && iid_is_android_queue(ids[i]) ? oh.oh_bq : (ids ? canon_iid(ids[i]) : NULL);
+        out->required[m] = required != NULL ? (SLboolean) required[i] : SL_BOOLEAN_FALSE;
+        m++;
     }
-    return n;
+    return m;
 }
 
 /* Storage for one rebuilt locator or format in OH's layout. */
@@ -512,17 +593,80 @@ static void o_destroy(AObjectItf s)
     free(w->engine);
     free(w->play);
     free(w->volume);
+    free(w->config);
     free(w);
 }
+
+/* ------------------------------------------------------------ Android configuration ------- */
+
+/* AOSP's values: SL_ANDROID_STREAM_MEDIA, SL_ANDROID_RECORDING_PRESET_GENERIC,
+ * SL_ANDROID_PERFORMANCE_LATENCY. */
+#define A_STREAM_MEDIA 3
+#define A_PRESET_GENERIC 1
+#define A_PERFORMANCE_LATENCY 1
+
+static a_i32 *config_slot(ConfigW *c, const SLchar *key)
+{
+    const char *k = (const char *) key;
+    if (strcmp(k, "androidPerformanceMode") == 0) return &c->performance_mode;
+    if (c->kind == OBJ_PLAYER && strcmp(k, "androidPlaybackStreamType") == 0) return &c->stream_type;
+    if (c->kind == OBJ_RECORDER && strcmp(k, "androidRecordingPreset") == 0) return &c->recording_preset;
+    return NULL;
+}
+
+static a_result c_set(AConfigItf self, const SLchar *key, const void *value, a_u32 size)
+{
+    ConfigW *c = (ConfigW *) self;
+    a_i32 *slot;
+    if (key == NULL || value == NULL || size == 0) return SL_RESULT_PARAMETER_INVALID;
+    if ((slot = config_slot(c, key)) == NULL) return SL_RESULT_PARAMETER_INVALID;
+    if (size < sizeof(a_i32)) return SL_RESULT_BUFFER_INSUFFICIENT;
+    memcpy(slot, value, sizeof(a_i32));
+    SLES_LOGF("configuration %s = %d (recorded; OH has no equivalent)", (const char *) key, (int) *slot);
+    return SL_RESULT_SUCCESS;
+}
+
+static a_result c_get(AConfigItf self, const SLchar *key, a_u32 *size, void *value)
+{
+    ConfigW *c = (ConfigW *) self;
+    a_i32 *slot;
+    if (key == NULL || size == NULL) return SL_RESULT_PARAMETER_INVALID;
+    if ((slot = config_slot(c, key)) == NULL) return SL_RESULT_PARAMETER_INVALID;
+    if (value == NULL) { *size = sizeof(a_i32); return SL_RESULT_SUCCESS; }
+    if (*size < sizeof(a_i32)) return SL_RESULT_BUFFER_INSUFFICIENT;
+    memcpy(value, slot, sizeof(a_i32));
+    *size = sizeof(a_i32);
+    return SL_RESULT_SUCCESS;
+}
+
+static a_result c_acquire_proxy(AConfigItf self, a_u32 type, void **proxy)
+{ (void) self; (void) type; (void) proxy; return SL_RESULT_FEATURE_UNSUPPORTED; }
+static a_result c_release_proxy(AConfigItf self, a_u32 type)
+{ (void) self; (void) type; return SL_RESULT_FEATURE_UNSUPPORTED; }
+
+static const struct AConfigItf_ config_vtable = { c_set, c_get, c_acquire_proxy, c_release_proxy };
 
 static a_result o_get_interface(AObjectItf s, const SLInterfaceID iid, void *out)
 {
     Obj *w = obj_of(s);
     if (out == NULL) return SL_RESULT_PARAMETER_INVALID;
+    if (iid_is(iid, SL_IID_ANDROIDCONFIGURATION)) {
+        if (w->kind == OBJ_OTHER) return SL_RESULT_FEATURE_UNSUPPORTED;
+        if (w->config == NULL) {
+            if ((w->config = calloc(1, sizeof(*w->config))) == NULL) return SL_RESULT_MEMORY_FAILURE;
+            w->config->itf = &config_vtable;
+            w->config->kind = w->kind;
+            w->config->stream_type = A_STREAM_MEDIA;
+            w->config->recording_preset = A_PRESET_GENERIC;
+            w->config->performance_mode = A_PERFORMANCE_LATENCY;
+        }
+        *(AConfigItf *) out = (AConfigItf) &w->config->itf;
+        return SL_RESULT_SUCCESS;
+    }
     if (iid_is(iid, oh.engine)) {
         if (w->engine == NULL) {
             SLEngineItf real = NULL;
-            SLresult r = (*w->real)->GetInterface(w->real, iid, &real);
+            SLresult r = (*w->real)->GetInterface(w->real, oh.engine, &real);
             if (r != SL_RESULT_SUCCESS) return (a_result) r;
             if ((w->engine = calloc(1, sizeof(*w->engine))) == NULL) return SL_RESULT_MEMORY_FAILURE;
             w->engine->itf = &engine_vtable;
@@ -534,7 +678,7 @@ static a_result o_get_interface(AObjectItf s, const SLInterfaceID iid, void *out
     if (iid_is(iid, oh.play)) {
         if (w->play == NULL) {
             SLPlayItf real = NULL;
-            SLresult r = (*w->real)->GetInterface(w->real, iid, &real);
+            SLresult r = (*w->real)->GetInterface(w->real, oh.play, &real);
             if (r != SL_RESULT_SUCCESS) return (a_result) r;
             if ((w->play = calloc(1, sizeof(*w->play))) == NULL) return SL_RESULT_MEMORY_FAILURE;
             w->play->itf = &play_vtable;
@@ -546,7 +690,7 @@ static a_result o_get_interface(AObjectItf s, const SLInterfaceID iid, void *out
     if (iid_is(iid, oh.volume)) {
         if (w->volume == NULL) {
             SLVolumeItf real = NULL;
-            SLresult r = (*w->real)->GetInterface(w->real, iid, &real);
+            SLresult r = (*w->real)->GetInterface(w->real, oh.volume, &real);
             if (r != SL_RESULT_SUCCESS) return (a_result) r;
             if ((w->volume = calloc(1, sizeof(*w->volume))) == NULL) return SL_RESULT_MEMORY_FAILURE;
             w->volume->itf = &volume_vtable;
@@ -575,7 +719,7 @@ static a_result o_get_interface(AObjectItf s, const SLInterfaceID iid, void *out
         return SL_RESULT_SUCCESS;
     }
     /* Not wrapped: hand OH's interface back, and say so -- its methods take OH-width types. */
-    SLresult r = (*w->real)->GetInterface(w->real, iid, out);
+    SLresult r = (*w->real)->GetInterface(w->real, canon_iid(iid), out);
     if (iid != NULL) {
         SLES_LOGF("interface %08x-... handed back unwrapped (%u)", (unsigned) iid->time_low, (unsigned) r);
     }
@@ -599,7 +743,9 @@ static a_result e_create_audio_player(AEngineItf self, AObjectItf *player, AData
     SLresult r = (*ENG(self))->CreateAudioPlayer(ENG(self), &real, translate_source(src, &os),
                                                  translate_sink(sink, &ok), m, il.ids, il.required);
     SLES_LOGF("CreateAudioPlayer -> %u", (unsigned) r);
-    return finish_create(r, real, player, "CreateAudioPlayer");
+    a_result result = finish_create(r, real, player, "CreateAudioPlayer");
+    if (result == SL_RESULT_SUCCESS) obj_of(*player)->kind = OBJ_PLAYER;
+    return result;
 }
 
 static a_result e_create_audio_recorder(AEngineItf self, AObjectItf *rec, ADataSource *src, ADataSink *sink,
@@ -610,7 +756,9 @@ static a_result e_create_audio_recorder(AEngineItf self, AObjectItf *rec, ADataS
     SLObjectItf real = NULL;
     SLresult r = (*ENG(self))->CreateAudioRecorder(ENG(self), &real, translate_source(src, &os),
                                                    translate_sink(sink, &ok), m, il.ids, il.required);
-    return finish_create(r, real, rec, "CreateAudioRecorder");
+    a_result result = finish_create(r, real, rec, "CreateAudioRecorder");
+    if (result == SL_RESULT_SUCCESS) obj_of(*rec)->kind = OBJ_RECORDER;
+    return result;
 }
 
 static a_result e_create_output_mix(AEngineItf self, AObjectItf *mix, a_u32 n, const SLInterfaceID *ids,
