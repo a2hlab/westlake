@@ -538,6 +538,12 @@ public class AppSchedulerBridge {
                 final String appProcess = appInfo.processName;
                 realProviders.removeIf(provider -> !appProcess.equals(provider.processName));
             }
+            // Install in descending initOrder, as PackageManager hands them to ActivityThread
+            // (ComputerEngine.sProviderInitOrderSorter; a stable sort keeps manifest order within an
+            // order). FirebaseInitProvider declares initOrder 100 so that FirebaseApp exists before
+            // androidx.startup's initializers run; in manifest order Citymapper's
+            // InitializationProvider came first and died on "Default FirebaseApp is not initialized".
+            realProviders.sort((p1, p2) -> Integer.compare(p2.initOrder, p1.initOrder));
             // §611e: append the in-process settings provider (see WlSettingsProvider).
             // Installed into the process-local provider map at bind, so every
             // Settings/DeviceConfig read resolves locally instead of NPEing on the
