@@ -8,6 +8,7 @@
 #include <math.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <errno.h>
 #include <stddef.h>
@@ -2061,3 +2062,176 @@ void ATrace_endSection(void) {}
 void ATrace_beginAsyncSection(const char *section_name, int32_t cookie) { (void)section_name; (void)cookie; }
 void ATrace_endAsyncSection(const char *section_name, int32_t cookie) { (void)section_name; (void)cookie; }
 void ATrace_setCounter(const char *counter_name, int64_t counter_value) { (void)counter_name; (void)counter_value; }
+
+/*
+ * ---------------------------------------------------------------------------
+ * More bionic-private names app libraries import that OH's musl lacks, counted by the harness's
+ * ndk:libc-abi rows across 330 maps: __libc_init (23 apps), __system_property_read (12),
+ * getprogname (8), funopen (6), __assert (4), __sched_cpufree (4), sys_signame (2), isnanf (1).
+ * A library importing one fails to relocate; many apps catch that and go on without it, then die
+ * at the first call into the library: Transit's libtransitBgtfs.so (on __assert) died as
+ * "No implementation found for TransitLib.refreshRoyaleStoreSubscriptionStatus", and Snapchat's
+ * libclient.so on __assert directly. Each is bionic's behaviour.
+ * ---------------------------------------------------------------------------
+ */
+
+/* bionic's assert() target: report and abort, as bionic does. */
+void __assert(const char *file, int line, const char *failed_expression)
+{
+    fprintf(stderr, "%s:%d: assertion \"%s\" failed\n", file ? file : "?", line,
+            failed_expression ? failed_expression : "?");
+    abort();
+}
+
+/* The entry an executable's crt calls. A shared library links it only through a crt object it
+ * never runs; reaching it in this process would be a bug, so it says so and aborts. */
+void __libc_init(void *raw_args, void (*onexit)(void), int (*slingshot)(int, char **, char **),
+                 const void *structors)
+{
+    (void)raw_args; (void)onexit; (void)slingshot; (void)structors;
+    fprintf(stderr, "[WESTLAKE-BIONIC] __libc_init called inside an app process\n");
+    abort();
+}
+
+/* Reads a property found with __system_property_find into name/value; returns the value's
+ * length, as bionic does (PROP_VALUE_MAX-sized buffers). */
+int __system_property_read(const struct prop_info *pi, char *name, char *value)
+{
+    if (pi == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&g_property_mutex);
+    if (name != NULL) {
+        snprintf(name, 32, "%s", pi->name);          /* bionic's PROP_NAME_MAX */
+    }
+    int length = 0;
+    if (value != NULL) {
+        snprintf(value, 92, "%s", pi->value);        /* bionic's PROP_VALUE_MAX */
+        length = (int)strlen(value);
+    }
+    pthread_mutex_unlock(&g_property_mutex);
+    return length;
+}
+
+/* The process's short name, as bionic sets it from argv[0]: the basename of the first word of
+ * /proc/self/cmdline, read once. */
+static char g_progname[256];
+
+static void westlake_read_progname(void)
+{
+    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    char buffer[sizeof(g_progname)];
+    ssize_t n = fd >= 0 ? read(fd, buffer, sizeof(buffer) - 1) : -1;
+    if (fd >= 0) {
+        close(fd);
+    }
+    if (n <= 0) {
+        return;
+    }
+    buffer[n] = '\0';
+    const char *slash = strrchr(buffer, '/');
+    snprintf(g_progname, sizeof(g_progname), "%s", slash != NULL ? slash + 1 : buffer);
+}
+
+const char *getprogname(void)
+{
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, westlake_read_progname);
+    return g_progname;
+}
+
+/* BSD's funopen over musl's fopencookie. bionic's fpos_t is a 64-bit offset; musl's is a
+ * union, so the seek callback is typed with bionic's. */
+typedef int64_t westlake_bionic_fpos_t;
+
+struct westlake_funopen_cookie {
+    void *cookie;
+    int (*readfn)(void *, char *, int);
+    int (*writefn)(void *, const char *, int);
+    westlake_bionic_fpos_t (*seekfn)(void *, westlake_bionic_fpos_t, int);
+    int (*closefn)(void *);
+};
+
+static ssize_t westlake_funopen_read(void *c, char *buf, size_t size)
+{
+    struct westlake_funopen_cookie *f = c;
+    return f->readfn ? f->readfn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size) : -1;
+}
+
+static ssize_t westlake_funopen_write(void *c, const char *buf, size_t size)
+{
+    struct westlake_funopen_cookie *f = c;
+    return f->writefn ? f->writefn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size) : -1;
+}
+
+static int westlake_funopen_seek(void *c, off_t *offset, int whence)
+{
+    struct westlake_funopen_cookie *f = c;
+    if (f->seekfn == NULL) {
+        errno = ESPIPE;
+        return -1;
+    }
+    westlake_bionic_fpos_t result = f->seekfn(f->cookie, (westlake_bionic_fpos_t)*offset, whence);
+    if (result == -1) {
+        return -1;
+    }
+    *offset = (off_t)result;
+    return 0;
+}
+
+static int westlake_funopen_close(void *c)
+{
+    struct westlake_funopen_cookie *f = c;
+    int result = f->closefn ? f->closefn(f->cookie) : 0;
+    free(f);
+    return result;
+}
+
+FILE *funopen(const void *cookie, int (*readfn)(void *, char *, int),
+              int (*writefn)(void *, const char *, int),
+              westlake_bionic_fpos_t (*seekfn)(void *, westlake_bionic_fpos_t, int),
+              int (*closefn)(void *))
+{
+    if (readfn == NULL && writefn == NULL) {
+        errno = EINVAL;
+        return NULL;
+    }
+    struct westlake_funopen_cookie *f = calloc(1, sizeof(*f));
+    if (f == NULL) {
+        return NULL;
+    }
+    f->cookie = (void *)cookie;
+    f->readfn = readfn;
+    f->writefn = writefn;
+    f->seekfn = seekfn;
+    f->closefn = closefn;
+    cookie_io_functions_t io = {westlake_funopen_read, westlake_funopen_write,
+                                westlake_funopen_seek, westlake_funopen_close};
+    FILE *file = fopencookie(f, readfn && writefn ? "r+" : readfn ? "r" : "w", io);
+    if (file == NULL) {
+        free(f);
+    }
+    return file;
+}
+
+/* bionic's CPU_FREE target; musl has __sched_cpualloc and __sched_cpucount but frees with free(). */
+void __sched_cpufree(cpu_set_t *set)
+{
+    free(set);
+}
+
+/* Signal names without the SIG prefix, indexed by signal number, as bionic's sys_signame. */
+const char *const sys_signame[65] = {
+    [SIGHUP] = "HUP", [SIGINT] = "INT", [SIGQUIT] = "QUIT", [SIGILL] = "ILL", [SIGTRAP] = "TRAP",
+    [SIGABRT] = "ABRT", [SIGBUS] = "BUS", [SIGFPE] = "FPE", [SIGKILL] = "KILL", [SIGUSR1] = "USR1",
+    [SIGSEGV] = "SEGV", [SIGUSR2] = "USR2", [SIGPIPE] = "PIPE", [SIGALRM] = "ALRM", [SIGTERM] = "TERM",
+    [SIGSTKFLT] = "STKFLT", [SIGCHLD] = "CHLD", [SIGCONT] = "CONT", [SIGSTOP] = "STOP",
+    [SIGTSTP] = "TSTP", [SIGTTIN] = "TTIN", [SIGTTOU] = "TTOU", [SIGURG] = "URG", [SIGXCPU] = "XCPU",
+    [SIGXFSZ] = "XFSZ", [SIGVTALRM] = "VTALRM", [SIGPROF] = "PROF", [SIGWINCH] = "WINCH",
+    [SIGIO] = "IO", [SIGPWR] = "PWR", [SIGSYS] = "SYS",
+};
+
+int isnanf(float value)
+{
+    return __builtin_isnan(value);
+}
