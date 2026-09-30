@@ -72,6 +72,18 @@ static int westlake_basename_in_list(const char *path, const char *list) {
     return 0;
 }
 
+/*
+ * A library the app wrote at run time: loaded from its own data directory, or from the
+ * code_cache/wl-exec copy the bionic shim makes of it. Such libraries are Android NDK code the
+ * launch could not name in advance (the APK does not contain them), so they get the Bionic ABI too:
+ * Messenger's superpack-unpacked liger library read a musl addrinfo as Bionic's and folly's
+ * SocketAddress rejected the address family.
+ */
+static int westlake_is_app_written_library(const char *path) {
+    return strstr(path, "/code_cache/wl-exec/") != NULL || strncmp(path, "/data/data/", 11) == 0 ||
+           strncmp(path, "/data/user/", 11) == 0 || strncmp(path, "/data/user_de/", 14) == 0;
+}
+
 static int westlake_network_callsite_selected(void *return_address) {
     Dl_info info;
     if (return_address == NULL ||
@@ -79,7 +91,8 @@ static int westlake_network_callsite_selected(void *return_address) {
         return 0;
     }
     return westlake_basename_in_list(
-            info.dli_fname, getenv("WESTLAKE_ANDROID_NATIVE_NET_TARGETS"));
+            info.dli_fname, getenv("WESTLAKE_ANDROID_NATIVE_NET_TARGETS")) ||
+           westlake_is_app_written_library(info.dli_fname);
 }
 
 static int westlake_network_trace_callsite(void *return_address) {
