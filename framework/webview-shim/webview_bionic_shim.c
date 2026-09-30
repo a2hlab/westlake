@@ -21,6 +21,7 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -896,7 +897,130 @@ static int westlake_library_is_refused(const char *basename)
     return 0;
 }
 
+int wl_needs_android_relocs(const char *path);
+void *wl_dlopen_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, const char *target,
+                               int flags);
+void wl_preload_relocated_deps(void *(*load)(const char *, int), const char *path, int flags, int depth);
+void wl_relocs_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
+/*
+ * An exec-allowed directory for a loadable copy of path: <app data>/code_cache/wl-exec for a
+ * library in app storage (the one app-data directory OH lets an app map executable), else a
+ * wl-exec directory beside the library (the runtime root, where apps' own libraries are staged,
+ * is exec-allowed and writable). Created if missing.
+ */
+static int westlake_exec_copy_dir(const char *path, char *dir, size_t size)
+{
+    static const char *const roots[] = {"/data/data/", "/data/user/0/", "/data/user_de/0/"};
+    const char *base = strrchr(path, '/');
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        size_t n = strlen(roots[i]);
+        const char *slash = strncmp(path, roots[i], n) == 0 ? strchr(path + n, '/') : NULL;
+        if (slash != NULL) {
+            char parent[600];
+            snprintf(parent, sizeof(parent), "%.*s/code_cache", (int)(slash - path), path);
+            mkdir(parent, 0700);
+            snprintf(dir, size, "%s/wl-exec", parent);
+            mkdir(dir, 0700);
+            return access(dir, W_OK) == 0 ? 0 : -1;
+        }
+    }
+    if (base == NULL || base == path) return -1;
+    snprintf(dir, size, "%.*s/wl-exec", (int)(base - path), path);
+    mkdir(dir, 0700);
+    return access(dir, W_OK) == 0 ? 0 : -1;
+}
+
+/*
+ * A library with DT_ANDROID_RELR (android_relocs.c) is loaded from a copy that musl
+ * can load, with those tables applied here. NULL, with the reason logged, when that fails.
+ */
+static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, int flags)
+{
+    char dir[512], target[768];
+    const char *base = strrchr(path, '/');
+    if (westlake_exec_copy_dir(path, dir, sizeof(dir)) != 0) {
+        wl_relocs_log("[WESTLAKE-RELOCS] no writable code_cache for %s\n", path);
+        return NULL;
+    }
+    snprintf(target, sizeof(target), "%s%s", dir, base);
+    return wl_dlopen_android_relocs(real_dlopen, path, target, flags);
+}
+
+/*
+ * A library an app copied into its own storage, loaded from there. Android maps such files
+ * executable; OH's policy refuses every app-data directory but code_cache ("failed to map library
+ * ... errno=13", measured by the harness's runtime-answers probe: files, cache and no_backup fail,
+ * code_cache loads). Meta's SoLoader with superpack unpacks libraries into files/ and loads them there
+ * (WhatsApp: files/decompressed/libs.spo/, every library of it). When such a load fails, the same bytes are
+ * copied into <app data>/code_cache/wl-exec/ and loaded from there; a copy that already matches in
+ * size and modification time is reused.
+ */
+static void *westlake_load_from_code_cache(void *(*real_dlopen)(const char *, int), const char *path, int flags)
+{
+    static const char *const roots[] = {"/data/data/", "/data/user/0/", "/data/user_de/0/"};
+    const char *rest = NULL;
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]) && rest == NULL; ++i) {
+        size_t n = strlen(roots[i]);
+        if (strncmp(path, roots[i], n) == 0) rest = path + n;
+    }
+    if (rest == NULL || strstr(path, "/code_cache/") != NULL) return NULL;
+    const char *slash = strchr(rest, '/');
+    const char *base = strrchr(path, '/');
+    if (slash == NULL || base == NULL) return NULL;
+    char dir[512], target[768];
+    snprintf(dir, sizeof(dir), "%.*s/code_cache/wl-exec", (int)(slash - path), path);
+    struct stat src, dst;
+    if (stat(path, &src) != 0) return NULL;
+    char parent[512];
+    snprintf(parent, sizeof(parent), "%.*s/code_cache", (int)(slash - path), path);
+    mkdir(parent, 0700);
+    mkdir(dir, 0700);
+    snprintf(target, sizeof(target), "%s%s", dir, base);
+    if (stat(target, &dst) != 0 || dst.st_size != src.st_size || dst.st_mtime < src.st_mtime) {
+        char tmp[800];
+        snprintf(tmp, sizeof(tmp), "%s.tmp%d", target, (int)getpid());
+        int in = open(path, O_RDONLY | O_CLOEXEC);
+        int out = in >= 0 ? open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700) : -1;
+        char buf[65536];
+        ssize_t n = 0;
+        while (in >= 0 && out >= 0 && (n = read(in, buf, sizeof(buf))) > 0) {
+            if (write(out, buf, (size_t)n) != n) { n = -1; break; }
+        }
+        if (in >= 0) close(in);
+        if (out >= 0) close(out);
+        if (n != 0 || out < 0 || rename(tmp, target) != 0) {
+            unlink(tmp);
+            return NULL;
+        }
+    }
+    void *handle = real_dlopen(target, flags);
+    if (handle != NULL) {
+        fprintf(stderr, "[WESTLAKE-LOADER] %s refused from app storage; loaded its copy in %s\n", path, dir);
+    }
+    return handle;
+}
+
+static void *westlake_dlopen(const char *filename, int flags, void *caller);
+
 void *dlopen(const char *filename, int flags)
+{
+    return westlake_dlopen(filename, flags, __builtin_return_address(0));
+}
+
+/*
+ * The shim's own loads (dependency preloading) go through here, never through dlopen: taking
+ * dlopen's address in this library resolves through the GOT to the first definition in the global
+ * scope, which can be musl's own -- Messenger's libc++_shared.so, preloaded that way, was mapped
+ * without its DT_ANDROID_RELR applied and its first constructor crashed.
+ */
+static void *westlake_dlopen_internal(const char *filename, int flags)
+{
+    return westlake_dlopen(filename, flags, NULL);
+}
+
+/* caller: the code that asked, for the redirects below that depend on who is loading. */
+static void *westlake_dlopen(const char *filename, int flags, void *caller)
 {
     typedef void *(*DlopenFn)(const char *, int);
     static DlopenFn real_dlopen;
@@ -931,10 +1055,10 @@ void *dlopen(const char *filename, int flags)
      * adapter's own dlopen, from inside this shim, still gets OH's library.
      */
     if (basename != NULL && strcmp(basename, "libOpenSLES.so") == 0) {
-        Dl_info self, caller;
+        Dl_info self, caller_info;
         if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
-            !(dladdr(__builtin_return_address(0), &caller) != 0 &&
-              caller.dli_fbase == self.dli_fbase)) {
+            !(caller == NULL || (dladdr(caller, &caller_info) != 0 &&
+                                 caller_info.dli_fbase == self.dli_fbase))) {
             void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
             if (handle != NULL) {
                 static int logged;
@@ -969,7 +1093,7 @@ void *dlopen(const char *filename, int flags)
      */
     static char webview_library[512];
     if (basename != NULL && basename == filename &&
-        caller_is_webview(__builtin_return_address(0), NULL)) {
+        caller_is_webview(caller, NULL)) {
         const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
         if (dir != NULL && dir[0] != '\0') {
             snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
@@ -1016,7 +1140,7 @@ void *dlopen(const char *filename, int flags)
         }
     }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
-        caller_is_webview(__builtin_return_address(0), NULL)) {
+        caller_is_webview(caller, NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
         static int logged;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
@@ -1026,7 +1150,23 @@ void *dlopen(const char *filename, int flags)
                     filename, actual_filename);
         }
     }
-    return real_dlopen(actual_filename, flags);
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD)) {
+        wl_preload_relocated_deps(westlake_dlopen_internal, actual_filename, flags, 0);
+    }
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
+        wl_needs_android_relocs(actual_filename)) {
+        wl_relocs_log("[WESTLAKE-RELOCS] loading %s (DT_ANDROID_RELR)\n", actual_filename);
+        /* Never the original: musl would run its constructors unrelocated (SIGSEGV). */
+        return westlake_load_android_relocs(real_dlopen, actual_filename, flags);
+    }
+    void *handle = real_dlopen(actual_filename, flags);
+    if (handle == NULL && actual_filename != NULL && actual_filename[0] == '/') {
+        void *copy = westlake_load_from_code_cache(real_dlopen, actual_filename, flags);
+        if (copy != NULL) {
+            return copy;
+        }
+    }
+    return handle;
 }
 
 /*
