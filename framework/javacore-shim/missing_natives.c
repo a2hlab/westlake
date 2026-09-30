@@ -71,6 +71,7 @@
  * supply a method belonging to a boot class without being the library that owns it.
  */
 #define _GNU_SOURCE
+#define _GNU_SOURCE /* dladdr */
 #include <dlfcn.h>
 #include <jni.h>
 #include <math.h>
@@ -579,6 +580,99 @@ static int normalize_thread_priority(JNIEnv* env)
     return priority;
 }
 
+/*
+ * Failed JNI member lookups, logged. A native library that caches a method or field ID for a
+ * member this runtime lacks aborts later under CheckJNI with only "mid == null" (Facebook and
+ * Messenger in com.facebook.proxygen.EventBase.init()), naming neither. ART lets a table replace
+ * every thread's JNI functions (JNIEnvExt::SetTableOverride, as heap profilers use); the one
+ * installed here is the active table with the four ID lookups wrapped. A failed lookup leaves
+ * NoSuchMethodError/NoSuchFieldError pending, so the wrapper sets it aside, names the class, and
+ * puts it back before returning.
+ */
+static struct JNINativeInterface g_lookup_table;
+static jmethodID (*g_get_method_id)(JNIEnv*, jclass, const char*, const char*);
+static jmethodID (*g_get_static_method_id)(JNIEnv*, jclass, const char*, const char*);
+static jfieldID (*g_get_field_id)(JNIEnv*, jclass, const char*, const char*);
+static jfieldID (*g_get_static_field_id)(JNIEnv*, jclass, const char*, const char*);
+static int g_lookup_failures;
+
+static void log_failed_lookup(JNIEnv* env, const char* what, jclass c, const char* name, const char* sig)
+{
+    char line[512], class_name[256] = "?";
+    jthrowable pending;
+    if (__atomic_fetch_add(&g_lookup_failures, 1, __ATOMIC_RELAXED) >= 100) return;
+    pending = (*env)->ExceptionOccurred(env);
+    (*env)->ExceptionClear(env);
+    if (c != NULL) {
+        jclass class_class = (*env)->GetObjectClass(env, c);
+        jmethodID get_name = g_get_method_id(env, class_class, "getName", "()Ljava/lang/String;");
+        jstring text = get_name != NULL ? (jstring) (*env)->CallObjectMethod(env, c, get_name) : NULL;
+        const char* chars = text != NULL ? (*env)->GetStringUTFChars(env, text, NULL) : NULL;
+        if (chars != NULL) {
+            snprintf(class_name, sizeof(class_name), "%s", chars);
+            (*env)->ReleaseStringUTFChars(env, text, chars);
+        }
+        (*env)->ExceptionClear(env);
+    }
+    snprintf(line, sizeof(line), "[WL-JNI] %s failed: %s.%s %s\n", what, class_name, name != NULL ? name : "?",
+             sig != NULL ? sig : "?");
+    note(line);
+    if (pending != NULL) (*env)->Throw(env, pending);
+}
+
+static jmethodID wl_GetMethodID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jmethodID id = g_get_method_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetMethodID", c, name, sig);
+    return id;
+}
+
+static jmethodID wl_GetStaticMethodID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jmethodID id = g_get_static_method_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetStaticMethodID", c, name, sig);
+    return id;
+}
+
+static jfieldID wl_GetFieldID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jfieldID id = g_get_field_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetFieldID", c, name, sig);
+    return id;
+}
+
+static jfieldID wl_GetStaticFieldID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jfieldID id = g_get_static_field_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetStaticFieldID", c, name, sig);
+    return id;
+}
+
+static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
+{
+    typedef void (*SetTableOverrideFn)(const struct JNINativeInterface*);
+    static const char kSymbol[] = "_ZN3art9JNIEnvExt16SetTableOverrideEPK18JNINativeInterface";
+    SetTableOverrideFn set_override = (SetTableOverrideFn) dlsym(RTLD_DEFAULT, kSymbol);
+    Dl_info art;
+    /* libart is not in this library's global scope; reach it through the VM's own code. */
+    if (set_override == NULL && dladdr((void*) (*vm)->GetEnv, &art) != 0 && art.dli_fname != NULL) {
+        void* handle = dlopen(art.dli_fname, RTLD_NOW | RTLD_NOLOAD);
+        if (handle != NULL) set_override = (SetTableOverrideFn) dlsym(handle, kSymbol);
+    }
+    if (set_override == NULL || g_get_method_id != NULL) return 0;
+    g_lookup_table = **env;
+    g_get_method_id = g_lookup_table.GetMethodID;
+    g_get_static_method_id = g_lookup_table.GetStaticMethodID;
+    g_get_field_id = g_lookup_table.GetFieldID;
+    g_get_static_field_id = g_lookup_table.GetStaticFieldID;
+    g_lookup_table.GetMethodID = wl_GetMethodID;
+    g_lookup_table.GetStaticMethodID = wl_GetStaticMethodID;
+    g_lookup_table.GetFieldID = wl_GetFieldID;
+    g_lookup_table.GetStaticFieldID = wl_GetStaticFieldID;
+    set_override(&g_lookup_table);
+    return 1;
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     JNIEnv* env = NULL;
@@ -609,13 +703,14 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int tx = wl_register_text(env);
         int ar = wl_register_audiorecord(env);
         int xp = wl_register_expat(env);
+        int jl = install_lookup_logging(env, vm);
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d jni-lookup-log=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp, jl);
         note(line);
     }
     wl_register_media(env, vm);
