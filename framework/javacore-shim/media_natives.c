@@ -37,6 +37,12 @@
  *   converts float and 8-bit PCM to 16-bit and hands the samples to the bridge's own 16-bit
  *   write (native_write_short), returning the bytes of the caller's encoding it consumed.
  *
+ *   MediaRecorder -- its static initializer calls native_init, so even reading
+ *   MediaRecorder.AudioSource constants died (MuseKit; the runtime-answers probe). native_init is a
+ *   no-op; constructing a recorder throws what AOSP's JNI throws when the recorder cannot be
+ *   initialised ("Unable to initialize media recorder"): recording video or audio through
+ *   MediaRecorder is not ported. AudioRecord is (audiorecord_natives.c).
+ *
  *   MediaDrm / MediaCrypto -- none of their natives is registered, so MediaDrm's static initializer
  *   threw and apps that only ask which DRM schemes exist died at startup (X, Uber). There is no DRM
  *   plugin here, and these answer what AOSP's JNI answers on a device without one: no scheme is
@@ -242,6 +248,19 @@ static void crypto_setup(JNIEnv* env, jobject thiz, jbyteArray uuid, jbyteArray 
 }
 static jboolean crypto_scheme_supported(JNIEnv* env, jclass c, jbyteArray uuid)
 { (void) env; (void) c; (void) uuid; return JNI_FALSE; }
+
+static void recorder_setup(JNIEnv* env, jobject thiz, jobject weak, jstring package, jobject attribution)
+{
+    (void) thiz; (void) weak; (void) package; (void) attribution;
+    drm_throw(env, "java/lang/RuntimeException", "Unable to initialize media recorder");
+}
+
+static const JNINativeMethod kMediaRecorder[] = {
+    { "native_init", "()V", (void*) drm_init },
+    { "native_setup", "(Ljava/lang/Object;Ljava/lang/String;Landroid/os/Parcel;)V", (void*) recorder_setup },
+    { "native_finalize", "()V", (void*) drm_release },
+    { "release", "()V", (void*) drm_release },
+};
 
 static const JNINativeMethod kMediaCrypto[] = {
     { "native_init", "()V", (void*) drm_init },
@@ -1176,6 +1195,8 @@ void wl_register_media(JNIEnv* env, JavaVM* vm)
     {
         int d = bind_class(env, "android/media/MediaDrm", kMediaDrm, COUNT(kMediaDrm));
         int c = bind_class(env, "android/media/MediaCrypto", kMediaCrypto, COUNT(kMediaCrypto));
+        int rc = bind_class(env, "android/media/MediaRecorder", kMediaRecorder, COUNT(kMediaRecorder));
+        mlog("[WL-NATIVES] bound MediaRecorder=%d/%d", rc, COUNT(kMediaRecorder));
         mlog("[WL-NATIVES] bound MediaDrm=%d/%d MediaCrypto=%d/%d", d, COUNT(kMediaDrm), c, COUNT(kMediaCrypto));
     }
     player = (*env)->FindClass(env, "android/media/MediaPlayer");

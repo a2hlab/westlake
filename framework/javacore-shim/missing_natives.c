@@ -62,6 +62,8 @@
  *
  *   android.text.AndroidCharacter -- see text_natives.c.
  *
+ *   android.media.AudioRecord -- see audiorecord_natives.c.
+ *
  *   android.media -- MediaPlayer, and the AudioTrack and AudioSystem natives the AudioTrack shim
  *   leaves out: see media_natives.c.
  *
@@ -473,6 +475,8 @@ static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int 
 
 void wl_register_media(JNIEnv* env, JavaVM* vm);
 int wl_register_text(JNIEnv* env);
+int wl_register_audiorecord(JNIEnv* env);
+int wl_register_expat(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
 {
@@ -554,7 +558,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         return JNI_VERSION_1_6;
     }
     {
-        char line[256];
+        char line[320];
         int m = bind(env, "java/lang/Math", kMath, (int) (sizeof(kMath) / sizeof(kMath[0])));
         int s = bind(env, "java/lang/StrictMath", kStrictMath,
                      (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
@@ -573,13 +577,15 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int fs = bind(env, "java/io/UnixFileSystem", kUnixFileSystem,
                       (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
         int tx = wl_register_text(env);
+        int ar = wl_register_audiorecord(env);
+        int xp = wl_register_expat(env);
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp);
         note(line);
     }
     wl_register_media(env, vm);
