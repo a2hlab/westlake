@@ -78,6 +78,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_acos(JNIEnv* env, jclass c, jdouble a)
 { (void)env; (void)c; return acos(a); }
@@ -520,9 +521,38 @@ static jboolean wl_setReadOnly0(JNIEnv* env, jobject self, jobject file)
     return chmod(path, st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH)) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
+/*
+ * File.setLastModified failed like the permission natives above (Facebook: "could not set modtime of
+ * .../dex/regen_stamp"). As OpenJDK does: the access time is kept, the modification time set to the
+ * given milliseconds.
+ */
+static jboolean wl_setLastModifiedTime0(JNIEnv* env, jobject self, jobject file, jlong time)
+{
+    char path[4096];
+    struct timespec times[2];
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path))) return JNI_FALSE;
+    times[0].tv_sec = 0;
+    times[0].tv_nsec = UTIME_OMIT;
+    times[1].tv_sec = (time_t) (time / 1000);
+    times[1].tv_nsec = (long) (time % 1000) * 1000000L;
+    return utimensat(AT_FDCWD, path, times, 0) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jlong wl_getLastModifiedTime0(JNIEnv* env, jobject self, jobject file)
+{
+    char path[4096];
+    struct stat st;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || stat(path, &st) != 0) return 0;
+    return (jlong) st.st_mtim.tv_sec * 1000 + st.st_mtim.tv_nsec / 1000000;
+}
+
 static const JNINativeMethod kUnixFileSystem[] = {
     { "setPermission0", "(Ljava/io/File;IZZ)Z", (void*) wl_setPermission0 },
     { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
+    { "setLastModifiedTime0", "(Ljava/io/File;J)Z", (void*) wl_setLastModifiedTime0 },
+    { "getLastModifiedTime0", "(Ljava/io/File;)J", (void*) wl_getLastModifiedTime0 },
 };
 
 /* Returns the priority it found (before any change). */

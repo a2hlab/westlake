@@ -2553,16 +2553,20 @@ int ASharedMemory_create(const char *name, size_t size)
     return fd;
 }
 
+/* By seeking, not fstat: the app domain may not getattr a memfd (probe: fstat gave size 0). */
 size_t ASharedMemory_getSize(int fd)
 {
-    struct stat st;
-    return fstat(fd, &st) == 0 ? (size_t)st.st_size : 0;
+    off_t position = lseek(fd, 0, SEEK_CUR);
+    off_t end = position < 0 ? -1 : lseek(fd, 0, SEEK_END);
+    if (position >= 0) {
+        lseek(fd, position, SEEK_SET);
+    }
+    return end > 0 ? (size_t)end : 0;
 }
 
 int ASharedMemory_setProt(int fd, int prot)
 {
-    struct stat st;
-    if (fstat(fd, &st) != 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
+    if (fcntl(fd, F_GETFD) < 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
         errno = EINVAL;
         return -1;
     }
