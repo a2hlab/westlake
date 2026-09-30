@@ -570,6 +570,19 @@ public class AppSchedulerBridge {
             } catch (Throwable t) {
                 System.err.println("[B43-BIND] applyManifestFields failed: " + t);
             }
+            // A source package's <uses-library> list comes from its PackageParser result.
+            if (sourcePackage) {
+                try {
+                    org.json.JSONArray names = new org.json.JSONArray(
+                            adapter.packagemanager.SourcePackageRegistry.usesLibraries());
+                    if (names.length() > 0) {
+                        appInfo.sharedLibraryFiles = sharedLibraryJars(names);
+                        appInfo.sharedLibraryInfos = sharedLibraryInfos(appInfo.sharedLibraryFiles);
+                    }
+                } catch (Throwable t) {
+                    System.err.println("[B43-BIND] uses-library resolution failed: " + t);
+                }
+            }
             // Instrumentation / SdkSandbox: A_ONLY_NULL — permanent null.
             setField(data, "instrumentationName", null);
             setField(data, "instrumentationArgs", null);
@@ -1746,9 +1759,8 @@ public class AppSchedulerBridge {
             }
             org.json.JSONArray libs = m.optJSONArray("sharedLibraryFiles");
             if (libs != null && libs.length() > 0) {
-                String[] arr = new String[libs.length()];
-                for (int i = 0; i < libs.length(); i++) arr[i] = libs.optString(i, "");
-                ai.sharedLibraryFiles = arr;
+                ai.sharedLibraryFiles = sharedLibraryJars(libs);
+                ai.sharedLibraryInfos = sharedLibraryInfos(ai.sharedLibraryFiles);
             }
             System.err.println("[B43-BIND] appInfo enriched: className=" + ai.className
                     + " theme=0x" + Integer.toHexString(ai.theme)
@@ -2565,5 +2577,46 @@ public class AppSchedulerBridge {
 
     private void logOhOnly(String method, String reason) {
         Log.d(TAG, "[OH_ONLY] " + method + " - " + reason);
+    }
+
+    /**
+     * The manifest parser reports <uses-library> names. LoadedApk builds a class loader for each
+     * builtin library in ApplicationInfo.sharedLibraryInfos (sharedLibraryFiles only carries .apk
+     * paths onto the class path) and puts it ahead of the app's code. Each name resolves to
+     * <runtime root>/framework/<name>.jar when the runtime ships it (runtime data), as Android's
+     * /system/framework does; names without a jar are reported and left out. Meta's apps declare
+     * org.apache.http.legacy, and the proxygen native library's JNI_OnLoad stopped at
+     * FindClass("org/apache/http/Header"), leaving its method IDs unset (Facebook and Messenger then
+     * aborted in EventBase.init with "mid == null").
+     */
+    static String[] sharedLibraryJars(org.json.JSONArray names) {
+        String root = System.getenv("WESTLAKE_RUNTIME_ROOT");
+        java.util.LinkedHashSet<String> jars = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < names.length(); i++) {
+            String name = names.optString(i, "");
+            if (name.isEmpty()) continue;
+            java.io.File jar = new java.io.File(root + "/framework/" + name + ".jar");
+            if (root != null && jar.isFile()) {
+                jars.add(jar.getPath());
+            } else {
+                System.err.println("[B43-BIND] uses-library " + name + ": not provided by this runtime");
+            }
+        }
+        if (!jars.isEmpty()) System.err.println("[B43-BIND] uses-library jars: " + jars);
+        return jars.toArray(new String[0]);
+    }
+
+    /** Builtin SharedLibraryInfo entries for the jars sharedLibraryJars resolved. */
+    static java.util.List<android.content.pm.SharedLibraryInfo> sharedLibraryInfos(String[] jars) {
+        java.util.ArrayList<android.content.pm.SharedLibraryInfo> infos = new java.util.ArrayList<>();
+        for (String jar : jars) {
+            String name = new java.io.File(jar).getName().replaceFirst("\\.jar$", "");
+            infos.add(new android.content.pm.SharedLibraryInfo(jar, null, null, name,
+                    android.content.pm.SharedLibraryInfo.VERSION_UNDEFINED,
+                    android.content.pm.SharedLibraryInfo.TYPE_BUILTIN,
+                    new android.content.pm.VersionedPackage(name, android.content.pm.SharedLibraryInfo.VERSION_UNDEFINED),
+                    null, null, false));
+        }
+        return infos.isEmpty() ? null : infos;
     }
 }
