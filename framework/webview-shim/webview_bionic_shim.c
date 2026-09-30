@@ -21,6 +21,7 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 
 static int caller_is_webview(void *return_address, const char **caller_path)
@@ -898,9 +899,21 @@ static int westlake_library_is_refused(const char *basename)
 }
 
 int wl_needs_android_relocs(const char *path);
+int wl_write_loadable_copy(const char *path, const char *target, int retag);
+void wl_copy_needed_siblings(const char *path, const char *dir, int depth);
 void *wl_dlopen_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, const char *target,
                                int flags);
 void wl_relocs_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
+/* 1 for a path in the app's own data directory, outside code_cache (see westlake_load_from_code_cache). */
+static int westlake_in_app_storage(const char *path)
+{
+    static const char *const roots[] = {"/data/data/", "/data/user/0/", "/data/user_de/0/"};
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        if (strncmp(path, roots[i], strlen(roots[i])) == 0) return strstr(path, "/code_cache/") == NULL;
+    }
+    return 0;
+}
 
 /*
  * An exec-allowed directory for a loadable copy of path: <app data>/code_cache/wl-exec for a
@@ -945,6 +958,91 @@ static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int
     }
     snprintf(target, sizeof(target), "%s%s", dir, base);
     return wl_dlopen_android_relocs(real_dlopen, path, target, flags);
+}
+
+/*
+ * Libraries the app writes into its own storage and loads by path (Meta's SoLoader: superpack
+ * unpacks them into lib-compressed/ or files/, then System.load()s each, dependencies first).
+ *
+ * bionic resolves a DT_NEEDED name against libraries already loaded, whatever path loaded them.
+ * OH's musl gives a library loaded by explicit path no short name (dynlink.c: "Add a shortname only
+ * if name arg was not an explicit pathname"), so a later DT_NEEDED of that name is searched for on
+ * the library path instead: WhatsApp's libfbjni.so bound OH's libc++ (no std::__ndk1) although the
+ * app had just loaded its own libc++_shared.so, and Facebook's libstorer-jni.so could not find the
+ * libxplat_... library loaded before it. OH also refuses to map app data executable outside
+ * code_cache, and a copy may need its DT_ANDROID_RELR renumbered.
+ *
+ * So such a library, with the DT_NEEDED siblings beside it, is copied into
+ * <app data>/code_cache/wl-exec and opened by bare name in a namespace of its own whose library
+ * path starts there: musl finds it and its siblings by name and records their short names. The
+ * namespace inherits everything the Android namespace ART's loader made for the APK's NDK libraries
+ * holds (their libc++_shared.so), and from the default namespace only the C runtime. NULL when the
+ * namespace cannot be made, so the other paths below take over.
+ */
+static void *westlake_load_app_library(const char *path, int flags)
+{
+    typedef void (*DlnsInitFn)(Dl_namespace *, const char *);
+    typedef int (*DlnsCreate2Fn)(Dl_namespace *, const char *, int);
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    typedef int (*DlnsInheritFn)(Dl_namespace *, Dl_namespace *, const char *);
+    typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static Dl_namespace ns;
+    static int state; /* 0 not tried, 1 ready, -1 unavailable */
+    static DlopenNsFn open_fn;
+    char dir[512], target[768];
+    const char *base = strrchr(path, '/');
+    if (base == NULL || westlake_exec_copy_dir(path, dir, sizeof(dir)) != 0) return NULL;
+    pthread_mutex_lock(&lock);
+    if (state == 0) {
+        DlnsInitFn init_fn = (DlnsInitFn) dlsym(RTLD_DEFAULT, "dlns_init");
+        DlnsCreate2Fn create_fn = (DlnsCreate2Fn) dlsym(RTLD_DEFAULT, "dlns_create2");
+        DlnsGetFn get_fn = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        DlnsInheritFn inherit_fn = (DlnsInheritFn) dlsym(RTLD_DEFAULT, "dlns_inherit");
+        open_fn = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+        const char *android_path = getenv("WESTLAKE_ANDROID_NATIVE_SEARCH_PATH");
+        const char *app_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
+        char search[4096];
+        snprintf(search, sizeof(search), "%s:%s", dir,
+                 android_path != NULL && android_path[0] != '\0' ? android_path
+                 : app_lib_dir != NULL ? app_lib_dir : "/system/lib64");
+        Dl_namespace parent, android;
+        memset(&parent, 0, sizeof(parent));
+        memset(&android, 0, sizeof(android));
+        state = -1;
+        if (init_fn != NULL && create_fn != NULL && get_fn != NULL && inherit_fn != NULL && open_fn != NULL &&
+            get_fn(NULL, &parent) == 0) {
+            init_fn(&ns, "westlake_app_libs");
+            if (create_fn(&ns, search, 0) == 0) {
+                /* The Android namespace, when the launch made one, first and whole. */
+                if (get_fn("westlake_android_app", &android) == 0) inherit_fn(&ns, &android, NULL);
+                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so") == 0) state = 1;
+                /* This library, global there, as ART's loader does for its namespace: its bionic and
+                 * NDK symbols (ASharedMemory_*, __assert, ...) must resolve for what loads here. */
+                Dl_info self;
+                if (state == 1 && dladdr((void *) &westlake_load_app_library, &self) != 0 && self.dli_fname != NULL &&
+                    open_fn(&ns, self.dli_fname, RTLD_NOW | RTLD_GLOBAL) == NULL) {
+                    state = -1;
+                }
+            }
+        }
+        wl_relocs_log("[WESTLAKE-LOADER] app library namespace %s (search %s)\n",
+                      state == 1 ? "ready" : "unavailable", search);
+    }
+    int ready = state == 1;
+    pthread_mutex_unlock(&lock);
+    if (!ready) return NULL;
+    snprintf(target, sizeof(target), "%s%s", dir, base);
+    if (wl_write_loadable_copy(path, target, wl_needs_android_relocs(path)) != 0) {
+        wl_relocs_log("[WESTLAKE-LOADER] could not copy %s to %s\n", path, target);
+        return NULL;
+    }
+    wl_copy_needed_siblings(path, dir, 0);
+    void *handle = open_fn(&ns, base + 1, flags);
+    const char *error = handle == NULL ? dlerror() : NULL;
+    wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name from %s%s%s\n", path, handle != NULL ? "loaded" : "failed", dir,
+                  error != NULL ? ": " : "", error != NULL ? error : "");
+    return handle;
 }
 
 /*
@@ -1001,6 +1099,18 @@ static void *westlake_load_from_code_cache(void *(*real_dlopen)(const char *, in
     return handle;
 }
 
+/*
+ * bionic's linker entry behind dlopen, which libdl.so exports: open on behalf of caller_addr's
+ * namespace. Facebook's libbreakpad.so looks it up by dlsym(dlopen("libdl.so"), "__loader_dlopen")
+ * and gave up ("Could not find __loader_dlopen from libdl.so"). Namespaces are not modelled here;
+ * the shim's dlopen decides.
+ */
+void *__loader_dlopen(const char *filename, int flags, const void *caller_addr)
+{
+    (void) caller_addr;
+    return dlopen(filename, flags);
+}
+
 void *dlopen(const char *filename, int flags)
 {
     void *caller = __builtin_return_address(0);
@@ -1036,6 +1146,24 @@ void *dlopen(const char *filename, int flags)
      * Android's own IDs are found here and every other SL_IID_* in OH's library behind it. The
      * adapter's own dlopen, from inside this shim, still gets OH's library.
      */
+    /*
+     * libdl.so, asked for by app code: this library's own handle, so a lookup by it finds bionic's
+     * __loader_dlopen here (above) and, through this library's dependencies, everything musl's
+     * libdl exports. OH's own libraries keep getting OH's libdl.
+     */
+    if (basename != NULL && strcmp(basename, "libdl.so") == 0) {
+        Dl_info self, caller_info;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
+            dladdr(caller, &caller_info) != 0 && caller_info.dli_fname != NULL &&
+            caller_info.dli_fbase != self.dli_fbase &&
+            strncmp(caller_info.dli_fname, "/system/", 8) != 0 &&
+            strncmp(caller_info.dli_fname, "/vendor/", 8) != 0) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                return handle;
+            }
+        }
+    }
     if (basename != NULL && strcmp(basename, "libOpenSLES.so") == 0) {
         Dl_info self, caller_info;
         if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
@@ -1130,6 +1258,13 @@ void *dlopen(const char *filename, int flags)
                     "[WESTLAKE-WEBVIEW-BIONIC] GLES library translated "
                     "%s -> %s for libwebviewchromium.so\n",
                     filename, actual_filename);
+        }
+    }
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
+        westlake_in_app_storage(actual_filename)) {
+        void *namespaced = westlake_load_app_library(actual_filename, flags);
+        if (namespaced != NULL) {
+            return namespaced;
         }
     }
     if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
@@ -2258,9 +2393,21 @@ const char *getprogname(void)
     return g_progname;
 }
 
-/* BSD's funopen over musl's fopencookie. bionic's fpos_t is a 64-bit offset; musl's is a
- * union, so the seek callback is typed with bionic's. */
+/*
+ * BSD's funopen over musl's fopencookie. bionic's fpos_t is a 64-bit offset; musl's is a union, so
+ * the seek callback is typed with bionic's.
+ *
+ * The FILE is unbuffered and this cookie buffers reads itself. OH's musl refills a buffered FILE
+ * by calling the cookie reader with the FILE's own buffer as the destination (__fill_buffer ->
+ * readx == cookieread), and cookieread uses that same buffer for its last byte, so each refill
+ * overwrote what it had just read: superpack's funopen over a Java InputStream saw byte 1023 where
+ * byte 0 should be (runtime-answers probe: "131415..." for a stream of i % 251), failed its
+ * archive magic, and Facebook, Instagram and Messenger stopped at "could not extract file from
+ * archive". Unbuffered, musl reads straight into the caller's memory.
+ */
 typedef int64_t westlake_bionic_fpos_t;
+
+enum { WESTLAKE_FUNOPEN_BUFFER = 4096 };
 
 struct westlake_funopen_cookie {
     void *cookie;
@@ -2268,17 +2415,37 @@ struct westlake_funopen_cookie {
     int (*writefn)(void *, const char *, int);
     westlake_bionic_fpos_t (*seekfn)(void *, westlake_bionic_fpos_t, int);
     int (*closefn)(void *);
+    size_t pos, len; /* read-ahead: buffer[pos..len) is data the caller has not taken yet */
+    char buffer[WESTLAKE_FUNOPEN_BUFFER];
 };
 
 static ssize_t westlake_funopen_read(void *c, char *buf, size_t size)
 {
     struct westlake_funopen_cookie *f = c;
-    return f->readfn ? f->readfn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size) : -1;
+    if (f->readfn == NULL) {
+        return -1;
+    }
+    if (f->pos == f->len && size >= sizeof(f->buffer)) {
+        return f->readfn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size);
+    }
+    if (f->pos == f->len) {
+        int n = f->readfn(f->cookie, f->buffer, (int)sizeof(f->buffer));
+        if (n <= 0) {
+            return n;
+        }
+        f->pos = 0;
+        f->len = (size_t)n;
+    }
+    size_t n = f->len - f->pos < size ? f->len - f->pos : size;
+    memcpy(buf, f->buffer + f->pos, n);
+    f->pos += n;
+    return (ssize_t)n;
 }
 
 static ssize_t westlake_funopen_write(void *c, const char *buf, size_t size)
 {
     struct westlake_funopen_cookie *f = c;
+    f->pos = f->len = 0;
     return f->writefn ? f->writefn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size) : -1;
 }
 
@@ -2289,10 +2456,16 @@ static int westlake_funopen_seek(void *c, off_t *offset, int whence)
         errno = ESPIPE;
         return -1;
     }
-    westlake_bionic_fpos_t result = f->seekfn(f->cookie, (westlake_bionic_fpos_t)*offset, whence);
+    /* The underlying position is ahead of the caller's by the read-ahead not yet taken. */
+    westlake_bionic_fpos_t target = (westlake_bionic_fpos_t)*offset;
+    if (whence == SEEK_CUR) {
+        target -= (westlake_bionic_fpos_t)(f->len - f->pos);
+    }
+    westlake_bionic_fpos_t result = f->seekfn(f->cookie, target, whence);
     if (result == -1) {
         return -1;
     }
+    f->pos = f->len = 0;
     *offset = (off_t)result;
     return 0;
 }
@@ -2328,7 +2501,9 @@ FILE *funopen(const void *cookie, int (*readfn)(void *, char *, int),
     FILE *file = fopencookie(f, readfn && writefn ? "r+" : readfn ? "r" : "w", io);
     if (file == NULL) {
         free(f);
+        return NULL;
     }
+    setvbuf(file, NULL, _IONBF, 0);
     return file;
 }
 
@@ -2352,4 +2527,44 @@ const char *const sys_signame[65] = {
 int isnanf(float value)
 {
     return __builtin_isnan(value);
+}
+
+/*
+ * The NDK's ASharedMemory (libandroid.so, API 26), which neither OH nor the runtime's or the
+ * WebView's libandroid.so provides: Instagram's and Messenger's libstartup.so failed to relocate on
+ * ASharedMemory_create. Android backs it with ashmem; a sealable memfd gives the same fd-passing,
+ * mmap-able region. setProt narrows nothing: ashmem enforces a narrowed protection on later
+ * mappings, a memfd seal would fail while a writable mapping exists, and callers use it as a
+ * safety net rather than for behaviour. ASharedMemory_dupFromJava is not provided (this library has
+ * no JNI headers).
+ */
+int ASharedMemory_create(const char *name, size_t size)
+{
+    int fd = memfd_create(name != NULL && name[0] != '\0' ? name : "ashmem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0) {
+        return -1;
+    }
+    if (ftruncate(fd, (off_t)size) != 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
+size_t ASharedMemory_getSize(int fd)
+{
+    struct stat st;
+    return fstat(fd, &st) == 0 ? (size_t)st.st_size : 0;
+}
+
+int ASharedMemory_setProt(int fd, int prot)
+{
+    struct stat st;
+    if (fstat(fd, &st) != 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return 0;
 }
