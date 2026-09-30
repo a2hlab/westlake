@@ -29,6 +29,7 @@
 
 // OH port: the OH window a Java Surface carries (oh_surface_window.cpp, shared with EGL14).
 extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);
+extern "C" void* wl_window_from_surface_texture(JNIEnv* env, jobject surfaceTexture);
 static void* oh_window_from_surface(JNIEnv* env, jobject surface) {
     return wl_window_from_surface(env, surface);
 }
@@ -290,10 +291,28 @@ static jlong jni_eglCreateWindowSurface(JNIEnv *_env, jobject _this, jobject dis
 
 static jlong jni_eglCreateWindowSurfaceTexture(JNIEnv *_env, jobject _this, jobject display,
         jobject config, jobject native_window, jintArray attrib_list) {
-    // OH port: a SurfaceTexture has no OH native window behind it here.
-    jniThrowException(_env, "java/lang/UnsupportedOperationException",
-            "eglCreateWindowSurface with a SurfaceTexture is not supported on this platform");
-    return 0;
+    if (display == NULL || config == NULL
+        || !validAttribList(_env, attrib_list)) {
+        jniThrowException(_env, "java/lang/IllegalArgumentException", NULL);
+        return JNI_FALSE;
+    }
+    EGLDisplay dpy = getDisplay(_env, display);
+    EGLContext cnf = getConfig(_env, config);
+    // OH port: the SurfaceTexture's own OH producer window (oh_surface_window.cpp).
+    void* window = native_window != NULL ? wl_window_from_surface_texture(_env, native_window) : NULL;
+    if (window == NULL) {
+        jniThrowException(_env, "java/lang/IllegalArgumentException",
+                "Make sure the SurfaceTexture is valid");
+        return 0;
+    }
+    jint* base = beginNativeAttribList(_env, attrib_list);
+    EGLSurface sur = eglCreateWindowSurface(dpy, cnf, (EGLNativeWindowType) window, base);
+    if (sur == EGL_NO_SURFACE) {
+        fprintf(stderr, "[WL-OPENGL] eglCreateWindowSurface(SurfaceTexture window=%p) failed: EGL error 0x%x\n",
+                window, eglGetError());
+    }
+    endNativeAttributeList(_env, attrib_list, base);
+    return reinterpret_cast<jlong>(sur);
 }
 
 static jboolean jni_eglGetConfigAttrib(JNIEnv *_env, jobject _this, jobject display,

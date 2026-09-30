@@ -31,6 +31,7 @@
 #include <EGL/egl.h>
 // OH port: the OH window a Java Surface carries (oh_surface_window.cpp).
 extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);
+extern "C" void* wl_window_from_surface_texture(JNIEnv* env, jobject surfaceTexture);
 
 
 
@@ -593,10 +594,74 @@ exit:
 static jobject
 android_eglCreateWindowSurfaceTexture
   (JNIEnv *_env, jobject _this, jobject dpy, jobject config, jobject win, jintArray attrib_list_ref, jint offset) {
-    // OH port: a SurfaceTexture has no OH native window behind it here.
-    jniThrowException(_env, "java/lang/UnsupportedOperationException",
-            "eglCreateWindowSurface with a SurfaceTexture is not supported on this platform");
-    return nullptr;
+    jint _exception = 0;
+    const char * _exceptionType = "";
+    const char * _exceptionMessage = "";
+    EGLSurface _returnValue = (EGLSurface) 0;
+    EGLDisplay dpy_native = (EGLDisplay) fromEGLHandle(_env, egldisplayGetHandleID, dpy);
+    EGLConfig config_native = (EGLConfig) fromEGLHandle(_env, eglconfigGetHandleID, config);
+    int attrib_list_sentinel = 0;
+    EGLint *attrib_list_base = (EGLint *) 0;
+    jint _remaining;
+    EGLint *attrib_list = (EGLint *) 0;
+    void* window = NULL;
+
+    if (attrib_list_ref) {
+        if (offset < 0) {
+            _exception = 1;
+            _exceptionType = "java/lang/IllegalArgumentException";
+            _exceptionMessage = "offset < 0";
+            goto exit;
+        }
+        _remaining = _env->GetArrayLength(attrib_list_ref) - offset;
+        attrib_list_base = (EGLint *)
+            _env->GetIntArrayElements(attrib_list_ref, (jboolean *)0);
+        attrib_list = attrib_list_base + offset;
+        attrib_list_sentinel = 0;
+        for (int i = _remaining - 1; i >= 0; i--)  {
+            if (*((EGLint*)(attrib_list + i)) == EGL_NONE){
+                attrib_list_sentinel = 1;
+                break;
+            }
+        }
+        if (attrib_list_sentinel == 0) {
+            _exception = 1;
+            _exceptionType = "java/lang/IllegalArgumentException";
+            _exceptionMessage = "attrib_list must contain EGL_NONE!";
+            goto exit;
+        }
+    }
+
+    if (win == NULL) {
+not_valid_surface:
+        _exception = 1;
+        _exceptionType = "java/lang/IllegalArgumentException";
+        _exceptionMessage = "Make sure the SurfaceView or associated SurfaceHolder has a valid Surface";
+        goto exit;
+    }
+
+    window = wl_window_from_surface_texture(_env, win);
+
+    if (window == NULL)
+        goto not_valid_surface;
+
+    _returnValue = eglCreateWindowSurface(
+        (EGLDisplay)dpy_native,
+        (EGLConfig)config_native,
+        (EGLNativeWindowType)window,
+        (EGLint *)attrib_list
+    );
+
+exit:
+    if (attrib_list_base) {
+        _env->ReleaseIntArrayElements(attrib_list_ref, attrib_list_base,
+            JNI_ABORT);
+    }
+    if (_exception) {
+        jniThrowException(_env, _exceptionType, _exceptionMessage);
+        return nullptr;
+    }
+    return toEGLHandle(_env, eglsurfaceClass, eglsurfaceConstructor, _returnValue);
 }
 /* EGLSurface eglCreatePbufferSurface ( EGLDisplay dpy, EGLConfig config, const EGLint *attrib_list ) */
 static jobject

@@ -12,7 +12,7 @@ Android's private graphics stack is:
 
 EGLExt's eglDupNativeFenceFDANDROID is not exported by OH's libEGL and is resolved through
 eglGetProcAddress. The window comes from wl_window_from_surface (oh_surface_window.cpp), shared
-with the EGL10 port, and SurfaceTexture windows are refused explicitly, as there. Everything else is kept
+with the EGL10 port; a SurfaceTexture's window comes from wl_window_from_surface_texture, as there. Everything else is kept
 byte-for-byte so the port can be diffed against the AOSP files.
 
 Usage: port_egl14.py <aosp frameworks-base/core/jni> <out dir>
@@ -29,7 +29,8 @@ PRIVATE_INCLUDES = [
     '#include <ui/ANativeObjectBase.h>\n',
 ]
 SHARED = ('// OH port: the OH window a Java Surface carries (oh_surface_window.cpp).\n'
-          'extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);\n')
+          'extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);\n'
+          'extern "C" void* wl_window_from_surface_texture(JNIEnv* env, jobject surfaceTexture);\n')
 
 
 def function_span(text, name):
@@ -74,14 +75,12 @@ def egl14(src):
         if old not in fn: raise SystemExit('EGL14 eglCreateWindowSurface: not found: ' + old.strip())
         fn = fn.replace(old, new, 1)
     src = src[:start] + fn + src[end:]
+    # The SurfaceTexture variant is the same function over the SurfaceTexture's own producer window.
     start, end = function_span(src, 'android_eglCreateWindowSurfaceTexture')
     signature = src[start:src.index('{', start)]
-    body = ('{\n    // OH port: a SurfaceTexture has no OH native window behind it here.\n'
-            '    jniThrowException(_env, "java/lang/UnsupportedOperationException",\n'
-            '            "eglCreateWindowSurface with a SurfaceTexture is not supported on this platform");\n'
-            '    return nullptr;\n}')
+    body = fn[fn.index('{'):].replace('wl_window_from_surface(_env, win)',
+                                       'wl_window_from_surface_texture(_env, win)', 1)
     return src[:start] + signature + body + src[end:]
-
 
 def eglext(src):
     # OH's libEGL does not export this Android extension; ask the driver for it at run time, and

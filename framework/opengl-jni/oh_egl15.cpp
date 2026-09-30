@@ -32,6 +32,7 @@
 #include <EGL/egl.h>
 // OH port: the OH window a Java Surface carries (oh_surface_window.cpp).
 extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);
+extern "C" void* wl_window_from_surface_texture(JNIEnv* env, jobject surfaceTexture);
 
 
 // classes from EGL 1.4
