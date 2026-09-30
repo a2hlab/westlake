@@ -77,6 +77,8 @@ __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *pat
     struct stat src, dst;
     if (stat(path, &src) != 0) return -1;
     if (stat(target, &dst) == 0 && dst.st_size == src.st_size && dst.st_mtime >= src.st_mtime) return 0;
+    /* Never replace a different file of that name (the APK's own library, staged beside it). */
+    if (stat(target, &dst) == 0 && dst.st_size != src.st_size) return 0;
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return -1;
     unsigned char *data = mmap(NULL, (size_t) src.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);

@@ -993,6 +993,36 @@ static void *westlake_load_app_library(const char *path, int flags)
     char dir[512], target[768];
     const char *base = strrchr(path, '/');
     if (base == NULL || westlake_exec_copy_dir(path, dir, sizeof(dir)) != 0) return NULL;
+    /*
+     * When ART's loader made an Android namespace for the APK's NDK libraries, the library joins
+     * them there: symbols resolve against the namespace's own libraries (libc++_shared.so, this
+     * shim), which a second namespace inheriting them did not see (Messenger's libcore.so: "Error
+     * relocating ... std::__ndk1::basic_string ... __system_property_read_callback"). Its copy goes
+     * into the staged APK library directory, first on that namespace's search path, never over a
+     * library the APK ships under the same name.
+     */
+    {
+        static DlnsGetFn android_get;
+        static DlopenNsFn android_open;
+        const char *apk_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
+        Dl_namespace android;
+        memset(&android, 0, sizeof(android));
+        if (android_get == NULL) android_get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        if (android_open == NULL) android_open = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+        if (apk_lib_dir != NULL && android_get != NULL && android_open != NULL &&
+            android_get("westlake_android_app", &android) == 0) {
+            snprintf(target, sizeof(target), "%s%s", apk_lib_dir, base);
+            if (wl_write_loadable_copy(path, target, wl_needs_android_relocs(path)) == 0) {
+                wl_copy_needed_siblings(path, apk_lib_dir, 0);
+                void *handle = android_open(&android, base + 1, flags);
+                const char *error = handle == NULL ? dlerror() : NULL;
+                wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name in the Android namespace from %s%s%s\n", path,
+                              handle != NULL ? "loaded" : "failed", apk_lib_dir, error != NULL ? ": " : "",
+                              error != NULL ? error : "");
+                if (handle != NULL) return handle;
+            }
+        }
+    }
     pthread_mutex_lock(&lock);
     if (state == 0) {
         DlnsInitFn init_fn = (DlnsInitFn) dlsym(RTLD_DEFAULT, "dlns_init");
@@ -2572,3 +2602,60 @@ int ASharedMemory_setProt(int fd, int prot)
     }
     return 0;
 }
+
+/*
+ * The NDK's ALooper API. The runtime's libandroid.so implements it, but in the Android namespace a
+ * library's libandroid.so is the WebView shim's, which does not: Facebook's libscrollmerged.so
+ * failed to relocate on ALooper_pollAll. Each forwards to the runtime library's own entry point,
+ * looked up through that library's handle so it can never resolve back to this one.
+ */
+typedef struct ALooper ALooper;
+typedef int (*westlake_alooper_callback)(int fd, int events, void *data);
+
+static void *westlake_runtime_android_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) {
+        const char *root = getenv("WESTLAKE_RUNTIME_ROOT");
+        char path[512];
+        snprintf(path, sizeof(path), "%s/libandroid.so", root != NULL ? root : "");
+        /* The default namespace's copy, which the framework (and its Looper) uses: a copy of this
+         * library in another namespace must not load a second libandroid with its own Looper. */
+        typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+        typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+        DlnsGetFn get_fn = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        DlopenNsFn open_fn = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+        Dl_namespace parent;
+        memset(&parent, 0, sizeof(parent));
+        if (get_fn != NULL && open_fn != NULL && get_fn("default", &parent) == 0) {
+            library = open_fn(&parent, path, RTLD_NOW | RTLD_NOLOAD);
+        }
+        if (library == NULL) library = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+    }
+    void *symbol = library != NULL ? dlsym(library, name) : NULL;
+    if (symbol == NULL) wl_relocs_log("[WESTLAKE-BIONIC] runtime libandroid.so lacks %s\n", name);
+    return symbol;
+}
+
+#define WESTLAKE_ALOOPER_FORWARD(ret, name, params, args)                             \
+    ret name params                                                                   \
+    {                                                                                 \
+        static ret (*real) params;                                                    \
+        if (real == NULL) real = (ret (*) params) westlake_runtime_android_symbol(#name); \
+        return real args;                                                             \
+    }
+
+WESTLAKE_ALOOPER_FORWARD(ALooper *, ALooper_forThread, (void), ())
+WESTLAKE_ALOOPER_FORWARD(ALooper *, ALooper_prepare, (int opts), (opts))
+WESTLAKE_ALOOPER_FORWARD(void, ALooper_acquire, (ALooper *looper), (looper))
+WESTLAKE_ALOOPER_FORWARD(void, ALooper_release, (ALooper *looper), (looper))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_pollOnce, (int timeout, int *fd, int *events, void **data),
+                         (timeout, fd, events, data))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_pollAll, (int timeout, int *fd, int *events, void **data),
+                         (timeout, fd, events, data))
+WESTLAKE_ALOOPER_FORWARD(void, ALooper_wake, (ALooper *looper), (looper))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_addFd,
+                         (ALooper *looper, int fd, int ident, int events, westlake_alooper_callback callback,
+                          void *data),
+                         (looper, fd, ident, events, callback, data))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_removeFd, (ALooper *looper, int fd), (looper, fd))
