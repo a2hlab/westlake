@@ -17,10 +17,20 @@ ${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Werror -I$HERE/frame
   -I$SRC/libcore/luni/src/main/native -I$SRC/libnativehelper/include -I$SRC/libnativehelper/header_only_include \
   -I$SRC/libnativehelper/include_platform_header_only -I$SRC/libnativehelper/include_jni -I$SRC/expat/expat/lib \
   -c $HERE/framework/javacore-shim/expat_natives.cpp -o $OBJ/expat_natives.o
-for f in missing_natives media_natives text_natives audiorecord_natives; do
+# libcore's NIO natives (ojluni), unmodified, with the InetAddress field IDs and platform-string
+# helpers they use; ojluni_nio_natives.c supplies the few libopenjdkjvm/libnativehelper symbols.
+OJ=$SRC/libcore/ojluni/src/main/native
+for f in Net IOUtil SocketChannelImpl ServerSocketChannelImpl DatagramChannelImpl DatagramDispatcher \
+         PollArrayWrapper FileDispatcherImpl MappedByteBuffer InetAddress Inet4Address Inet6Address \
+         jni_util jni_util_md net_util net_util_md; do
+  $CC -fvisibility=hidden -w -D_GNU_SOURCE -DLINUX -I$OJ -I$HERE/framework/javacore-shim/expat-compat \
+    -I$SRC/libnativehelper/include -I$SRC/libnativehelper/include_jni -I$SRC/libnativehelper/header_only_include \
+    -c $OJ/$f.c -o $OBJ/oj_$f.o
+done
+for f in missing_natives media_natives text_natives audiorecord_natives ojluni_nio_natives; do
   $CC -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni -c $HERE/framework/javacore-shim/$f.c -o $OBJ/$f.o
 done
 ${CC/clang /clang++ } -shared -fuse-ld=lld -Wl,-soname,libwl_missing_natives.so -Wl,-z,defs \
-  $OBJ/missing_natives.o $OBJ/media_natives.o $OBJ/text_natives.o $OBJ/audiorecord_natives.o \
-  $OBJ/expat_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -lm -lc -o $OUT/libwl_missing_natives.so
+  $OBJ/missing_natives.o $OBJ/media_natives.o $OBJ/text_natives.o $OBJ/audiorecord_natives.o $OBJ/ojluni_nio_natives.o $OBJ/oj_*.o \
+  $OBJ/expat_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
 echo "built $OUT/libwl_missing_natives.so"

@@ -76,11 +76,17 @@
 #include <jni.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
+#include <grp.h>
+#include <poll.h>
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_acos(JNIEnv* env, jclass c, jdouble a)
 { (void)env; (void)c; return acos(a); }
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_asin(JNIEnv* env, jclass c, jdouble a)
@@ -479,6 +485,7 @@ void wl_register_media(JNIEnv* env, JavaVM* vm);
 int wl_register_text(JNIEnv* env);
 int wl_register_audiorecord(JNIEnv* env);
 int wl_register_expat(JNIEnv* env);
+int wl_register_ojluni_nio(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
 {
@@ -554,6 +561,130 @@ static const JNINativeMethod kUnixFileSystem[] = {
     { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
     { "setLastModifiedTime0", "(Ljava/io/File;J)Z", (void*) wl_setLastModifiedTime0 },
     { "getLastModifiedTime0", "(Ljava/io/File;)J", (void*) wl_getLastModifiedTime0 },
+};
+
+/*
+ * Platform natives the staged runtime leaves unregistered, found by r73 ("No implementation found"):
+ * sun.nio.ch.Net's poll constants (Mindustry, Unciv), Process.getGidForName (NYTimes),
+ * android.os.SELinux's context queries (Termux), Camera._getNumberOfCameras (Open Camera) and
+ * CamcorderProfile (Snapchat). Values are this kernel's; there is no camera, so none is reported.
+ */
+static jshort wl_pollin(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLIN; }
+static jshort wl_pollout(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLOUT; }
+static jshort wl_pollerr(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLERR; }
+static jshort wl_pollhup(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLHUP; }
+static jshort wl_pollnval(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLNVAL; }
+static jshort wl_pollconn(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLOUT; }
+
+static const JNINativeMethod kNet[] = {
+    { "pollinValue", "()S", (void*) wl_pollin },
+    { "polloutValue", "()S", (void*) wl_pollout },
+    { "pollerrValue", "()S", (void*) wl_pollerr },
+    { "pollhupValue", "()S", (void*) wl_pollhup },
+    { "pollnvalValue", "()S", (void*) wl_pollnval },
+    { "pollconnValue", "()S", (void*) wl_pollconn },
+};
+
+static jint wl_getGidForName(JNIEnv* env, jclass c, jstring name)
+{
+    const char* chars;
+    struct group* g;
+    jint gid = -1;
+    (void) c;
+    if (name == NULL) return -1;
+    chars = (*env)->GetStringUTFChars(env, name, NULL);
+    if (chars == NULL) return -1;
+    g = getgrnam(chars);
+    if (g != NULL) gid = (jint) g->gr_gid;
+    (*env)->ReleaseStringUTFChars(env, name, chars);
+    return gid;
+}
+
+static const JNINativeMethod kProcess[] = {
+    { "getGidForName", "(Ljava/lang/String;)I", (void*) wl_getGidForName },
+};
+
+static jstring context_from(JNIEnv* env, const char* path)
+{
+    char buffer[256];
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    ssize_t n = fd >= 0 ? read(fd, buffer, sizeof(buffer) - 1) : -1;
+    if (fd >= 0) close(fd);
+    if (n <= 0) return NULL;
+    buffer[n] = '\0';
+    while (n > 0 && (buffer[n - 1] == '\n' || buffer[n - 1] == '\0')) buffer[--n] = '\0';
+    return (*env)->NewStringUTF(env, buffer);
+}
+
+static jstring wl_selinux_getContext(JNIEnv* env, jclass c) { (void) c; return context_from(env, "/proc/self/attr/current"); }
+
+static jstring wl_selinux_getPidContext(JNIEnv* env, jclass c, jint pid)
+{
+    char path[64];
+    (void) c;
+    snprintf(path, sizeof(path), "/proc/%d/attr/current", (int) pid);
+    return context_from(env, path);
+}
+
+static jstring wl_selinux_getFileContext(JNIEnv* env, jclass c, jstring path)
+{
+    char buffer[256];
+    const char* chars;
+    ssize_t n;
+    (void) c;
+    if (path == NULL) return NULL;
+    chars = (*env)->GetStringUTFChars(env, path, NULL);
+    if (chars == NULL) return NULL;
+    n = getxattr(chars, "security.selinux", buffer, sizeof(buffer) - 1);
+    (*env)->ReleaseStringUTFChars(env, path, chars);
+    if (n <= 0) return NULL;
+    buffer[n] = '\0';
+    return (*env)->NewStringUTF(env, buffer);
+}
+
+static jboolean wl_selinux_enabled(JNIEnv* env, jclass c)
+{
+    (void) env; (void) c;
+    return access("/sys/fs/selinux/enforce", F_OK) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean wl_selinux_enforced(JNIEnv* env, jclass c)
+{
+    char value = '0';
+    int fd = open("/sys/fs/selinux/enforce", O_RDONLY | O_CLOEXEC);
+    (void) env; (void) c;
+    if (fd >= 0) { if (read(fd, &value, 1) != 1) value = '0'; close(fd); }
+    return value == '1' ? JNI_TRUE : JNI_FALSE;
+}
+
+static const JNINativeMethod kSELinux[] = {
+    { "getContext", "()Ljava/lang/String;", (void*) wl_selinux_getContext },
+    { "getPidContext", "(I)Ljava/lang/String;", (void*) wl_selinux_getPidContext },
+    { "getFileContext", "(Ljava/lang/String;)Ljava/lang/String;", (void*) wl_selinux_getFileContext },
+    { "isSELinuxEnabled", "()Z", (void*) wl_selinux_enabled },
+    { "isSELinuxEnforced", "()Z", (void*) wl_selinux_enforced },
+};
+
+static jint wl_camera_count(JNIEnv* e, jclass c, jint device, jint policy)
+{
+    (void) e; (void) c; (void) device; (void) policy;
+    return 0;
+}
+
+static const JNINativeMethod kCamera[] = {
+    { "_getNumberOfCameras", "(II)I", (void*) wl_camera_count },
+};
+
+static void wl_camcorder_init(JNIEnv* e, jclass c) { (void) e; (void) c; }
+static jobject wl_camcorder_profile(JNIEnv* e, jclass c, jint id, jint q) { (void) e; (void) c; (void) id; (void) q; return NULL; }
+static jobject wl_camcorder_profiles(JNIEnv* e, jclass c, jint id, jint q, jboolean a) { (void) e; (void) c; (void) id; (void) q; (void) a; return NULL; }
+static jboolean wl_camcorder_has(JNIEnv* e, jclass c, jint id, jint q) { (void) e; (void) c; (void) id; (void) q; return JNI_FALSE; }
+
+static const JNINativeMethod kCamcorderProfile[] = {
+    { "native_init", "()V", (void*) wl_camcorder_init },
+    { "native_get_camcorder_profile", "(II)Landroid/media/CamcorderProfile;", (void*) wl_camcorder_profile },
+    { "native_get_camcorder_profiles", "(IIZ)Landroid/media/EncoderProfiles;", (void*) wl_camcorder_profiles },
+    { "native_has_camcorder_profile", "(II)Z", (void*) wl_camcorder_has },
 };
 
 /* Returns the priority it found (before any change). */
@@ -704,13 +835,20 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int ar = wl_register_audiorecord(env);
         int xp = wl_register_expat(env);
         int jl = install_lookup_logging(env, vm);
+        int mb = wl_register_ojluni_nio(env);
+        int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
+                   + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
+                   + bind(env, "android/os/SELinux", kSELinux, (int) (sizeof(kSELinux) / sizeof(kSELinux[0])))
+                   + bind(env, "android/hardware/Camera", kCamera, (int) (sizeof(kCamera) / sizeof(kCamera[0])))
+                   + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
+                          (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d jni-lookup-log=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp, jl);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp, jl, mb, more);
         note(line);
     }
     wl_register_media(env, vm);
