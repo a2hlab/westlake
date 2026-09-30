@@ -900,7 +900,6 @@ static int westlake_library_is_refused(const char *basename)
 int wl_needs_android_relocs(const char *path);
 void *wl_dlopen_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, const char *target,
                                int flags);
-void wl_preload_relocated_deps(void *(*load)(const char *, int), const char *path, int flags, int depth);
 void wl_relocs_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
 /*
@@ -932,8 +931,9 @@ static int westlake_exec_copy_dir(const char *path, char *dir, size_t size)
 }
 
 /*
- * A library with DT_ANDROID_RELR (android_relocs.c) is loaded from a copy that musl
- * can load, with those tables applied here. NULL, with the reason logged, when that fails.
+ * A library with DT_ANDROID_RELR that the launcher did not stage (one the app wrote at run time) is
+ * loaded from a copy with the tags renumbered (android_relocs.c). NULL, with the reason logged,
+ * when that fails.
  */
 static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, int flags)
 {
@@ -1001,27 +1001,9 @@ static void *westlake_load_from_code_cache(void *(*real_dlopen)(const char *, in
     return handle;
 }
 
-static void *westlake_dlopen(const char *filename, int flags, void *caller);
-
 void *dlopen(const char *filename, int flags)
 {
-    return westlake_dlopen(filename, flags, __builtin_return_address(0));
-}
-
-/*
- * The shim's own loads (dependency preloading) go through here, never through dlopen: taking
- * dlopen's address in this library resolves through the GOT to the first definition in the global
- * scope, which can be musl's own -- Messenger's libc++_shared.so, preloaded that way, was mapped
- * without its DT_ANDROID_RELR applied and its first constructor crashed.
- */
-static void *westlake_dlopen_internal(const char *filename, int flags)
-{
-    return westlake_dlopen(filename, flags, NULL);
-}
-
-/* caller: the code that asked, for the redirects below that depend on who is loading. */
-static void *westlake_dlopen(const char *filename, int flags, void *caller)
-{
+    void *caller = __builtin_return_address(0);
     typedef void *(*DlopenFn)(const char *, int);
     static DlopenFn real_dlopen;
     if (real_dlopen == NULL) {
@@ -1057,8 +1039,8 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
     if (basename != NULL && strcmp(basename, "libOpenSLES.so") == 0) {
         Dl_info self, caller_info;
         if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
-            !(caller == NULL || (dladdr(caller, &caller_info) != 0 &&
-                                 caller_info.dli_fbase == self.dli_fbase))) {
+            !(dladdr(caller, &caller_info) != 0 &&
+              caller_info.dli_fbase == self.dli_fbase)) {
             void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
             if (handle != NULL) {
                 static int logged;
@@ -1150,13 +1132,9 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
                     filename, actual_filename);
         }
     }
-    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD)) {
-        wl_preload_relocated_deps(westlake_dlopen_internal, actual_filename, flags, 0);
-    }
     if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
         wl_needs_android_relocs(actual_filename)) {
-        wl_relocs_log("[WESTLAKE-RELOCS] loading %s (DT_ANDROID_RELR)\n", actual_filename);
-        /* Never the original: musl would run its constructors unrelocated (SIGSEGV). */
+        /* Never the original: musl would leave its RELR pointers unrelocated (SIGSEGV). */
         return westlake_load_android_relocs(real_dlopen, actual_filename, flags);
     }
     void *handle = real_dlopen(actual_filename, flags);
