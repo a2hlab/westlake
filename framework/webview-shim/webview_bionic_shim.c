@@ -2659,3 +2659,241 @@ WESTLAKE_ALOOPER_FORWARD(int, ALooper_addFd,
                           void *data),
                          (looper, fd, ident, events, callback, data))
 WESTLAKE_ALOOPER_FORWARD(int, ALooper_removeFd, (ALooper *looper, int fd), (looper, fd))
+
+/*
+ * AHardwareBuffer and the multinetwork DNS calls, for the same reason: the WebView shim's
+ * libandroid.so has neither, so Instagram's libscrollmerged.so failed to relocate on
+ * AHardwareBuffer_unlock. The runtime's libandroid.so imports AHardwareBuffer from libhwui.so;
+ * a lookup through its handle searches its dependencies and finds libhwui's definition.
+ */
+typedef struct AHardwareBuffer AHardwareBuffer;
+typedef struct AHardwareBuffer_Desc AHardwareBuffer_Desc;
+typedef struct ARect ARect;
+
+WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_allocate, (const AHardwareBuffer_Desc *desc, AHardwareBuffer **out),
+                         (desc, out))
+WESTLAKE_ALOOPER_FORWARD(void, AHardwareBuffer_acquire, (AHardwareBuffer *buffer), (buffer))
+WESTLAKE_ALOOPER_FORWARD(void, AHardwareBuffer_release, (AHardwareBuffer *buffer), (buffer))
+WESTLAKE_ALOOPER_FORWARD(void, AHardwareBuffer_describe, (const AHardwareBuffer *buffer, AHardwareBuffer_Desc *out),
+                         (buffer, out))
+WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_lock,
+                         (AHardwareBuffer *buffer, uint64_t usage, int32_t fence, const ARect *rect, void **address),
+                         (buffer, usage, fence, rect, address))
+WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_unlock, (AHardwareBuffer *buffer, int32_t *fence), (buffer, fence))
+WESTLAKE_ALOOPER_FORWARD(AHardwareBuffer *, AHardwareBuffer_fromHardwareBuffer, (void *env, void *object),
+                         (env, object))
+WESTLAKE_ALOOPER_FORWARD(void *, AHardwareBuffer_toHardwareBuffer, (void *env, AHardwareBuffer *buffer),
+                         (env, buffer))
+WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
+                         (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
+                         (network, name, ns_class, ns_type, flags))
+WESTLAKE_ALOOPER_FORWARD(int, android_res_nresult, (int fd, int *rcode, uint8_t *answer, size_t length),
+                         (fd, rcode, answer, length))
+
+/*
+ * Importing an AHardwareBuffer into EGL. Westlake's AHardwareBuffer is an OH_NativeBuffer, but
+ * hwui's TextureView path (AutoBackendTextureRelease -> MakeBackendTexture) imports it the Android
+ * way: eglGetNativeClientBufferANDROID, then eglCreateImageKHR(EGL_NATIVE_BUFFER_ANDROID). OH's
+ * EGL takes an OHNativeWindowBuffer with EGL_NATIVE_BUFFER_OHOS, so the import failed and hwui
+ * aborted with "Invalid GrBackendTexture" (Telegram, a video camera app). libhwui calls both
+ * through its PLT, so these preloaded definitions win: the client buffer becomes an OH window
+ * buffer over the same native buffer, and an image of it is created with the OH target. The window
+ * buffer lives as long as the image.
+ */
+typedef void *WlEglDisplay;
+typedef void *WlEglContext;
+typedef void *WlEglImage;
+typedef void *WlEglClientBuffer;
+typedef int32_t WlEglInt;
+#define WL_EGL_NATIVE_BUFFER_ANDROID 0x3140
+#define WL_EGL_NATIVE_BUFFER_OHOS 0x34E1
+
+static struct {
+    void *window_buffer;
+    WlEglImage image;
+} wl_egl_imports[256];
+static pthread_mutex_t wl_egl_imports_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *wl_native_window_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) library = dlopen("libnative_window.so", RTLD_NOW);
+    return library != NULL ? dlsym(library, name) : NULL;
+}
+
+static void wl_destroy_window_buffer(void *window_buffer)
+{
+    static void (*destroy)(void *);
+    if (destroy == NULL) destroy = (void (*)(void *)) wl_native_window_symbol("OH_NativeWindow_DestroyNativeWindowBuffer");
+    if (destroy != NULL && window_buffer != NULL) destroy(window_buffer);
+}
+
+WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
+{
+    static void *(*create)(void *);
+    if (create == NULL) {
+        create = (void *(*)(void *)) wl_native_window_symbol("OH_NativeWindow_CreateNativeWindowBufferFromNativeBuffer");
+    }
+    void *window_buffer = create != NULL && buffer != NULL ? create((void *) buffer) : NULL;
+    if (window_buffer == NULL) {
+        wl_relocs_log("[WESTLAKE-EGL] no OH window buffer for AHardwareBuffer %p\n", buffer);
+        return NULL;
+    }
+    pthread_mutex_lock(&wl_egl_imports_lock);
+    size_t slot = 0;
+    while (slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]) && wl_egl_imports[slot].window_buffer != NULL) slot++;
+    if (slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0])) {
+        wl_egl_imports[slot].window_buffer = window_buffer;
+        wl_egl_imports[slot].image = NULL;
+    }
+    pthread_mutex_unlock(&wl_egl_imports_lock);
+    return window_buffer;
+}
+
+WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigned target, WlEglClientBuffer buffer,
+                             const WlEglInt *attribs)
+{
+    static WlEglImage (*real)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *);
+    static WlEglInt (*error)(void);
+    if (real == NULL) {
+        real = (WlEglImage (*)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *))
+                dlsym(RTLD_NEXT, "eglCreateImageKHR");
+        error = (WlEglInt (*)(void)) dlsym(RTLD_NEXT, "eglGetError");
+    }
+    if (real == NULL) return NULL;
+    size_t slot = sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
+    if (target == WL_EGL_NATIVE_BUFFER_ANDROID) {
+        pthread_mutex_lock(&wl_egl_imports_lock);
+        for (size_t i = 0; i < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]); i++) {
+            if (wl_egl_imports[i].window_buffer == buffer && wl_egl_imports[i].image == NULL) {
+                slot = i;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&wl_egl_imports_lock);
+    }
+    if (slot == sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0])) return real(display, context, target, buffer, attribs);
+    WlEglImage image = real(display, context, WL_EGL_NATIVE_BUFFER_OHOS, buffer, attribs);
+    pthread_mutex_lock(&wl_egl_imports_lock);
+    if (image != NULL) {
+        wl_egl_imports[slot].image = image;
+    } else {
+        wl_egl_imports[slot].window_buffer = NULL;
+    }
+    pthread_mutex_unlock(&wl_egl_imports_lock);
+    if (image == NULL) {
+        wl_relocs_log("[WESTLAKE-EGL] OH image import failed: 0x%x\n", error != NULL ? (unsigned) error() : 0u);
+        wl_destroy_window_buffer(buffer);
+    } else {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] AHardwareBuffer imported as an OH native buffer image\n");
+        }
+    }
+    return image;
+}
+
+unsigned eglDestroyImageKHR(WlEglDisplay display, WlEglImage image)
+{
+    static unsigned (*real)(WlEglDisplay, WlEglImage);
+    if (real == NULL) real = (unsigned (*)(WlEglDisplay, WlEglImage)) dlsym(RTLD_NEXT, "eglDestroyImageKHR");
+    unsigned result = real != NULL ? real(display, image) : 0;
+    void *window_buffer = NULL;
+    pthread_mutex_lock(&wl_egl_imports_lock);
+    for (size_t i = 0; image != NULL && i < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]); i++) {
+        if (wl_egl_imports[i].image == image) {
+            window_buffer = wl_egl_imports[i].window_buffer;
+            wl_egl_imports[i].window_buffer = NULL;
+            wl_egl_imports[i].image = NULL;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wl_egl_imports_lock);
+    wl_destroy_window_buffer(window_buffer);
+    return result;
+}
+
+/*
+ * EGL_KHR_partial_update. The board's EGL advertises it but rejects eglSetDamageRegionKHR with
+ * EGL_BAD_ACCESS, and the deployed libhwui still treats that as fatal (the hwui source carries the
+ * remedy as §320; the binary predates it): Telegram drew 120 frames, then aborted on its RenderThread.
+ * The damage region is only a hint of which part changes, so after the first failure the call is
+ * reported as done and no longer made: the frame is presented whole.
+ */
+unsigned eglSetDamageRegionKHR(WlEglDisplay display, void *surface, WlEglInt *rects, WlEglInt count)
+{
+    static unsigned (*real)(WlEglDisplay, void *, WlEglInt *, WlEglInt);
+    static WlEglInt (*error)(void);
+    static int disabled;
+    if (__atomic_load_n(&disabled, __ATOMIC_RELAXED)) return 1;
+    if (real == NULL) {
+        real = (unsigned (*)(WlEglDisplay, void *, WlEglInt *, WlEglInt)) dlsym(RTLD_NEXT, "eglSetDamageRegionKHR");
+        error = (WlEglInt (*)(void)) dlsym(RTLD_NEXT, "eglGetError");
+    }
+    if (real != NULL && real(display, surface, rects, count)) return 1;
+    WlEglInt code = error != NULL ? error() : 0;
+    if (!__atomic_exchange_n(&disabled, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGLDAMAGE] eglSetDamageRegionKHR failed (0x%x): partial-update damage off\n",
+                      (unsigned) code);
+    }
+    return 1;
+}
+
+/*
+ * eglInitialize / eglTerminate, reference-counted per display as Android's EGL loader does. hwui
+ * and an app's own GL code (GLSurfaceView, a video or camera renderer through EGL14) share the
+ * default display; on Android the app's eglTerminate only drops its reference, on OH it tears the
+ * display down under hwui, whose next frame fails with EGL_NOT_INITIALIZED and aborts (X, and
+ * Telegram's GL thread after it). The real eglTerminate runs when the last reference goes.
+ */
+static struct {
+    WlEglDisplay display;
+    int references;
+} wl_egl_displays[16];
+static pthread_mutex_t wl_egl_displays_lock = PTHREAD_MUTEX_INITIALIZER;
+
+unsigned eglInitialize(WlEglDisplay display, WlEglInt *major, WlEglInt *minor)
+{
+    static unsigned (*real)(WlEglDisplay, WlEglInt *, WlEglInt *);
+    if (real == NULL) real = (unsigned (*)(WlEglDisplay, WlEglInt *, WlEglInt *)) dlsym(RTLD_NEXT, "eglInitialize");
+    if (real == NULL) return 0;
+    unsigned result = real(display, major, minor);
+    if (!result) return result;
+    pthread_mutex_lock(&wl_egl_displays_lock);
+    size_t free_slot = sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0]), i;
+    for (i = 0; i < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0]); i++) {
+        if (wl_egl_displays[i].display == display && wl_egl_displays[i].references > 0) break;
+        if (wl_egl_displays[i].references == 0 && free_slot == sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0])) free_slot = i;
+    }
+    if (i < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0])) {
+        wl_egl_displays[i].references++;
+    } else if (free_slot < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0])) {
+        wl_egl_displays[free_slot].display = display;
+        wl_egl_displays[free_slot].references = 1;
+    }
+    pthread_mutex_unlock(&wl_egl_displays_lock);
+    return result;
+}
+
+unsigned eglTerminate(WlEglDisplay display)
+{
+    static unsigned (*real)(WlEglDisplay);
+    if (real == NULL) real = (unsigned (*)(WlEglDisplay)) dlsym(RTLD_NEXT, "eglTerminate");
+    int remaining = -1;
+    pthread_mutex_lock(&wl_egl_displays_lock);
+    for (size_t i = 0; i < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0]); i++) {
+        if (wl_egl_displays[i].display == display && wl_egl_displays[i].references > 0) {
+            remaining = --wl_egl_displays[i].references;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wl_egl_displays_lock);
+    if (remaining > 0) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] eglTerminate kept display %p: %d other user(s)\n", display, remaining);
+        }
+        return 1;
+    }
+    return real != NULL ? real(display) : 0;
+}
