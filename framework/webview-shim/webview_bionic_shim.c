@@ -2731,6 +2731,35 @@ typedef int32_t WlEglInt;
 #define WL_EGL_NATIVE_BUFFER_ANDROID 0x3140
 #define WL_EGL_NATIVE_BUFFER_OHOS 0x34E1
 
+/* The board's EGL entry point behind one of these wrappers, from OH's libEGL.so itself. Not
+ * RTLD_NEXT: what follows this library in the global scope differs from process to process.
+ * libEGL is often there only as a local dependency, and the Mali driver, which the runtime's
+ * libandroid.so links directly, exports eglInitialize, eglCreateImageKHR and more under the same
+ * names but takes the driver's handles, not OH's. With RTLD_NEXT, whichever call came first
+ * failed: libGDX's GL check reported "requires OpenGL ES 2.0", Godot's GL thread "eglInitialize
+ * failed". RTLD_NOLOAD first, so a namespace uses the libEGL its own callers already have. */
+static void *wl_egl_real(const char *name)
+{
+    static void *library;
+    if (library == NULL) library = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+    if (library == NULL) library = dlopen("libEGL.so", RTLD_NOW);
+    void *symbol = library != NULL ? dlsym(library, name) : NULL;
+    Dl_info self, found;
+    if (symbol != NULL && dladdr((void *) &wl_egl_real, &self) != 0 && dladdr(symbol, &found) != 0 &&
+        found.dli_fbase == self.dli_fbase) {
+        symbol = NULL; /* never this library's own wrapper */
+    }
+    if (symbol == NULL) {
+        wl_relocs_log("[WESTLAKE-EGL] libEGL.so has no %s\n", name);
+    } else {
+        static int logged;
+        if (dladdr(symbol, &found) != 0 && !__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] board EGL from %s\n", found.dli_fname != NULL ? found.dli_fname : "?");
+        }
+    }
+    return symbol;
+}
+
 static struct {
     void *window_buffer;
     WlEglImage image;
@@ -2780,8 +2809,8 @@ WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigne
     static WlEglInt (*error)(void);
     if (real == NULL) {
         real = (WlEglImage (*)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *))
-                dlsym(RTLD_NEXT, "eglCreateImageKHR");
-        error = (WlEglInt (*)(void)) dlsym(RTLD_NEXT, "eglGetError");
+                wl_egl_real("eglCreateImageKHR");
+        error = (WlEglInt (*)(void)) wl_egl_real("eglGetError");
     }
     if (real == NULL) return NULL;
     size_t slot = sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
@@ -2819,7 +2848,7 @@ WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigne
 unsigned eglDestroyImageKHR(WlEglDisplay display, WlEglImage image)
 {
     static unsigned (*real)(WlEglDisplay, WlEglImage);
-    if (real == NULL) real = (unsigned (*)(WlEglDisplay, WlEglImage)) dlsym(RTLD_NEXT, "eglDestroyImageKHR");
+    if (real == NULL) real = (unsigned (*)(WlEglDisplay, WlEglImage)) wl_egl_real("eglDestroyImageKHR");
     unsigned result = real != NULL ? real(display, image) : 0;
     void *window_buffer = NULL;
     pthread_mutex_lock(&wl_egl_imports_lock);
@@ -2850,8 +2879,8 @@ unsigned eglSetDamageRegionKHR(WlEglDisplay display, void *surface, WlEglInt *re
     static int disabled;
     if (__atomic_load_n(&disabled, __ATOMIC_RELAXED)) return 1;
     if (real == NULL) {
-        real = (unsigned (*)(WlEglDisplay, void *, WlEglInt *, WlEglInt)) dlsym(RTLD_NEXT, "eglSetDamageRegionKHR");
-        error = (WlEglInt (*)(void)) dlsym(RTLD_NEXT, "eglGetError");
+        real = (unsigned (*)(WlEglDisplay, void *, WlEglInt *, WlEglInt)) wl_egl_real("eglSetDamageRegionKHR");
+        error = (WlEglInt (*)(void)) wl_egl_real("eglGetError");
     }
     if (real != NULL && real(display, surface, rects, count)) return 1;
     WlEglInt code = error != NULL ? error() : 0;
@@ -2863,60 +2892,18 @@ unsigned eglSetDamageRegionKHR(WlEglDisplay display, void *surface, WlEglInt *re
 }
 
 /*
- * eglInitialize / eglTerminate, reference-counted per display as Android's EGL loader does. hwui
- * and an app's own GL code (GLSurfaceView, a video or camera renderer through EGL14) share the
- * default display; on Android the app's eglTerminate only drops its reference, on OH it tears the
- * display down under hwui, whose next frame fails with EGL_NOT_INITIALIZED and aborts (X, and
- * Telegram's GL thread after it). The real eglTerminate runs when the last reference goes.
+ * eglTerminate. hwui renders the whole process through the default display and keeps it
+ * initialized for the life of the process; Android's EGL loader counts initializations, so an app's
+ * own eglTerminate (GLSurfaceView, a renderer through EGL14) never tears that display down there.
+ * OH's terminates it at once, under hwui, whose next frame fails with EGL_NOT_INITIALIZED and aborts
+ * (X, and Telegram's GL thread). The display therefore stays initialized; what the app created on
+ * it, it destroys itself, as it does on Android.
  */
-static struct {
-    WlEglDisplay display;
-    int references;
-} wl_egl_displays[16];
-static pthread_mutex_t wl_egl_displays_lock = PTHREAD_MUTEX_INITIALIZER;
-
-unsigned eglInitialize(WlEglDisplay display, WlEglInt *major, WlEglInt *minor)
-{
-    static unsigned (*real)(WlEglDisplay, WlEglInt *, WlEglInt *);
-    if (real == NULL) real = (unsigned (*)(WlEglDisplay, WlEglInt *, WlEglInt *)) dlsym(RTLD_NEXT, "eglInitialize");
-    if (real == NULL) return 0;
-    unsigned result = real(display, major, minor);
-    if (!result) return result;
-    pthread_mutex_lock(&wl_egl_displays_lock);
-    size_t free_slot = sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0]), i;
-    for (i = 0; i < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0]); i++) {
-        if (wl_egl_displays[i].display == display && wl_egl_displays[i].references > 0) break;
-        if (wl_egl_displays[i].references == 0 && free_slot == sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0])) free_slot = i;
-    }
-    if (i < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0])) {
-        wl_egl_displays[i].references++;
-    } else if (free_slot < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0])) {
-        wl_egl_displays[free_slot].display = display;
-        wl_egl_displays[free_slot].references = 1;
-    }
-    pthread_mutex_unlock(&wl_egl_displays_lock);
-    return result;
-}
-
 unsigned eglTerminate(WlEglDisplay display)
 {
-    static unsigned (*real)(WlEglDisplay);
-    if (real == NULL) real = (unsigned (*)(WlEglDisplay)) dlsym(RTLD_NEXT, "eglTerminate");
-    int remaining = -1;
-    pthread_mutex_lock(&wl_egl_displays_lock);
-    for (size_t i = 0; i < sizeof(wl_egl_displays) / sizeof(wl_egl_displays[0]); i++) {
-        if (wl_egl_displays[i].display == display && wl_egl_displays[i].references > 0) {
-            remaining = --wl_egl_displays[i].references;
-            break;
-        }
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGL] eglTerminate(%p): display left initialized for the process\n", display);
     }
-    pthread_mutex_unlock(&wl_egl_displays_lock);
-    if (remaining > 0) {
-        static int logged;
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            wl_relocs_log("[WESTLAKE-EGL] eglTerminate kept display %p: %d other user(s)\n", display, remaining);
-        }
-        return 1;
-    }
-    return real != NULL ? real(display) : 0;
+    return 1;
 }
