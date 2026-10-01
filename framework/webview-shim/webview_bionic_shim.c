@@ -2690,6 +2690,29 @@ WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nresult, (int fd, int *rcode, uint8_t *answer, size_t length),
                          (fd, rcode, answer, length))
 
+/* AChoreographer, for the same reason (Duolingo's packaged libraries import it); the runtime's
+ * definitions live in liboh_hwui_shim.so, which libandroid.so's dependencies reach. */
+typedef struct AChoreographer AChoreographer;
+typedef void (*westlake_frame_callback)(long time, void *data);
+typedef void (*westlake_frame_callback64)(int64_t time, void *data);
+typedef void (*westlake_refresh_rate_callback)(int64_t period, void *data);
+
+WESTLAKE_ALOOPER_FORWARD(AChoreographer *, AChoreographer_getInstance, (void), ())
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback,
+                         (AChoreographer *c, westlake_frame_callback callback, void *data), (c, callback, data))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed,
+                         (AChoreographer *c, westlake_frame_callback callback, void *data, long delay),
+                         (c, callback, data, delay))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback64,
+                         (AChoreographer *c, westlake_frame_callback64 callback, void *data), (c, callback, data))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed64,
+                         (AChoreographer *c, westlake_frame_callback64 callback, void *data, uint32_t delay),
+                         (c, callback, data, delay))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_registerRefreshRateCallback,
+                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_unregisterRefreshRateCallback,
+                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
+
 /*
  * Importing an AHardwareBuffer into EGL. Westlake's AHardwareBuffer is an OH_NativeBuffer, but
  * hwui's TextureView path (AutoBackendTextureRelease -> MakeBackendTexture) imports it the Android
