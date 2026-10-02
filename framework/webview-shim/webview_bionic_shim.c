@@ -2731,40 +2731,107 @@ typedef int32_t WlEglInt;
 #define WL_EGL_NATIVE_BUFFER_ANDROID 0x3140
 #define WL_EGL_NATIVE_BUFFER_OHOS 0x34E1
 
-/* The board's EGL entry point behind one of these wrappers, from OH's libEGL.so itself. Not
- * RTLD_NEXT: what follows this library in the global scope differs from process to process.
- * libEGL is often there only as a local dependency, and the Mali driver, which the runtime's
- * libandroid.so links directly, exports eglInitialize, eglCreateImageKHR and more under the same
- * names but takes the driver's handles, not OH's. With RTLD_NEXT, whichever call came first
- * failed: libGDX's GL check reported "requires OpenGL ES 2.0", Godot's GL thread "eglInitialize
- * failed". RTLD_NOLOAD first, so a namespace uses the libEGL its own callers already have. */
-static void *wl_egl_real(const char *name)
+/*
+ * The EGL implementations behind these wrappers. More than one serves the process: OH's libEGL.so,
+ * and the Mali driver, which the runtime's libandroid.so and libhwui.so link directly and which
+ * hwui's EGL calls bind to. Each takes only its own display handles: hwui's display given to
+ * libEGL.so fails with EGL_BAD_DISPLAY (Telegram's TextureView import), and an eglInitialize sent
+ * to whichever one RTLD_NEXT happened to find failed outright (libGDX: "requires OpenGL ES 2.0";
+ * Godot: "eglInitialize failed"). A call goes to the implementation whose current display it
+ * names; failing that, to each in turn while the answer is EGL_BAD_DISPLAY.
+ */
+#define WL_EGL_BAD_DISPLAY 0x3008
+#define WL_EGL_IMPLEMENTATIONS 3
+typedef struct {
+    void *library;
+    WlEglDisplay (*current_display)(void);
+    WlEglInt (*error)(void);
+    WlEglImage (*create_image)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *);
+    unsigned (*destroy_image)(WlEglDisplay, WlEglImage);
+    int (*dup_fence)(WlEglDisplay, void *);
+} WlEglImplementation;
+static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
+static int wl_egl_implementation_count;
+static pthread_once_t wl_egl_implementations_once = PTHREAD_ONCE_INIT;
+
+static void *wl_egl_entry(void *library, const char *name)
 {
-    static void *library;
-    if (library == NULL) library = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
-    if (library == NULL) library = dlopen("libEGL.so", RTLD_NOW);
-    void *symbol = library != NULL ? dlsym(library, name) : NULL;
-    Dl_info self, found;
-    if (symbol != NULL && dladdr((void *) &wl_egl_real, &self) != 0 && dladdr(symbol, &found) != 0 &&
-        found.dli_fbase == self.dli_fbase) {
-        symbol = NULL; /* never this library's own wrapper */
-    }
+    void *symbol = dlsym(library, name);
     if (symbol == NULL) {
-        wl_relocs_log("[WESTLAKE-EGL] libEGL.so has no %s\n", name);
-    } else {
-        static int logged;
-        if (dladdr(symbol, &found) != 0 && !__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            wl_relocs_log("[WESTLAKE-EGL] board EGL from %s\n", found.dli_fname != NULL ? found.dli_fname : "?");
-        }
+        /* An extension the library implements without exporting the name (the Mali driver's
+         * eglDupNativeFenceFDANDROID): its own eglGetProcAddress. */
+        void *(*proc)(const char *) = (void *(*)(const char *)) dlsym(library, "eglGetProcAddress");
+        if (proc != NULL) symbol = proc(name);
+    }
+    Dl_info self, found;
+    if (symbol != NULL && dladdr((void *) &wl_egl_entry, &self) != 0 && dladdr(symbol, &found) != 0 &&
+        found.dli_fbase == self.dli_fbase) {
+        return NULL; /* never this library's own wrapper */
     }
     return symbol;
+}
+
+static void wl_egl_add_implementation(void *library)
+{
+    if (library == NULL || wl_egl_implementation_count == WL_EGL_IMPLEMENTATIONS) return;
+    void *current = wl_egl_entry(library, "eglGetCurrentDisplay");
+    if (current == NULL) return;
+    for (int i = 0; i < wl_egl_implementation_count; i++) {
+        if ((void *) wl_egl_implementations[i].current_display == current) return; /* the same one */
+    }
+    WlEglImplementation *e = &wl_egl_implementations[wl_egl_implementation_count++];
+    e->library = library;
+    e->current_display = (WlEglDisplay (*)(void)) current;
+    e->error = (WlEglInt (*)(void)) wl_egl_entry(library, "eglGetError");
+    e->create_image = (WlEglImage (*)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *))
+            wl_egl_entry(library, "eglCreateImageKHR");
+    e->destroy_image = (unsigned (*)(WlEglDisplay, WlEglImage)) wl_egl_entry(library, "eglDestroyImageKHR");
+    e->dup_fence = (int (*)(WlEglDisplay, void *)) wl_egl_entry(library, "eglDupNativeFenceFDANDROID");
+    Dl_info info;
+    wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
+                  dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
+}
+
+static void wl_egl_find_implementations(void)
+{
+    /* First what the process binds to: eglGetCurrentDisplay, which this library does not define, in
+     * the global scope. Then the driver the runtime links, then OH's libEGL.so. */
+    Dl_info info;
+    void *first = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
+    if (first != NULL && dladdr(first, &info) != 0 && info.dli_fname != NULL) {
+        wl_egl_add_implementation(dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD));
+    }
+    wl_egl_add_implementation(dlopen("libGLES_mali.z.so", RTLD_NOW | RTLD_NOLOAD));
+    void *board = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+    wl_egl_add_implementation(board != NULL ? board : dlopen("libEGL.so", RTLD_NOW));
+}
+
+/* The implementations to try for a call on this display, in order; returns how many. */
+static int wl_egl_order(WlEglDisplay display, int order[WL_EGL_IMPLEMENTATIONS])
+{
+    pthread_once(&wl_egl_implementations_once, wl_egl_find_implementations);
+    for (int i = 0; display != NULL && i < wl_egl_implementation_count; i++) {
+        if (wl_egl_implementations[i].current_display() == display) {
+            order[0] = i;
+            return 1;
+        }
+    }
+    for (int i = 0; i < wl_egl_implementation_count; i++) order[i] = i;
+    return wl_egl_implementation_count;
+}
+
+static WlEglInt wl_egl_error(int which)
+{
+    return wl_egl_implementations[which].error != NULL ? wl_egl_implementations[which].error() : 0;
 }
 
 static struct {
     void *window_buffer;
     WlEglImage image;
+    int implementation;
 } wl_egl_imports[256];
 static pthread_mutex_t wl_egl_imports_lock = PTHREAD_MUTEX_INITIALIZER;
+static int wl_egl_imports_created, wl_egl_imports_destroyed;
 
 static void *wl_native_window_symbol(const char *name)
 {
@@ -2794,25 +2861,20 @@ WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
     pthread_mutex_lock(&wl_egl_imports_lock);
     size_t slot = 0;
     while (slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]) && wl_egl_imports[slot].window_buffer != NULL) slot++;
-    if (slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0])) {
+    int full = slot == sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
+    if (!full) {
         wl_egl_imports[slot].window_buffer = window_buffer;
         wl_egl_imports[slot].image = NULL;
     }
     pthread_mutex_unlock(&wl_egl_imports_lock);
+    if (full) wl_relocs_log("[WESTLAKE-EGL] import table full: %d created, %d destroyed\n",
+                            wl_egl_imports_created, wl_egl_imports_destroyed);
     return window_buffer;
 }
 
 WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigned target, WlEglClientBuffer buffer,
                              const WlEglInt *attribs)
 {
-    static WlEglImage (*real)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *);
-    static WlEglInt (*error)(void);
-    if (real == NULL) {
-        real = (WlEglImage (*)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *))
-                wl_egl_real("eglCreateImageKHR");
-        error = (WlEglInt (*)(void)) wl_egl_real("eglGetError");
-    }
-    if (real == NULL) return NULL;
     size_t slot = sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
     if (target == WL_EGL_NATIVE_BUFFER_ANDROID) {
         pthread_mutex_lock(&wl_egl_imports_lock);
@@ -2824,22 +2886,37 @@ WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigne
         }
         pthread_mutex_unlock(&wl_egl_imports_lock);
     }
-    if (slot == sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0])) return real(display, context, target, buffer, attribs);
-    WlEglImage image = real(display, context, WL_EGL_NATIVE_BUFFER_OHOS, buffer, attribs);
+    int ours = slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order), used = -1;
+    WlEglImage image = NULL;
+    WlEglInt code = 0;
+    for (int k = 0; k < count && image == NULL; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->create_image == NULL) continue;
+        used = order[k];
+        image = e->create_image(display, context, ours ? WL_EGL_NATIVE_BUFFER_OHOS : target, buffer, attribs);
+        /* Ask for the error only when another implementation remains: the caller reads it. */
+        if (image == NULL && k + 1 < count && (code = wl_egl_error(used)) != WL_EGL_BAD_DISPLAY) break;
+    }
+    if (!ours) return image;
     pthread_mutex_lock(&wl_egl_imports_lock);
     if (image != NULL) {
         wl_egl_imports[slot].image = image;
+        wl_egl_imports[slot].implementation = used;
+        wl_egl_imports_created++;
     } else {
         wl_egl_imports[slot].window_buffer = NULL;
     }
     pthread_mutex_unlock(&wl_egl_imports_lock);
     if (image == NULL) {
-        wl_relocs_log("[WESTLAKE-EGL] OH image import failed: 0x%x\n", error != NULL ? (unsigned) error() : 0u);
+        if (code == 0 && used >= 0) code = wl_egl_error(used);
+        wl_relocs_log("[WESTLAKE-EGL] OH image import failed: 0x%x\n", (unsigned) code);
         wl_destroy_window_buffer(buffer);
     } else {
         static int logged;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            wl_relocs_log("[WESTLAKE-EGL] AHardwareBuffer imported as an OH native buffer image\n");
+            wl_relocs_log("[WESTLAKE-EGL] AHardwareBuffer imported as an OH native buffer image (implementation %d)\n",
+                          used);
         }
     }
     return image;
@@ -2847,48 +2924,76 @@ WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigne
 
 unsigned eglDestroyImageKHR(WlEglDisplay display, WlEglImage image)
 {
-    static unsigned (*real)(WlEglDisplay, WlEglImage);
-    if (real == NULL) real = (unsigned (*)(WlEglDisplay, WlEglImage)) wl_egl_real("eglDestroyImageKHR");
-    unsigned result = real != NULL ? real(display, image) : 0;
     void *window_buffer = NULL;
+    int made_by = -1;
     pthread_mutex_lock(&wl_egl_imports_lock);
     for (size_t i = 0; image != NULL && i < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]); i++) {
         if (wl_egl_imports[i].image == image) {
             window_buffer = wl_egl_imports[i].window_buffer;
+            made_by = wl_egl_imports[i].implementation;
             wl_egl_imports[i].window_buffer = NULL;
             wl_egl_imports[i].image = NULL;
+            wl_egl_imports_destroyed++;
             break;
         }
     }
     pthread_mutex_unlock(&wl_egl_imports_lock);
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    if (made_by >= 0) {
+        order[0] = made_by;
+        count = 1;
+    }
+    unsigned result = 0;
+    for (int k = 0; k < count && !result; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->destroy_image == NULL) continue;
+        result = e->destroy_image(display, image);
+        if (!result && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
     wl_destroy_window_buffer(window_buffer);
     return result;
 }
 
 /*
- * EGL_KHR_partial_update. The board's EGL advertises it but rejects eglSetDamageRegionKHR with
- * EGL_BAD_ACCESS, and the deployed libhwui still treats that as fatal (the hwui source carries the
- * remedy as §320; the binary predates it): Telegram drew 120 frames, then aborted on its RenderThread.
- * The damage region is only a hint of which part changes, so after the first failure the call is
- * reported as done and no longer made: the frame is presented whole.
+ * EGL_KHR_partial_update. The board's EGL advertises it but has rejected the damage region with
+ * EGL_BAD_ACCESS (Telegram, after 120 frames), and the deployed libhwui still treats any failure as
+ * fatal: the hwui source carries the remedy as §320, the binary predates it. The region is only a
+ * hint of which part of the frame changes, so it is not passed on: each frame is presented whole.
  */
 unsigned eglSetDamageRegionKHR(WlEglDisplay display, void *surface, WlEglInt *rects, WlEglInt count)
 {
-    static unsigned (*real)(WlEglDisplay, void *, WlEglInt *, WlEglInt);
-    static WlEglInt (*error)(void);
-    static int disabled;
-    if (__atomic_load_n(&disabled, __ATOMIC_RELAXED)) return 1;
-    if (real == NULL) {
-        real = (unsigned (*)(WlEglDisplay, void *, WlEglInt *, WlEglInt)) wl_egl_real("eglSetDamageRegionKHR");
-        error = (WlEglInt (*)(void)) wl_egl_real("eglGetError");
-    }
-    if (real != NULL && real(display, surface, rects, count)) return 1;
-    WlEglInt code = error != NULL ? error() : 0;
-    if (!__atomic_exchange_n(&disabled, 1, __ATOMIC_RELAXED)) {
-        wl_relocs_log("[WESTLAKE-EGLDAMAGE] eglSetDamageRegionKHR failed (0x%x): partial-update damage off\n",
-                      (unsigned) code);
+    (void) rects;
+    (void) count;
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGLDAMAGE] damage region for %p/%p not passed on: frames presented whole\n",
+                      display, surface);
     }
     return 1;
+}
+
+/*
+ * eglDupNativeFenceFDANDROID. The Mali driver hwui binds its EGL calls to implements it but does not
+ * export the name, so hwui's call went to OH's libEGL.so with the driver's display: "invalid display
+ * pointer" on every TextureView frame. hwui then had no release fence, so the SurfaceTexture kept its
+ * old buffer frame after frame, and Telegram's next swaps failed with EGL_BAD_ALLOC. The call goes to
+ * the implementation that owns the display, through its eglGetProcAddress where it has no export.
+ */
+int eglDupNativeFenceFDANDROID(WlEglDisplay display, void *sync)
+{
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    for (int k = 0; k < count; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->dup_fence == NULL) continue;
+        int fd = e->dup_fence(display, sync);
+        if (fd >= 0) return fd;
+        if (k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGL] no native fence for sync %p on display %p\n", sync, display);
+    }
+    return -1; /* EGL_NO_NATIVE_FENCE_FD_ANDROID */
 }
 
 /*
