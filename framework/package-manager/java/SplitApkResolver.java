@@ -56,6 +56,12 @@ public final class SplitApkResolver {
                 if (basePrefix != null && splitName.startsWith(basePrefix)) {
                     splitName = splitName.substring(basePrefix.length());
                 }
+                // Android installs a split as split_<name>.apk, and SDKs find theirs by that file
+                // name: Facebook's SoLoader looks for a split path ending split_config.<abi>.apk
+                // and otherwise reads native libraries from the base APK, which has none.
+                if (splitName.startsWith("split_")) {
+                    splitName = splitName.substring("split_".length());
+                }
                 if (!splitName.isEmpty()) explicit.put(splitName, candidate.getAbsolutePath());
             }
             if (!explicit.isEmpty()) {

@@ -1,7 +1,7 @@
 #!/bin/bash
 # build_opengl_jni.sh <android-source> <oh-sdk-native> <out-dir>
 # Builds libwl_opengl_jni.so: AOSP's generated GL JNI sources compiled unchanged, the OH ports of
-# EGLImpl, EGL14, EGL15 and EGLExt, and forwarders for GL functions OH's libGLESv3 lacks, linked against OH's public libEGL/libGLESv3 and the runtime's
+# EGLImpl, EGL14, EGL15 and EGLExt, AOSP's android.opengl util natives (GLUtils, Visibility, ETC1), and forwarders for GL functions OH's libGLESv3 lacks, linked against OH's public libEGL/libGLESv3 and the runtime's
 # libnativehelper and liblog.
 set -e
 SRC=$1; SDK=$2; OUT=$3
@@ -11,6 +11,8 @@ mkdir -p $OUT/obj $OUT/gles1-include
 # Only Android's GLES 1 headers: OH's SDK has none. EGL, KHR and GLES2/3 must come from OH's SDK,
 # because Android's eglplatform.h does not recognise OH and falls back to X11.
 ln -sfn $SRC/frameworks-native/opengl/include/GLES $OUT/gles1-include/GLES
+# ...and ETC1's, for android/opengl/util.cpp.
+ln -sfn $SRC/frameworks-native/opengl/include/ETC1 $OUT/gles1-include/ETC1
 # ...plus the one GLES3 header OH's SDK lacks; header search falls back per file to OH's GLES3.
 mkdir -p $OUT/gles1-include/GLES3
 ln -sfn $SRC/frameworks-native/opengl/include/GLES3/gl3ext.h $OUT/gles1-include/GLES3/gl3ext.h
@@ -28,6 +30,11 @@ done
 for f in oh_egl_impl oh_egl14 oh_egl15 oh_eglext oh_surface_window; do
   $CXX $INC -c $D/$f.cpp -o $OUT/obj/$f.o; objs+=($OUT/obj/$f.o)
 done
+# android/opengl/util.cpp (GLUtils, Visibility, ETC1) with its polygon clipper and libETC1, unchanged;
+# compat/ supplies graphics::Bitmap over the NDK bitmap API, RegisterMethodsOrDie and utils/Log.h.
+$CXX $INC -c $J/android/opengl/util.cpp -o $OUT/obj/util.o; objs+=($OUT/obj/util.o)
+$CXX $INC -c $J/android/opengl/poly_clip.cpp -o $OUT/obj/poly_clip.o; objs+=($OUT/obj/poly_clip.o)
+$CXX $INC -c $SRC/frameworks-native/opengl/libs/ETC1/etc1.cpp -o $OUT/obj/etc1.o; objs+=($OUT/obj/etc1.o)
 $CXX $INC -c $D/opengl_jni_onload.cpp -o $OUT/obj/onload.o; objs+=($OUT/obj/onload.o)
 # Forwarders cover what the SDK's public libGLESv3 does not export -- the link-time contract, not
 # what a particular board happens to export -- and resolve those through eglGetProcAddress.

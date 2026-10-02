@@ -10,7 +10,8 @@ private graphics stack, none of which exists on OH:
 
 Everything else is kept byte-for-byte, so a reviewer can diff this port against the AOSP file and
 see only those replacements. The window surface comes from wl_window_from_surface
-(oh_surface_window.cpp), which resolves it the way the runtime's hwui does. SurfaceTexture-backed windows are refused explicitly.
+(oh_surface_window.cpp), which resolves it the way the runtime's hwui does; a SurfaceTexture's
+comes from wl_window_from_surface_texture, the OH producer window of its OH_NativeImage.
 
 Usage: port_egl_impl.py <aosp EGLImpl.cpp> <out oh_egl_impl.cpp>
 """
@@ -45,6 +46,7 @@ includes_new = '''#include <nativehelper/JNIHelp.h>
 
 // OH port: the OH window a Java Surface carries (oh_surface_window.cpp, shared with EGL14).
 extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface);
+extern "C" void* wl_window_from_surface_texture(JNIEnv* env, jobject surfaceTexture);
 static void* oh_window_from_surface(JNIEnv* env, jobject surface) {
     return wl_window_from_surface(env, surface);
 }
@@ -87,10 +89,28 @@ static jlong jni_eglCreateWindowSurface(JNIEnv *_env, jobject _this, jobject dis
 src = replace_function(src, 'jni_eglCreateWindowSurfaceTexture', r'''
 static jlong jni_eglCreateWindowSurfaceTexture(JNIEnv *_env, jobject _this, jobject display,
         jobject config, jobject native_window, jintArray attrib_list) {
-    // OH port: a SurfaceTexture has no OH native window behind it here.
-    jniThrowException(_env, "java/lang/UnsupportedOperationException",
-            "eglCreateWindowSurface with a SurfaceTexture is not supported on this platform");
-    return 0;
+    if (display == NULL || config == NULL
+        || !validAttribList(_env, attrib_list)) {
+        jniThrowException(_env, "java/lang/IllegalArgumentException", NULL);
+        return JNI_FALSE;
+    }
+    EGLDisplay dpy = getDisplay(_env, display);
+    EGLContext cnf = getConfig(_env, config);
+    // OH port: the SurfaceTexture's own OH producer window (oh_surface_window.cpp).
+    void* window = native_window != NULL ? wl_window_from_surface_texture(_env, native_window) : NULL;
+    if (window == NULL) {
+        jniThrowException(_env, "java/lang/IllegalArgumentException",
+                "Make sure the SurfaceTexture is valid");
+        return 0;
+    }
+    jint* base = beginNativeAttribList(_env, attrib_list);
+    EGLSurface sur = eglCreateWindowSurface(dpy, cnf, (EGLNativeWindowType) window, base);
+    if (sur == EGL_NO_SURFACE) {
+        fprintf(stderr, "[WL-OPENGL] eglCreateWindowSurface(SurfaceTexture window=%p) failed: EGL error 0x%x\n",
+                window, eglGetError());
+    }
+    endNativeAttributeList(_env, attrib_list, base);
+    return reinterpret_cast<jlong>(sur);
 }
 ''')
 

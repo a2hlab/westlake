@@ -72,6 +72,24 @@ static int westlake_basename_in_list(const char *path, const char *list) {
     return 0;
 }
 
+/*
+ * A library the app wrote at run time: loaded from its own data directory, from the
+ * code_cache/wl-exec copy the bionic shim makes of it, or from the APK library directory the shim
+ * copies it into when an Android namespace exists. Such libraries are Android NDK code the
+ * launch could not name in advance (the APK does not contain them), so they get the Bionic ABI too:
+ * Messenger's superpack-unpacked liger library read a musl addrinfo as Bionic's and folly's
+ * SocketAddress rejected the address family.
+ */
+static int westlake_is_app_written_library(const char *path) {
+    /* The bionic shim puts such a library, when the launch made an Android namespace, beside the
+     * APK's own libraries (ASX_NATIVE_LIB_DIR); everything there is the app's NDK code. */
+    const char *apk_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
+    size_t n = apk_lib_dir != NULL ? strlen(apk_lib_dir) : 0;
+    if (n > 0 && strncmp(path, apk_lib_dir, n) == 0 && path[n] == '/') return 1;
+    return strstr(path, "/code_cache/wl-exec/") != NULL || strncmp(path, "/data/data/", 11) == 0 ||
+           strncmp(path, "/data/user/", 11) == 0 || strncmp(path, "/data/user_de/", 14) == 0;
+}
+
 static int westlake_network_callsite_selected(void *return_address) {
     Dl_info info;
     if (return_address == NULL ||
@@ -79,7 +97,8 @@ static int westlake_network_callsite_selected(void *return_address) {
         return 0;
     }
     return westlake_basename_in_list(
-            info.dli_fname, getenv("WESTLAKE_ANDROID_NATIVE_NET_TARGETS"));
+            info.dli_fname, getenv("WESTLAKE_ANDROID_NATIVE_NET_TARGETS")) ||
+           westlake_is_app_written_library(info.dli_fname);
 }
 
 static int westlake_network_trace_callsite(void *return_address) {
@@ -182,6 +201,44 @@ static void westlake_format_sockaddr(const struct sockaddr *address,
     }
 }
 
+/* Bionic's AI_* bits (netdb.h) that differ from OH musl's: NUMERICSERV 0x8, ALL 0x100,
+ * V4MAPPED_CFG 0x200, ADDRCONFIG 0x400, V4MAPPED 0x800. Unchanged: PASSIVE, CANONNAME, NUMERICHOST.
+ * Untranslated, a Bionic AI_ADDRCONFIG reached musl as AI_NUMERICSERV. */
+static int westlake_musl_ai_flags(int bionic) {
+    int musl = bionic & (AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST);
+    if (bionic & 0x8) musl |= AI_NUMERICSERV;
+    if (bionic & 0x100) musl |= AI_ALL;
+    if (bionic & 0x400) musl |= AI_ADDRCONFIG;
+    if (bionic & (0x800 | 0x200)) musl |= AI_V4MAPPED;
+    return musl;
+}
+
+/* OH musl's EAI_* are negative; Bionic's are the BSD positive values. */
+static const struct { int musl, bionic; } westlake_eai[] = {
+    {EAI_BADFLAGS, 3}, {EAI_NONAME, 8}, {EAI_AGAIN, 2}, {EAI_FAIL, 4}, {EAI_NODATA, 7},
+    {EAI_FAMILY, 5}, {EAI_SOCKTYPE, 10}, {EAI_SERVICE, 9}, {EAI_MEMORY, 6}, {EAI_SYSTEM, 11},
+    {EAI_OVERFLOW, 14},
+};
+
+static int westlake_bionic_eai(int musl) {
+    for (size_t i = 0; i < sizeof(westlake_eai) / sizeof(westlake_eai[0]); ++i) {
+        if (westlake_eai[i].musl == musl) return westlake_eai[i].bionic;
+    }
+    return musl;
+}
+
+const char *gai_strerror(int code) {
+    typedef const char *(*Fn)(int);
+    static Fn real;
+    if (real == NULL) real = (Fn)westlake_libc_symbol("gai_strerror");
+    if (westlake_network_callsite_selected(__builtin_return_address(0))) {
+        for (size_t i = 0; i < sizeof(westlake_eai) / sizeof(westlake_eai[0]); ++i) {
+            if (westlake_eai[i].bionic == code) { code = westlake_eai[i].musl; break; }
+        }
+    }
+    return real != NULL ? real(code) : "Unknown error";
+}
+
 int getaddrinfo(const char *node, const char *service,
                 const struct addrinfo *hints, struct addrinfo **result) {
     typedef int (*Fn)(const char *, const char *, const struct addrinfo *,
@@ -200,7 +257,7 @@ int getaddrinfo(const char *node, const char *service,
     if (selected) {
         if (hints != NULL) {
             memset(&oh_hints, 0, sizeof(oh_hints));
-            oh_hints.ai_flags = hints->ai_flags;
+            oh_hints.ai_flags = westlake_musl_ai_flags(hints->ai_flags);
             oh_hints.ai_family = hints->ai_family;
             oh_hints.ai_socktype = hints->ai_socktype;
             oh_hints.ai_protocol = hints->ai_protocol;
@@ -254,13 +311,13 @@ int getaddrinfo(const char *node, const char *service,
         if (real_free != NULL) real_free(oh_result);
         if (bionic_result == NULL && oh_result != NULL) {
             if (result != NULL) *result = NULL;
-            return EAI_MEMORY;
+            return westlake_bionic_eai(EAI_MEMORY);
         }
         if (result != NULL) {
             *result = (struct addrinfo *)bionic_result;
         } else {
             westlake_free_bionic_addrinfo(bionic_result);
-            return EAI_FAIL;
+            return westlake_bionic_eai(EAI_FAIL);
         }
         if (trace) {
             fprintf(stderr,
@@ -269,7 +326,7 @@ int getaddrinfo(const char *node, const char *service,
             fflush(stderr);
         }
     }
-    return rc;
+    return selected ? westlake_bionic_eai(rc) : rc;
 }
 
 void freeaddrinfo(struct addrinfo *result) {

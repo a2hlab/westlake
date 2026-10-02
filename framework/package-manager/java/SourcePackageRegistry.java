@@ -38,6 +38,16 @@ public final class SourcePackageRegistry {
         return result;
     }
 
+    /** The registered package's <uses-library> names, required then optional. */
+    public static synchronized java.util.List<String> usesLibraries() {
+        java.util.ArrayList<String> names = new java.util.ArrayList<>();
+        if (parsed != null) {
+            if (parsed.usesLibraries != null) names.addAll(parsed.usesLibraries);
+            if (parsed.usesOptionalLibraries != null) names.addAll(parsed.usesOptionalLibraries);
+        }
+        return names;
+    }
+
     public static synchronized boolean contains(String packageName) {
         return parsed != null && parsed.packageName.equals(packageName);
     }

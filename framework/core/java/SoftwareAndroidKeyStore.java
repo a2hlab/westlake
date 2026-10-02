@@ -76,7 +76,56 @@ public final class SoftwareAndroidKeyStore extends Provider {
         }
         sFile = directory == null ? null : new File(directory, "westlake-android-keystore");
         Security.addProvider(new SoftwareAndroidKeyStore());
-        System.err.println(TAG + "installed software " + NAME + " provider, keys in " + sFile);
+        int mirrored = 0;
+        if (Security.getProvider(BCWorkaround.NAME) == null) {
+            BCWorkaround workaround = new BCWorkaround();
+            mirrored = workaround.getServices().size();
+            Security.addProvider(workaround);
+        }
+        System.err.println(TAG + "installed software " + NAME + " provider, keys in " + sFile
+                + "; " + BCWorkaround.NAME + " mirrors " + mirrored + " operations");
+    }
+
+    /**
+     * Android installs a second provider, "AndroidKeyStoreBCWorkaround", for the operations on
+     * keystore keys (Cipher, Signature, Mac, KeyAgreement), and apps name it:
+     * flutter_secure_storage asks for Cipher.getInstance(..., "AndroidKeyStoreBCWorkaround") and
+     * failed with NoSuchProviderException (Jiyi, ServerBox). This runtime's keys are ordinary
+     * software keys that the installed providers already operate on, so each operation is the
+     * first installed provider's service of that name, reached under this provider.
+     */
+    static final class BCWorkaround extends Provider {
+        static final String NAME = "AndroidKeyStoreBCWorkaround";
+        private static final String[] TYPES = {"Cipher", "Signature", "Mac", "KeyAgreement"};
+
+        BCWorkaround() {
+            super(NAME, 1.0, "Westlake: operations on software AndroidKeyStore keys, from the installed providers");
+            for (Provider source : Security.getProviders()) {
+                if (source instanceof SoftwareAndroidKeyStore || source instanceof BCWorkaround) {
+                    continue;
+                }
+                for (Service service : source.getServices()) {
+                    boolean wanted = false;
+                    for (String type : TYPES) wanted |= type.equals(service.getType());
+                    if (!wanted || getService(service.getType(), service.getAlgorithm()) != null) {
+                        continue;
+                    }
+                    final Service origin = service;
+                    putService(new Service(this, origin.getType(), origin.getAlgorithm(), origin.getClassName(),
+                            null, null) {
+                        @Override
+                        public Object newInstance(Object parameter) throws java.security.NoSuchAlgorithmException {
+                            return origin.newInstance(parameter);
+                        }
+
+                        @Override
+                        public boolean supportsParameter(Object parameter) {
+                            return origin.supportsParameter(parameter);
+                        }
+                    });
+                }
+            }
+        }
     }
 
     private SoftwareAndroidKeyStore() {

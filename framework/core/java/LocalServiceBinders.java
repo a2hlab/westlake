@@ -115,6 +115,20 @@ public final class LocalServiceBinders {
                 case "wifi":
                     binder = proxy(name, "android.net.wifi.IWifiManager", LocalServiceBinders::wifi);
                     break;
+                // TrafficStats.init (run at bind) takes its binder from NetworkStatsManager, which
+                // needs this service; without it every TrafficStats call threw "TrafficStats not
+                // initialized" (Waze, Shazam). Stats are not counted here, so every query answers
+                // UNSUPPORTED, as on a device that does not count traffic.
+                case "netstats":
+                    binder = proxy(name, "android.net.INetworkStatsService", LocalServiceBinders::netStats);
+                    break;
+                // TelephonyManager.listen registers through the telephony registry; a null registry
+                // threw a NullPointerException (Waze). Registration succeeds and no event arrives,
+                // which is what a device without telephony changes delivers.
+                case "telephony.registry":
+                    binder = proxy(name, "com.android.internal.telephony.ITelephonyRegistry",
+                            LocalServiceBinders::telephonyRegistry);
+                    break;
                 case "notification":
                     binder = proxy(name, "android.app.INotificationManager",
                             LocalServiceBinders::notification);
@@ -264,6 +278,27 @@ public final class LocalServiceBinders {
      * needs Wi-Fi state learns it is unavailable rather than crashing on a null manager.
      */
     private static Object wifi(String method, Object[] args) {
+        // A null connection info NPE'd NYTimes' startup initializer. AOSP's default WifiInfo is
+        // "not connected": unknown SSID, network id -1, invalid RSSI.
+        if ("getConnectionInfo".equals(method)) {
+            try {
+                java.lang.reflect.Constructor<?> c = Class.forName("android.net.wifi.WifiInfo").getDeclaredConstructor();
+                c.setAccessible(true);
+                return c.newInstance();
+            } catch (Throwable t) {
+                return DEFAULT;
+            }
+        }
+        return DEFAULT;
+    }
+
+    private static Object netStats(String method, Object[] args) {
+        // getUidStats / getIfaceStats / getTotalStats return long: TrafficStats.UNSUPPORTED.
+        if (method.endsWith("Stats")) return Long.valueOf(-1L);
+        return DEFAULT;
+    }
+
+    private static Object telephonyRegistry(String method, Object[] args) {
         return DEFAULT;
     }
 

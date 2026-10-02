@@ -22,15 +22,71 @@
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
  *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
  *
+ *   android.app.ActivityThread.nPurgePendingResources / nInitZygoteChildHeapProfiling -- the
+ *   framework calls the first itself, from its low-memory purge, so no app code names it and any
+ *   app can reach it once the system is short of memory: RedReader died on it before its first
+ *   screen. AOSP's version asks the allocator to release free memory and ignores the result;
+ *   OH's musl has no M_PURGE, so here it does nothing, which is the same outcome for the app. The
+ *   second sets up heap profiling for zygote children, which is not configured here.
+ *
+ *   android.database.sqlite.SQLiteGlobal.nativeReleaseMemory -- the same kind: ActivityThread's
+ *   low-memory handler calls it for every app. AOSP returns the bytes SQLite freed; this answers
+ *   0, nothing released, which callers only log. Found by the harness's lifecycle-natives check,
+ *   before any app died on it.
+ *
+ *   android.os.SystemProperties.native_get(String, String) -- wrapped, not replaced. Its table (in
+ *   liboh_android_runtime.so, which cannot be rebuilt here) has no dalvik.vm heap sizes, so
+ *   ActivityManager.getMemoryClass() and getLargeMemoryClass() answered 0: CNN's Application built
+ *   an LruCache of that size and threw "maxSize <= 0"; Glide sizes its caches the same way. The
+ *   registered implementation is taken from ART's method record (a jmethodID is the ArtMethod;
+ *   its JNI entry point, data_, is at offset 16 in this ART) and used only if it lies in
+ *   liboh_android_runtime.so; the wrapper returns it unchanged unless it answers nothing for
+ *   one of these keys, then the value an 8 GB Android device reports. Same heap size as the
+ *   bionic shim's table.
+ *
+ *   java.io.UnixFileSystem.setPermission0 / setReadOnly0 -- File.setWritable, setReadable,
+ *   setExecutable and setReadOnly returned false on every file and directory (Os.chmod on the same
+ *   paths works): Facebook and Messenger (SoLoader making lib-compressed read-only) and CapCut died
+ *   on it. Replaced with libcore's own logic (UnixFileSystem_md.c): stat, add or clear the owner or
+ *   everyone bits, chmod.
+ *
+ *   The loading thread's Java priority -- not a native, a value. libart.so's PaletteSchedGetPriority
+ *   is a weak stub that returns success without writing a priority, so ART gives every thread it
+ *   attaches, the main thread included, Java priority 0 (Android's main thread has 5), and every
+ *   Java thread created from them inherits 0. Code that saves a thread's priority and restores it
+ *   calls Thread.setPriority(0), which throws "Priority out of range: 0": Instagram's Application
+ *   constructor and CapCut's ByteDance thread pool died on it. This library loads on the main
+ *   thread before the app starts, so it sets that thread to NORM_PRIORITY when it reads 0; threads
+ *   created from it then inherit 5. Threads ART attaches later (render, binder) still read 0 --
+ *   fixing those needs the palette in libart.
+ *
+ *   android.text.AndroidCharacter -- see text_natives.c.
+ *
+ *   android.media.AudioRecord -- see audiorecord_natives.c.
+ *
+ *   android.media -- MediaPlayer, and the AudioTrack and AudioSystem natives the AudioTrack shim
+ *   leaves out: see media_natives.c.
+ *
  * Bound with RegisterNatives rather than left to be found by name, which is what lets this library
  * supply a method belonging to a boot class without being the library that owns it.
  */
+#define _GNU_SOURCE
+#define _GNU_SOURCE /* dladdr */
+#include <dlfcn.h>
 #include <jni.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/xattr.h>
+#include <grp.h>
+#include <poll.h>
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_acos(JNIEnv* env, jclass c, jdouble a)
 { (void)env; (void)c; return acos(a); }
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_asin(JNIEnv* env, jclass c, jdouble a)
@@ -204,6 +260,89 @@ static const JNINativeMethod kVm[] = {
     { "getNanoTimeAdjustment", "(J)J", (void*) wl_getNanoTimeAdjustment },
 };
 
+static void wl_purgePendingResources(JNIEnv* env, jclass c) { (void) env; (void) c; }
+static void wl_initZygoteChildHeapProfiling(JNIEnv* env, jclass c) { (void) env; (void) c; }
+
+typedef jstring (*PropGetFn)(JNIEnv*, jclass, jstring, jstring);
+static PropGetFn g_prop_get;
+
+static const struct { const char* key; const char* value; } kHeapProps[] = {
+    { "dalvik.vm.heapgrowthlimit", "256m" },
+    { "dalvik.vm.heapsize", "512m" },
+};
+
+static jstring wl_prop_get(JNIEnv* env, jclass c, jstring key, jstring def)
+{
+    jstring answer = g_prop_get(env, c, key, def);
+    const char* k;
+    const char* a;
+    int missing;
+    size_t i;
+    if ((*env)->ExceptionCheck(env) || key == NULL) return answer;
+    /* Missing means empty, or the caller's own default handed back: getLargeMemoryClass asks for
+     * dalvik.vm.heapsize with "16m" as the default and got 16 back. */
+    a = answer != NULL ? (*env)->GetStringUTFChars(env, answer, NULL) : NULL;
+    missing = a == NULL || a[0] == '\0';
+    if (!missing && def != NULL) {
+        const char* d = (*env)->GetStringUTFChars(env, def, NULL);
+        if (d != NULL) {
+            missing = strcmp(a, d) == 0;
+            (*env)->ReleaseStringUTFChars(env, def, d);
+        }
+    }
+    if (a != NULL) (*env)->ReleaseStringUTFChars(env, answer, a);
+    if (!missing) return answer;
+    k = (*env)->GetStringUTFChars(env, key, NULL);
+    if (k == NULL) return answer;
+    for (i = 0; i < sizeof(kHeapProps) / sizeof(kHeapProps[0]); i++) {
+        if (strcmp(k, kHeapProps[i].key) == 0) {
+            (*env)->ReleaseStringUTFChars(env, key, k);
+            return (*env)->NewStringUTF(env, kHeapProps[i].value);
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, key, k);
+    return answer;
+}
+
+/* Wraps SystemProperties.native_get(String, String) if its registered implementation can be found
+ * and is liboh_android_runtime's; otherwise leaves it alone. Returns 1 when wrapped. */
+static int wrap_system_properties(JNIEnv* env)
+{
+    static const JNINativeMethod wrapped = {
+        "native_get", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", (void*) wl_prop_get };
+    jclass c = (*env)->FindClass(env, "android/os/SystemProperties");
+    jmethodID m;
+    void* entry;
+    Dl_info info;
+    int ok = 0;
+    if (c == NULL) { (*env)->ExceptionClear(env); return 0; }
+    m = (*env)->GetStaticMethodID(env, c, wrapped.name, wrapped.signature);
+    if (m == NULL) {
+        (*env)->ExceptionClear(env);
+    } else {
+        entry = *(void* const*) ((const char*) m + 16);   /* ArtMethod::ptr_sized_fields_.data_ */
+        if (entry != NULL && dladdr(entry, &info) != 0 && info.dli_fname != NULL
+                && strstr(info.dli_fname, "liboh_android_runtime") != NULL) {
+            g_prop_get = (PropGetFn) entry;
+            ok = (*env)->RegisterNatives(env, c, &wrapped, 1) == JNI_OK;
+            if (!ok) (*env)->ExceptionClear(env);
+        }
+    }
+    (*env)->DeleteLocalRef(env, c);
+    return ok;
+}
+
+static jint wl_sqliteReleaseMemory(JNIEnv* env, jclass c) { (void) env; (void) c; return 0; }
+
+static const JNINativeMethod kSqliteGlobal[] = {
+    { "nativeReleaseMemory", "()I", (void*) wl_sqliteReleaseMemory },
+};
+
+static const JNINativeMethod kActivityThread[] = {
+    { "nPurgePendingResources", "()V", (void*) wl_purgePendingResources },
+    { "nInitZygoteChildHeapProfiling", "()V", (void*) wl_initZygoteChildHeapProfiling },
+};
+
 static const JNINativeMethod kSurfaceControl[] = {
     { "nativeSetDesiredHdrHeadroom", "(JJF)V",
       (void*) Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadroom },
@@ -226,6 +365,91 @@ static const JNINativeMethod kStrictMath[] = {
     SM(log1p, "(D)D"), SM(sin, "(D)D"), SM(sinh, "(D)D"), SM(sqrt, "(D)D"), SM(tan, "(D)D"),
     SM(tanh, "(D)D"), SM(IEEEremainder, "(DD)D"), SM(atan2, "(DD)D"), SM(hypot, "(DD)D"),
     SM(pow, "(DD)D"),
+};
+
+/*
+ * libcore.io.Memory's bulk copies between native memory and Java arrays. NIO's direct buffers
+ * use them for every bulk put/get (FloatBuffer.put(float[]) and the like), and this runtime's
+ * libcore registers none: libGDX's Mindustry died in FloatBuffer.put on pokeFloatArray, Unciv on
+ * pokeShortArray. As AOSP's libcore_io_Memory.cpp: a plain copy, or a per-element byte swap
+ * when the buffer's order is not the platform's.
+ */
+#define WL_MEMORY_ARRAY(Name, T, JArray, Get, Set, Swap)                                           \
+    static void wl_peek##Name##Array(JNIEnv* env, jclass c, jlong address, JArray dst,           \
+                                     jint offset, jint count, jboolean swap) {                   \
+        const T* src = (const T*) (intptr_t) address;                                            \
+        (void) c;                                                                                  \
+        if (!swap) {                                                                               \
+            (*env)->Set(env, dst, offset, count, src);                                             \
+            return;                                                                                \
+        }                                                                                          \
+        for (jint i = 0; i < count; i++) {                                                         \
+            T value;                                                                               \
+            memcpy(&value, &src[i], sizeof value);                                                 \
+            value = Swap(value);                                                                   \
+            (*env)->Set(env, dst, offset + i, 1, &value);                                          \
+        }                                                                                          \
+    }                                                                                              \
+    static void wl_poke##Name##Array(JNIEnv* env, jclass c, jlong address, JArray src,           \
+                                     jint offset, jint count, jboolean swap) {                   \
+        T* dst = (T*) (intptr_t) address;                                                          \
+        (void) c;                                                                                  \
+        if (!swap) {                                                                               \
+            (*env)->Get(env, src, offset, count, dst);                                             \
+            return;                                                                                \
+        }                                                                                          \
+        for (jint i = 0; i < count; i++) {                                                         \
+            T value;                                                                               \
+            (*env)->Get(env, src, offset + i, 1, &value);                                          \
+            value = Swap(value);                                                                   \
+            memcpy(&dst[i], &value, sizeof value);                                                 \
+        }                                                                                          \
+    }
+
+static inline jchar wl_swap16c(jchar v) { return (jchar) __builtin_bswap16(v); }
+static inline jshort wl_swap16(jshort v) { return (jshort) __builtin_bswap16((uint16_t) v); }
+static inline jint wl_swap32(jint v) { return (jint) __builtin_bswap32((uint32_t) v); }
+static inline jlong wl_swap64(jlong v) { return (jlong) __builtin_bswap64((uint64_t) v); }
+static inline jfloat wl_swapf(jfloat v) {
+    uint32_t bits;
+    memcpy(&bits, &v, sizeof bits);
+    bits = __builtin_bswap32(bits);
+    memcpy(&v, &bits, sizeof v);
+    return v;
+}
+static inline jdouble wl_swapd(jdouble v) {
+    uint64_t bits;
+    memcpy(&bits, &v, sizeof bits);
+    bits = __builtin_bswap64(bits);
+    memcpy(&v, &bits, sizeof v);
+    return v;
+}
+
+WL_MEMORY_ARRAY(Char, jchar, jcharArray, GetCharArrayRegion, SetCharArrayRegion, wl_swap16c)
+WL_MEMORY_ARRAY(Short, jshort, jshortArray, GetShortArrayRegion, SetShortArrayRegion, wl_swap16)
+WL_MEMORY_ARRAY(Int, jint, jintArray, GetIntArrayRegion, SetIntArrayRegion, wl_swap32)
+WL_MEMORY_ARRAY(Long, jlong, jlongArray, GetLongArrayRegion, SetLongArrayRegion, wl_swap64)
+WL_MEMORY_ARRAY(Float, jfloat, jfloatArray, GetFloatArrayRegion, SetFloatArrayRegion, wl_swapf)
+WL_MEMORY_ARRAY(Double, jdouble, jdoubleArray, GetDoubleArrayRegion, SetDoubleArrayRegion, wl_swapd)
+
+static void wl_peekByteArray(JNIEnv* env, jclass c, jlong address, jbyteArray dst, jint offset, jint count) {
+    (void) c;
+    (*env)->SetByteArrayRegion(env, dst, offset, count, (const jbyte*) (intptr_t) address);
+}
+static void wl_pokeByteArray(JNIEnv* env, jclass c, jlong address, jbyteArray src, jint offset, jint count) {
+    (void) c;
+    (*env)->GetByteArrayRegion(env, src, offset, count, (jbyte*) (intptr_t) address);
+}
+
+#define MEM(Name, Sig) { #Name, Sig, (void*) wl_##Name }
+static const JNINativeMethod kMemory[] = {
+    MEM(peekByteArray, "(J[BII)V"), MEM(pokeByteArray, "(J[BII)V"),
+    MEM(peekCharArray, "(J[CIIZ)V"), MEM(pokeCharArray, "(J[CIIZ)V"),
+    MEM(peekShortArray, "(J[SIIZ)V"), MEM(pokeShortArray, "(J[SIIZ)V"),
+    MEM(peekIntArray, "(J[IIIZ)V"), MEM(pokeIntArray, "(J[IIIZ)V"),
+    MEM(peekLongArray, "(J[JIIZ)V"), MEM(pokeLongArray, "(J[JIIZ)V"),
+    MEM(peekFloatArray, "(J[FIIZ)V"), MEM(pokeFloatArray, "(J[FIIZ)V"),
+    MEM(peekDoubleArray, "(J[DIIZ)V"), MEM(pokeDoubleArray, "(J[DIIZ)V"),
 };
 
 static void note(const char* text)
@@ -257,6 +481,329 @@ static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int 
     return bound;
 }
 
+void wl_register_media(JNIEnv* env, JavaVM* vm);
+int wl_register_text(JNIEnv* env);
+int wl_register_audiorecord(JNIEnv* env);
+int wl_register_expat(JNIEnv* env);
+int wl_register_ojluni_nio(JNIEnv* env);
+
+static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
+{
+    jclass c = (*env)->GetObjectClass(env, file);
+    jmethodID getPath = (*env)->GetMethodID(env, c, "getPath", "()Ljava/lang/String;");
+    jstring path;
+    const char* chars;
+    (*env)->DeleteLocalRef(env, c);
+    if (getPath == NULL) { (*env)->ExceptionClear(env); return 0; }
+    path = (jstring) (*env)->CallObjectMethod(env, file, getPath);
+    if (path == NULL || (*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); return 0; }
+    chars = (*env)->GetStringUTFChars(env, path, NULL);
+    if (chars == NULL) { (*env)->DeleteLocalRef(env, path); return 0; }
+    snprintf(out, size, "%s", chars);
+    (*env)->ReleaseStringUTFChars(env, path, chars);
+    (*env)->DeleteLocalRef(env, path);
+    return out[0] != '\0';
+}
+
+/* java.io.FileSystem's ACCESS_READ, ACCESS_WRITE, ACCESS_EXECUTE. */
+static jboolean wl_setPermission0(JNIEnv* env, jobject self, jobject file, jint access, jboolean enable,
+                                  jboolean owner_only)
+{
+    char path[4096];
+    struct stat st;
+    mode_t bits = 0;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || stat(path, &st) != 0) return JNI_FALSE;
+    if (access & 4) bits |= owner_only ? S_IRUSR : (S_IRUSR | S_IRGRP | S_IROTH);
+    if (access & 2) bits |= owner_only ? S_IWUSR : (S_IWUSR | S_IWGRP | S_IWOTH);
+    if (access & 1) bits |= owner_only ? S_IXUSR : (S_IXUSR | S_IXGRP | S_IXOTH);
+    return chmod(path, enable ? (st.st_mode | bits) : (st.st_mode & ~bits)) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean wl_setReadOnly0(JNIEnv* env, jobject self, jobject file)
+{
+    char path[4096];
+    struct stat st;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || stat(path, &st) != 0) return JNI_FALSE;
+    return chmod(path, st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH)) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+/*
+ * File.setLastModified failed like the permission natives above (Facebook: "could not set modtime of
+ * .../dex/regen_stamp"). As OpenJDK does: the access time is kept, the modification time set to the
+ * given milliseconds.
+ */
+static jboolean wl_setLastModifiedTime0(JNIEnv* env, jobject self, jobject file, jlong time)
+{
+    char path[4096];
+    struct timespec times[2];
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path))) return JNI_FALSE;
+    times[0].tv_sec = 0;
+    times[0].tv_nsec = UTIME_OMIT;
+    times[1].tv_sec = (time_t) (time / 1000);
+    times[1].tv_nsec = (long) (time % 1000) * 1000000L;
+    return utimensat(AT_FDCWD, path, times, 0) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jlong wl_getLastModifiedTime0(JNIEnv* env, jobject self, jobject file)
+{
+    char path[4096];
+    struct stat st;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || stat(path, &st) != 0) return 0;
+    return (jlong) st.st_mtim.tv_sec * 1000 + st.st_mtim.tv_nsec / 1000000;
+}
+
+static const JNINativeMethod kUnixFileSystem[] = {
+    { "setPermission0", "(Ljava/io/File;IZZ)Z", (void*) wl_setPermission0 },
+    { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
+    { "setLastModifiedTime0", "(Ljava/io/File;J)Z", (void*) wl_setLastModifiedTime0 },
+    { "getLastModifiedTime0", "(Ljava/io/File;)J", (void*) wl_getLastModifiedTime0 },
+};
+
+/*
+ * Platform natives the staged runtime leaves unregistered, found by r73 ("No implementation found"):
+ * sun.nio.ch.Net's poll constants (Mindustry, Unciv), Process.getGidForName (NYTimes),
+ * android.os.SELinux's context queries (Termux), Camera._getNumberOfCameras (Open Camera) and
+ * CamcorderProfile (Snapchat). Values are this kernel's; there is no camera, so none is reported.
+ */
+static jshort wl_pollin(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLIN; }
+static jshort wl_pollout(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLOUT; }
+static jshort wl_pollerr(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLERR; }
+static jshort wl_pollhup(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLHUP; }
+static jshort wl_pollnval(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLNVAL; }
+static jshort wl_pollconn(JNIEnv* e, jclass c) { (void) e; (void) c; return POLLOUT; }
+
+static const JNINativeMethod kNet[] = {
+    { "pollinValue", "()S", (void*) wl_pollin },
+    { "polloutValue", "()S", (void*) wl_pollout },
+    { "pollerrValue", "()S", (void*) wl_pollerr },
+    { "pollhupValue", "()S", (void*) wl_pollhup },
+    { "pollnvalValue", "()S", (void*) wl_pollnval },
+    { "pollconnValue", "()S", (void*) wl_pollconn },
+};
+
+static jint wl_getGidForName(JNIEnv* env, jclass c, jstring name)
+{
+    const char* chars;
+    struct group* g;
+    jint gid = -1;
+    (void) c;
+    if (name == NULL) return -1;
+    chars = (*env)->GetStringUTFChars(env, name, NULL);
+    if (chars == NULL) return -1;
+    g = getgrnam(chars);
+    if (g != NULL) gid = (jint) g->gr_gid;
+    (*env)->ReleaseStringUTFChars(env, name, chars);
+    return gid;
+}
+
+static const JNINativeMethod kProcess[] = {
+    { "getGidForName", "(Ljava/lang/String;)I", (void*) wl_getGidForName },
+};
+
+static jstring context_from(JNIEnv* env, const char* path)
+{
+    char buffer[256];
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    ssize_t n = fd >= 0 ? read(fd, buffer, sizeof(buffer) - 1) : -1;
+    if (fd >= 0) close(fd);
+    if (n <= 0) return NULL;
+    buffer[n] = '\0';
+    while (n > 0 && (buffer[n - 1] == '\n' || buffer[n - 1] == '\0')) buffer[--n] = '\0';
+    return (*env)->NewStringUTF(env, buffer);
+}
+
+static jstring wl_selinux_getContext(JNIEnv* env, jclass c) { (void) c; return context_from(env, "/proc/self/attr/current"); }
+
+static jstring wl_selinux_getPidContext(JNIEnv* env, jclass c, jint pid)
+{
+    char path[64];
+    (void) c;
+    snprintf(path, sizeof(path), "/proc/%d/attr/current", (int) pid);
+    return context_from(env, path);
+}
+
+static jstring wl_selinux_getFileContext(JNIEnv* env, jclass c, jstring path)
+{
+    char buffer[256];
+    const char* chars;
+    ssize_t n;
+    (void) c;
+    if (path == NULL) return NULL;
+    chars = (*env)->GetStringUTFChars(env, path, NULL);
+    if (chars == NULL) return NULL;
+    n = getxattr(chars, "security.selinux", buffer, sizeof(buffer) - 1);
+    (*env)->ReleaseStringUTFChars(env, path, chars);
+    if (n <= 0) return NULL;
+    buffer[n] = '\0';
+    return (*env)->NewStringUTF(env, buffer);
+}
+
+static jboolean wl_selinux_enabled(JNIEnv* env, jclass c)
+{
+    (void) env; (void) c;
+    return access("/sys/fs/selinux/enforce", F_OK) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean wl_selinux_enforced(JNIEnv* env, jclass c)
+{
+    char value = '0';
+    int fd = open("/sys/fs/selinux/enforce", O_RDONLY | O_CLOEXEC);
+    (void) env; (void) c;
+    if (fd >= 0) { if (read(fd, &value, 1) != 1) value = '0'; close(fd); }
+    return value == '1' ? JNI_TRUE : JNI_FALSE;
+}
+
+static const JNINativeMethod kSELinux[] = {
+    { "getContext", "()Ljava/lang/String;", (void*) wl_selinux_getContext },
+    { "getPidContext", "(I)Ljava/lang/String;", (void*) wl_selinux_getPidContext },
+    { "getFileContext", "(Ljava/lang/String;)Ljava/lang/String;", (void*) wl_selinux_getFileContext },
+    { "isSELinuxEnabled", "()Z", (void*) wl_selinux_enabled },
+    { "isSELinuxEnforced", "()Z", (void*) wl_selinux_enforced },
+};
+
+static jint wl_camera_count(JNIEnv* e, jclass c, jint device, jint policy)
+{
+    (void) e; (void) c; (void) device; (void) policy;
+    return 0;
+}
+
+static const JNINativeMethod kCamera[] = {
+    { "_getNumberOfCameras", "(II)I", (void*) wl_camera_count },
+};
+
+static void wl_camcorder_init(JNIEnv* e, jclass c) { (void) e; (void) c; }
+static jobject wl_camcorder_profile(JNIEnv* e, jclass c, jint id, jint q) { (void) e; (void) c; (void) id; (void) q; return NULL; }
+static jobject wl_camcorder_profiles(JNIEnv* e, jclass c, jint id, jint q, jboolean a) { (void) e; (void) c; (void) id; (void) q; (void) a; return NULL; }
+static jboolean wl_camcorder_has(JNIEnv* e, jclass c, jint id, jint q) { (void) e; (void) c; (void) id; (void) q; return JNI_FALSE; }
+
+static const JNINativeMethod kCamcorderProfile[] = {
+    { "native_init", "()V", (void*) wl_camcorder_init },
+    { "native_get_camcorder_profile", "(II)Landroid/media/CamcorderProfile;", (void*) wl_camcorder_profile },
+    { "native_get_camcorder_profiles", "(IIZ)Landroid/media/EncoderProfiles;", (void*) wl_camcorder_profiles },
+    { "native_has_camcorder_profile", "(II)Z", (void*) wl_camcorder_has },
+};
+
+/* Returns the priority it found (before any change). */
+static int normalize_thread_priority(JNIEnv* env)
+{
+    jclass thread = (*env)->FindClass(env, "java/lang/Thread");
+    jmethodID current, get, set;
+    jobject self;
+    int priority = -1;
+    if (thread == NULL) { (*env)->ExceptionClear(env); return -1; }
+    current = (*env)->GetStaticMethodID(env, thread, "currentThread", "()Ljava/lang/Thread;");
+    get = (*env)->GetMethodID(env, thread, "getPriority", "()I");
+    set = (*env)->GetMethodID(env, thread, "setPriority", "(I)V");
+    if (current != NULL && get != NULL && set != NULL
+            && (self = (*env)->CallStaticObjectMethod(env, thread, current)) != NULL) {
+        priority = (*env)->CallIntMethod(env, self, get);
+        if (priority < 1) {
+            (*env)->CallVoidMethod(env, self, set, 5 /* Thread.NORM_PRIORITY */);
+        }
+        (*env)->DeleteLocalRef(env, self);
+    }
+    (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, thread);
+    return priority;
+}
+
+/*
+ * Failed JNI member lookups, logged. A native library that caches a method or field ID for a
+ * member this runtime lacks aborts later under CheckJNI with only "mid == null" (Facebook and
+ * Messenger in com.facebook.proxygen.EventBase.init()), naming neither. ART lets a table replace
+ * every thread's JNI functions (JNIEnvExt::SetTableOverride, as heap profilers use); the one
+ * installed here is the active table with the four ID lookups wrapped. A failed lookup leaves
+ * NoSuchMethodError/NoSuchFieldError pending, so the wrapper sets it aside, names the class, and
+ * puts it back before returning.
+ */
+static struct JNINativeInterface g_lookup_table;
+static jmethodID (*g_get_method_id)(JNIEnv*, jclass, const char*, const char*);
+static jmethodID (*g_get_static_method_id)(JNIEnv*, jclass, const char*, const char*);
+static jfieldID (*g_get_field_id)(JNIEnv*, jclass, const char*, const char*);
+static jfieldID (*g_get_static_field_id)(JNIEnv*, jclass, const char*, const char*);
+static int g_lookup_failures;
+
+static void log_failed_lookup(JNIEnv* env, const char* what, jclass c, const char* name, const char* sig)
+{
+    char line[512], class_name[256] = "?";
+    jthrowable pending;
+    if (__atomic_fetch_add(&g_lookup_failures, 1, __ATOMIC_RELAXED) >= 100) return;
+    pending = (*env)->ExceptionOccurred(env);
+    (*env)->ExceptionClear(env);
+    if (c != NULL) {
+        jclass class_class = (*env)->GetObjectClass(env, c);
+        jmethodID get_name = g_get_method_id(env, class_class, "getName", "()Ljava/lang/String;");
+        jstring text = get_name != NULL ? (jstring) (*env)->CallObjectMethod(env, c, get_name) : NULL;
+        const char* chars = text != NULL ? (*env)->GetStringUTFChars(env, text, NULL) : NULL;
+        if (chars != NULL) {
+            snprintf(class_name, sizeof(class_name), "%s", chars);
+            (*env)->ReleaseStringUTFChars(env, text, chars);
+        }
+        (*env)->ExceptionClear(env);
+    }
+    snprintf(line, sizeof(line), "[WL-JNI] %s failed: %s.%s %s\n", what, class_name, name != NULL ? name : "?",
+             sig != NULL ? sig : "?");
+    note(line);
+    if (pending != NULL) (*env)->Throw(env, pending);
+}
+
+static jmethodID wl_GetMethodID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jmethodID id = g_get_method_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetMethodID", c, name, sig);
+    return id;
+}
+
+static jmethodID wl_GetStaticMethodID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jmethodID id = g_get_static_method_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetStaticMethodID", c, name, sig);
+    return id;
+}
+
+static jfieldID wl_GetFieldID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jfieldID id = g_get_field_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetFieldID", c, name, sig);
+    return id;
+}
+
+static jfieldID wl_GetStaticFieldID(JNIEnv* env, jclass c, const char* name, const char* sig)
+{
+    jfieldID id = g_get_static_field_id(env, c, name, sig);
+    if (id == NULL) log_failed_lookup(env, "GetStaticFieldID", c, name, sig);
+    return id;
+}
+
+static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
+{
+    typedef void (*SetTableOverrideFn)(const struct JNINativeInterface*);
+    static const char kSymbol[] = "_ZN3art9JNIEnvExt16SetTableOverrideEPK18JNINativeInterface";
+    SetTableOverrideFn set_override = (SetTableOverrideFn) dlsym(RTLD_DEFAULT, kSymbol);
+    Dl_info art;
+    /* libart is not in this library's global scope; reach it through the VM's own code. */
+    if (set_override == NULL && dladdr((void*) (*vm)->GetEnv, &art) != 0 && art.dli_fname != NULL) {
+        void* handle = dlopen(art.dli_fname, RTLD_NOW | RTLD_NOLOAD);
+        if (handle != NULL) set_override = (SetTableOverrideFn) dlsym(handle, kSymbol);
+    }
+    if (set_override == NULL || g_get_method_id != NULL) return 0;
+    g_lookup_table = **env;
+    g_get_method_id = g_lookup_table.GetMethodID;
+    g_get_static_method_id = g_lookup_table.GetStaticMethodID;
+    g_get_field_id = g_lookup_table.GetFieldID;
+    g_get_static_field_id = g_lookup_table.GetStaticFieldID;
+    g_lookup_table.GetMethodID = wl_GetMethodID;
+    g_lookup_table.GetStaticMethodID = wl_GetStaticMethodID;
+    g_lookup_table.GetFieldID = wl_GetFieldID;
+    g_lookup_table.GetStaticFieldID = wl_GetStaticFieldID;
+    set_override(&g_lookup_table);
+    return 1;
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     JNIEnv* env = NULL;
@@ -266,7 +813,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         return JNI_VERSION_1_6;
     }
     {
-        char line[128];
+        char line[320];
         int m = bind(env, "java/lang/Math", kMath, (int) (sizeof(kMath) / sizeof(kMath[0])));
         int s = bind(env, "java/lang/StrictMath", kStrictMath,
                      (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])));
@@ -275,13 +822,35 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int t = bind(env, "jdk/internal/misc/VM", kVm, (int) (sizeof(kVm) / sizeof(kVm[0])));
         int e = bind(env, "java/lang/ProcessEnvironment", kProcessEnvironment,
                      (int) (sizeof(kProcessEnvironment) / sizeof(kProcessEnvironment[0])));
+        int mem = bind(env, "libcore/io/Memory", kMemory, (int) (sizeof(kMemory) / sizeof(kMemory[0])));
+        int at = bind(env, "android/app/ActivityThread", kActivityThread,
+                      (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])));
+        int sq = bind(env, "android/database/sqlite/SQLiteGlobal", kSqliteGlobal,
+                      (int) (sizeof(kSqliteGlobal) / sizeof(kSqliteGlobal[0])));
+        int sp = wrap_system_properties(env);
+        int pr = normalize_thread_priority(env);
+        int fs = bind(env, "java/io/UnixFileSystem", kUnixFileSystem,
+                      (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
+        int tx = wl_register_text(env);
+        int ar = wl_register_audiorecord(env);
+        int xp = wl_register_expat(env);
+        int jl = install_lookup_logging(env, vm);
+        int mb = wl_register_ojluni_nio(env);
+        int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
+                   + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
+                   + bind(env, "android/os/SELinux", kSELinux, (int) (sizeof(kSELinux) / sizeof(kSELinux[0])))
+                   + bind(env, "android/hardware/Camera", kCamera, (int) (sizeof(kCamera) / sizeof(kCamera[0])))
+                   + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
+                          (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
-                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e);
+                 t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp, jl, mb, more);
         note(line);
     }
+    wl_register_media(env, vm);
     return JNI_VERSION_1_6;
 }

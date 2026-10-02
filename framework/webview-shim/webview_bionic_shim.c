@@ -8,6 +8,7 @@
 #include <math.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <errno.h>
 #include <stddef.h>
@@ -20,6 +21,8 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -895,8 +898,252 @@ static int westlake_library_is_refused(const char *basename)
     return 0;
 }
 
+int wl_needs_android_relocs(const char *path);
+int wl_write_loadable_copy(const char *path, const char *target, int retag);
+void wl_copy_needed_siblings(const char *path, const char *dir, int depth);
+void *wl_dlopen_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, const char *target,
+                               int flags);
+void wl_relocs_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
+/* 1 for a path in the app's own data directory, outside code_cache (see westlake_load_from_code_cache). */
+static int westlake_in_app_storage(const char *path)
+{
+    static const char *const roots[] = {"/data/data/", "/data/user/0/", "/data/user_de/0/"};
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        if (strncmp(path, roots[i], strlen(roots[i])) == 0) return strstr(path, "/code_cache/") == NULL;
+    }
+    return 0;
+}
+
+/*
+ * An exec-allowed directory for a loadable copy of path: <app data>/code_cache/wl-exec for a
+ * library in app storage (the one app-data directory OH lets an app map executable), else a
+ * wl-exec directory beside the library (the runtime root, where apps' own libraries are staged,
+ * is exec-allowed and writable). Created if missing.
+ */
+static int westlake_exec_copy_dir(const char *path, char *dir, size_t size)
+{
+    static const char *const roots[] = {"/data/data/", "/data/user/0/", "/data/user_de/0/"};
+    const char *base = strrchr(path, '/');
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
+        size_t n = strlen(roots[i]);
+        const char *slash = strncmp(path, roots[i], n) == 0 ? strchr(path + n, '/') : NULL;
+        if (slash != NULL) {
+            char parent[600];
+            snprintf(parent, sizeof(parent), "%.*s/code_cache", (int)(slash - path), path);
+            mkdir(parent, 0700);
+            snprintf(dir, size, "%s/wl-exec", parent);
+            mkdir(dir, 0700);
+            return access(dir, W_OK) == 0 ? 0 : -1;
+        }
+    }
+    if (base == NULL || base == path) return -1;
+    snprintf(dir, size, "%.*s/wl-exec", (int)(base - path), path);
+    mkdir(dir, 0700);
+    return access(dir, W_OK) == 0 ? 0 : -1;
+}
+
+/*
+ * A library with DT_ANDROID_RELR that the launcher did not stage (one the app wrote at run time) is
+ * loaded from a copy with the tags renumbered (android_relocs.c). NULL, with the reason logged,
+ * when that fails.
+ */
+static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, int flags)
+{
+    char dir[512], target[768];
+    const char *base = strrchr(path, '/');
+    if (westlake_exec_copy_dir(path, dir, sizeof(dir)) != 0) {
+        wl_relocs_log("[WESTLAKE-RELOCS] no writable code_cache for %s\n", path);
+        return NULL;
+    }
+    snprintf(target, sizeof(target), "%s%s", dir, base);
+    return wl_dlopen_android_relocs(real_dlopen, path, target, flags);
+}
+
+/*
+ * Libraries the app writes into its own storage and loads by path (Meta's SoLoader: superpack
+ * unpacks them into lib-compressed/ or files/, then System.load()s each, dependencies first).
+ *
+ * bionic resolves a DT_NEEDED name against libraries already loaded, whatever path loaded them.
+ * OH's musl gives a library loaded by explicit path no short name (dynlink.c: "Add a shortname only
+ * if name arg was not an explicit pathname"), so a later DT_NEEDED of that name is searched for on
+ * the library path instead: WhatsApp's libfbjni.so bound OH's libc++ (no std::__ndk1) although the
+ * app had just loaded its own libc++_shared.so, and Facebook's libstorer-jni.so could not find the
+ * libxplat_... library loaded before it. OH also refuses to map app data executable outside
+ * code_cache, and a copy may need its DT_ANDROID_RELR renumbered.
+ *
+ * So such a library, with the DT_NEEDED siblings beside it, is copied into
+ * <app data>/code_cache/wl-exec and opened by bare name in a namespace of its own whose library
+ * path starts there: musl finds it and its siblings by name and records their short names. The
+ * namespace inherits everything the Android namespace ART's loader made for the APK's NDK libraries
+ * holds (their libc++_shared.so), and from the default namespace only the C runtime. NULL when the
+ * namespace cannot be made, so the other paths below take over.
+ */
+static void *westlake_load_app_library(const char *path, int flags)
+{
+    typedef void (*DlnsInitFn)(Dl_namespace *, const char *);
+    typedef int (*DlnsCreate2Fn)(Dl_namespace *, const char *, int);
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    typedef int (*DlnsInheritFn)(Dl_namespace *, Dl_namespace *, const char *);
+    typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static Dl_namespace ns;
+    static int state; /* 0 not tried, 1 ready, -1 unavailable */
+    static DlopenNsFn open_fn;
+    char dir[512], target[768];
+    const char *base = strrchr(path, '/');
+    if (base == NULL || westlake_exec_copy_dir(path, dir, sizeof(dir)) != 0) return NULL;
+    /*
+     * When ART's loader made an Android namespace for the APK's NDK libraries, the library joins
+     * them there: symbols resolve against the namespace's own libraries (libc++_shared.so, this
+     * shim), which a second namespace inheriting them did not see (Messenger's libcore.so: "Error
+     * relocating ... std::__ndk1::basic_string ... __system_property_read_callback"). Its copy goes
+     * into the staged APK library directory, first on that namespace's search path, never over a
+     * library the APK ships under the same name.
+     */
+    {
+        static DlnsGetFn android_get;
+        static DlopenNsFn android_open;
+        const char *apk_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
+        Dl_namespace android;
+        memset(&android, 0, sizeof(android));
+        if (android_get == NULL) android_get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        if (android_open == NULL) android_open = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+        if (apk_lib_dir != NULL && android_get != NULL && android_open != NULL &&
+            android_get("westlake_android_app", &android) == 0) {
+            snprintf(target, sizeof(target), "%s%s", apk_lib_dir, base);
+            if (wl_write_loadable_copy(path, target, wl_needs_android_relocs(path)) == 0) {
+                wl_copy_needed_siblings(path, apk_lib_dir, 0);
+                void *handle = android_open(&android, base + 1, flags);
+                const char *error = handle == NULL ? dlerror() : NULL;
+                wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name in the Android namespace from %s%s%s\n", path,
+                              handle != NULL ? "loaded" : "failed", apk_lib_dir, error != NULL ? ": " : "",
+                              error != NULL ? error : "");
+                if (handle != NULL) return handle;
+            }
+        }
+    }
+    pthread_mutex_lock(&lock);
+    if (state == 0) {
+        DlnsInitFn init_fn = (DlnsInitFn) dlsym(RTLD_DEFAULT, "dlns_init");
+        DlnsCreate2Fn create_fn = (DlnsCreate2Fn) dlsym(RTLD_DEFAULT, "dlns_create2");
+        DlnsGetFn get_fn = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        DlnsInheritFn inherit_fn = (DlnsInheritFn) dlsym(RTLD_DEFAULT, "dlns_inherit");
+        open_fn = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+        const char *android_path = getenv("WESTLAKE_ANDROID_NATIVE_SEARCH_PATH");
+        const char *app_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
+        char search[4096];
+        snprintf(search, sizeof(search), "%s:%s", dir,
+                 android_path != NULL && android_path[0] != '\0' ? android_path
+                 : app_lib_dir != NULL ? app_lib_dir : "/system/lib64");
+        Dl_namespace parent, android;
+        memset(&parent, 0, sizeof(parent));
+        memset(&android, 0, sizeof(android));
+        state = -1;
+        if (init_fn != NULL && create_fn != NULL && get_fn != NULL && inherit_fn != NULL && open_fn != NULL &&
+            get_fn(NULL, &parent) == 0) {
+            init_fn(&ns, "westlake_app_libs");
+            if (create_fn(&ns, search, 0) == 0) {
+                /* The Android namespace, when the launch made one, first and whole. */
+                if (get_fn("westlake_android_app", &android) == 0) inherit_fn(&ns, &android, NULL);
+                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so") == 0) state = 1;
+                /* This library, global there, as ART's loader does for its namespace: its bionic and
+                 * NDK symbols (ASharedMemory_*, __assert, ...) must resolve for what loads here. */
+                Dl_info self;
+                if (state == 1 && dladdr((void *) &westlake_load_app_library, &self) != 0 && self.dli_fname != NULL &&
+                    open_fn(&ns, self.dli_fname, RTLD_NOW | RTLD_GLOBAL) == NULL) {
+                    state = -1;
+                }
+            }
+        }
+        wl_relocs_log("[WESTLAKE-LOADER] app library namespace %s (search %s)\n",
+                      state == 1 ? "ready" : "unavailable", search);
+    }
+    int ready = state == 1;
+    pthread_mutex_unlock(&lock);
+    if (!ready) return NULL;
+    snprintf(target, sizeof(target), "%s%s", dir, base);
+    if (wl_write_loadable_copy(path, target, wl_needs_android_relocs(path)) != 0) {
+        wl_relocs_log("[WESTLAKE-LOADER] could not copy %s to %s\n", path, target);
+        return NULL;
+    }
+    wl_copy_needed_siblings(path, dir, 0);
+    void *handle = open_fn(&ns, base + 1, flags);
+    const char *error = handle == NULL ? dlerror() : NULL;
+    wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name from %s%s%s\n", path, handle != NULL ? "loaded" : "failed", dir,
+                  error != NULL ? ": " : "", error != NULL ? error : "");
+    return handle;
+}
+
+/*
+ * A library an app copied into its own storage, loaded from there. Android maps such files
+ * executable; OH's policy refuses every app-data directory but code_cache ("failed to map library
+ * ... errno=13", measured by the harness's runtime-answers probe: files, cache and no_backup fail,
+ * code_cache loads). Meta's SoLoader with superpack unpacks libraries into files/ and loads them there
+ * (WhatsApp: files/decompressed/libs.spo/, every library of it). When such a load fails, the same bytes are
+ * copied into <app data>/code_cache/wl-exec/ and loaded from there; a copy that already matches in
+ * size and modification time is reused.
+ */
+static void *westlake_load_from_code_cache(void *(*real_dlopen)(const char *, int), const char *path, int flags)
+{
+    static const char *const roots[] = {"/data/data/", "/data/user/0/", "/data/user_de/0/"};
+    const char *rest = NULL;
+    for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]) && rest == NULL; ++i) {
+        size_t n = strlen(roots[i]);
+        if (strncmp(path, roots[i], n) == 0) rest = path + n;
+    }
+    if (rest == NULL || strstr(path, "/code_cache/") != NULL) return NULL;
+    const char *slash = strchr(rest, '/');
+    const char *base = strrchr(path, '/');
+    if (slash == NULL || base == NULL) return NULL;
+    char dir[512], target[768];
+    snprintf(dir, sizeof(dir), "%.*s/code_cache/wl-exec", (int)(slash - path), path);
+    struct stat src, dst;
+    if (stat(path, &src) != 0) return NULL;
+    char parent[512];
+    snprintf(parent, sizeof(parent), "%.*s/code_cache", (int)(slash - path), path);
+    mkdir(parent, 0700);
+    mkdir(dir, 0700);
+    snprintf(target, sizeof(target), "%s%s", dir, base);
+    if (stat(target, &dst) != 0 || dst.st_size != src.st_size || dst.st_mtime < src.st_mtime) {
+        char tmp[800];
+        snprintf(tmp, sizeof(tmp), "%s.tmp%d", target, (int)getpid());
+        int in = open(path, O_RDONLY | O_CLOEXEC);
+        int out = in >= 0 ? open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700) : -1;
+        char buf[65536];
+        ssize_t n = 0;
+        while (in >= 0 && out >= 0 && (n = read(in, buf, sizeof(buf))) > 0) {
+            if (write(out, buf, (size_t)n) != n) { n = -1; break; }
+        }
+        if (in >= 0) close(in);
+        if (out >= 0) close(out);
+        if (n != 0 || out < 0 || rename(tmp, target) != 0) {
+            unlink(tmp);
+            return NULL;
+        }
+    }
+    void *handle = real_dlopen(target, flags);
+    if (handle != NULL) {
+        fprintf(stderr, "[WESTLAKE-LOADER] %s refused from app storage; loaded its copy in %s\n", path, dir);
+    }
+    return handle;
+}
+
+/*
+ * bionic's linker entry behind dlopen, which libdl.so exports: open on behalf of caller_addr's
+ * namespace. Facebook's libbreakpad.so looks it up by dlsym(dlopen("libdl.so"), "__loader_dlopen")
+ * and gave up ("Could not find __loader_dlopen from libdl.so"). Namespaces are not modelled here;
+ * the shim's dlopen decides.
+ */
+void *__loader_dlopen(const char *filename, int flags, const void *caller_addr)
+{
+    (void) caller_addr;
+    return dlopen(filename, flags);
+}
+
 void *dlopen(const char *filename, int flags)
 {
+    void *caller = __builtin_return_address(0);
     typedef void *(*DlopenFn)(const char *, int);
     static DlopenFn real_dlopen;
     if (real_dlopen == NULL) {
@@ -918,6 +1165,50 @@ void *dlopen(const char *filename, int flags)
                     filename);
         }
         return NULL;
+    }
+    /*
+     * OpenSL ES through dlopen. Oboe (Rhythm Engine) does not link libOpenSLES: it dlopens it and
+     * looks up slCreateEngine and the SL_IID_* by handle, which reaches OH's library directly and
+     * skips the Android-ABI adapter this shim exports -- OH then refused Oboe's engine interface
+     * (SL_RESULT_FEATURE_UNSUPPORTED) and the app died. An app's dlopen of libOpenSLES.so is
+     * answered with this shim's own handle. The shim depends on OH's libOpenSLES, and a lookup by
+     * handle searches a library before its dependencies, so the adapter's slCreateEngine and
+     * Android's own IDs are found here and every other SL_IID_* in OH's library behind it. The
+     * adapter's own dlopen, from inside this shim, still gets OH's library.
+     */
+    /*
+     * libdl.so, asked for by app code: this library's own handle, so a lookup by it finds bionic's
+     * __loader_dlopen here (above) and, through this library's dependencies, everything musl's
+     * libdl exports. OH's own libraries keep getting OH's libdl.
+     */
+    if (basename != NULL && strcmp(basename, "libdl.so") == 0) {
+        Dl_info self, caller_info;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
+            dladdr(caller, &caller_info) != 0 && caller_info.dli_fname != NULL &&
+            caller_info.dli_fbase != self.dli_fbase &&
+            strncmp(caller_info.dli_fname, "/system/", 8) != 0 &&
+            strncmp(caller_info.dli_fname, "/vendor/", 8) != 0) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                return handle;
+            }
+        }
+    }
+    if (basename != NULL && strcmp(basename, "libOpenSLES.so") == 0) {
+        Dl_info self, caller_info;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL &&
+            !(dladdr(caller, &caller_info) != 0 &&
+              caller_info.dli_fbase == self.dli_fbase)) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                static int logged;
+                if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                    fprintf(stderr, "[WESTLAKE-SLES] dlopen %s -> the Android OpenSL ES adapter\n",
+                            filename);
+                }
+                return handle;
+            }
+        }
     }
     /*
      * WebView's own libraries come from the WebView library directory, which the search path
@@ -942,7 +1233,7 @@ void *dlopen(const char *filename, int flags)
      */
     static char webview_library[512];
     if (basename != NULL && basename == filename &&
-        caller_is_webview(__builtin_return_address(0), NULL)) {
+        caller_is_webview(caller, NULL)) {
         const char *dir = getenv("ASX_WEBVIEW_LIB_DIR");
         if (dir != NULL && dir[0] != '\0') {
             snprintf(webview_library, sizeof(webview_library), "%s/%s", dir, basename);
@@ -989,7 +1280,7 @@ void *dlopen(const char *filename, int flags)
         }
     }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
-        caller_is_webview(__builtin_return_address(0), NULL)) {
+        caller_is_webview(caller, NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
         static int logged;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
@@ -999,7 +1290,26 @@ void *dlopen(const char *filename, int flags)
                     filename, actual_filename);
         }
     }
-    return real_dlopen(actual_filename, flags);
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
+        westlake_in_app_storage(actual_filename)) {
+        void *namespaced = westlake_load_app_library(actual_filename, flags);
+        if (namespaced != NULL) {
+            return namespaced;
+        }
+    }
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
+        wl_needs_android_relocs(actual_filename)) {
+        /* Never the original: musl would leave its RELR pointers unrelocated (SIGSEGV). */
+        return westlake_load_android_relocs(real_dlopen, actual_filename, flags);
+    }
+    void *handle = real_dlopen(actual_filename, flags);
+    if (handle == NULL && actual_filename != NULL && actual_filename[0] == '/') {
+        void *copy = westlake_load_from_code_cache(real_dlopen, actual_filename, flags);
+        if (copy != NULL) {
+            return copy;
+        }
+    }
+    return handle;
 }
 
 /*
@@ -2020,4 +2330,685 @@ int isinf(double value)
 int *__get_h_errno(void)
 {
     return &h_errno;
+}
+
+/*
+ * libandroid's NDK trace API (android/trace.h). In the Android namespace libandroid.so is the
+ * WebView shim's, which has none of it, so a library that imports ATrace_* fails to relocate:
+ * React Native's libworklets.so (Reanimated) did, and Nori, Rush Hour and Marlin aborted on the
+ * JniException. This preloaded shim supplies them as Android behaves with tracing off:
+ * ATrace_isEnabled() is false and the section calls do nothing.
+ */
+bool ATrace_isEnabled(void) { return false; }
+void ATrace_beginSection(const char *section_name) { (void)section_name; }
+void ATrace_endSection(void) {}
+void ATrace_beginAsyncSection(const char *section_name, int32_t cookie) { (void)section_name; (void)cookie; }
+void ATrace_endAsyncSection(const char *section_name, int32_t cookie) { (void)section_name; (void)cookie; }
+void ATrace_setCounter(const char *counter_name, int64_t counter_value) { (void)counter_name; (void)counter_value; }
+
+/*
+ * ---------------------------------------------------------------------------
+ * More bionic-private names app libraries import that OH's musl lacks, counted by the harness's
+ * ndk:libc-abi rows across 330 maps: __libc_init (23 apps), __system_property_read (12),
+ * getprogname (8), funopen (6), __assert (4), __sched_cpufree (4), sys_signame (2), isnanf (1).
+ * A library importing one fails to relocate; many apps catch that and go on without it, then die
+ * at the first call into the library: Transit's libtransitBgtfs.so (on __assert) died as
+ * "No implementation found for TransitLib.refreshRoyaleStoreSubscriptionStatus", and Snapchat's
+ * libclient.so on __assert directly. Each is bionic's behaviour.
+ * ---------------------------------------------------------------------------
+ */
+
+/* bionic's assert() target: report and abort, as bionic does. */
+void __assert(const char *file, int line, const char *failed_expression)
+{
+    fprintf(stderr, "%s:%d: assertion \"%s\" failed\n", file ? file : "?", line,
+            failed_expression ? failed_expression : "?");
+    abort();
+}
+
+/* The entry an executable's crt calls. A shared library links it only through a crt object it
+ * never runs; reaching it in this process would be a bug, so it says so and aborts. */
+void __libc_init(void *raw_args, void (*onexit)(void), int (*slingshot)(int, char **, char **),
+                 const void *structors)
+{
+    (void)raw_args; (void)onexit; (void)slingshot; (void)structors;
+    fprintf(stderr, "[WESTLAKE-BIONIC] __libc_init called inside an app process\n");
+    abort();
+}
+
+/* Reads a property found with __system_property_find into name/value; returns the value's
+ * length, as bionic does (PROP_VALUE_MAX-sized buffers). */
+int __system_property_read(const struct prop_info *pi, char *name, char *value)
+{
+    if (pi == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&g_property_mutex);
+    if (name != NULL) {
+        snprintf(name, 32, "%s", pi->name);          /* bionic's PROP_NAME_MAX */
+    }
+    int length = 0;
+    if (value != NULL) {
+        snprintf(value, 92, "%s", pi->value);        /* bionic's PROP_VALUE_MAX */
+        length = (int)strlen(value);
+    }
+    pthread_mutex_unlock(&g_property_mutex);
+    return length;
+}
+
+/* The process's short name, as bionic sets it from argv[0]: the basename of the first word of
+ * /proc/self/cmdline, read once. */
+static char g_progname[256];
+
+static void westlake_read_progname(void)
+{
+    int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
+    char buffer[sizeof(g_progname)];
+    ssize_t n = fd >= 0 ? read(fd, buffer, sizeof(buffer) - 1) : -1;
+    if (fd >= 0) {
+        close(fd);
+    }
+    if (n <= 0) {
+        return;
+    }
+    buffer[n] = '\0';
+    const char *slash = strrchr(buffer, '/');
+    snprintf(g_progname, sizeof(g_progname), "%s", slash != NULL ? slash + 1 : buffer);
+}
+
+const char *getprogname(void)
+{
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, westlake_read_progname);
+    return g_progname;
+}
+
+/*
+ * BSD's funopen over musl's fopencookie. bionic's fpos_t is a 64-bit offset; musl's is a union, so
+ * the seek callback is typed with bionic's.
+ *
+ * The FILE is unbuffered and this cookie buffers reads itself. OH's musl refills a buffered FILE
+ * by calling the cookie reader with the FILE's own buffer as the destination (__fill_buffer ->
+ * readx == cookieread), and cookieread uses that same buffer for its last byte, so each refill
+ * overwrote what it had just read: superpack's funopen over a Java InputStream saw byte 1023 where
+ * byte 0 should be (runtime-answers probe: "131415..." for a stream of i % 251), failed its
+ * archive magic, and Facebook, Instagram and Messenger stopped at "could not extract file from
+ * archive". Unbuffered, musl reads straight into the caller's memory.
+ */
+typedef int64_t westlake_bionic_fpos_t;
+
+enum { WESTLAKE_FUNOPEN_BUFFER = 4096 };
+
+struct westlake_funopen_cookie {
+    void *cookie;
+    int (*readfn)(void *, char *, int);
+    int (*writefn)(void *, const char *, int);
+    westlake_bionic_fpos_t (*seekfn)(void *, westlake_bionic_fpos_t, int);
+    int (*closefn)(void *);
+    size_t pos, len; /* read-ahead: buffer[pos..len) is data the caller has not taken yet */
+    char buffer[WESTLAKE_FUNOPEN_BUFFER];
+};
+
+static ssize_t westlake_funopen_read(void *c, char *buf, size_t size)
+{
+    struct westlake_funopen_cookie *f = c;
+    if (f->readfn == NULL) {
+        return -1;
+    }
+    if (f->pos == f->len && size >= sizeof(f->buffer)) {
+        return f->readfn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size);
+    }
+    if (f->pos == f->len) {
+        int n = f->readfn(f->cookie, f->buffer, (int)sizeof(f->buffer));
+        if (n <= 0) {
+            return n;
+        }
+        f->pos = 0;
+        f->len = (size_t)n;
+    }
+    size_t n = f->len - f->pos < size ? f->len - f->pos : size;
+    memcpy(buf, f->buffer + f->pos, n);
+    f->pos += n;
+    return (ssize_t)n;
+}
+
+static ssize_t westlake_funopen_write(void *c, const char *buf, size_t size)
+{
+    struct westlake_funopen_cookie *f = c;
+    f->pos = f->len = 0;
+    return f->writefn ? f->writefn(f->cookie, buf, size > INT32_MAX ? INT32_MAX : (int)size) : -1;
+}
+
+static int westlake_funopen_seek(void *c, off_t *offset, int whence)
+{
+    struct westlake_funopen_cookie *f = c;
+    if (f->seekfn == NULL) {
+        errno = ESPIPE;
+        return -1;
+    }
+    /* The underlying position is ahead of the caller's by the read-ahead not yet taken. */
+    westlake_bionic_fpos_t target = (westlake_bionic_fpos_t)*offset;
+    if (whence == SEEK_CUR) {
+        target -= (westlake_bionic_fpos_t)(f->len - f->pos);
+    }
+    westlake_bionic_fpos_t result = f->seekfn(f->cookie, target, whence);
+    if (result == -1) {
+        return -1;
+    }
+    f->pos = f->len = 0;
+    *offset = (off_t)result;
+    return 0;
+}
+
+static int westlake_funopen_close(void *c)
+{
+    struct westlake_funopen_cookie *f = c;
+    int result = f->closefn ? f->closefn(f->cookie) : 0;
+    free(f);
+    return result;
+}
+
+FILE *funopen(const void *cookie, int (*readfn)(void *, char *, int),
+              int (*writefn)(void *, const char *, int),
+              westlake_bionic_fpos_t (*seekfn)(void *, westlake_bionic_fpos_t, int),
+              int (*closefn)(void *))
+{
+    if (readfn == NULL && writefn == NULL) {
+        errno = EINVAL;
+        return NULL;
+    }
+    struct westlake_funopen_cookie *f = calloc(1, sizeof(*f));
+    if (f == NULL) {
+        return NULL;
+    }
+    f->cookie = (void *)cookie;
+    f->readfn = readfn;
+    f->writefn = writefn;
+    f->seekfn = seekfn;
+    f->closefn = closefn;
+    cookie_io_functions_t io = {westlake_funopen_read, westlake_funopen_write,
+                                westlake_funopen_seek, westlake_funopen_close};
+    FILE *file = fopencookie(f, readfn && writefn ? "r+" : readfn ? "r" : "w", io);
+    if (file == NULL) {
+        free(f);
+        return NULL;
+    }
+    setvbuf(file, NULL, _IONBF, 0);
+    return file;
+}
+
+/* bionic's CPU_FREE target; musl has __sched_cpualloc and __sched_cpucount but frees with free(). */
+void __sched_cpufree(cpu_set_t *set)
+{
+    free(set);
+}
+
+/* Signal names without the SIG prefix, indexed by signal number, as bionic's sys_signame. */
+const char *const sys_signame[65] = {
+    [SIGHUP] = "HUP", [SIGINT] = "INT", [SIGQUIT] = "QUIT", [SIGILL] = "ILL", [SIGTRAP] = "TRAP",
+    [SIGABRT] = "ABRT", [SIGBUS] = "BUS", [SIGFPE] = "FPE", [SIGKILL] = "KILL", [SIGUSR1] = "USR1",
+    [SIGSEGV] = "SEGV", [SIGUSR2] = "USR2", [SIGPIPE] = "PIPE", [SIGALRM] = "ALRM", [SIGTERM] = "TERM",
+    [SIGSTKFLT] = "STKFLT", [SIGCHLD] = "CHLD", [SIGCONT] = "CONT", [SIGSTOP] = "STOP",
+    [SIGTSTP] = "TSTP", [SIGTTIN] = "TTIN", [SIGTTOU] = "TTOU", [SIGURG] = "URG", [SIGXCPU] = "XCPU",
+    [SIGXFSZ] = "XFSZ", [SIGVTALRM] = "VTALRM", [SIGPROF] = "PROF", [SIGWINCH] = "WINCH",
+    [SIGIO] = "IO", [SIGPWR] = "PWR", [SIGSYS] = "SYS",
+};
+
+int isnanf(float value)
+{
+    return __builtin_isnan(value);
+}
+
+/*
+ * The NDK's ASharedMemory (libandroid.so, API 26), which neither OH nor the runtime's or the
+ * WebView's libandroid.so provides: Instagram's and Messenger's libstartup.so failed to relocate on
+ * ASharedMemory_create. Android backs it with ashmem; a sealable memfd gives the same fd-passing,
+ * mmap-able region. setProt narrows nothing: ashmem enforces a narrowed protection on later
+ * mappings, a memfd seal would fail while a writable mapping exists, and callers use it as a
+ * safety net rather than for behaviour. ASharedMemory_dupFromJava is not provided (this library has
+ * no JNI headers).
+ */
+int ASharedMemory_create(const char *name, size_t size)
+{
+    int fd = memfd_create(name != NULL && name[0] != '\0' ? name : "ashmem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0) {
+        return -1;
+    }
+    if (ftruncate(fd, (off_t)size) != 0) {
+        int saved = errno;
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
+/* By seeking, not fstat: the app domain may not getattr a memfd (probe: fstat gave size 0). */
+size_t ASharedMemory_getSize(int fd)
+{
+    off_t position = lseek(fd, 0, SEEK_CUR);
+    off_t end = position < 0 ? -1 : lseek(fd, 0, SEEK_END);
+    if (position >= 0) {
+        lseek(fd, position, SEEK_SET);
+    }
+    return end > 0 ? (size_t)end : 0;
+}
+
+int ASharedMemory_setProt(int fd, int prot)
+{
+    if (fcntl(fd, F_GETFD) < 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * The NDK's ALooper API. The runtime's libandroid.so implements it, but in the Android namespace a
+ * library's libandroid.so is the WebView shim's, which does not: Facebook's libscrollmerged.so
+ * failed to relocate on ALooper_pollAll. Each forwards to the runtime library's own entry point,
+ * looked up through that library's handle so it can never resolve back to this one.
+ */
+typedef struct ALooper ALooper;
+typedef int (*westlake_alooper_callback)(int fd, int events, void *data);
+
+static void *westlake_runtime_android_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) {
+        const char *root = getenv("WESTLAKE_RUNTIME_ROOT");
+        char path[512];
+        snprintf(path, sizeof(path), "%s/libandroid.so", root != NULL ? root : "");
+        /* The default namespace's copy, which the framework (and its Looper) uses: a copy of this
+         * library in another namespace must not load a second libandroid with its own Looper. */
+        typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+        typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+        DlnsGetFn get_fn = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        DlopenNsFn open_fn = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+        Dl_namespace parent;
+        memset(&parent, 0, sizeof(parent));
+        if (get_fn != NULL && open_fn != NULL && get_fn("default", &parent) == 0) {
+            library = open_fn(&parent, path, RTLD_NOW | RTLD_NOLOAD);
+        }
+        if (library == NULL) library = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+    }
+    void *symbol = library != NULL ? dlsym(library, name) : NULL;
+    if (symbol == NULL) wl_relocs_log("[WESTLAKE-BIONIC] runtime libandroid.so lacks %s\n", name);
+    return symbol;
+}
+
+#define WESTLAKE_ALOOPER_FORWARD(ret, name, params, args)                             \
+    ret name params                                                                   \
+    {                                                                                 \
+        static ret (*real) params;                                                    \
+        if (real == NULL) real = (ret (*) params) westlake_runtime_android_symbol(#name); \
+        return real args;                                                             \
+    }
+
+WESTLAKE_ALOOPER_FORWARD(ALooper *, ALooper_forThread, (void), ())
+WESTLAKE_ALOOPER_FORWARD(ALooper *, ALooper_prepare, (int opts), (opts))
+WESTLAKE_ALOOPER_FORWARD(void, ALooper_acquire, (ALooper *looper), (looper))
+WESTLAKE_ALOOPER_FORWARD(void, ALooper_release, (ALooper *looper), (looper))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_pollOnce, (int timeout, int *fd, int *events, void **data),
+                         (timeout, fd, events, data))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_pollAll, (int timeout, int *fd, int *events, void **data),
+                         (timeout, fd, events, data))
+WESTLAKE_ALOOPER_FORWARD(void, ALooper_wake, (ALooper *looper), (looper))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_addFd,
+                         (ALooper *looper, int fd, int ident, int events, westlake_alooper_callback callback,
+                          void *data),
+                         (looper, fd, ident, events, callback, data))
+WESTLAKE_ALOOPER_FORWARD(int, ALooper_removeFd, (ALooper *looper, int fd), (looper, fd))
+
+/*
+ * AHardwareBuffer and the multinetwork DNS calls, for the same reason: the WebView shim's
+ * libandroid.so has neither, so Instagram's libscrollmerged.so failed to relocate on
+ * AHardwareBuffer_unlock. The runtime's libandroid.so imports AHardwareBuffer from libhwui.so;
+ * a lookup through its handle searches its dependencies and finds libhwui's definition.
+ */
+typedef struct AHardwareBuffer AHardwareBuffer;
+typedef struct AHardwareBuffer_Desc AHardwareBuffer_Desc;
+typedef struct ARect ARect;
+
+WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_allocate, (const AHardwareBuffer_Desc *desc, AHardwareBuffer **out),
+                         (desc, out))
+WESTLAKE_ALOOPER_FORWARD(void, AHardwareBuffer_acquire, (AHardwareBuffer *buffer), (buffer))
+WESTLAKE_ALOOPER_FORWARD(void, AHardwareBuffer_release, (AHardwareBuffer *buffer), (buffer))
+WESTLAKE_ALOOPER_FORWARD(void, AHardwareBuffer_describe, (const AHardwareBuffer *buffer, AHardwareBuffer_Desc *out),
+                         (buffer, out))
+WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_lock,
+                         (AHardwareBuffer *buffer, uint64_t usage, int32_t fence, const ARect *rect, void **address),
+                         (buffer, usage, fence, rect, address))
+WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_unlock, (AHardwareBuffer *buffer, int32_t *fence), (buffer, fence))
+WESTLAKE_ALOOPER_FORWARD(AHardwareBuffer *, AHardwareBuffer_fromHardwareBuffer, (void *env, void *object),
+                         (env, object))
+WESTLAKE_ALOOPER_FORWARD(void *, AHardwareBuffer_toHardwareBuffer, (void *env, AHardwareBuffer *buffer),
+                         (env, buffer))
+WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
+                         (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
+                         (network, name, ns_class, ns_type, flags))
+WESTLAKE_ALOOPER_FORWARD(int, android_res_nresult, (int fd, int *rcode, uint8_t *answer, size_t length),
+                         (fd, rcode, answer, length))
+
+/* AChoreographer, for the same reason (Duolingo's packaged libraries import it); the runtime's
+ * definitions live in liboh_hwui_shim.so, which libandroid.so's dependencies reach. */
+typedef struct AChoreographer AChoreographer;
+typedef void (*westlake_frame_callback)(long time, void *data);
+typedef void (*westlake_frame_callback64)(int64_t time, void *data);
+typedef void (*westlake_refresh_rate_callback)(int64_t period, void *data);
+
+WESTLAKE_ALOOPER_FORWARD(AChoreographer *, AChoreographer_getInstance, (void), ())
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback,
+                         (AChoreographer *c, westlake_frame_callback callback, void *data), (c, callback, data))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed,
+                         (AChoreographer *c, westlake_frame_callback callback, void *data, long delay),
+                         (c, callback, data, delay))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback64,
+                         (AChoreographer *c, westlake_frame_callback64 callback, void *data), (c, callback, data))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed64,
+                         (AChoreographer *c, westlake_frame_callback64 callback, void *data, uint32_t delay),
+                         (c, callback, data, delay))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_registerRefreshRateCallback,
+                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
+WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_unregisterRefreshRateCallback,
+                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
+
+/*
+ * Importing an AHardwareBuffer into EGL. Westlake's AHardwareBuffer is an OH_NativeBuffer, but
+ * hwui's TextureView path (AutoBackendTextureRelease -> MakeBackendTexture) imports it the Android
+ * way: eglGetNativeClientBufferANDROID, then eglCreateImageKHR(EGL_NATIVE_BUFFER_ANDROID). OH's
+ * EGL takes an OHNativeWindowBuffer with EGL_NATIVE_BUFFER_OHOS, so the import failed and hwui
+ * aborted with "Invalid GrBackendTexture" (Telegram, a video camera app). libhwui calls both
+ * through its PLT, so these preloaded definitions win: the client buffer becomes an OH window
+ * buffer over the same native buffer, and an image of it is created with the OH target. The window
+ * buffer lives as long as the image.
+ */
+typedef void *WlEglDisplay;
+typedef void *WlEglContext;
+typedef void *WlEglImage;
+typedef void *WlEglClientBuffer;
+typedef int32_t WlEglInt;
+#define WL_EGL_NATIVE_BUFFER_ANDROID 0x3140
+#define WL_EGL_NATIVE_BUFFER_OHOS 0x34E1
+
+/*
+ * The EGL implementations behind these wrappers. More than one serves the process: OH's libEGL.so,
+ * and the Mali driver, which the runtime's libandroid.so and libhwui.so link directly and which
+ * hwui's EGL calls bind to. Each takes only its own display handles: hwui's display given to
+ * libEGL.so fails with EGL_BAD_DISPLAY (Telegram's TextureView import), and an eglInitialize sent
+ * to whichever one RTLD_NEXT happened to find failed outright (libGDX: "requires OpenGL ES 2.0";
+ * Godot: "eglInitialize failed"). A call goes to the implementation whose current display it
+ * names; failing that, to each in turn while the answer is EGL_BAD_DISPLAY.
+ */
+#define WL_EGL_BAD_DISPLAY 0x3008
+#define WL_EGL_IMPLEMENTATIONS 3
+typedef struct {
+    void *library;
+    WlEglDisplay (*current_display)(void);
+    WlEglInt (*error)(void);
+    WlEglImage (*create_image)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *);
+    unsigned (*destroy_image)(WlEglDisplay, WlEglImage);
+    int (*dup_fence)(WlEglDisplay, void *);
+} WlEglImplementation;
+static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
+static int wl_egl_implementation_count;
+static pthread_once_t wl_egl_implementations_once = PTHREAD_ONCE_INIT;
+
+static void *wl_egl_entry(void *library, const char *name)
+{
+    void *symbol = dlsym(library, name);
+    if (symbol == NULL) {
+        /* An extension the library implements without exporting the name (the Mali driver's
+         * eglDupNativeFenceFDANDROID): its own eglGetProcAddress. */
+        void *(*proc)(const char *) = (void *(*)(const char *)) dlsym(library, "eglGetProcAddress");
+        if (proc != NULL) symbol = proc(name);
+    }
+    Dl_info self, found;
+    if (symbol != NULL && dladdr((void *) &wl_egl_entry, &self) != 0 && dladdr(symbol, &found) != 0 &&
+        found.dli_fbase == self.dli_fbase) {
+        return NULL; /* never this library's own wrapper */
+    }
+    return symbol;
+}
+
+static void wl_egl_add_implementation(void *library)
+{
+    if (library == NULL || wl_egl_implementation_count == WL_EGL_IMPLEMENTATIONS) return;
+    void *current = wl_egl_entry(library, "eglGetCurrentDisplay");
+    if (current == NULL) return;
+    for (int i = 0; i < wl_egl_implementation_count; i++) {
+        if ((void *) wl_egl_implementations[i].current_display == current) return; /* the same one */
+    }
+    WlEglImplementation *e = &wl_egl_implementations[wl_egl_implementation_count++];
+    e->library = library;
+    e->current_display = (WlEglDisplay (*)(void)) current;
+    e->error = (WlEglInt (*)(void)) wl_egl_entry(library, "eglGetError");
+    e->create_image = (WlEglImage (*)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *))
+            wl_egl_entry(library, "eglCreateImageKHR");
+    e->destroy_image = (unsigned (*)(WlEglDisplay, WlEglImage)) wl_egl_entry(library, "eglDestroyImageKHR");
+    e->dup_fence = (int (*)(WlEglDisplay, void *)) wl_egl_entry(library, "eglDupNativeFenceFDANDROID");
+    Dl_info info;
+    wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
+                  dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
+}
+
+static void wl_egl_find_implementations(void)
+{
+    /* First what the process binds to: eglGetCurrentDisplay, which this library does not define, in
+     * the global scope. Then the driver the runtime links, then OH's libEGL.so. */
+    Dl_info info;
+    void *first = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
+    if (first != NULL && dladdr(first, &info) != 0 && info.dli_fname != NULL) {
+        wl_egl_add_implementation(dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD));
+    }
+    wl_egl_add_implementation(dlopen("libGLES_mali.z.so", RTLD_NOW | RTLD_NOLOAD));
+    void *board = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
+    wl_egl_add_implementation(board != NULL ? board : dlopen("libEGL.so", RTLD_NOW));
+}
+
+/* The implementations to try for a call on this display, in order; returns how many. */
+static int wl_egl_order(WlEglDisplay display, int order[WL_EGL_IMPLEMENTATIONS])
+{
+    pthread_once(&wl_egl_implementations_once, wl_egl_find_implementations);
+    for (int i = 0; display != NULL && i < wl_egl_implementation_count; i++) {
+        if (wl_egl_implementations[i].current_display() == display) {
+            order[0] = i;
+            return 1;
+        }
+    }
+    for (int i = 0; i < wl_egl_implementation_count; i++) order[i] = i;
+    return wl_egl_implementation_count;
+}
+
+static WlEglInt wl_egl_error(int which)
+{
+    return wl_egl_implementations[which].error != NULL ? wl_egl_implementations[which].error() : 0;
+}
+
+static struct {
+    void *window_buffer;
+    WlEglImage image;
+    int implementation;
+} wl_egl_imports[256];
+static pthread_mutex_t wl_egl_imports_lock = PTHREAD_MUTEX_INITIALIZER;
+static int wl_egl_imports_created, wl_egl_imports_destroyed;
+
+static void *wl_native_window_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) library = dlopen("libnative_window.so", RTLD_NOW);
+    return library != NULL ? dlsym(library, name) : NULL;
+}
+
+static void wl_destroy_window_buffer(void *window_buffer)
+{
+    static void (*destroy)(void *);
+    if (destroy == NULL) destroy = (void (*)(void *)) wl_native_window_symbol("OH_NativeWindow_DestroyNativeWindowBuffer");
+    if (destroy != NULL && window_buffer != NULL) destroy(window_buffer);
+}
+
+WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
+{
+    static void *(*create)(void *);
+    if (create == NULL) {
+        create = (void *(*)(void *)) wl_native_window_symbol("OH_NativeWindow_CreateNativeWindowBufferFromNativeBuffer");
+    }
+    void *window_buffer = create != NULL && buffer != NULL ? create((void *) buffer) : NULL;
+    if (window_buffer == NULL) {
+        wl_relocs_log("[WESTLAKE-EGL] no OH window buffer for AHardwareBuffer %p\n", buffer);
+        return NULL;
+    }
+    pthread_mutex_lock(&wl_egl_imports_lock);
+    size_t slot = 0;
+    while (slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]) && wl_egl_imports[slot].window_buffer != NULL) slot++;
+    int full = slot == sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
+    if (!full) {
+        wl_egl_imports[slot].window_buffer = window_buffer;
+        wl_egl_imports[slot].image = NULL;
+    }
+    pthread_mutex_unlock(&wl_egl_imports_lock);
+    if (full) wl_relocs_log("[WESTLAKE-EGL] import table full: %d created, %d destroyed\n",
+                            wl_egl_imports_created, wl_egl_imports_destroyed);
+    return window_buffer;
+}
+
+WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigned target, WlEglClientBuffer buffer,
+                             const WlEglInt *attribs)
+{
+    size_t slot = sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
+    if (target == WL_EGL_NATIVE_BUFFER_ANDROID) {
+        pthread_mutex_lock(&wl_egl_imports_lock);
+        for (size_t i = 0; i < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]); i++) {
+            if (wl_egl_imports[i].window_buffer == buffer && wl_egl_imports[i].image == NULL) {
+                slot = i;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&wl_egl_imports_lock);
+    }
+    int ours = slot < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order), used = -1;
+    WlEglImage image = NULL;
+    WlEglInt code = 0;
+    for (int k = 0; k < count && image == NULL; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->create_image == NULL) continue;
+        used = order[k];
+        image = e->create_image(display, context, ours ? WL_EGL_NATIVE_BUFFER_OHOS : target, buffer, attribs);
+        /* Ask for the error only when another implementation remains: the caller reads it. */
+        if (image == NULL && k + 1 < count && (code = wl_egl_error(used)) != WL_EGL_BAD_DISPLAY) break;
+    }
+    if (!ours) return image;
+    pthread_mutex_lock(&wl_egl_imports_lock);
+    if (image != NULL) {
+        wl_egl_imports[slot].image = image;
+        wl_egl_imports[slot].implementation = used;
+        wl_egl_imports_created++;
+    } else {
+        wl_egl_imports[slot].window_buffer = NULL;
+    }
+    pthread_mutex_unlock(&wl_egl_imports_lock);
+    if (image == NULL) {
+        if (code == 0 && used >= 0) code = wl_egl_error(used);
+        wl_relocs_log("[WESTLAKE-EGL] OH image import failed: 0x%x\n", (unsigned) code);
+        wl_destroy_window_buffer(buffer);
+    } else {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] AHardwareBuffer imported as an OH native buffer image (implementation %d)\n",
+                          used);
+        }
+    }
+    return image;
+}
+
+unsigned eglDestroyImageKHR(WlEglDisplay display, WlEglImage image)
+{
+    void *window_buffer = NULL;
+    int made_by = -1;
+    pthread_mutex_lock(&wl_egl_imports_lock);
+    for (size_t i = 0; image != NULL && i < sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]); i++) {
+        if (wl_egl_imports[i].image == image) {
+            window_buffer = wl_egl_imports[i].window_buffer;
+            made_by = wl_egl_imports[i].implementation;
+            wl_egl_imports[i].window_buffer = NULL;
+            wl_egl_imports[i].image = NULL;
+            wl_egl_imports_destroyed++;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wl_egl_imports_lock);
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    if (made_by >= 0) {
+        order[0] = made_by;
+        count = 1;
+    }
+    unsigned result = 0;
+    for (int k = 0; k < count && !result; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->destroy_image == NULL) continue;
+        result = e->destroy_image(display, image);
+        if (!result && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    wl_destroy_window_buffer(window_buffer);
+    return result;
+}
+
+/*
+ * EGL_KHR_partial_update. The board's EGL advertises it but has rejected the damage region with
+ * EGL_BAD_ACCESS (Telegram, after 120 frames), and the deployed libhwui still treats any failure as
+ * fatal: the hwui source carries the remedy as §320, the binary predates it. The region is only a
+ * hint of which part of the frame changes, so it is not passed on: each frame is presented whole.
+ */
+unsigned eglSetDamageRegionKHR(WlEglDisplay display, void *surface, WlEglInt *rects, WlEglInt count)
+{
+    (void) rects;
+    (void) count;
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGLDAMAGE] damage region for %p/%p not passed on: frames presented whole\n",
+                      display, surface);
+    }
+    return 1;
+}
+
+/*
+ * eglDupNativeFenceFDANDROID. The Mali driver hwui binds its EGL calls to implements it but does not
+ * export the name, so hwui's call went to OH's libEGL.so with the driver's display: "invalid display
+ * pointer" on every TextureView frame. hwui then had no release fence, so the SurfaceTexture kept its
+ * old buffer frame after frame, and Telegram's next swaps failed with EGL_BAD_ALLOC. The call goes to
+ * the implementation that owns the display, through its eglGetProcAddress where it has no export.
+ */
+int eglDupNativeFenceFDANDROID(WlEglDisplay display, void *sync)
+{
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    for (int k = 0; k < count; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->dup_fence == NULL) continue;
+        int fd = e->dup_fence(display, sync);
+        if (fd >= 0) return fd;
+        if (k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGL] no native fence for sync %p on display %p\n", sync, display);
+    }
+    return -1; /* EGL_NO_NATIVE_FENCE_FD_ANDROID */
+}
+
+/*
+ * eglTerminate. hwui renders the whole process through the default display and keeps it
+ * initialized for the life of the process; Android's EGL loader counts initializations, so an app's
+ * own eglTerminate (GLSurfaceView, a renderer through EGL14) never tears that display down there.
+ * OH's terminates it at once, under hwui, whose next frame fails with EGL_NOT_INITIALIZED and aborts
+ * (X, and Telegram's GL thread). The display therefore stays initialized; what the app created on
+ * it, it destroys itself, as it does on Android.
+ */
+unsigned eglTerminate(WlEglDisplay display)
+{
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGL] eglTerminate(%p): display left initialized for the process\n", display);
+    }
+    return 1;
 }

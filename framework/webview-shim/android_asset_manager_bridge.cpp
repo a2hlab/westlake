@@ -70,7 +70,7 @@ wl_AAssetDir_getNextFileName(void* directory_handle) {
       state->next_index >= state->directory->getFileCount()) {
     return nullptr;
   }
-  return state->directory->getFileName(state->next_index++).string();
+  return state->directory->getFileName(state->next_index++).c_str();
 }
 
 extern "C" __attribute__((visibility("default"))) void wl_AAssetDir_rewind(

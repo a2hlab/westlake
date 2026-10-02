@@ -537,6 +537,68 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // ActivityThread.currentPackageName() may return null very early (before
     // handleBindApplication completes); fall back to "android" so the SSM
     // call still has a non-null bundleName for SCB routing.
+    // ---- SurfaceView: a surface of its own ---------------------------------------------------
+    // Android composes a SurfaceView's layer beside its window's; here a SurfaceControl resolves
+    // to its session's one OH window, so a SurfaceView's producer (an engine's EGL or Vulkan
+    // swapchain) and hwui drew into the same OH window: Flutter and game engines never showed.
+    // A SurfaceView that fills its window gets an OH sub-window session of its own, created after
+    // the activity's (so above it: OH stacks app windows by creation order) and bound to its
+    // BLAST SurfaceControl before its BLASTBufferQueue resolves a window. OH windows cannot be
+    // placed here (updateSessionRect has no IPC on this path; every window sits at 0,0), so a
+    // smaller SurfaceView -- an inline video, say -- keeps sharing its window as before.
+    private static final Map<Object, Integer> sSurfaceViewSessions = new java.util.IdentityHashMap<>();
+
+    /** SurfaceView (framework, by reflection) after building its BLAST layer. 0: not taken. */
+    public static int attachSurfaceView(Object surfaceView, SurfaceControl blast, String name,
+            int width, int height, int windowWidth, int windowHeight, IBinder token) {
+        if (blast == null || width <= 0 || height <= 0
+                || width * 10 < windowWidth * 9 || height * 10 < windowHeight * 9) {
+            return 0;
+        }
+        try {
+            long ohTokenAddr = 0L;
+            if (token != null) {
+                Long addr = adapter.core.OhTokenRegistry.findOhToken(token);
+                if (addr != null) ohTokenAddr = addr;
+            }
+            int[] info = nativeCreateSession(new android.os.Binder(), currentPackageName(),
+                    currentActivityName(), "entry", "SurfaceView:" + name,
+                    WindowManager.LayoutParams.TYPE_APPLICATION, 0, width, height, ohTokenAddr);
+            if (info == null || info.length < 6 || info[0] <= 0) {
+                System.err.println("[OH_WSA] SurfaceView '" + name + "' got no OH session: "
+                        + (info == null || info.length < 6 ? "malformed" : "wsErr=" + info[5]));
+                return 0;
+            }
+            int sessionId = info[0];
+            nativeShowWindow(sessionId);
+            nativeAttachSessionToSc(blast, sessionId);
+            synchronized (sSurfaceViewSessions) {
+                sSurfaceViewSessions.put(surfaceView, sessionId);
+            }
+            System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
+                    + " -> own sessionId=" + sessionId);
+            return sessionId;
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] SurfaceView '" + name + "' own session failed: " + t);
+            return 0;
+        }
+    }
+
+    /** SurfaceView (framework, by reflection) when it releases its surfaces. */
+    public static void detachSurfaceView(Object surfaceView) {
+        Integer sessionId;
+        synchronized (sSurfaceViewSessions) {
+            sessionId = sSurfaceViewSessions.remove(surfaceView);
+        }
+        if (sessionId == null) return;
+        try {
+            nativeDestroySession(sessionId);
+            System.err.println("[OH_WSA] SurfaceView session " + sessionId + " destroyed");
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] SurfaceView session " + sessionId + " destroy failed: " + t);
+        }
+    }
+
     private static String currentPackageName() {
         try {
             Class<?> c = Class.forName("android.app.ActivityThread");

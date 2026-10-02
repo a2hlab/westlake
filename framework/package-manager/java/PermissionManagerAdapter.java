@@ -43,9 +43,12 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
         static native int flags(String permission);
         static native boolean granted(String permission);
     }
-    private static void own(String pkg, int user) {
+    private static boolean isOwn(String pkg, int user) {
         Application app = ActivityThread.currentApplication();
-        if (app == null || !app.getPackageName().equals(pkg) || app.getUserId() != user)
+        return app != null && app.getPackageName().equals(pkg) && app.getUserId() == user;
+    }
+    private static void own(String pkg, int user) {
+        if (!isOwn(pkg, user))
             throw new SecurityException("Permission query is not for the current OH application");
     }
     private static SecurityException controllerRequired() {
@@ -110,7 +113,10 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
 
     @Override
     public int checkPermission(java.lang.String packageName, java.lang.String permissionName, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
-        own(packageName, userId);
+        // Android answers for any package and never throws here: another package, which this
+        // process cannot see installed, holds nothing (Messenger's Firebase checked one and died on
+        // the SecurityException).
+        if (!isOwn(packageName, userId)) return PackageManager.PERMISSION_DENIED;
         if (!android.companion.virtual.VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT.equals(persistentDeviceId)) return PackageManager.PERMISSION_DENIED;
         return checkProcessPermission(permissionName, -1, android.os.Process.myUid());
     }

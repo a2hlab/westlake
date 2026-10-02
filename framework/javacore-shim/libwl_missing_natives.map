@@ -1,0 +1,9 @@
+/* Only what ART looks up. Everything else stays local, so the ojluni sources' JNIEXPORT helpers
+ * (JNU_*, NET_*, JVM_*) neither interpose on nor bind to another library's copies. */
+{
+    global:
+        JNI_OnLoad;
+        Java_*;
+    local:
+        *;
+};
