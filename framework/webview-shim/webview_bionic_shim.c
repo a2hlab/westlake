@@ -3012,3 +3012,80 @@ unsigned eglTerminate(WlEglDisplay display)
     }
     return 1;
 }
+
+/*
+ * setcon. Westlake's app process starts in the launcher's domain (su, from the device shell) and
+ * moves to the app's (normal_hap) through OH's HapContext::HapDomainSetcontext, which calls setcon.
+ * A datagram socket connected before that keeps the launcher's label, and the app domain may
+ * neither write to it nor reconnect it: hilog's, inherited from the launcher. Under SELinux
+ * enforcing every app log line was dropped, silently (dontaudit): Telegram's process got 24 lines
+ * into hilog in a run, 2,980 with this. Each connected AF_UNIX datagram socket is noted while
+ * still in the old domain, and after a
+ * successful setcon replaced, on the same descriptor, by one created and connected in the new one.
+ * The switch is made while the process is single-threaded, so the swap races with nothing.
+ */
+#include <sys/un.h>
+
+int setcon(const char *context)
+{
+    static int (*real)(const char *);
+    if (real == NULL) {
+        void *library = dlopen("libselinux.z.so", RTLD_NOW | RTLD_NOLOAD);
+        if (library == NULL) library = dlopen("libselinux.z.so", RTLD_NOW);
+        void *symbol = library != NULL ? dlsym(library, "setcon") : NULL;
+        Dl_info self, found;
+        if (symbol != NULL && dladdr((void *) &setcon, &self) != 0 && dladdr(symbol, &found) != 0 &&
+            found.dli_fbase == self.dli_fbase) {
+            symbol = NULL; /* never this library's own wrapper */
+        }
+        real = (int (*)(const char *)) symbol;
+    }
+    if (real == NULL) {
+        errno = ENOSYS;
+        return -1;
+    }
+    enum { WL_MAX_RENEW = 16 };
+    struct {
+        int fd;
+        struct sockaddr_un peer;
+        socklen_t length;
+    } connected[WL_MAX_RENEW];
+    int count = 0;
+    for (int fd = 0; fd < 1024 && count < WL_MAX_RENEW; fd++) {
+        int type = 0;
+        socklen_t size = sizeof(type);
+        if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &size) != 0 || type != SOCK_DGRAM) continue;
+        struct sockaddr_un peer;
+        socklen_t length = sizeof(peer);
+        memset(&peer, 0, sizeof(peer));
+        if (getpeername(fd, (struct sockaddr *) &peer, &length) != 0 || peer.sun_family != AF_UNIX ||
+            length <= (socklen_t) offsetof(struct sockaddr_un, sun_path) || peer.sun_path[0] == '\0') {
+            continue; /* not connected to a filesystem socket: unnamed, abstract or another family */
+        }
+        connected[count].fd = fd;
+        connected[count].peer = peer;
+        connected[count].length = length;
+        count++;
+    }
+    int rc = real(context);
+    if (rc != 0) return rc;
+    int renewed = 0;
+    for (int i = 0; i < count; i++) {
+        int fd = connected[i].fd;
+        int descriptor_flags = fcntl(fd, F_GETFD);
+        int status_flags = fcntl(fd, F_GETFL);
+        int fresh = socket(AF_UNIX, SOCK_DGRAM, 0);
+        if (fresh < 0) continue;
+        if (connect(fresh, (struct sockaddr *) &connected[i].peer, connected[i].length) != 0 ||
+            (status_flags >= 0 && fcntl(fresh, F_SETFL, status_flags) != 0) || dup2(fresh, fd) < 0) {
+            close(fresh);
+            continue;
+        }
+        if (descriptor_flags >= 0) fcntl(fd, F_SETFD, descriptor_flags);
+        close(fresh);
+        renewed++;
+    }
+    wl_relocs_log("[WESTLAKE-SELINUX] setcon %s: %d of %d connected datagram socket(s) re-created in the new domain\n",
+                  context != NULL ? context : "(null)", renewed, count);
+    return rc;
+}
