@@ -38,6 +38,14 @@ static int caller_is_webview(void *return_address, const char **caller_path)
 }
 
 /* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
+/*
+ * An Android-built (bionic ABI) caller: the WebView, a library the app packages
+ * (/data/local/tmp/asx/lib/), or one the app wrote and loads from its own storage
+ * (/data/data/<pkg>/..., including the code_cache/wl-exec copies this shim makes of
+ * them). WhatsApp's superpack libraries run from those copies; its Breakpad setup
+ * passed a 32-byte bionic old-action to OH's sigaction untranslated, musl wrote 152
+ * bytes into it, and the clobbered stack crashed the app four seconds in.
+ */
 static int caller_is_android_dso(void *return_address, const char **caller_path)
 {
     Dl_info caller = {0};
@@ -45,7 +53,9 @@ static int caller_is_android_dso(void *return_address, const char **caller_path)
         return 0;
     }
     if (strstr(caller.dli_fname, "libwebviewchromium.so") == NULL &&
-        strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL) {
+        strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL &&
+        strncmp(caller.dli_fname, "/data/data/", 11) != 0 &&
+        strncmp(caller.dli_fname, "/data/user/", 11) != 0) {
         return 0;
     }
     if (caller_path != NULL) {
