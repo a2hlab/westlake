@@ -249,9 +249,10 @@ static const char *const westlake_bionic_ai_errlist[] = {
 
 /*
  * A Bionic caller gets Bionic's message for Bionic's code, from this table, never through musl's
- * gai_strerror: musl translates the message through the calling thread's locale, and on Meta's DNS
- * thread that returned a pointer into code. Instagram and Threads built "getaddrinfo(): " plus those
- * bytes into an error string, ICU rejected it as UTF-8, and the app aborted.
+ * gai_strerror. On Meta's DNS thread the old path returned a pointer into code, though musl's
+ * gai_strerror gave proper strings for every code and locale in a standalone test, so where that
+ * pointer came from is open. Instagram and Threads built "getaddrinfo(): " plus those bytes into an
+ * error string, ICU rejected it as UTF-8, and the app aborted.
  */
 const char *gai_strerror(int code) {
     typedef const char *(*Fn)(int);
