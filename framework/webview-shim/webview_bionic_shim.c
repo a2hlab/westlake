@@ -354,6 +354,32 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *old_set)
     return real_pthread_sigmask(how, set, old_set);
 }
 
+/*
+ * sigprocmask takes the same 8-byte bionic set as pthread_sigmask. Untranslated, musl copies a
+ * 128-byte old mask into it. Instagram's libraries import it; it reports failure through errno,
+ * where pthread_sigmask returns the error.
+ */
+int sigprocmask(int how, const sigset_t *set, sigset_t *old_set)
+{
+    if (caller_uses_bionic_signal_abi(__builtin_return_address(0), NULL)) {
+        int error = wl_pthread_mask(how, (const westlake_webview_bionic_sigset_t *)set,
+                                    (westlake_webview_bionic_sigset_t *)old_set);
+        if (error == 0) return 0;
+        errno = error;
+        return -1;
+    }
+    typedef int (*SigprocmaskFn)(int, const sigset_t *, sigset_t *);
+    static SigprocmaskFn real_sigprocmask;
+    if (real_sigprocmask == NULL) {
+        real_sigprocmask = (SigprocmaskFn)dlsym(RTLD_NEXT, "sigprocmask");
+    }
+    if (real_sigprocmask == NULL) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return real_sigprocmask(how, set, old_set);
+}
+
 int wl_sigact(int signal_number,
               const struct westlake_webview_bionic_sigaction *bionic_action,
               struct westlake_webview_bionic_sigaction *bionic_old_action)
