@@ -1177,6 +1177,48 @@ void *__loader_dlopen(const char *filename, int flags, const void *caller_addr)
     return dlopen(filename, flags);
 }
 
+/*
+ * A library inside an APK (<apk>!/lib/<abi>/<name>). OH's loader maps a stored zip member itself, so
+ * such a load gets the APK's own bytes, without what the launcher fixes when it stages the same
+ * library under lib/<abi>/: Android's RELR tags, null init array entries. Meta's SoLoader loads
+ * straight from the split APK that way, and Threads died when libc++_shared.so's constructor jumped
+ * to its link-time address. The staged copy is the same library, as Android would load it from an
+ * extracted install. Returns it (in staged), or NULL to load the path as asked.
+ */
+static const char *westlake_staged_apk_member(const char *filename, char *staged, size_t size)
+{
+    const char *member = filename != NULL ? strstr(filename, ".apk!/lib/") : NULL;
+    if (member == NULL) return NULL;
+    const char *abi = member + strlen(".apk!/lib/");
+    const char *slash = strchr(abi, '/');
+    if (slash == NULL || slash[1] == '\0' || strchr(slash + 1, '/') != NULL) return NULL;
+    if (snprintf(staged, size, "/data/local/tmp/asx/lib/%.*s/%s", (int) (slash - abi), abi, slash + 1) >= (int) size ||
+        access(staged, R_OK) != 0) {
+        return NULL;
+    }
+    fprintf(stderr, "[WESTLAKE-LOADER] %s: loading the staged copy %s\n", filename, staged);
+    return staged;
+}
+
+/*
+ * OH's dlopen into a namespace. ART's loader opens the libraries the launcher routes to the Android
+ * namespace through it (looked up with dlsym(RTLD_DEFAULT), which finds this one), not through
+ * dlopen: Threads' libc++_shared.so went that way, so the redirect above is applied here too.
+ */
+void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
+{
+    typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+    static DlopenNsFn real_dlopen_ns;
+    if (real_dlopen_ns == NULL) real_dlopen_ns = (DlopenNsFn) dlsym(RTLD_NEXT, "dlopen_ns");
+    if (real_dlopen_ns == NULL) {
+        errno = ENOSYS;
+        return NULL;
+    }
+    char staged[512];
+    const char *redirected = westlake_staged_apk_member(file, staged, sizeof(staged));
+    return real_dlopen_ns(ns, redirected != NULL ? redirected : file, mode);
+}
+
 void *dlopen(const char *filename, int flags)
 {
     void *caller = __builtin_return_address(0);
@@ -1201,6 +1243,11 @@ void *dlopen(const char *filename, int flags)
                     filename);
         }
         return NULL;
+    }
+    char staged[512];
+    if (westlake_staged_apk_member(filename, staged, sizeof(staged)) != NULL) {
+        actual_filename = staged;
+        basename = strrchr(staged, '/') + 1;
     }
     /*
      * OpenSL ES through dlopen. Oboe (Rhythm Engine) does not link libOpenSLES: it dlopens it and
