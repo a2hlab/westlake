@@ -441,6 +441,52 @@ static void wl_pokeByteArray(JNIEnv* env, jclass c, jlong address, jbyteArray sr
     (*env)->GetByteArrayRegion(env, src, offset, count, (jbyte*) (intptr_t) address);
 }
 
+/*
+ * The bulk copies between a byte[] and an array of wider elements, with an optional per-element
+ * byte swap: java.nio.HeapByteBuffer's typed bulk gets and puts (a CharBuffer, ShortBuffer,
+ * IntBuffer... view over a byte[]). Instagram's start-up hit unsafeBulkGet; Snapchat's r83 log has
+ * it too. As AOSP's libcore_io_Memory.cpp: the element-typed side's offset counts elements, the
+ * byte[] side's counts bytes.
+ */
+static void wl_bulk_copy(jbyte* dst, const jbyte* src, jint byteCount, jint sizeofElement, jboolean swap)
+{
+    if (sizeofElement <= 1 || !swap) {
+        memmove(dst, src, (size_t) byteCount);
+        return;
+    }
+    for (jint i = 0; i + sizeofElement <= byteCount; i += sizeofElement) {
+        for (jint k = 0; k < sizeofElement; k++) dst[i + k] = src[i + sizeofElement - 1 - k];
+    }
+}
+
+static void wl_unsafeBulkGet(JNIEnv* env, jclass c, jobject dstObject, jint dstOffset, jint byteCount,
+                             jbyteArray srcArray, jint srcOffset, jint sizeofElement, jboolean swap)
+{
+    (void) c;
+    jbyte* src = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, srcArray, NULL);
+    if (src == NULL) return;
+    jbyte* dst = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, (jarray) dstObject, NULL);
+    if (dst != NULL) {
+        wl_bulk_copy(dst + (size_t) dstOffset * (size_t) sizeofElement, src + srcOffset, byteCount, sizeofElement, swap);
+        (*env)->ReleasePrimitiveArrayCritical(env, (jarray) dstObject, dst, 0);
+    }
+    (*env)->ReleasePrimitiveArrayCritical(env, srcArray, src, JNI_ABORT);
+}
+
+static void wl_unsafeBulkPut(JNIEnv* env, jclass c, jbyteArray dstArray, jint dstOffset, jint byteCount,
+                             jobject srcObject, jint srcOffset, jint sizeofElement, jboolean swap)
+{
+    (void) c;
+    jbyte* src = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, (jarray) srcObject, NULL);
+    if (src == NULL) return;
+    jbyte* dst = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, dstArray, NULL);
+    if (dst != NULL) {
+        wl_bulk_copy(dst + dstOffset, src + (size_t) srcOffset * (size_t) sizeofElement, byteCount, sizeofElement, swap);
+        (*env)->ReleasePrimitiveArrayCritical(env, dstArray, dst, 0);
+    }
+    (*env)->ReleasePrimitiveArrayCritical(env, (jarray) srcObject, src, JNI_ABORT);
+}
+
 #define MEM(Name, Sig) { #Name, Sig, (void*) wl_##Name }
 static const JNINativeMethod kMemory[] = {
     MEM(peekByteArray, "(J[BII)V"), MEM(pokeByteArray, "(J[BII)V"),
@@ -450,6 +496,7 @@ static const JNINativeMethod kMemory[] = {
     MEM(peekLongArray, "(J[JIIZ)V"), MEM(pokeLongArray, "(J[JIIZ)V"),
     MEM(peekFloatArray, "(J[FIIZ)V"), MEM(pokeFloatArray, "(J[FIIZ)V"),
     MEM(peekDoubleArray, "(J[DIIZ)V"), MEM(pokeDoubleArray, "(J[DIIZ)V"),
+    MEM(unsafeBulkGet, "(Ljava/lang/Object;II[BIIZ)V"), MEM(unsafeBulkPut, "([BIILjava/lang/Object;IIZ)V"),
 };
 
 static void note(const char* text)
