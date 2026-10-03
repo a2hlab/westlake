@@ -1082,7 +1082,16 @@ static void *westlake_load_app_library(const char *path, int flags)
             if (create_fn(&ns, search, 0) == 0) {
                 /* The Android namespace, when the launch made one, first and whole. */
                 if (get_fn("westlake_android_app", &android) == 0) inherit_fn(&ns, &android, NULL);
-                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so") == 0) state = 1;
+                /* From the default namespace: libc, and the NDK libraries an app's packaged code gets
+                 * there too. WhatsApp's libwhatsappmerged.so needs libandroid.so; with no Android
+                 * namespace in its launch nothing here had one, the load failed, and SoLoader's retry
+                 * outside this namespace could not find libqpl.so beside it. */
+                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
+                               "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
+                               "libjnigraphics.so:libnativewindow.so:libvulkan.so:libsync.so:libaaudio.so:"
+                               "libcamera2ndk.so:libmediandk.so") == 0) {
+                    state = 1;
+                }
                 /* This library, global there, as ART's loader does for its namespace: its bionic and
                  * NDK symbols (ASharedMemory_*, __assert, ...) must resolve for what loads here. */
                 Dl_info self;
