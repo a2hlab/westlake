@@ -459,10 +459,34 @@ int wl_sigact(int signal_number,
  * 0x18000004. Interpose the public name as well, but translate only a direct
  * Android WebView caller. Every OH-native caller is forwarded unchanged.
  */
+/*
+ * Who installs a handler, and which. An OH library can replace the handler an app installed: Meta's
+ * sigmux owns SIGILL for its trap hooks (it rewrites abort's first instruction and catches the
+ * trap), and Instagram died when the SIGILL that abort raised reached another library's handler.
+ * Each install is logged with the handler's and the caller's addresses, the first 96 in a process.
+ */
+static void westlake_log_install(const char *kind, int signal_number, const void *handler, unsigned long flags,
+                                 const void *caller)
+{
+    static int logged;
+    if (handler == NULL || handler == (const void *) SIG_DFL || handler == (const void *) SIG_IGN) return;
+    if (__atomic_add_fetch(&logged, 1, __ATOMIC_RELAXED) > 96) return;
+    /* Raw addresses: no dladdr here, since a library constructor can install a handler while the
+     * loader holds its lock. The harness places them with the process map. */
+    fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] %s signal=%d flags=%#lx handler=%p caller=%p\n", kind, signal_number,
+            flags, handler, caller);
+}
+
 int sigaction(int signal_number, const struct sigaction *action,
               struct sigaction *old_action)
 {
     if (caller_uses_bionic_signal_abi(__builtin_return_address(0), NULL)) {
+        if (action != NULL) {
+            const struct westlake_webview_bionic_sigaction *bionic =
+                    (const struct westlake_webview_bionic_sigaction *) action;
+            westlake_log_install("android", signal_number, (const void *) bionic->callback.handler,
+                                 (unsigned long) bionic->flags, __builtin_return_address(0));
+        }
         return wl_sigact(
                 signal_number,
                 (const struct westlake_webview_bionic_sigaction *)action,
@@ -478,6 +502,10 @@ int sigaction(int signal_number, const struct sigaction *action,
     if (real_sigaction == NULL) {
         errno = ENOSYS;
         return -1;
+    }
+    if (action != NULL) {
+        westlake_log_install("oh", signal_number, (const void *) action->sa_handler, (unsigned long) action->sa_flags,
+                             __builtin_return_address(0));
     }
     return real_sigaction(signal_number, action, old_action);
 }
@@ -2207,6 +2235,215 @@ void android_set_abort_message(const char *message)
 
 static char g_bionic_ctype[257];
 const char *_ctype_ = g_bionic_ctype;
+
+/*
+ * A witness for signals that can end the process without a crash dump. OH's dumper writes none for a
+ * SIGILL that FFRT's handler takes (Instagram and Threads died that way, right after a numeric-host
+ * getaddrinfo), so nothing said where the instruction was. First in musl's signal chain for SIGILL,
+ * SIGTRAP and SIGBUS, this prints the signal, thread, pc and x30 to stderr and lets the chain go on:
+ * it never handles the signal, so a library probing the CPU with an illegal instruction still
+ * catches its own. The harness places pc and x30 with the process map the run samples. Only
+ * async-signal-safe calls; at most 16 lines per process.
+ */
+#include <sys/prctl.h>
+#include <ucontext.h>
+#include <stdbool.h>
+
+struct westlake_signal_chain_action {
+    bool (*sca_sigaction)(int, siginfo_t *, void *);
+    sigset_t sca_mask;
+    int sca_flags;
+};
+
+static char *westlake_hex(char *out, uint64_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char buffer[18];
+    int length = 0;
+    do {
+        buffer[length++] = digits[value & 15];
+        value >>= 4;
+    } while (value != 0);
+    *out++ = '0';
+    *out++ = 'x';
+    while (length > 0) *out++ = buffer[--length];
+    return out;
+}
+
+static char *westlake_text(char *out, const char *text, size_t limit)
+{
+    while (*text != '\0' && limit-- > 0) *out++ = *text++;
+    return out;
+}
+
+static uint64_t westlake_parse_hex(const char **cursor, const char *end)
+{
+    uint64_t value = 0;
+    const char *p = *cursor;
+    for (; p < end; ++p) {
+        char c = *p;
+        int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+        if (digit < 0) break;
+        value = (value << 4) | (uint64_t) digit;
+    }
+    *cursor = p;
+    return value;
+}
+
+/*
+ * Appends " <path>+<offset>" for the mapping holding address, read from /proc/self/maps with raw
+ * open/read: the process map the harness samples is often taken too late for a process that dies in
+ * its first seconds. Bounded throughout; an unreadable or odd line just adds nothing.
+ */
+static char *westlake_place(char *out, char *limit, uint64_t address, int *readable)
+{
+    if (readable != NULL) *readable = 0;
+    int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return out;
+    char buffer[4096];
+    char line[512];
+    size_t used = 0;
+    int done = 0;
+    while (!done) {
+        ssize_t got = read(fd, buffer, sizeof(buffer));
+        if (got <= 0) break;
+        for (ssize_t i = 0; i < got && !done; ++i) {
+            if (buffer[i] != '\n') {
+                if (used < sizeof(line) - 1) line[used++] = buffer[i];
+                continue;
+            }
+            line[used] = '\0';
+            const char *cursor = line, *end = line + used;
+            uint64_t start = westlake_parse_hex(&cursor, end);
+            if (cursor < end && *cursor == '-') {
+                ++cursor;
+                uint64_t stop = westlake_parse_hex(&cursor, end);
+                if (address >= start && address < stop) {
+                    while (cursor < end && *cursor == ' ') ++cursor;
+                    if (readable != NULL && cursor < end && *cursor == 'r' && address + 8 <= stop) *readable = 1;
+                    /* "start-stop perms offset dev inode path": four fields, then the path. */
+                    int field = 0;
+                    uint64_t offset = 0;
+                    while (cursor < end && field < 4) {
+                        while (cursor < end && *cursor == ' ') ++cursor;
+                        if (field == 1) offset = westlake_parse_hex(&cursor, end);
+                        while (cursor < end && *cursor != ' ') ++cursor;
+                        ++field;
+                    }
+                    while (cursor < end && *cursor == ' ') ++cursor;
+                    if (cursor < end && out + (end - cursor) + 24 < limit) {
+                        *out++ = ' ';
+                        while (cursor < end) *out++ = *cursor++;
+                        *out++ = '+';
+                        out = westlake_hex(out, address - start + offset);
+                    }
+                    done = 1;
+                }
+            }
+            used = 0;
+        }
+    }
+    close(fd);
+    return out;
+}
+
+static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
+{
+    static int witnessed;
+    if (__atomic_add_fetch(&witnessed, 1, __ATOMIC_RELAXED) > 16) return false;
+    const ucontext_t *uc = (const ucontext_t *) context;
+    char thread[17] = "";
+    prctl(PR_GET_NAME, thread, 0, 0, 0);
+    char line[1800];
+    char *out = westlake_text(line, "[WESTLAKE-SIGNAL-WITNESS] signal=", 64);
+    out = westlake_hex(out, (uint64_t) signal_number);
+    out = westlake_text(out, " code=", 8);
+    out = westlake_hex(out, info != NULL ? (uint64_t) (uint32_t) info->si_code : 0);
+    out = westlake_text(out, " tid=", 8);
+    out = westlake_hex(out, (uint64_t) gettid());
+    out = westlake_text(out, " thread=", 8);
+    out = westlake_text(out, thread, 16);
+    if (uc != NULL) {
+        out = westlake_text(out, " pc=", 8);
+        out = westlake_hex(out, (uint64_t) uc->uc_mcontext.pc);
+        out = westlake_text(out, " x30=", 8);
+        out = westlake_hex(out, (uint64_t) uc->uc_mcontext.regs[30]);
+        /* The instruction word in memory at pc: what the CPU refused, which is not always what
+         * the library's file holds (code patched at run time). */
+        int readable = 0;
+        out = westlake_text(out, " at", 4);
+        out = westlake_place(out, line + 480, (uint64_t) uc->uc_mcontext.pc, &readable);
+        if (readable && out + 40 < line + 500) {
+            const volatile uint32_t *words = (const volatile uint32_t *) (uintptr_t) uc->uc_mcontext.pc;
+            uint64_t first = words[0], second = words[1];
+            out = westlake_text(out, " insn=", 8);
+            out = westlake_hex(out, first);
+            out = westlake_text(out, " next=", 8);
+            out = westlake_hex(out, second);
+            /* Two words that read as a user-space address are a pointer written over the code (a
+             * hook installed in the wrong place): where it points names the hook. */
+            uint64_t pointer = first | (second << 32);
+            if (second != 0 && second < 0x100 && out + 40 < line + 700) {
+                out = westlake_text(out, " pointer-to", 12);
+                out = westlake_place(out, line + 700, pointer, NULL);
+            }
+        }
+        out = westlake_text(out, " from", 6);
+        out = westlake_place(out, line + 1000, (uint64_t) uc->uc_mcontext.regs[30], NULL);
+        /* The arguments and the first callee-saved registers, and what x19 points to: at an abort
+         * the caller's x19..x22 still hold what it was working on (Instagram's: the string an ICU
+         * conversion rejected). Printable bytes as text, the rest as \xNN. */
+        static const int shown[] = {0, 1, 2, 3, 4, 5, 19, 20, 21, 22};
+        for (size_t i = 0; i < sizeof(shown) / sizeof(shown[0]) && out + 26 < line + 1500; ++i) {
+            *out++ = ' ';
+            *out++ = 'x';
+            if (shown[i] >= 10) *out++ = (char) ('0' + shown[i] / 10);
+            *out++ = (char) ('0' + shown[i] % 10);
+            *out++ = '=';
+            out = westlake_hex(out, (uint64_t) uc->uc_mcontext.regs[shown[i]]);
+        }
+        int string_readable = 0;
+        char scratch[256];
+        westlake_place(scratch, scratch + sizeof(scratch), (uint64_t) uc->uc_mcontext.regs[19], &string_readable);
+        if (string_readable && westlake_place(scratch, scratch + sizeof(scratch),
+                                              (uint64_t) uc->uc_mcontext.regs[19] + 48, &string_readable) != NULL &&
+            string_readable) {
+            out = westlake_text(out, " *x19=\"", 8);
+            const volatile unsigned char *bytes = (const volatile unsigned char *) (uintptr_t) uc->uc_mcontext.regs[19];
+            for (int i = 0; i < 48 && out + 6 < line + 1700; ++i) {
+                unsigned char c = bytes[i];
+                if (c >= 32 && c < 127 && c != '\\' && c != '"') {
+                    *out++ = (char) c;
+                } else {
+                    static const char digits[] = "0123456789abcdef";
+                    *out++ = '\\';
+                    *out++ = 'x';
+                    *out++ = digits[c >> 4];
+                    *out++ = digits[c & 15];
+                }
+            }
+            *out++ = '"';
+        }
+    }
+    *out++ = '\n';
+    ssize_t written = write(2, line, (size_t) (out - line));
+    (void) written;
+    return false;
+}
+
+__attribute__((constructor)) static void westlake_install_signal_witness(void)
+{
+    typedef void (*AddSpecialFn)(int, struct westlake_signal_chain_action *);
+    AddSpecialFn add = (AddSpecialFn) dlsym(RTLD_DEFAULT, "add_special_signal_handler");
+    if (add == NULL) return;
+    static struct westlake_signal_chain_action action;
+    action.sca_sigaction = westlake_signal_witness;
+    sigemptyset(&action.sca_mask);
+    action.sca_flags = 0;
+    add(SIGILL, &action);
+    add(SIGTRAP, &action);
+    add(SIGBUS, &action);
+}
 
 __attribute__((constructor)) static void initialize_bionic_ctype(void)
 {
