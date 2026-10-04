@@ -3306,6 +3306,34 @@ WESTLAKE_ALOOPER_FORWARD(AHardwareBuffer *, AHardwareBuffer_fromHardwareBuffer, 
                          (env, object))
 WESTLAKE_ALOOPER_FORWARD(void *, AHardwareBuffer_toHardwareBuffer, (void *env, AHardwareBuffer *buffer),
                          (env, buffer))
+/*
+ * The cross-process buffer handoff, and the Surface for a native window: no runtime library defines
+ * them. Gecko's libxul imports all three -- Fennec's failed to relocate on
+ * AHardwareBuffer_recvHandleFromUnixSocket -- for its compositor in a separate GPU process, which
+ * the one app process here never starts. They answer as on a socket that carries no buffer and a
+ * window with no Java Surface: -EINVAL, and null.
+ */
+int AHardwareBuffer_sendHandleToUnixSocket(const AHardwareBuffer *buffer, int socket_fd)
+{
+    (void) buffer;
+    (void) socket_fd;
+    return -EINVAL;
+}
+
+int AHardwareBuffer_recvHandleFromUnixSocket(int socket_fd, AHardwareBuffer **out_buffer)
+{
+    (void) socket_fd;
+    if (out_buffer != NULL) *out_buffer = NULL;
+    return -EINVAL;
+}
+
+void *ANativeWindow_toSurface(void *env, void *window)
+{
+    (void) env;
+    (void) window;
+    return NULL;
+}
+
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
                          (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
                          (network, name, ns_class, ns_type, flags))
