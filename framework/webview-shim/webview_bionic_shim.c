@@ -1313,6 +1313,128 @@ static const char *westlake_staged_apk_member(const char *filename, char *staged
 }
 
 /*
+ * An app library opened by name instead of by path. OH's loader records a library's short name only
+ * when it is opened by name, and a later DT_NEEDED is matched against short names alone. ART opens
+ * app libraries by path, so a library naming an already-loaded one in DT_NEEDED got a second copy:
+ * Chaquopy loads libpython3.11.so, then libchaquopy_java.so, which needs it, and the two Python
+ * runtimes ended in a call through a null slot (econverter). A library in the staged lib directory
+ * is opened by its name instead -- only where no other directory the loader searches has a file of
+ * that name, so the name finds this file -- and the handle is checked to be that file.
+ */
+static const char *westlake_unambiguous_lib_name(const char *path, int first_on_path)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    size_t length = dir != NULL ? strlen(dir) : 0;
+    if (path == NULL || length == 0 || strncmp(path, dir, length) != 0 || path[length] != '/') return NULL;
+    const char *name = path + length + 1;
+    if (name[0] == '\0' || strchr(name, '/') != NULL) return NULL;
+    /* A namespace that searches the staged directory first finds this file by its name. */
+    if (first_on_path) return name;
+    char other[512];
+    const char *search = getenv("LD_LIBRARY_PATH");
+    while (search != NULL && *search != '\0') {
+        const char *end = strchr(search, ':');
+        size_t n = end != NULL ? (size_t) (end - search) : strlen(search);
+        if (n > 0 && !(n == length && strncmp(search, dir, n) == 0) &&
+            snprintf(other, sizeof(other), "%.*s/%s", (int) n, search, name) < (int) sizeof(other) &&
+            access(other, F_OK) == 0) {
+            return NULL;
+        }
+        search = end != NULL ? end + 1 : NULL;
+    }
+    /* The Android namespace searches the WebView shim's libraries first. */
+    const char *root = getenv("WESTLAKE_RUNTIME_ROOT");
+    if (root != NULL && snprintf(other, sizeof(other), "%s/webview-t-lib/%s", root, name) < (int) sizeof(other) &&
+        access(other, F_OK) == 0) {
+        return NULL;
+    }
+    return name;
+}
+
+/*
+ * Whether handle, opened by name through open, is the library at path. The path re-opened with
+ * RTLD_NOLOAD through the same open answers only a library already loaded, matched by device and
+ * inode, and OH's loader keeps one handle per library, so the two handles are equal exactly when
+ * the name opened that file. dlinfo cannot tell: OH's dlopen returns a random handle mapped to the
+ * library, which musl's dlinfo rejects as invalid, and every by-name open fell back to its path
+ * (econverter's Chaquopy libraries, all of them). The reference the check takes is dropped.
+ */
+static int westlake_handle_is(void *(*open)(void *context, const char *file, int flags), void *context,
+                              void *handle, const char *path, int flags)
+{
+    if (handle == NULL) return 0;
+    void *same = open(context, path, flags | RTLD_NOLOAD);
+    if (same == NULL) return 0;
+    dlclose(same);
+    return same == handle;
+}
+
+/* Whether ns is ART's Android namespace with the staged lib directory first on its search path. */
+static int westlake_searches_staged_first(Dl_namespace *ns)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    const char *search = getenv("WESTLAKE_ANDROID_NATIVE_SEARCH_PATH");
+    size_t length = dir != NULL ? strlen(dir) : 0;
+    return ns != NULL && strcmp(ns->name, "westlake_android_app") == 0 && length > 0 && search != NULL &&
+           strncmp(search, dir, length) == 0 && (search[length] == ':' || search[length] == '\0');
+}
+
+/* Opens path by name through open (dlopen or a namespace's dlopen_ns), or returns NULL to open it by path. */
+static void *westlake_open_lib_by_name(void *(*open)(void *context, const char *file, int flags), void *context,
+                                       const char *path, int flags, int first_on_path)
+{
+    const char *name = westlake_unambiguous_lib_name(path, first_on_path);
+    if (name == NULL) return NULL;
+    void *handle = open(context, name, flags);
+    if (westlake_handle_is(open, context, handle, path, flags)) return handle;
+    fprintf(stderr, "[WESTLAKE-LOADER] %s by name gave another library; opening the path\n", name);
+    return NULL;
+}
+
+static void *westlake_real_dlopen_ns_fn(void *context, const char *file, int flags);
+static void *westlake_real_dlopen_fn(void *context, const char *file, int flags);
+
+/*
+ * A library the launcher routes to ART's Android namespace (WESTLAKE_ANDROID_NATIVE_TARGETS), opened
+ * by app code with dlopen. ART's loader puts it in that namespace, where the APK's own
+ * libc++_shared.so is found first; a direct dlopen lands in the default namespace, where OH's
+ * /system/lib64/ndk/libc++_shared.so (another C++ ABI) is. JNA does both: System.loadLibrary, then
+ * dlopen for its own handle, and Translator's second copy of libbindings.so failed to relocate
+ * std::__ndk1::to_string. Once ART has made the namespace, the dlopen is answered there, by name:
+ * the library ART already loaded.
+ */
+static void *westlake_open_routed_lib(const char *path, int flags)
+{
+    const char *targets = getenv("WESTLAKE_ANDROID_NATIVE_TARGETS");
+    const char *name = path != NULL ? strrchr(path, '/') : NULL;
+    name = name != NULL ? name + 1 : path;
+    if (targets == NULL || name == NULL || name[0] == '\0') return NULL;
+    if (name != path) {
+        const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+        size_t length = dir != NULL ? strlen(dir) : 0;
+        if (length == 0 || (size_t) (name - path) != length + 1 || strncmp(path, dir, length) != 0) return NULL;
+    }
+    size_t name_length = strlen(name);
+    int listed = 0;
+    for (const char *item = targets; item != NULL && *item != '\0' && !listed;) {
+        const char *end = strchr(item, ':');
+        size_t n = end != NULL ? (size_t) (end - item) : strlen(item);
+        listed = n == name_length && strncmp(item, name, n) == 0;
+        item = end != NULL ? end + 1 : NULL;
+    }
+    if (!listed) return NULL;
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    DlnsGetFn get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    Dl_namespace android;
+    memset(&android, 0, sizeof(android));
+    if (get == NULL || get("westlake_android_app", &android) != 0) return NULL;   /* ART has not made it yet */
+    void *handle = westlake_real_dlopen_ns_fn(&android, name, flags);
+    wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name in the Android namespace\n", path,
+                  handle != NULL ? "opened" : "not opened");
+    return handle;
+}
+
+/*
  * OH's dlopen into a namespace. ART's loader opens the libraries the launcher routes to the Android
  * namespace through it (looked up with dlsym(RTLD_DEFAULT), which finds this one), not through
  * dlopen: Threads' libc++_shared.so went that way, so the redirect above is applied here too.
@@ -1328,7 +1450,27 @@ void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
     }
     char staged[512];
     const char *redirected = westlake_staged_apk_member(file, staged, sizeof(staged));
-    return real_dlopen_ns(ns, redirected != NULL ? redirected : file, mode);
+    const char *path = redirected != NULL ? redirected : file;
+    void *by_name = westlake_open_lib_by_name(westlake_real_dlopen_ns_fn, ns, path, mode,
+                                              westlake_searches_staged_first(ns));
+    return by_name != NULL ? by_name : real_dlopen_ns(ns, path, mode);
+}
+
+static void *westlake_real_dlopen_ns_fn(void *context, const char *file, int flags)
+{
+    typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+    static DlopenNsFn real;
+    if (real == NULL) real = (DlopenNsFn) dlsym(RTLD_NEXT, "dlopen_ns");
+    return real != NULL ? real((Dl_namespace *) context, file, flags) : NULL;
+}
+
+static void *westlake_real_dlopen_fn(void *context, const char *file, int flags)
+{
+    typedef void *(*DlopenFn)(const char *, int);
+    static DlopenFn real;
+    (void) context;
+    if (real == NULL) real = (DlopenFn) dlsym(RTLD_NEXT, "dlopen");
+    return real != NULL ? real(file, flags) : NULL;
 }
 
 void *dlopen(const char *filename, int flags)
@@ -1513,6 +1655,18 @@ void *dlopen(const char *filename, int flags)
         wl_needs_android_relocs(actual_filename)) {
         /* Never the original: musl would leave its RELR pointers unrelocated (SIGSEGV). */
         return westlake_load_android_relocs(real_dlopen, actual_filename, flags);
+    }
+    if (actual_filename != NULL && !(flags & RTLD_NOLOAD) && caller_is_android_dso(caller, NULL)) {
+        void *routed = westlake_open_routed_lib(actual_filename, flags);
+        if (routed != NULL) {
+            return routed;
+        }
+    }
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD)) {
+        void *by_name = westlake_open_lib_by_name(westlake_real_dlopen_fn, NULL, actual_filename, flags, 0);
+        if (by_name != NULL) {
+            return by_name;
+        }
     }
     void *handle = real_dlopen(actual_filename, flags);
     if (handle == NULL && actual_filename != NULL && actual_filename[0] == '/') {
