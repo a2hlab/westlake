@@ -477,20 +477,49 @@ static void westlake_log_install(const char *kind, int signal_number, const void
             flags, handler, caller);
 }
 
+/*
+ * SIGILL and SIGTRAP handlers Android code installed, which OH's own libraries may not replace. On
+ * Android nothing else in an app's process takes these over. Here FFRT installs its own when it
+ * starts, after the app's crash reporter: Meta's tooling traps abort and exit with an illegal
+ * instruction for Breakpad's handler to catch, and FFRT's handler took the trap instead and the
+ * process died. Trap hooks and CPU-feature probes use these two signals; SIGSEGV and the rest stay
+ * as OH sets them.
+ */
+static volatile unsigned int westlake_android_signal_claims;
+
+static int westlake_claimable_signal(int signal_number)
+{
+    return signal_number == SIGILL || signal_number == SIGTRAP;
+}
+
+/* A Bionic caller's sigaction: translated, logged, and its SIGILL/SIGTRAP handler claimed. */
+static int westlake_android_sigaction(int signal_number, const struct westlake_webview_bionic_sigaction *action,
+                                      struct westlake_webview_bionic_sigaction *old_action, const void *caller)
+{
+    if (action != NULL) {
+        westlake_log_install("android", signal_number, (const void *) action->callback.handler,
+                             (unsigned long) action->flags, caller);
+    }
+    int result = wl_sigact(signal_number, action, old_action);
+    if (result == 0 && action != NULL && westlake_claimable_signal(signal_number)) {
+        void (*handler)(int) = action->callback.handler;
+        unsigned int bit = 1u << signal_number;
+        if (handler == SIG_DFL || handler == SIG_IGN) {
+            __atomic_fetch_and(&westlake_android_signal_claims, ~bit, __ATOMIC_RELAXED);
+        } else {
+            __atomic_fetch_or(&westlake_android_signal_claims, bit, __ATOMIC_RELAXED);
+        }
+    }
+    return result;
+}
+
 int sigaction(int signal_number, const struct sigaction *action,
               struct sigaction *old_action)
 {
     if (caller_uses_bionic_signal_abi(__builtin_return_address(0), NULL)) {
-        if (action != NULL) {
-            const struct westlake_webview_bionic_sigaction *bionic =
-                    (const struct westlake_webview_bionic_sigaction *) action;
-            westlake_log_install("android", signal_number, (const void *) bionic->callback.handler,
-                                 (unsigned long) bionic->flags, __builtin_return_address(0));
-        }
-        return wl_sigact(
-                signal_number,
-                (const struct westlake_webview_bionic_sigaction *)action,
-                (struct westlake_webview_bionic_sigaction *)old_action);
+        return westlake_android_sigaction(signal_number, (const struct westlake_webview_bionic_sigaction *) action,
+                                          (struct westlake_webview_bionic_sigaction *) old_action,
+                                          __builtin_return_address(0));
     }
 
     typedef int (*SigactionFn)(int, const struct sigaction *,
@@ -506,8 +535,54 @@ int sigaction(int signal_number, const struct sigaction *action,
     if (action != NULL) {
         westlake_log_install("oh", signal_number, (const void *) action->sa_handler, (unsigned long) action->sa_flags,
                              __builtin_return_address(0));
+        if (westlake_claimable_signal(signal_number) &&
+            (__atomic_load_n(&westlake_android_signal_claims, __ATOMIC_RELAXED) & (1u << signal_number)) != 0) {
+            /* The app's handler stays; the caller is told what is installed. */
+            fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied: the app's handler stays\n",
+                    signal_number);
+            return old_action != NULL ? real_sigaction(signal_number, NULL, old_action) : 0;
+        }
     }
     return real_sigaction(signal_number, action, old_action);
+}
+
+/*
+ * Bionic's 64-bit signal API (API 28). On arm64 sigset64_t and struct sigaction64 lay out as Bionic's
+ * sigset_t and struct sigaction, and musl has no such names, so only Android code calls these and
+ * each is the Bionic translation. TikTok's and CapCut's libraries import them weak: missing, they
+ * read as null, which code gated on the SDK level (34 here) would call.
+ */
+int sigemptyset64(westlake_webview_bionic_sigset_t *set) { return wl_emptyset(set); }
+int sigfillset64(westlake_webview_bionic_sigset_t *set) { return wl_fillset(set); }
+int sigaddset64(westlake_webview_bionic_sigset_t *set, int signal_number) { return wl_addset(set, signal_number); }
+int sigismember64(const westlake_webview_bionic_sigset_t *set, int signal_number)
+{
+    return wl_ismember(set, signal_number);
+}
+int sigdelset64(westlake_webview_bionic_sigset_t *set, int signal_number)
+{
+    if (set == NULL || !westlake_bionic_signal_number_is_valid(signal_number)) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set &= ~(UINT64_C(1) << (signal_number - 1));
+    return 0;
+}
+int pthread_sigmask64(int how, const westlake_webview_bionic_sigset_t *set, westlake_webview_bionic_sigset_t *old_set)
+{
+    return wl_pthread_mask(how, set, old_set);
+}
+int sigprocmask64(int how, const westlake_webview_bionic_sigset_t *set, westlake_webview_bionic_sigset_t *old_set)
+{
+    int error = wl_pthread_mask(how, set, old_set);
+    if (error == 0) return 0;
+    errno = error;
+    return -1;
+}
+int sigaction64(int signal_number, const struct westlake_webview_bionic_sigaction *action,
+                struct westlake_webview_bionic_sigaction *old_action)
+{
+    return westlake_android_sigaction(signal_number, action, old_action, __builtin_return_address(0));
 }
 
 /*
@@ -1308,6 +1383,23 @@ void *dlopen(const char *filename, int flags)
             caller_info.dli_fbase != self.dli_fbase &&
             strncmp(caller_info.dli_fname, "/system/", 8) != 0 &&
             strncmp(caller_info.dli_fname, "/vendor/", 8) != 0) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                return handle;
+            }
+        }
+    }
+    /*
+     * libc.so, asked for by Android code: this library's own handle, as for libdl.so. A lookup by it
+     * finds this library's Bionic-ABI entry points first (sigaction and the signal sets, sysconf,
+     * the property calls) and everything else in musl through this library's dependencies.
+     * ByteDance's bytesig (shadowhook, bytehook) takes sigaction from libc's handle to put its own
+     * handler first; on musl's it handed over a Bionic struct, and musl installed the flags word
+     * (0x18000804) as the handler in TikTok and CapCut. OH's and Westlake's own libraries keep musl.
+     */
+    if (basename != NULL && strcmp(basename, "libc.so") == 0 && caller_is_android_dso(caller, NULL)) {
+        Dl_info self;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL) {
             void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
             if (handle != NULL) {
                 return handle;
