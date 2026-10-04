@@ -1249,6 +1249,10 @@ public class AppSpawnXInit {
                     if ("getProcessMemoryInfo".equals(name)) {
                         return adapter.activity.CallerProcess.processMemoryInfo(args != null ? (int[]) args[0] : null);
                     }
+                    if ("getMemoryInfo".equals(name) && args != null && args.length > 0) {
+                        adapter.activity.CallerProcess.memoryInfo((android.app.ActivityManager.MemoryInfo) args[0]);
+                        return null;
+                    }
                     // An app binding one of its OWN services. The type default (0) reads as "bind
                     // failed" to ContextImpl, and Termux throws on that from TermuxActivity.onCreate,
                     // so the activity never starts. ActivityManagerAdapter already binds in-app
@@ -1272,6 +1276,53 @@ public class AppSpawnXInit {
                     }
                     // Nothing is held for an in-process binding, so releasing one always succeeds.
                     if ("unbindService".equals(name)) return Boolean.TRUE;
+                    // An app starting or stopping one of its OWN services. The type default (null)
+                    // reads as "no such service", so a started service never ran: Draw Anywhere
+                    // starts the service that shows its overlay, then finishes its activity. Run in
+                    // process like a binding; a service in another package still answers null.
+                    // startService(caller, intent, ...), stopService(caller, intent, ...),
+                    // stopServiceToken(component, token, startId).
+                    if ("startService".equals(name) && args != null && args.length > 1) {
+                        return adapter.activity.InProcessServiceBinder.start((android.content.Intent) args[1]);
+                    }
+                    if ("stopService".equals(name) && args != null && args.length > 1) {
+                        android.content.ComponentName comp = adapter.activity.InProcessServiceBinder.resolveInApp(
+                                (android.content.Intent) args[1]);
+                        return adapter.activity.InProcessServiceBinder.stop(comp, -1) ? 1 : 0;
+                    }
+                    if ("stopServiceToken".equals(name) && args != null && args.length > 2) {
+                        return adapter.activity.InProcessServiceBinder.stop(
+                                (android.content.ComponentName) args[0], (Integer) args[2]);
+                    }
+                    // Receivers and broadcasts, kept in process (LocalBroadcasts): a registration
+                    // answered null was never heard from, and sendBroadcast went nowhere.
+                    // registerReceiverWithFeature(caller, pkg, feature, receiverId, receiver, filter,
+                    // ...), registerReceiver(caller, pkg, receiver, filter, ...).
+                    if ("registerReceiverWithFeature".equals(name) && args != null && args.length > 5) {
+                        return adapter.activity.LocalBroadcasts.register(
+                                (android.content.IIntentReceiver) args[4], (android.content.IntentFilter) args[5]);
+                    }
+                    if ("registerReceiver".equals(name) && args != null && args.length > 3) {
+                        return adapter.activity.LocalBroadcasts.register(
+                                (android.content.IIntentReceiver) args[2], (android.content.IntentFilter) args[3]);
+                    }
+                    if ("unregisterReceiver".equals(name) && args != null && args.length > 0) {
+                        adapter.activity.LocalBroadcasts.unregister((android.content.IIntentReceiver) args[0]);
+                        return null;
+                    }
+                    // broadcastIntentWithFeature(caller, feature, intent, type, resultTo, code, data,
+                    // extras, perms, excludePerms, excludePkgs, appOp, options, serialized, sticky,
+                    // user); broadcastIntent drops feature, excludePerms and excludePkgs.
+                    if ("broadcastIntentWithFeature".equals(name) && args != null && args.length > 15) {
+                        return adapter.activity.LocalBroadcasts.broadcast((android.content.Intent) args[2],
+                                (String) args[3], (android.content.IIntentReceiver) args[4], (Integer) args[5],
+                                (String) args[6], (android.os.Bundle) args[7], (Boolean) args[13], (Integer) args[15]);
+                    }
+                    if ("broadcastIntent".equals(name) && args != null && args.length > 12) {
+                        return adapter.activity.LocalBroadcasts.broadcast((android.content.Intent) args[1],
+                                (String) args[2], (android.content.IIntentReceiver) args[3], (Integer) args[4],
+                                (String) args[5], (android.os.Bundle) args[6], (Boolean) args[10], (Integer) args[12]);
+                    }
                     // PendingIntents: a null sender made every PendingIntent factory return null
                     // (Element hands one to AlarmManager.cancel from onResume). getIntentSender's
                     // args are (type, package, token, resultWho, requestCode, intents, types,
