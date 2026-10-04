@@ -366,8 +366,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     public List<ActivityManager.RunningTaskInfo> getTasks(int maxNum,
             boolean filterOnlyVisibleRecents, boolean keepIntentExtra, int displayId)
             throws RemoteException {
-        logBridged("getTasks", "-> OH IMissionManager.GetMissionInfos");
-        return Collections.emptyList();
+        logBridged("getTasks", "-> the app's own task");
+        // An app sees only its own tasks (since Android 5): the one the client controller keeps.
+        return OwnTask.runningTasks(maxNum);
     }
 
     /** [BRIDGED] moveTaskToFront -> OH IMissionManager.MoveMissionToFront */
@@ -382,8 +383,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     @Override
     public ParceledListSlice<ActivityManager.RecentTaskInfo> getRecentTasks(int maxNum,
             int flags, int userId) throws RemoteException {
-        logBridged("getRecentTasks", "-> OH IMissionManager.GetMissionInfos");
-        return null;
+        logBridged("getRecentTasks", "-> the app's own task");
+        // ActivityManager.getRecentTasks reads getList() off the result unchecked: never null.
+        java.util.ArrayList<ActivityManager.RecentTaskInfo> recent = new java.util.ArrayList<>(1);
+        ActivityManager.RecentTaskInfo own = OwnTask.recentTaskInfo();
+        if (own != null && maxNum > 0) recent.add(own);
+        return new ParceledListSlice<>(recent);
     }
 
     /** [STUB] isTopActivityImmersive - No direct OH equivalent */
@@ -610,8 +615,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     /** [BRIDGED] getAppTasks -> OH IMissionManager.GetMissionInfos */
     @Override
     public List<IBinder> getAppTasks(String callingPackage) throws RemoteException {
-        logBridged("getAppTasks", "-> OH IMissionManager.GetMissionInfos");
-        return Collections.emptyList();
+        logBridged("getAppTasks", "-> the app's own task");
+        return OwnTask.appTasks();
     }
 
     /** [STUB] addAppTask - No OH equivalent */
