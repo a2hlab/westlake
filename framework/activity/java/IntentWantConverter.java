@@ -279,9 +279,29 @@ public class IntentWantConverter {
                 return Intent.ACTION_SEND;
             case "ohos.want.action.select":
                 return Intent.ACTION_PICK;
-            default:
-                return ohAction;
+            default: {
+                String android = unprefixedAndroidAction(ohAction);
+                return android != null ? android : ohAction;
+            }
         }
+    }
+
+    private static final String OH_ACTION_PREFIX = "ohos.want.action.";
+
+    /**
+     * The Android action mapAction() carried under OH's prefix, or null if ohAction is not one.
+     *
+     * OH's own actions in that namespace are single names (viewData, home, sendData); an Android
+     * action is always qualified (android.intent.action.EDIT, org.andstatus.app.action.X), so a
+     * dot after the prefix marks one. Left prefixed, the activity received an action it does not
+     * know: AndStatus's FirstActivity starts itself with its SET_DEFAULT_VALUES action, did not
+     * recognise "ohos.want.action.org.andstatus.app.action.SET_DEFAULT_VALUES", and its splash
+     * waited for defaults that were never set.
+     */
+    static String unprefixedAndroidAction(String ohAction) {
+        if (ohAction == null || !ohAction.startsWith(OH_ACTION_PREFIX)) return null;
+        String rest = ohAction.substring(OH_ACTION_PREFIX.length());
+        return rest.indexOf('.') > 0 ? rest : null;
     }
 
     // ==================== Serialization Utilities ====================

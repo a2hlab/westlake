@@ -1446,17 +1446,23 @@ public class AppSchedulerBridge {
             case "ohos.want.action.viewData":  return Intent.ACTION_VIEW;
             case "ohos.want.action.editData":  return Intent.ACTION_EDIT;
             case "ohos.want.action.search":    return Intent.ACTION_SEARCH;
-            case "ohos.want.action.send":      return Intent.ACTION_SEND;
+            case "ohos.want.action.send":
+            case "ohos.want.action.sendData":  return Intent.ACTION_SEND;   // IntentWantConverter's form
             case "ohos.want.action.sendto":    return Intent.ACTION_SENDTO;
             case "ohos.want.action.dial":      return Intent.ACTION_DIAL;
             case "ohos.want.action.call":      return Intent.ACTION_CALL;
-            case "ohos.want.action.pickItem":  return Intent.ACTION_PICK;
+            case "ohos.want.action.pickItem":
+            case "ohos.want.action.select":    return Intent.ACTION_PICK;   // IntentWantConverter's form
             case "ohos.want.action.imageCapture":
                 return "android.media.action.IMAGE_CAPTURE";   // MediaStore constant
             case "ohos.want.action.videoCapture":
                 return "android.media.action.VIDEO_CAPTURE";   // MediaStore constant
-            default:
-                return ohAction;  // pass-through (App-defined custom actions)
+            default: {
+                // An Android action IntentWantConverter carried under OH's prefix gets its own name
+                // back; anything else passes through (app-defined actions sent as they are).
+                String android = IntentWantConverter.unprefixedAndroidAction(ohAction);
+                return android != null ? android : ohAction;
+            }
         }
     }
 
