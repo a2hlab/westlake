@@ -942,25 +942,44 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         logStub("hasSystemFeature", name);
         // A feature is claimed only where its Android API reaches the hardware: an app that is
         // told the hardware exists takes its hardware path without further checks.
-        switch (name) {
-            case "android.software.webview":
-                return getSideloadedWebViewPackageInfo() != null;
-            // No camera: the board has two (OH's CameraService lists a back and a front one),
-            // but no Android camera service reaches them, so CameraManager lists none. CameraX
-            // checks its camera list against these features: with a back camera claimed and
-            // none listed, its init retries until a timeout and then fails ("Device reporting
-            // less cameras than anticipated"). Claim it again once "media.camera" is provided.
-            // No Bluetooth either. The adapter is present and off (LocalServiceBinders answers
-            // the manager service); claimed, the feature sends apps to ACTION_REQUEST_ENABLE,
-            // which nothing here answers.
-            case "android.hardware.touchscreen":
-            case "android.hardware.wifi":
-            case "android.hardware.screen.portrait":
-            case "android.hardware.screen.landscape":
-                return true;
-            default:
-                return false;
+        //
+        // No camera: the board has two (OH's CameraService lists a back and a front one),
+        // but no Android camera service reaches them, so CameraManager lists none. CameraX
+        // checks its camera list against these features: with a back camera claimed and
+        // none listed, its init retries until a timeout and then fails ("Device reporting
+        // less cameras than anticipated"). Claim it again once "media.camera" is provided.
+        // No Bluetooth either. The adapter is present and off (LocalServiceBinders answers
+        // the manager service); claimed, the feature sends apps to ACTION_REQUEST_ENABLE,
+        // which nothing here answers.
+        if ("android.software.webview".equals(name)) {
+            return getSideloadedWebViewPackageInfo() != null;
         }
+        // As PackageManagerService answers: claimed, at the version asked for or a later one.
+        Integer claimed = name != null ? CLAIMED_FEATURES.get(name) : null;
+        return claimed != null && claimed >= version;
+    }
+
+    /*
+     * Vulkan as the board's driver provides it: the Mali ICD reports API 1.2.275, reached through
+     * the runtime's libvulkan (OH's loader plus VK_KHR_android_surface), where Flutter's Impeller
+     * draws. Unclaimed, an app's two halves disagreed: Godot's Java side found no
+     * android.hardware.vulkan.version, fell back to an OpenGL view and never handed its engine a
+     * window, while the engine found a working libvulkan, chose Vulkan, failed on the null window
+     * and then called its renderer through a null pointer (duckrun, playmaker). The level is 0,
+     * the minimum; level 1 promises optional features nobody has checked here.
+     */
+    private static final int VULKAN_API_VERSION = (1 << 22) | (2 << 12);  // VK_MAKE_API_VERSION(0, 1, 2, 0)
+
+    /** Every claimed feature and its version, for hasSystemFeature and getSystemAvailableFeatures. */
+    private static final java.util.Map<String, Integer> CLAIMED_FEATURES = new java.util.LinkedHashMap<>();
+    static {
+        CLAIMED_FEATURES.put("android.hardware.touchscreen", 0);
+        CLAIMED_FEATURES.put("android.hardware.wifi", 0);
+        CLAIMED_FEATURES.put("android.hardware.screen.portrait", 0);
+        CLAIMED_FEATURES.put("android.hardware.screen.landscape", 0);
+        CLAIMED_FEATURES.put("android.hardware.vulkan.version", VULKAN_API_VERSION);
+        CLAIMED_FEATURES.put("android.hardware.vulkan.level", 0);
+        CLAIMED_FEATURES.put("android.hardware.vulkan.compute", 0);
     }
 
     // ========================================================================
@@ -1850,10 +1869,27 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * The claimed features with their versions, plus the WebView when one is installed: the list
+     * hasSystemFeature answers from. It was null, which ApplicationPackageManager turns into no
+     * features at all, while hasSystemFeature said yes to the touchscreen.
+     */
     @Override
     public android.content.pm.ParceledListSlice getSystemAvailableFeatures() throws android.os.RemoteException {
         logStub("getSystemAvailableFeatures", "");
-        return null;
+        java.util.List<android.content.pm.FeatureInfo> features = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Integer> entry : CLAIMED_FEATURES.entrySet()) {
+            android.content.pm.FeatureInfo info = new android.content.pm.FeatureInfo();
+            info.name = entry.getKey();
+            info.version = entry.getValue();
+            features.add(info);
+        }
+        if (getSideloadedWebViewPackageInfo() != null) {
+            android.content.pm.FeatureInfo info = new android.content.pm.FeatureInfo();
+            info.name = "android.software.webview";
+            features.add(info);
+        }
+        return new android.content.pm.ParceledListSlice<>(features);
     }
 
 
