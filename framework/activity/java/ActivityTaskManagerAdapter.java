@@ -149,8 +149,15 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         // ("addObserver must be called on the main thread", "Can't create handler inside thread"):
         // AndStatus's first activity, Fennec's crash reporter. Android's ActivityManager is
         // asynchronous to the caller anyway, so hand the start to the main thread.
-        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-            final Intent started = intent;
+        // On the main thread as well, for the app's own activities: Android creates the started
+        // activity after the caller's current message, never inside startActivity. Instagram's
+        // BloksSignedOutFragmentActivity starts ModalActivity and then sets what ModalActivity's
+        // onCreate requires; launched in place, that onCreate threw "Required value was null" up
+        // through the caller. A start that leaves the app keeps its synchronous result, which
+        // Instrumentation turns into ActivityNotFoundException.
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper() || startsOwnActivity(intent)) {
+            // A copy, as AMS takes it when startActivity is called: the caller may reuse its Intent.
+            final Intent started = intent != null ? new Intent(intent) : null;
             final int startFlags = flags;
             final IBinder from = resultTo;
             new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
@@ -163,6 +170,18 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             return 0;   // ActivityManager.START_SUCCESS
         }
         return bridgeStartActivityWithStack(intent, flags, resultTo);
+    }
+
+    /** Whether the intent names one of this app's own activities, which launch in this process. */
+    private static boolean startsOwnActivity(Intent intent) {
+        if (intent == null) return false;
+        try {
+            String own = android.app.ActivityThread.currentPackageName();
+            String target = IntentWantConverter.intentToWant(intent).bundleName;
+            return own != null && own.equals(target);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** [BRIDGED] startActivities -> OH IAbilityManager.StartAbility(Want) for each intent */
