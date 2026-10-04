@@ -1041,6 +1041,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         IntentWantConverter.WantParams want = IntentWantConverter.intentToWant(intent);
         String bundleName = want.bundleName;
         String abilityName = want.abilityName;
+        // One of the app's own activities launches in this process: it gets the Intent as the app
+        // built it, not the one rebuilt from the Want (see PendingLaunchIntents).
+        String own = android.app.ActivityThread.currentPackageName();
+        if (own != null && own.equals(bundleName) && abilityName != null && !abilityName.isEmpty()) {
+            PendingLaunchIntents.offer(abilityName.startsWith(".") ? bundleName + abilityName : abilityName, intent);
+        }
 
         // 2026-05-19: resolve callerToken once — used by both nativeStartAbility
         // fallback (below) and the final new-Mission branch.  See
