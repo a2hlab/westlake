@@ -1447,6 +1447,11 @@ public class AppSchedulerBridge {
      * §1.2.5.2 — OH action string → Android Intent action constant.
      * Phase 1 minimum + Phase 2 full common.
      */
+    /** 0xPPTTEEEE with a non-zero type byte; OH's resource ids (0x01000005) have type 0. */
+    private static boolean isAndroidResourceId(int id) {
+        return id != 0 && ((id >>> 16) & 0xff) != 0;
+    }
+
     private static String mapOhActionToAndroid(String ohAction) {
         if (ohAction == null) return null;
         switch (ohAction) {
@@ -2026,14 +2031,18 @@ public class AppSchedulerBridge {
                         + Integer.toHexString(appThemeBefore));
             }
             activityInfo.icon = 0;
-            activityInfo.labelRes = 0;
+            // Labels are zeroed only in OH's id format (type byte 0), which G2.5 guarded against. An
+            // APK's own label ids are kept: ScrambledExif reads its application label from labelRes in
+            // onResume and, with neither labelRes nor nonLocalizedLabel left, threw; activity titles
+            // fell back to class names.
+            if (!isAndroidResourceId(activityInfo.labelRes)) activityInfo.labelRes = 0;
             if (!keepTheme) activityInfo.theme = 0;
             activityInfo.logo = 0;
             activityInfo.banner = 0;
             if (aiApp != null) {
                 aiApp.icon = 0;
                 aiApp.iconRes = 0;
-                aiApp.labelRes = 0;
+                if (!isAndroidResourceId(aiApp.labelRes)) aiApp.labelRes = 0;
                 aiApp.descriptionRes = 0;
                 if (!keepTheme) aiApp.theme = 0;
                 aiApp.logo = 0;
