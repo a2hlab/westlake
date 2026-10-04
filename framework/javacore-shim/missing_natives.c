@@ -50,6 +50,12 @@
  *   on it. Replaced with libcore's own logic (UnixFileSystem_md.c): stat, add or clear the owner or
  *   everyone bits, chmod.
  *
+ *   java.io.UnixFileSystem.getSpace0 -- File.getTotalSpace, getFreeSpace and getUsableSpace. The
+ *   runtime's openjdk stub registers a version that answers 0 for every path, so any size an app
+ *   derives from them is 0: CNN sizes its OkHttp cache at half of /data's usable space and its
+ *   Application died on "maxSize <= 0". libcore's logic again: statvfs, the fragment size times
+ *   the block count asked for.
+ *
  *   The loading thread's Java priority -- not a native, a value. libart.so's PaletteSchedGetPriority
  *   is a weak stub that returns success without writing a priority, so ART gives every thread it
  *   attaches, the main thread included, Java priority 0 (Android's main thread has 5), and every
@@ -73,6 +79,7 @@
 #define _GNU_SOURCE
 #define _GNU_SOURCE /* dladdr */
 #include <dlfcn.h>
+#include <errno.h>
 #include <jni.h>
 #include <math.h>
 #include <string.h>
@@ -84,6 +91,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/xattr.h>
 #include <grp.h>
 #include <poll.h>
@@ -441,6 +449,52 @@ static void wl_pokeByteArray(JNIEnv* env, jclass c, jlong address, jbyteArray sr
     (*env)->GetByteArrayRegion(env, src, offset, count, (jbyte*) (intptr_t) address);
 }
 
+/*
+ * The bulk copies between a byte[] and an array of wider elements, with an optional per-element
+ * byte swap: java.nio.HeapByteBuffer's typed bulk gets and puts (a CharBuffer, ShortBuffer,
+ * IntBuffer... view over a byte[]). Instagram's start-up hit unsafeBulkGet; Snapchat's r83 log has
+ * it too. As AOSP's libcore_io_Memory.cpp: the element-typed side's offset counts elements, the
+ * byte[] side's counts bytes.
+ */
+static void wl_bulk_copy(jbyte* dst, const jbyte* src, jint byteCount, jint sizeofElement, jboolean swap)
+{
+    if (sizeofElement <= 1 || !swap) {
+        memmove(dst, src, (size_t) byteCount);
+        return;
+    }
+    for (jint i = 0; i + sizeofElement <= byteCount; i += sizeofElement) {
+        for (jint k = 0; k < sizeofElement; k++) dst[i + k] = src[i + sizeofElement - 1 - k];
+    }
+}
+
+static void wl_unsafeBulkGet(JNIEnv* env, jclass c, jobject dstObject, jint dstOffset, jint byteCount,
+                             jbyteArray srcArray, jint srcOffset, jint sizeofElement, jboolean swap)
+{
+    (void) c;
+    jbyte* src = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, srcArray, NULL);
+    if (src == NULL) return;
+    jbyte* dst = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, (jarray) dstObject, NULL);
+    if (dst != NULL) {
+        wl_bulk_copy(dst + (size_t) dstOffset * (size_t) sizeofElement, src + srcOffset, byteCount, sizeofElement, swap);
+        (*env)->ReleasePrimitiveArrayCritical(env, (jarray) dstObject, dst, 0);
+    }
+    (*env)->ReleasePrimitiveArrayCritical(env, srcArray, src, JNI_ABORT);
+}
+
+static void wl_unsafeBulkPut(JNIEnv* env, jclass c, jbyteArray dstArray, jint dstOffset, jint byteCount,
+                             jobject srcObject, jint srcOffset, jint sizeofElement, jboolean swap)
+{
+    (void) c;
+    jbyte* src = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, (jarray) srcObject, NULL);
+    if (src == NULL) return;
+    jbyte* dst = (jbyte*) (*env)->GetPrimitiveArrayCritical(env, dstArray, NULL);
+    if (dst != NULL) {
+        wl_bulk_copy(dst + dstOffset, src + (size_t) srcOffset * (size_t) sizeofElement, byteCount, sizeofElement, swap);
+        (*env)->ReleasePrimitiveArrayCritical(env, dstArray, dst, 0);
+    }
+    (*env)->ReleasePrimitiveArrayCritical(env, (jarray) srcObject, src, JNI_ABORT);
+}
+
 #define MEM(Name, Sig) { #Name, Sig, (void*) wl_##Name }
 static const JNINativeMethod kMemory[] = {
     MEM(peekByteArray, "(J[BII)V"), MEM(pokeByteArray, "(J[BII)V"),
@@ -450,6 +504,7 @@ static const JNINativeMethod kMemory[] = {
     MEM(peekLongArray, "(J[JIIZ)V"), MEM(pokeLongArray, "(J[JIIZ)V"),
     MEM(peekFloatArray, "(J[FIIZ)V"), MEM(pokeFloatArray, "(J[FIIZ)V"),
     MEM(peekDoubleArray, "(J[DIIZ)V"), MEM(pokeDoubleArray, "(J[DIIZ)V"),
+    MEM(unsafeBulkGet, "(Ljava/lang/Object;II[BIIZ)V"), MEM(unsafeBulkPut, "([BIILjava/lang/Object;IIZ)V"),
 };
 
 static void note(const char* text)
@@ -556,11 +611,27 @@ static jlong wl_getLastModifiedTime0(JNIEnv* env, jobject self, jobject file)
     return (jlong) st.st_mtim.tv_sec * 1000 + st.st_mtim.tv_nsec / 1000000;
 }
 
+/* java.io.FileSystem's SPACE_TOTAL, SPACE_FREE, SPACE_USABLE. */
+static jlong wl_getSpace0(JNIEnv* env, jobject self, jobject file, jint which)
+{
+    char path[4096];
+    struct statvfs st;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || statvfs(path, &st) != 0) return 0;
+    switch (which) {
+    case 0: return (jlong) st.f_frsize * (jlong) st.f_blocks;
+    case 1: return (jlong) st.f_frsize * (jlong) st.f_bfree;
+    case 2: return (jlong) st.f_frsize * (jlong) st.f_bavail;
+    default: return 0;
+    }
+}
+
 static const JNINativeMethod kUnixFileSystem[] = {
     { "setPermission0", "(Ljava/io/File;IZZ)Z", (void*) wl_setPermission0 },
     { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
     { "setLastModifiedTime0", "(Ljava/io/File;J)Z", (void*) wl_setLastModifiedTime0 },
     { "getLastModifiedTime0", "(Ljava/io/File;)J", (void*) wl_getLastModifiedTime0 },
+    { "getSpace0", "(Ljava/io/File;I)J", (void*) wl_getSpace0 },
 };
 
 /*
@@ -671,8 +742,31 @@ static jint wl_camera_count(JNIEnv* e, jclass c, jint device, jint policy)
     return 0;
 }
 
+/*
+ * With no camera listed, every id is unknown. Android's JNI answers getCameraInfo for an unknown id
+ * with RuntimeException("Unknown camera ID"), and a connection with -EACCES, which Camera.open turns
+ * into "Fail to connect to camera service". Open Camera asks for camera 0's facing without checking
+ * the count; the missing native threw UnsatisfiedLinkError, which no caller catches.
+ */
+static void wl_camera_info(JNIEnv* e, jclass c, jint id, jint rotation, jint slow, jint policy, jobject info)
+{
+    (void) c; (void) id; (void) rotation; (void) slow; (void) policy; (void) info;
+    jclass failure = (*e)->FindClass(e, "java/lang/RuntimeException");
+    if (failure != NULL) (*e)->ThrowNew(e, failure, "Unknown camera ID");
+}
+
+static jint wl_camera_setup(JNIEnv* e, jobject thiz, jobject self, jint id, jstring package, jint rotation,
+                            jboolean slow, jint client, jint policy)
+{
+    (void) e; (void) thiz; (void) self; (void) id; (void) package; (void) rotation; (void) slow; (void) client;
+    (void) policy;
+    return -EACCES;
+}
+
 static const JNINativeMethod kCamera[] = {
     { "_getNumberOfCameras", "(II)I", (void*) wl_camera_count },
+    { "_getCameraInfo", "(IIIILandroid/hardware/Camera$CameraInfo;)V", (void*) wl_camera_info },
+    { "native_setup", "(Ljava/lang/Object;ILjava/lang/String;IZII)I", (void*) wl_camera_setup },
 };
 
 static void wl_camcorder_init(JNIEnv* e, jclass c) { (void) e; (void) c; }

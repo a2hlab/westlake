@@ -227,15 +227,41 @@ static int westlake_bionic_eai(int musl) {
     return musl;
 }
 
+/* Bionic's own gai_strerror table, indexed by its own EAI_* numbers (EAI_MAX is 15). */
+static const char *const westlake_bionic_ai_errlist[] = {
+    "Success",
+    "Address family for hostname not supported",
+    "Temporary failure in name resolution",
+    "Invalid value for ai_flags",
+    "Non-recoverable failure in name resolution",
+    "ai_family not supported",
+    "Memory allocation failure",
+    "No address associated with hostname",
+    "hostname nor servname provided, or not known",
+    "servname not supported for ai_socktype",
+    "ai_socktype not supported",
+    "System error returned in errno",
+    "Invalid value for hints",
+    "Resolved protocol is unknown",
+    "Argument buffer overflow",
+    "Unknown error",
+};
+
+/*
+ * A Bionic caller gets Bionic's message for Bionic's code, from this table, never through musl's
+ * gai_strerror. On Meta's DNS thread the old path returned a pointer into code, though musl's
+ * gai_strerror gave proper strings for every code and locale in a standalone test, so where that
+ * pointer came from is open. Instagram and Threads built "getaddrinfo(): " plus those bytes into an
+ * error string, ICU rejected it as UTF-8, and the app aborted.
+ */
 const char *gai_strerror(int code) {
     typedef const char *(*Fn)(int);
     static Fn real;
-    if (real == NULL) real = (Fn)westlake_libc_symbol("gai_strerror");
     if (westlake_network_callsite_selected(__builtin_return_address(0))) {
-        for (size_t i = 0; i < sizeof(westlake_eai) / sizeof(westlake_eai[0]); ++i) {
-            if (westlake_eai[i].bionic == code) { code = westlake_eai[i].musl; break; }
-        }
+        const int last = (int)(sizeof(westlake_bionic_ai_errlist) / sizeof(westlake_bionic_ai_errlist[0])) - 1;
+        return westlake_bionic_ai_errlist[code < 0 || code > last ? last : code];
     }
+    if (real == NULL) real = (Fn)westlake_libc_symbol("gai_strerror");
     return real != NULL ? real(code) : "Unknown error";
 }
 

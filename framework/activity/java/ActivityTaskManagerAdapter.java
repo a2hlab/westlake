@@ -149,8 +149,15 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         // ("addObserver must be called on the main thread", "Can't create handler inside thread"):
         // AndStatus's first activity, Fennec's crash reporter. Android's ActivityManager is
         // asynchronous to the caller anyway, so hand the start to the main thread.
-        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
-            final Intent started = intent;
+        // On the main thread as well, for the app's own activities: Android creates the started
+        // activity after the caller's current message, never inside startActivity. Instagram's
+        // BloksSignedOutFragmentActivity starts ModalActivity and then sets what ModalActivity's
+        // onCreate requires; launched in place, that onCreate threw "Required value was null" up
+        // through the caller. A start that leaves the app keeps its synchronous result, which
+        // Instrumentation turns into ActivityNotFoundException.
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper() || startsOwnActivity(intent)) {
+            // A copy, as AMS takes it when startActivity is called: the caller may reuse its Intent.
+            final Intent started = intent != null ? new Intent(intent) : null;
             final int startFlags = flags;
             final IBinder from = resultTo;
             new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
@@ -163,6 +170,18 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             return 0;   // ActivityManager.START_SUCCESS
         }
         return bridgeStartActivityWithStack(intent, flags, resultTo);
+    }
+
+    /** Whether the intent names one of this app's own activities, which launch in this process. */
+    private static boolean startsOwnActivity(Intent intent) {
+        if (intent == null) return false;
+        try {
+            String own = android.app.ActivityThread.currentPackageName();
+            String target = IntentWantConverter.intentToWant(intent).bundleName;
+            return own != null && own.equals(target);
+        } catch (Throwable t) {
+            return false;
+        }
     }
 
     /** [BRIDGED] startActivities -> OH IAbilityManager.StartAbility(Want) for each intent */
@@ -366,8 +385,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     public List<ActivityManager.RunningTaskInfo> getTasks(int maxNum,
             boolean filterOnlyVisibleRecents, boolean keepIntentExtra, int displayId)
             throws RemoteException {
-        logBridged("getTasks", "-> OH IMissionManager.GetMissionInfos");
-        return Collections.emptyList();
+        logBridged("getTasks", "-> the app's own task");
+        // An app sees only its own tasks (since Android 5): the one the client controller keeps.
+        return OwnTask.runningTasks(maxNum);
     }
 
     /** [BRIDGED] moveTaskToFront -> OH IMissionManager.MoveMissionToFront */
@@ -382,8 +402,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     @Override
     public ParceledListSlice<ActivityManager.RecentTaskInfo> getRecentTasks(int maxNum,
             int flags, int userId) throws RemoteException {
-        logBridged("getRecentTasks", "-> OH IMissionManager.GetMissionInfos");
-        return null;
+        logBridged("getRecentTasks", "-> the app's own task");
+        // ActivityManager.getRecentTasks reads getList() off the result unchecked: never null.
+        java.util.ArrayList<ActivityManager.RecentTaskInfo> recent = new java.util.ArrayList<>(1);
+        ActivityManager.RecentTaskInfo own = OwnTask.recentTaskInfo();
+        if (own != null && maxNum > 0) recent.add(own);
+        return new ParceledListSlice<>(recent);
     }
 
     /** [STUB] isTopActivityImmersive - No direct OH equivalent */
@@ -610,8 +634,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     /** [BRIDGED] getAppTasks -> OH IMissionManager.GetMissionInfos */
     @Override
     public List<IBinder> getAppTasks(String callingPackage) throws RemoteException {
-        logBridged("getAppTasks", "-> OH IMissionManager.GetMissionInfos");
-        return Collections.emptyList();
+        logBridged("getAppTasks", "-> the app's own task");
+        return OwnTask.appTasks();
     }
 
     /** [STUB] addAppTask - No OH equivalent */
@@ -1017,6 +1041,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         IntentWantConverter.WantParams want = IntentWantConverter.intentToWant(intent);
         String bundleName = want.bundleName;
         String abilityName = want.abilityName;
+        // One of the app's own activities launches in this process: it gets the Intent as the app
+        // built it, not the one rebuilt from the Want (see PendingLaunchIntents).
+        String own = android.app.ActivityThread.currentPackageName();
+        if (own != null && own.equals(bundleName) && abilityName != null && !abilityName.isEmpty()) {
+            PendingLaunchIntents.offer(abilityName.startsWith(".") ? bundleName + abilityName : abilityName, intent);
+        }
 
         // 2026-05-19: resolve callerToken once — used by both nativeStartAbility
         // fallback (below) and the final new-Mission branch.  See

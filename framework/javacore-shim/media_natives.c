@@ -769,6 +769,24 @@ static jint mp_prepare_async(JNIEnv* env, jobject thiz, jobject piid)
     return 0;
 }
 
+/*
+ * A call the player's state does not allow. AOSP's JNI throws only when the native player is
+ * missing; for start, pause, stop and seekTo it hands the status to process_media_player_call with
+ * no exception, which reports it as MediaPlayer::notify does: MEDIA_ERROR with INVALID_OPERATION,
+ * the "error (-38, 0)" apps see on Android, and the player in its error state. Fossify Voice
+ * Recorder stops a player it never prepared; the throw here killed its process at start.
+ *
+ * A player still idle stays idle here: AOSP accepts setDataSource from the error state, this
+ * player only from idle, and every other call is invalid in both.
+ */
+static void invalid_operation(Player* p)
+{
+    pthread_mutex_lock(&p->lock);
+    if (p->state != S_IDLE) p->state = S_ERROR;
+    pthread_mutex_unlock(&p->lock);
+    post(p, MEDIA_ERROR, -38 /* INVALID_OPERATION */, 0);
+}
+
 static void mp_start(JNIEnv* env, jobject thiz)
 {
     Player* p = require(env, thiz);
@@ -781,7 +799,7 @@ static void mp_start(JNIEnv* env, jobject thiz)
         bad = 1;
     }
     pthread_mutex_unlock(&p->lock);
-    if (bad) throw_new(env, "java/lang/IllegalStateException", NULL);
+    if (bad) invalid_operation(p);
 }
 
 static void mp_pause(JNIEnv* env, jobject thiz)
@@ -796,7 +814,7 @@ static void mp_pause(JNIEnv* env, jobject thiz)
         bad = 1;
     }
     pthread_mutex_unlock(&p->lock);
-    if (bad) throw_new(env, "java/lang/IllegalStateException", NULL);
+    if (bad) invalid_operation(p);
 }
 
 static void mp_stop(JNIEnv* env, jobject thiz)
@@ -812,7 +830,7 @@ static void mp_stop(JNIEnv* env, jobject thiz)
         bad = 1;
     }
     pthread_mutex_unlock(&p->lock);
-    if (bad) throw_new(env, "java/lang/IllegalStateException", NULL);
+    if (bad) invalid_operation(p);
 }
 
 static void mp_seek(JNIEnv* env, jobject thiz, jlong msec, jint mode)
@@ -830,7 +848,7 @@ static void mp_seek(JNIEnv* env, jobject thiz, jlong msec, jint mode)
         bad = 1;
     }
     pthread_mutex_unlock(&p->lock);
-    if (bad) throw_new(env, "java/lang/IllegalStateException", NULL);
+    if (bad) invalid_operation(p);
 }
 
 static jint query(JNIEnv* env, jobject thiz, int (*get)(OH_AVPlayer*, int32_t*))

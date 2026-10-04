@@ -805,6 +805,16 @@ public class AppSchedulerBridge {
         cfg.screenHeightDp = hDp;
         cfg.smallestScreenWidthDp = Math.min(wDp, hDp);
 
+        // The window an activity gets here: the full screen, as WindowSessionAdapter's relayout
+        // reports later. WindowManager.getCurrentWindowMetrics() and getMaximumWindowMetrics()
+        // answer from these bounds, and activities are launched with this configuration: left
+        // empty, an activity measuring itself in onCreate got 0x0 (aat divided by the button
+        // count it derived from the width).
+        android.graphics.Rect bounds = new android.graphics.Rect(0, 0, disp.widthPx, disp.heightPx);
+        cfg.windowConfiguration.setBounds(bounds);
+        cfg.windowConfiguration.setAppBounds(bounds);
+        cfg.windowConfiguration.setMaxBounds(bounds);
+
         // Orientation
         cfg.orientation = disp.widthPx >= disp.heightPx
                 ? android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -1437,6 +1447,11 @@ public class AppSchedulerBridge {
      * §1.2.5.2 — OH action string → Android Intent action constant.
      * Phase 1 minimum + Phase 2 full common.
      */
+    /** 0xPPTTEEEE with a non-zero type byte; OH's resource ids (0x01000005) have type 0. */
+    private static boolean isAndroidResourceId(int id) {
+        return id != 0 && ((id >>> 16) & 0xff) != 0;
+    }
+
     private static String mapOhActionToAndroid(String ohAction) {
         if (ohAction == null) return null;
         switch (ohAction) {
@@ -1446,17 +1461,23 @@ public class AppSchedulerBridge {
             case "ohos.want.action.viewData":  return Intent.ACTION_VIEW;
             case "ohos.want.action.editData":  return Intent.ACTION_EDIT;
             case "ohos.want.action.search":    return Intent.ACTION_SEARCH;
-            case "ohos.want.action.send":      return Intent.ACTION_SEND;
+            case "ohos.want.action.send":
+            case "ohos.want.action.sendData":  return Intent.ACTION_SEND;   // IntentWantConverter's form
             case "ohos.want.action.sendto":    return Intent.ACTION_SENDTO;
             case "ohos.want.action.dial":      return Intent.ACTION_DIAL;
             case "ohos.want.action.call":      return Intent.ACTION_CALL;
-            case "ohos.want.action.pickItem":  return Intent.ACTION_PICK;
+            case "ohos.want.action.pickItem":
+            case "ohos.want.action.select":    return Intent.ACTION_PICK;   // IntentWantConverter's form
             case "ohos.want.action.imageCapture":
                 return "android.media.action.IMAGE_CAPTURE";   // MediaStore constant
             case "ohos.want.action.videoCapture":
                 return "android.media.action.VIDEO_CAPTURE";   // MediaStore constant
-            default:
-                return ohAction;  // pass-through (App-defined custom actions)
+            default: {
+                // An Android action IntentWantConverter carried under OH's prefix gets its own name
+                // back; anything else passes through (app-defined actions sent as they are).
+                String android = IntentWantConverter.unprefixedAndroidAction(ohAction);
+                return android != null ? android : ohAction;
+            }
         }
     }
 
@@ -1884,6 +1905,12 @@ public class AppSchedulerBridge {
             // §1.2.4.1: build Intent from OH Want JSON (component + action + categories
             // + data + type + flags + extras).
             Intent intent = buildIntentFromWant(packageName, activityInfo.name, wantJson);
+            // A start from this app's own code: the Intent it passed, extras and action intact.
+            Intent original = PendingLaunchIntents.take(activityInfo.name);
+            if (original != null) {
+                original.setComponent(new android.content.ComponentName(packageName, activityInfo.name));
+                intent = original;
+            }
 
             // §1.2.4.3: token map. Create/get Android IBinder for this OH token,
             // store mapping for reverse callback (finishActivity / pause / stop).
@@ -2010,14 +2037,18 @@ public class AppSchedulerBridge {
                         + Integer.toHexString(appThemeBefore));
             }
             activityInfo.icon = 0;
-            activityInfo.labelRes = 0;
+            // Labels are zeroed only in OH's id format (type byte 0), which G2.5 guarded against. An
+            // APK's own label ids are kept: ScrambledExif reads its application label from labelRes in
+            // onResume and, with neither labelRes nor nonLocalizedLabel left, threw; activity titles
+            // fell back to class names.
+            if (!isAndroidResourceId(activityInfo.labelRes)) activityInfo.labelRes = 0;
             if (!keepTheme) activityInfo.theme = 0;
             activityInfo.logo = 0;
             activityInfo.banner = 0;
             if (aiApp != null) {
                 aiApp.icon = 0;
                 aiApp.iconRes = 0;
-                aiApp.labelRes = 0;
+                if (!isAndroidResourceId(aiApp.labelRes)) aiApp.labelRes = 0;
                 aiApp.descriptionRes = 0;
                 if (!keepTheme) aiApp.theme = 0;
                 aiApp.logo = 0;

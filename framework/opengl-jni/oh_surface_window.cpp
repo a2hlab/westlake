@@ -8,7 +8,27 @@
 #include <dlfcn.h>
 #include <stdio.h>
 
+#include <stdint.h>
+
 struct ANativeWindow;
+
+// An app's EGL producer waits for a free buffer, as Android's BufferQueue dequeue does, instead of
+// failing after OH's default 3000 ms. Telegram's intro renderer, an EGL thread drawing into a
+// TextureView, timed out ("all buffer are using") while its main thread spent over 3 s on one frame
+// (under SELinux enforcing ART gets no JIT), and the Mali driver crashed three seconds after the
+// failed dequeue. OH_NativeWindow_NativeWindowHandleOpt(window, SET_TIMEOUT = 10, ms).
+static void wait_for_buffers(void* window) {
+    typedef int32_t (*HandleOpt)(void*, int, ...);
+    static HandleOpt opt = reinterpret_cast<HandleOpt>(dlsym(RTLD_DEFAULT, "OH_NativeWindow_NativeWindowHandleOpt"));
+    if (opt == nullptr) {
+        void* library = dlopen("libnative_window.so", RTLD_NOW | RTLD_NOLOAD);
+        if (library != nullptr) opt = reinterpret_cast<HandleOpt>(dlsym(library, "OH_NativeWindow_NativeWindowHandleOpt"));
+    }
+    if (opt == nullptr || window == nullptr) return;
+    constexpr int kSetTimeout = 10;
+    int32_t rc = opt(window, kSetTimeout, static_cast<int32_t>(INT32_MAX));
+    if (rc != 0) fprintf(stderr, "[WL-OPENGL] buffer request timeout not set (rc=%d)\n", rc);
+}
 
 // The runtime's bridge library (liboh_adapter_bridge.so) is not in the global scope, so a
 // RTLD_DEFAULT lookup misses its symbols; ask that library directly.
@@ -38,6 +58,7 @@ extern "C" void* wl_window_from_surface(JNIEnv* env, jobject surface) {
     void* oh = unwrap != nullptr ? unwrap(window) : nullptr;
     fprintf(stderr, "[WL-OPENGL] window surface: anw=%p oh=%p unwrap=%s\n",
             static_cast<void*>(window), oh, unwrap != nullptr ? "found" : "MISSING");
+    if (oh != nullptr) wait_for_buffers(oh);
     return oh != nullptr ? oh : static_cast<void*>(window);
 }
 
@@ -54,5 +75,6 @@ extern "C" void* wl_window_from_surface_texture(JNIEnv* env, jobject surfaceText
     }
     void* window = reinterpret_cast<void*>(get_window(env, surfaceTexture));
     fprintf(stderr, "[WL-OPENGL] SurfaceTexture window surface: oh=%p\n", window);
+    wait_for_buffers(window);
     return window;
 }

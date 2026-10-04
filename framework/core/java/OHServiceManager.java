@@ -171,6 +171,19 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // .listen needs the registry (Waze).
             case "netstats":
             case "telephony.registry":
+            // CameraX casts DevicePolicyManager non-null to ask whether the camera is disabled
+            // (FairScan); Obtainium, Termux and others ask about device and profile owners.
+            case "device_policy":
+            // NsdManager's constructor connects to the service and throws without it (Internet
+            // Radio's FCast discoverer, at process start).
+            case "servicediscovery":
+            // Their fetchers require the binder, so the manager was null: linphone asks for its
+            // standby bucket while it starts; USB and storage-stats callers in 26 and 18 apps.
+            case "usagestats":
+            case "usb":
+            case "storagestats":
+            // BluetoothAdapter, present and off (aat, Beatbridge used a null adapter unchecked).
+            case "bluetooth_manager":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

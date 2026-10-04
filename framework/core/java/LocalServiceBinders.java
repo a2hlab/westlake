@@ -143,6 +143,33 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.os.IBatteryPropertiesRegistrar",
                             LocalServiceBinders::batteryProperties);
                     break;
+                case "device_policy":
+                    binder = proxy(name, "android.app.admin.IDevicePolicyManager",
+                            LocalServiceBinders::devicePolicy);
+                    break;
+                case "servicediscovery":
+                    binder = proxy(name, "android.net.nsd.INsdManager", LocalServiceBinders::nsd);
+                    break;
+                case "usagestats":
+                    binder = proxy(name, "android.app.usage.IUsageStatsManager", LocalServiceBinders::usageStats);
+                    break;
+                // No USB device or accessory attached: the device list is empty, nothing to open
+                // or ask permission for. OH's USB service is not bridged.
+                case "usb":
+                    binder = proxy(name, "android.hardware.usb.IUsbManager", (method, args) -> DEFAULT);
+                    break;
+                case "storagestats":
+                    binder = proxy(name, "android.app.usage.IStorageStatsManager", LocalServiceBinders::storageStats);
+                    break;
+                // Bluetooth present and switched off. With no manager service BluetoothAdapter is
+                // null, which Android gives only on hardware without Bluetooth, and apps use it
+                // unchecked: aat's BLE sensors threw "getAdapter(...) must not be null" while its
+                // tracker service started. registerAdapter answers no IBluetooth, so the adapter
+                // reports STATE_OFF, isEnabled() false and no LE scanner, and enable() is refused --
+                // a phone whose user has Bluetooth off. OH's Bluetooth service is not bridged.
+                case "bluetooth_manager":
+                    binder = proxy(name, "android.bluetooth.IBluetoothManager", (method, args) -> DEFAULT);
+                    break;
                 default:
                     return null;
             }
@@ -484,6 +511,157 @@ public final class LocalServiceBinders {
         }
         ((android.os.BatteryProperty) args[1]).setLong(value);
         return 0;
+    }
+
+    /**
+     * A personal phone nobody manages: no device or profile owner, no active admin, no policy set.
+     * Every query then answers the type default (camera and screen capture allowed, no password
+     * requirement, no lock-task packages), and admin calls are accepted and change nothing.
+     *
+     * CameraX checks DevicePolicyManager.getCameraDisabled before it lists cameras, and casts the
+     * manager non-null: the null manager failed every init attempt (FairScan, six seconds of
+     * retries before its camera screen).
+     *
+     * Two answers differ from the default: a provisioned device says so, and USB data signalling
+     * is on unless a policy turned it off. Storage encryption answers the default, unsupported,
+     * which is what Android reports without file encryption; the board sets no fscrypt policy.
+     */
+    private static Object devicePolicy(String method, Object[] args) {
+        switch (method) {
+            case "isDeviceProvisioned":
+            case "isUsbDataSignalingEnabled":
+                return Boolean.TRUE;
+            default:
+                return DEFAULT;
+        }
+    }
+
+    /**
+     * Network service discovery with nothing behind it: OH's mDNS is not bridged, so every request
+     * fails as NsdService reports an internal error, through the callback the app connected with.
+     * NsdManager's constructor connects first and throws on a null connector; that killed Internet
+     * Radio's FCast device discoverer while its process started.
+     */
+    private static Object nsd(String method, Object[] args) {
+        if (!"connect".equals(method) || args == null || args.length < 1) return DEFAULT;
+        Object callback = args[0];
+        try {
+            IBinder connector = proxy("servicediscovery-connector", "android.net.nsd.INsdServiceConnector",
+                    (call, callArgs) -> nsdRequest(callback, call, callArgs));
+            return connector.queryLocalInterface("android.net.nsd.INsdServiceConnector");
+        } catch (ClassNotFoundException e) {
+            return DEFAULT;
+        }
+    }
+
+    private static final int NSD_FAILURE_INTERNAL_ERROR = 0;   // NsdManager.FAILURE_INTERNAL_ERROR
+
+    private static Object nsdRequest(Object callback, String method, Object[] args) {
+        String failure;
+        switch (method) {
+            case "discoverServices": failure = "onDiscoverServicesFailed"; break;
+            case "stopDiscovery": failure = "onStopDiscoveryFailed"; break;
+            case "registerService": failure = "onRegisterServiceFailed"; break;
+            case "unregisterService": failure = "onUnregisterServiceFailed"; break;
+            case "resolveService": failure = "onResolveServiceFailed"; break;
+            case "stopResolution": failure = "onStopResolutionFailed"; break;
+            case "registerServiceInfoCallback": failure = "onServiceInfoCallbackRegistrationFailed"; break;
+            default: return DEFAULT;   // startDaemon, unregisterServiceInfoCallback, offload engines
+        }
+        Integer key = firstInt(args);
+        if (key == null || callback == null) return DEFAULT;
+        try {
+            // NsdManager queued the listener under this key before calling; the callback posts the
+            // failure to its handler, which reports it to the listener and drops it.
+            Class.forName("android.net.nsd.INsdManagerCallback").getMethod(failure, int.class, int.class)
+                    .invoke(callback, key, NSD_FAILURE_INTERNAL_ERROR);
+        } catch (Throwable t) {
+            System.err.println("[" + TAG + "] servicediscovery " + failure + " not delivered: " + t);
+        }
+        return DEFAULT;
+    }
+
+    /**
+     * Usage stats as an app without usage access sees them on Android: every query answers empty
+     * (PACKAGE_USAGE_STATS is not granted), and the caller, running in the foreground, is in the
+     * ACTIVE standby bucket. linphone asks for its bucket while it starts and threw on the null
+     * service.
+     */
+    private static Object usageStats(String method, Object[] args) {
+        switch (method) {
+            case "getAppStandbyBucket":
+                return 10;   // UsageStatsManager.STANDBY_BUCKET_ACTIVE
+            default:
+                return DEFAULT;   // not inactive; event and stats queries empty (null events, empty slices)
+        }
+    }
+
+    /**
+     * Storage stats from the board's own data partition. Totals and free space are what statfs
+     * reports for the app's data directory; the app's own package is measured on disk (its APKs,
+     * data and cache directories). Other users' and other packages' stats need permissions an
+     * app does not hold, so those answer empty.
+     */
+    private static Object storageStats(String method, Object[] args) {
+        android.app.Application app = android.app.ActivityThread.currentApplication();
+        String dataDir = app != null ? app.getDataDir().getPath() : android.os.Environment.getDataDirectory().getPath();
+        try {
+            switch (method) {
+                case "getTotalBytes":
+                    return new android.os.StatFs(dataDir).getTotalBytes();
+                case "getFreeBytes":
+                    return new android.os.StatFs(dataDir).getAvailableBytes();
+                case "getCacheQuotaBytes":
+                    return CACHE_QUOTA_BYTES;
+                case "queryStatsForPackage":
+                case "queryStatsForUid":
+                    return ownStorageStats(app);
+                case "queryStatsForUser":
+                    return new android.app.usage.StorageStats();
+                default:
+                    return DEFAULT;   // quotas and reserved space unsupported, cache total unknown (0)
+            }
+        } catch (RuntimeException e) {
+            System.err.println("[" + TAG + "] storagestats." + method + ": " + e);
+            return DEFAULT;
+        }
+    }
+
+    /** StorageStatsService's quota for an app it has no usage history for (DEFAULT_QUOTA). */
+    public static final long CACHE_QUOTA_BYTES = 64L * 1024 * 1024;
+
+    private static android.app.usage.StorageStats ownStorageStats(android.app.Application app) {
+        android.app.usage.StorageStats stats = new android.app.usage.StorageStats();
+        if (app == null) return stats;
+        android.content.pm.ApplicationInfo info = app.getApplicationInfo();
+        long code = sizeOf(new java.io.File(info.sourceDir));
+        if (info.splitSourceDirs != null) {
+            for (String split : info.splitSourceDirs) code += sizeOf(new java.io.File(split));
+        }
+        stats.codeBytes = code;
+        stats.apkBytes = code;
+        stats.cacheBytes = sizeOf(app.getCacheDir()) + sizeOf(app.getCodeCacheDir());
+        stats.dataBytes = sizeOf(app.getDataDir());   // includes the caches, as Android counts it
+        return stats;
+    }
+
+    /** Bytes under a file or directory, stopping after 100000 entries so a huge tree cannot stall the caller. */
+    private static long sizeOf(java.io.File root) {
+        long total = 0;
+        int seen = 0;
+        java.util.ArrayDeque<java.io.File> pending = new java.util.ArrayDeque<>();
+        if (root != null) pending.add(root);
+        while (!pending.isEmpty() && seen++ < 100000) {
+            java.io.File file = pending.poll();
+            if (java.nio.file.Files.isSymbolicLink(file.toPath())) continue;
+            java.io.File[] children = file.isDirectory() ? file.listFiles() : null;
+            if (children != null) {
+                java.util.Collections.addAll(pending, children);
+            } else {
+                total += file.length();
+            }
+        }
+        return total;
     }
 
     private static Object account(String method, Object[] args) {

@@ -38,6 +38,14 @@ static int caller_is_webview(void *return_address, const char **caller_path)
 }
 
 /* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
+/*
+ * An Android-built (bionic ABI) caller: the WebView, a library the app packages
+ * (/data/local/tmp/asx/lib/), or one the app wrote and loads from its own storage
+ * (/data/data/<pkg>/..., including the code_cache/wl-exec copies this shim makes of
+ * them). WhatsApp's superpack libraries run from those copies; its Breakpad setup
+ * passed a 32-byte bionic old-action to OH's sigaction untranslated, musl wrote 152
+ * bytes into it, and the clobbered stack crashed the app four seconds in.
+ */
 static int caller_is_android_dso(void *return_address, const char **caller_path)
 {
     Dl_info caller = {0};
@@ -45,7 +53,9 @@ static int caller_is_android_dso(void *return_address, const char **caller_path)
         return 0;
     }
     if (strstr(caller.dli_fname, "libwebviewchromium.so") == NULL &&
-        strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL) {
+        strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL &&
+        strncmp(caller.dli_fname, "/data/data/", 11) != 0 &&
+        strncmp(caller.dli_fname, "/data/user/", 11) != 0) {
         return 0;
     }
     if (caller_path != NULL) {
@@ -344,6 +354,32 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *old_set)
     return real_pthread_sigmask(how, set, old_set);
 }
 
+/*
+ * sigprocmask takes the same 8-byte bionic set as pthread_sigmask. Untranslated, musl copies a
+ * 128-byte old mask into it. Instagram's libraries import it; it reports failure through errno,
+ * where pthread_sigmask returns the error.
+ */
+int sigprocmask(int how, const sigset_t *set, sigset_t *old_set)
+{
+    if (caller_uses_bionic_signal_abi(__builtin_return_address(0), NULL)) {
+        int error = wl_pthread_mask(how, (const westlake_webview_bionic_sigset_t *)set,
+                                    (westlake_webview_bionic_sigset_t *)old_set);
+        if (error == 0) return 0;
+        errno = error;
+        return -1;
+    }
+    typedef int (*SigprocmaskFn)(int, const sigset_t *, sigset_t *);
+    static SigprocmaskFn real_sigprocmask;
+    if (real_sigprocmask == NULL) {
+        real_sigprocmask = (SigprocmaskFn)dlsym(RTLD_NEXT, "sigprocmask");
+    }
+    if (real_sigprocmask == NULL) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return real_sigprocmask(how, set, old_set);
+}
+
 int wl_sigact(int signal_number,
               const struct westlake_webview_bionic_sigaction *bionic_action,
               struct westlake_webview_bionic_sigaction *bionic_old_action)
@@ -423,14 +459,67 @@ int wl_sigact(int signal_number,
  * 0x18000004. Interpose the public name as well, but translate only a direct
  * Android WebView caller. Every OH-native caller is forwarded unchanged.
  */
+/*
+ * Who installs a handler, and which. An OH library can replace the handler an app installed: Meta's
+ * sigmux owns SIGILL for its trap hooks (it rewrites abort's first instruction and catches the
+ * trap), and Instagram died when the SIGILL that abort raised reached another library's handler.
+ * Each install is logged with the handler's and the caller's addresses, the first 96 in a process.
+ */
+static void westlake_log_install(const char *kind, int signal_number, const void *handler, unsigned long flags,
+                                 const void *caller)
+{
+    static int logged;
+    if (handler == NULL || handler == (const void *) SIG_DFL || handler == (const void *) SIG_IGN) return;
+    if (__atomic_add_fetch(&logged, 1, __ATOMIC_RELAXED) > 96) return;
+    /* Raw addresses: no dladdr here, since a library constructor can install a handler while the
+     * loader holds its lock. The harness places them with the process map. */
+    fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] %s signal=%d flags=%#lx handler=%p caller=%p\n", kind, signal_number,
+            flags, handler, caller);
+}
+
+/*
+ * SIGILL and SIGTRAP handlers Android code installed, which OH's own libraries may not replace. On
+ * Android nothing else in an app's process takes these over. Here FFRT installs its own when it
+ * starts, after the app's crash reporter: Meta's tooling traps abort and exit with an illegal
+ * instruction for Breakpad's handler to catch, and FFRT's handler took the trap instead and the
+ * process died. Trap hooks and CPU-feature probes use these two signals; SIGSEGV and the rest stay
+ * as OH sets them.
+ */
+static volatile unsigned int westlake_android_signal_claims;
+
+static int westlake_claimable_signal(int signal_number)
+{
+    return signal_number == SIGILL || signal_number == SIGTRAP;
+}
+
+/* A Bionic caller's sigaction: translated, logged, and its SIGILL/SIGTRAP handler claimed. */
+static int westlake_android_sigaction(int signal_number, const struct westlake_webview_bionic_sigaction *action,
+                                      struct westlake_webview_bionic_sigaction *old_action, const void *caller)
+{
+    if (action != NULL) {
+        westlake_log_install("android", signal_number, (const void *) action->callback.handler,
+                             (unsigned long) action->flags, caller);
+    }
+    int result = wl_sigact(signal_number, action, old_action);
+    if (result == 0 && action != NULL && westlake_claimable_signal(signal_number)) {
+        void (*handler)(int) = action->callback.handler;
+        unsigned int bit = 1u << signal_number;
+        if (handler == SIG_DFL || handler == SIG_IGN) {
+            __atomic_fetch_and(&westlake_android_signal_claims, ~bit, __ATOMIC_RELAXED);
+        } else {
+            __atomic_fetch_or(&westlake_android_signal_claims, bit, __ATOMIC_RELAXED);
+        }
+    }
+    return result;
+}
+
 int sigaction(int signal_number, const struct sigaction *action,
               struct sigaction *old_action)
 {
     if (caller_uses_bionic_signal_abi(__builtin_return_address(0), NULL)) {
-        return wl_sigact(
-                signal_number,
-                (const struct westlake_webview_bionic_sigaction *)action,
-                (struct westlake_webview_bionic_sigaction *)old_action);
+        return westlake_android_sigaction(signal_number, (const struct westlake_webview_bionic_sigaction *) action,
+                                          (struct westlake_webview_bionic_sigaction *) old_action,
+                                          __builtin_return_address(0));
     }
 
     typedef int (*SigactionFn)(int, const struct sigaction *,
@@ -443,7 +532,104 @@ int sigaction(int signal_number, const struct sigaction *action,
         errno = ENOSYS;
         return -1;
     }
+    if (action != NULL) {
+        westlake_log_install("oh", signal_number, (const void *) action->sa_handler, (unsigned long) action->sa_flags,
+                             __builtin_return_address(0));
+        if (westlake_claimable_signal(signal_number) &&
+            (__atomic_load_n(&westlake_android_signal_claims, __ATOMIC_RELAXED) & (1u << signal_number)) != 0) {
+            /* The app's handler stays; the caller is told what is installed. */
+            fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied: the app's handler stays\n",
+                    signal_number);
+            return old_action != NULL ? real_sigaction(signal_number, NULL, old_action) : 0;
+        }
+    }
     return real_sigaction(signal_number, action, old_action);
+}
+
+/*
+ * Bionic's 64-bit signal API (API 28). On arm64 sigset64_t and struct sigaction64 lay out as Bionic's
+ * sigset_t and struct sigaction, and musl has no such names, so only Android code calls these and
+ * each is the Bionic translation. TikTok's and CapCut's libraries import them weak: missing, they
+ * read as null, which code gated on the SDK level (34 here) would call.
+ */
+int sigemptyset64(westlake_webview_bionic_sigset_t *set) { return wl_emptyset(set); }
+int sigfillset64(westlake_webview_bionic_sigset_t *set) { return wl_fillset(set); }
+int sigaddset64(westlake_webview_bionic_sigset_t *set, int signal_number) { return wl_addset(set, signal_number); }
+int sigismember64(const westlake_webview_bionic_sigset_t *set, int signal_number)
+{
+    return wl_ismember(set, signal_number);
+}
+int sigdelset64(westlake_webview_bionic_sigset_t *set, int signal_number)
+{
+    if (set == NULL || !westlake_bionic_signal_number_is_valid(signal_number)) {
+        errno = EINVAL;
+        return -1;
+    }
+    *set &= ~(UINT64_C(1) << (signal_number - 1));
+    return 0;
+}
+int pthread_sigmask64(int how, const westlake_webview_bionic_sigset_t *set, westlake_webview_bionic_sigset_t *old_set)
+{
+    return wl_pthread_mask(how, set, old_set);
+}
+int sigprocmask64(int how, const westlake_webview_bionic_sigset_t *set, westlake_webview_bionic_sigset_t *old_set)
+{
+    int error = wl_pthread_mask(how, set, old_set);
+    if (error == 0) return 0;
+    errno = error;
+    return -1;
+}
+int sigaction64(int signal_number, const struct westlake_webview_bionic_sigaction *action,
+                struct westlake_webview_bionic_sigaction *old_action)
+{
+    return westlake_android_sigaction(signal_number, action, old_action, __builtin_return_address(0));
+}
+
+/*
+ * Bionic's static mutex initializers. PTHREAD_RECURSIVE_MUTEX_INITIALIZER and
+ * PTHREAD_ERRORCHECK_MUTEX_INITIALIZER put the type in bits 14-15 of the mutex's first word (0x4000
+ * and 0x8000). musl keeps its type in the low bits of that word, so it reads both as a normal mutex,
+ * and a recursive lock deadlocks on its own thread. sentry-native's sentry_init takes its options
+ * lock and, holding it, takes it again in sentry_close: Discord's crash-reporting init never
+ * returned and its main thread waited out two 30 s timeouts before its first frame.
+ *
+ * Before musl sees such a mutex, an unlocked one gets musl's word for its type. musl never writes
+ * either value there (its types fit in the low byte; a destroyed mutex is -1), so the check cannot
+ * touch a musl mutex. A held one is left alone: musl links a held recursive mutex into its owner's
+ * robust list, which a normal lock never did. Every caller binds to these through the preload, so
+ * the first lock of any such mutex converts it.
+ */
+static void westlake_adopt_bionic_mutex_type(pthread_mutex_t *mutex)
+{
+    int *words = (int *) mutex;
+    int type = __atomic_load_n(&words[0], __ATOMIC_RELAXED);
+    if (__builtin_expect(type != 0x4000 && type != 0x8000, 1)) return;
+    if (__atomic_load_n(&words[1], __ATOMIC_ACQUIRE) != 0) return;
+    __atomic_compare_exchange_n(&words[0], &type,
+                                type == 0x4000 ? PTHREAD_MUTEX_RECURSIVE : PTHREAD_MUTEX_ERRORCHECK, 0,
+                                __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+}
+
+/* musl's timed lock with no deadline is its lock: the same fast path, then the same wait. */
+int pthread_mutex_lock(pthread_mutex_t *mutex)
+{
+    westlake_adopt_bionic_mutex_type(mutex);
+    return pthread_mutex_timedlock(mutex, NULL);
+}
+
+/*
+ * musl's timed lock with a deadline already past: it takes a free mutex, relocks a recursive one its
+ * owner holds, and otherwise gives up at once -- trylock's answers, with EBUSY for its timeout and
+ * for an error-checking mutex the caller holds. No dlsym: in the copy of this library that ART's
+ * Android namespace loads, after libc, RTLD_NEXT finds nothing, and a trylock that answered EINVAL
+ * there stalled Zoom and failed PROJ's database in OsmAnd.
+ */
+int pthread_mutex_trylock(pthread_mutex_t *mutex)
+{
+    static const struct timespec past = { 0, 0 };
+    westlake_adopt_bionic_mutex_type(mutex);
+    int result = pthread_mutex_timedlock(mutex, &past);
+    return result == ETIMEDOUT || result == EDEADLK ? EBUSY : result;
 }
 
 /*
@@ -1046,7 +1232,16 @@ static void *westlake_load_app_library(const char *path, int flags)
             if (create_fn(&ns, search, 0) == 0) {
                 /* The Android namespace, when the launch made one, first and whole. */
                 if (get_fn("westlake_android_app", &android) == 0) inherit_fn(&ns, &android, NULL);
-                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so") == 0) state = 1;
+                /* From the default namespace: libc, and the NDK libraries an app's packaged code gets
+                 * there too. WhatsApp's libwhatsappmerged.so needs libandroid.so; with no Android
+                 * namespace in its launch nothing here had one, the load failed, and SoLoader's retry
+                 * outside this namespace could not find libqpl.so beside it. */
+                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
+                               "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
+                               "libjnigraphics.so:libnativewindow.so:libvulkan.so:libsync.so:libaaudio.so:"
+                               "libcamera2ndk.so:libmediandk.so") == 0) {
+                    state = 1;
+                }
                 /* This library, global there, as ART's loader does for its namespace: its bionic and
                  * NDK symbols (ASharedMemory_*, __assert, ...) must resolve for what loads here. */
                 Dl_info self;
@@ -1141,6 +1336,190 @@ void *__loader_dlopen(const char *filename, int flags, const void *caller_addr)
     return dlopen(filename, flags);
 }
 
+/*
+ * A library inside an APK (<apk>!/lib/<abi>/<name>). OH's loader maps a stored zip member itself, so
+ * such a load gets the APK's own bytes, without what the launcher fixes when it stages the same
+ * library under lib/<abi>/: Android's RELR tags, null init array entries. Meta's SoLoader loads
+ * straight from the split APK that way, and Threads died when libc++_shared.so's constructor jumped
+ * to its link-time address. The staged copy is the same library, as Android would load it from an
+ * extracted install. Returns it (in staged), or NULL to load the path as asked.
+ */
+static const char *westlake_staged_apk_member(const char *filename, char *staged, size_t size)
+{
+    const char *member = filename != NULL ? strstr(filename, ".apk!/lib/") : NULL;
+    if (member == NULL) return NULL;
+    const char *abi = member + strlen(".apk!/lib/");
+    const char *slash = strchr(abi, '/');
+    if (slash == NULL || slash[1] == '\0' || strchr(slash + 1, '/') != NULL) return NULL;
+    if (snprintf(staged, size, "/data/local/tmp/asx/lib/%.*s/%s", (int) (slash - abi), abi, slash + 1) >= (int) size ||
+        access(staged, R_OK) != 0) {
+        return NULL;
+    }
+    fprintf(stderr, "[WESTLAKE-LOADER] %s: loading the staged copy %s\n", filename, staged);
+    return staged;
+}
+
+/*
+ * An app library opened by name instead of by path. OH's loader records a library's short name only
+ * when it is opened by name, and a later DT_NEEDED is matched against short names alone. ART opens
+ * app libraries by path, so a library naming an already-loaded one in DT_NEEDED got a second copy:
+ * Chaquopy loads libpython3.11.so, then libchaquopy_java.so, which needs it, and the two Python
+ * runtimes ended in a call through a null slot (econverter). A library in the staged lib directory
+ * is opened by its name instead -- only where no other directory the loader searches has a file of
+ * that name, so the name finds this file -- and the handle is checked to be that file.
+ */
+static const char *westlake_unambiguous_lib_name(const char *path, int first_on_path)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    size_t length = dir != NULL ? strlen(dir) : 0;
+    if (path == NULL || length == 0 || strncmp(path, dir, length) != 0 || path[length] != '/') return NULL;
+    const char *name = path + length + 1;
+    if (name[0] == '\0' || strchr(name, '/') != NULL) return NULL;
+    /* A namespace that searches the staged directory first finds this file by its name. */
+    if (first_on_path) return name;
+    char other[512];
+    const char *search = getenv("LD_LIBRARY_PATH");
+    while (search != NULL && *search != '\0') {
+        const char *end = strchr(search, ':');
+        size_t n = end != NULL ? (size_t) (end - search) : strlen(search);
+        if (n > 0 && !(n == length && strncmp(search, dir, n) == 0) &&
+            snprintf(other, sizeof(other), "%.*s/%s", (int) n, search, name) < (int) sizeof(other) &&
+            access(other, F_OK) == 0) {
+            return NULL;
+        }
+        search = end != NULL ? end + 1 : NULL;
+    }
+    /* The Android namespace searches the WebView shim's libraries first. */
+    const char *root = getenv("WESTLAKE_RUNTIME_ROOT");
+    if (root != NULL && snprintf(other, sizeof(other), "%s/webview-t-lib/%s", root, name) < (int) sizeof(other) &&
+        access(other, F_OK) == 0) {
+        return NULL;
+    }
+    return name;
+}
+
+/*
+ * Whether handle, opened by name through open, is the library at path. The path re-opened with
+ * RTLD_NOLOAD through the same open answers only a library already loaded, matched by device and
+ * inode, and OH's loader keeps one handle per library, so the two handles are equal exactly when
+ * the name opened that file. dlinfo cannot tell: OH's dlopen returns a random handle mapped to the
+ * library, which musl's dlinfo rejects as invalid, and every by-name open fell back to its path
+ * (econverter's Chaquopy libraries, all of them). The reference the check takes is dropped.
+ */
+static int westlake_handle_is(void *(*open)(void *context, const char *file, int flags), void *context,
+                              void *handle, const char *path, int flags)
+{
+    if (handle == NULL) return 0;
+    void *same = open(context, path, flags | RTLD_NOLOAD);
+    if (same == NULL) return 0;
+    dlclose(same);
+    return same == handle;
+}
+
+/* Whether ns is ART's Android namespace with the staged lib directory first on its search path. */
+static int westlake_searches_staged_first(Dl_namespace *ns)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    const char *search = getenv("WESTLAKE_ANDROID_NATIVE_SEARCH_PATH");
+    size_t length = dir != NULL ? strlen(dir) : 0;
+    return ns != NULL && strcmp(ns->name, "westlake_android_app") == 0 && length > 0 && search != NULL &&
+           strncmp(search, dir, length) == 0 && (search[length] == ':' || search[length] == '\0');
+}
+
+/* Opens path by name through open (dlopen or a namespace's dlopen_ns), or returns NULL to open it by path. */
+static void *westlake_open_lib_by_name(void *(*open)(void *context, const char *file, int flags), void *context,
+                                       const char *path, int flags, int first_on_path)
+{
+    const char *name = westlake_unambiguous_lib_name(path, first_on_path);
+    if (name == NULL) return NULL;
+    void *handle = open(context, name, flags);
+    if (westlake_handle_is(open, context, handle, path, flags)) return handle;
+    fprintf(stderr, "[WESTLAKE-LOADER] %s by name gave another library; opening the path\n", name);
+    return NULL;
+}
+
+static void *westlake_real_dlopen_ns_fn(void *context, const char *file, int flags);
+static void *westlake_real_dlopen_fn(void *context, const char *file, int flags);
+
+/*
+ * A library the launcher routes to ART's Android namespace (WESTLAKE_ANDROID_NATIVE_TARGETS), opened
+ * by app code with dlopen. ART's loader puts it in that namespace, where the APK's own
+ * libc++_shared.so is found first; a direct dlopen lands in the default namespace, where OH's
+ * /system/lib64/ndk/libc++_shared.so (another C++ ABI) is. JNA does both: System.loadLibrary, then
+ * dlopen for its own handle, and Translator's second copy of libbindings.so failed to relocate
+ * std::__ndk1::to_string. Once ART has made the namespace, the dlopen is answered there, by name:
+ * the library ART already loaded.
+ */
+static void *westlake_open_routed_lib(const char *path, int flags)
+{
+    const char *targets = getenv("WESTLAKE_ANDROID_NATIVE_TARGETS");
+    const char *name = path != NULL ? strrchr(path, '/') : NULL;
+    name = name != NULL ? name + 1 : path;
+    if (targets == NULL || name == NULL || name[0] == '\0') return NULL;
+    if (name != path) {
+        const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+        size_t length = dir != NULL ? strlen(dir) : 0;
+        if (length == 0 || (size_t) (name - path) != length + 1 || strncmp(path, dir, length) != 0) return NULL;
+    }
+    size_t name_length = strlen(name);
+    int listed = 0;
+    for (const char *item = targets; item != NULL && *item != '\0' && !listed;) {
+        const char *end = strchr(item, ':');
+        size_t n = end != NULL ? (size_t) (end - item) : strlen(item);
+        listed = n == name_length && strncmp(item, name, n) == 0;
+        item = end != NULL ? end + 1 : NULL;
+    }
+    if (!listed) return NULL;
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    DlnsGetFn get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    Dl_namespace android;
+    memset(&android, 0, sizeof(android));
+    if (get == NULL || get("westlake_android_app", &android) != 0) return NULL;   /* ART has not made it yet */
+    void *handle = westlake_real_dlopen_ns_fn(&android, name, flags);
+    wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name in the Android namespace\n", path,
+                  handle != NULL ? "opened" : "not opened");
+    return handle;
+}
+
+/*
+ * OH's dlopen into a namespace. ART's loader opens the libraries the launcher routes to the Android
+ * namespace through it (looked up with dlsym(RTLD_DEFAULT), which finds this one), not through
+ * dlopen: Threads' libc++_shared.so went that way, so the redirect above is applied here too.
+ */
+void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
+{
+    typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+    static DlopenNsFn real_dlopen_ns;
+    if (real_dlopen_ns == NULL) real_dlopen_ns = (DlopenNsFn) dlsym(RTLD_NEXT, "dlopen_ns");
+    if (real_dlopen_ns == NULL) {
+        errno = ENOSYS;
+        return NULL;
+    }
+    char staged[512];
+    const char *redirected = westlake_staged_apk_member(file, staged, sizeof(staged));
+    const char *path = redirected != NULL ? redirected : file;
+    void *by_name = westlake_open_lib_by_name(westlake_real_dlopen_ns_fn, ns, path, mode,
+                                              westlake_searches_staged_first(ns));
+    return by_name != NULL ? by_name : real_dlopen_ns(ns, path, mode);
+}
+
+static void *westlake_real_dlopen_ns_fn(void *context, const char *file, int flags)
+{
+    typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
+    static DlopenNsFn real;
+    if (real == NULL) real = (DlopenNsFn) dlsym(RTLD_NEXT, "dlopen_ns");
+    return real != NULL ? real((Dl_namespace *) context, file, flags) : NULL;
+}
+
+static void *westlake_real_dlopen_fn(void *context, const char *file, int flags)
+{
+    typedef void *(*DlopenFn)(const char *, int);
+    static DlopenFn real;
+    (void) context;
+    if (real == NULL) real = (DlopenFn) dlsym(RTLD_NEXT, "dlopen");
+    return real != NULL ? real(file, flags) : NULL;
+}
+
 void *dlopen(const char *filename, int flags)
 {
     void *caller = __builtin_return_address(0);
@@ -1166,6 +1545,11 @@ void *dlopen(const char *filename, int flags)
         }
         return NULL;
     }
+    char staged[512];
+    if (westlake_staged_apk_member(filename, staged, sizeof(staged)) != NULL) {
+        actual_filename = staged;
+        basename = strrchr(staged, '/') + 1;
+    }
     /*
      * OpenSL ES through dlopen. Oboe (Rhythm Engine) does not link libOpenSLES: it dlopens it and
      * looks up slCreateEngine and the SL_IID_* by handle, which reaches OH's library directly and
@@ -1188,6 +1572,23 @@ void *dlopen(const char *filename, int flags)
             caller_info.dli_fbase != self.dli_fbase &&
             strncmp(caller_info.dli_fname, "/system/", 8) != 0 &&
             strncmp(caller_info.dli_fname, "/vendor/", 8) != 0) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                return handle;
+            }
+        }
+    }
+    /*
+     * libc.so, asked for by Android code: this library's own handle, as for libdl.so. A lookup by it
+     * finds this library's Bionic-ABI entry points first (sigaction and the signal sets, sysconf,
+     * the property calls) and everything else in musl through this library's dependencies.
+     * ByteDance's bytesig (shadowhook, bytehook) takes sigaction from libc's handle to put its own
+     * handler first; on musl's it handed over a Bionic struct, and musl installed the flags word
+     * (0x18000804) as the handler in TikTok and CapCut. OH's and Westlake's own libraries keep musl.
+     */
+    if (basename != NULL && strcmp(basename, "libc.so") == 0 && caller_is_android_dso(caller, NULL)) {
+        Dl_info self;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL) {
             void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
             if (handle != NULL) {
                 return handle;
@@ -1301,6 +1702,18 @@ void *dlopen(const char *filename, int flags)
         wl_needs_android_relocs(actual_filename)) {
         /* Never the original: musl would leave its RELR pointers unrelocated (SIGSEGV). */
         return westlake_load_android_relocs(real_dlopen, actual_filename, flags);
+    }
+    if (actual_filename != NULL && !(flags & RTLD_NOLOAD) && caller_is_android_dso(caller, NULL)) {
+        void *routed = westlake_open_routed_lib(actual_filename, flags);
+        if (routed != NULL) {
+            return routed;
+        }
+    }
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD)) {
+        void *by_name = westlake_open_lib_by_name(westlake_real_dlopen_fn, NULL, actual_filename, flags, 0);
+        if (by_name != NULL) {
+            return by_name;
+        }
     }
     void *handle = real_dlopen(actual_filename, flags);
     if (handle == NULL && actual_filename != NULL && actual_filename[0] == '/') {
@@ -2116,6 +2529,215 @@ void android_set_abort_message(const char *message)
 static char g_bionic_ctype[257];
 const char *_ctype_ = g_bionic_ctype;
 
+/*
+ * A witness for signals that can end the process without a crash dump. OH's dumper writes none for a
+ * SIGILL that FFRT's handler takes (Instagram and Threads died that way, right after a numeric-host
+ * getaddrinfo), so nothing said where the instruction was. First in musl's signal chain for SIGILL,
+ * SIGTRAP and SIGBUS, this prints the signal, thread, pc and x30 to stderr and lets the chain go on:
+ * it never handles the signal, so a library probing the CPU with an illegal instruction still
+ * catches its own. The harness places pc and x30 with the process map the run samples. Only
+ * async-signal-safe calls; at most 16 lines per process.
+ */
+#include <sys/prctl.h>
+#include <ucontext.h>
+#include <stdbool.h>
+
+struct westlake_signal_chain_action {
+    bool (*sca_sigaction)(int, siginfo_t *, void *);
+    sigset_t sca_mask;
+    int sca_flags;
+};
+
+static char *westlake_hex(char *out, uint64_t value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char buffer[18];
+    int length = 0;
+    do {
+        buffer[length++] = digits[value & 15];
+        value >>= 4;
+    } while (value != 0);
+    *out++ = '0';
+    *out++ = 'x';
+    while (length > 0) *out++ = buffer[--length];
+    return out;
+}
+
+static char *westlake_text(char *out, const char *text, size_t limit)
+{
+    while (*text != '\0' && limit-- > 0) *out++ = *text++;
+    return out;
+}
+
+static uint64_t westlake_parse_hex(const char **cursor, const char *end)
+{
+    uint64_t value = 0;
+    const char *p = *cursor;
+    for (; p < end; ++p) {
+        char c = *p;
+        int digit = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+        if (digit < 0) break;
+        value = (value << 4) | (uint64_t) digit;
+    }
+    *cursor = p;
+    return value;
+}
+
+/*
+ * Appends " <path>+<offset>" for the mapping holding address, read from /proc/self/maps with raw
+ * open/read: the process map the harness samples is often taken too late for a process that dies in
+ * its first seconds. Bounded throughout; an unreadable or odd line just adds nothing.
+ */
+static char *westlake_place(char *out, char *limit, uint64_t address, int *readable)
+{
+    if (readable != NULL) *readable = 0;
+    int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return out;
+    char buffer[4096];
+    char line[512];
+    size_t used = 0;
+    int done = 0;
+    while (!done) {
+        ssize_t got = read(fd, buffer, sizeof(buffer));
+        if (got <= 0) break;
+        for (ssize_t i = 0; i < got && !done; ++i) {
+            if (buffer[i] != '\n') {
+                if (used < sizeof(line) - 1) line[used++] = buffer[i];
+                continue;
+            }
+            line[used] = '\0';
+            const char *cursor = line, *end = line + used;
+            uint64_t start = westlake_parse_hex(&cursor, end);
+            if (cursor < end && *cursor == '-') {
+                ++cursor;
+                uint64_t stop = westlake_parse_hex(&cursor, end);
+                if (address >= start && address < stop) {
+                    while (cursor < end && *cursor == ' ') ++cursor;
+                    if (readable != NULL && cursor < end && *cursor == 'r' && address + 8 <= stop) *readable = 1;
+                    /* "start-stop perms offset dev inode path": four fields, then the path. */
+                    int field = 0;
+                    uint64_t offset = 0;
+                    while (cursor < end && field < 4) {
+                        while (cursor < end && *cursor == ' ') ++cursor;
+                        if (field == 1) offset = westlake_parse_hex(&cursor, end);
+                        while (cursor < end && *cursor != ' ') ++cursor;
+                        ++field;
+                    }
+                    while (cursor < end && *cursor == ' ') ++cursor;
+                    if (cursor < end && out + (end - cursor) + 24 < limit) {
+                        *out++ = ' ';
+                        while (cursor < end) *out++ = *cursor++;
+                        *out++ = '+';
+                        out = westlake_hex(out, address - start + offset);
+                    }
+                    done = 1;
+                }
+            }
+            used = 0;
+        }
+    }
+    close(fd);
+    return out;
+}
+
+static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
+{
+    static int witnessed;
+    if (__atomic_add_fetch(&witnessed, 1, __ATOMIC_RELAXED) > 16) return false;
+    const ucontext_t *uc = (const ucontext_t *) context;
+    char thread[17] = "";
+    prctl(PR_GET_NAME, thread, 0, 0, 0);
+    char line[1800];
+    char *out = westlake_text(line, "[WESTLAKE-SIGNAL-WITNESS] signal=", 64);
+    out = westlake_hex(out, (uint64_t) signal_number);
+    out = westlake_text(out, " code=", 8);
+    out = westlake_hex(out, info != NULL ? (uint64_t) (uint32_t) info->si_code : 0);
+    out = westlake_text(out, " tid=", 8);
+    out = westlake_hex(out, (uint64_t) gettid());
+    out = westlake_text(out, " thread=", 8);
+    out = westlake_text(out, thread, 16);
+    if (uc != NULL) {
+        out = westlake_text(out, " pc=", 8);
+        out = westlake_hex(out, (uint64_t) uc->uc_mcontext.pc);
+        out = westlake_text(out, " x30=", 8);
+        out = westlake_hex(out, (uint64_t) uc->uc_mcontext.regs[30]);
+        /* The instruction word in memory at pc: what the CPU refused, which is not always what
+         * the library's file holds (code patched at run time). */
+        int readable = 0;
+        out = westlake_text(out, " at", 4);
+        out = westlake_place(out, line + 480, (uint64_t) uc->uc_mcontext.pc, &readable);
+        if (readable && out + 40 < line + 500) {
+            const volatile uint32_t *words = (const volatile uint32_t *) (uintptr_t) uc->uc_mcontext.pc;
+            uint64_t first = words[0], second = words[1];
+            out = westlake_text(out, " insn=", 8);
+            out = westlake_hex(out, first);
+            out = westlake_text(out, " next=", 8);
+            out = westlake_hex(out, second);
+            /* Two words that read as a user-space address are a pointer written over the code (a
+             * hook installed in the wrong place): where it points names the hook. */
+            uint64_t pointer = first | (second << 32);
+            if (second != 0 && second < 0x100 && out + 40 < line + 700) {
+                out = westlake_text(out, " pointer-to", 12);
+                out = westlake_place(out, line + 700, pointer, NULL);
+            }
+        }
+        out = westlake_text(out, " from", 6);
+        out = westlake_place(out, line + 1000, (uint64_t) uc->uc_mcontext.regs[30], NULL);
+        /* The arguments and the first callee-saved registers, and what x19 points to: at an abort
+         * the caller's x19..x22 still hold what it was working on (Instagram's: the string an ICU
+         * conversion rejected). Printable bytes as text, the rest as \xNN. */
+        static const int shown[] = {0, 1, 2, 3, 4, 5, 19, 20, 21, 22};
+        for (size_t i = 0; i < sizeof(shown) / sizeof(shown[0]) && out + 26 < line + 1500; ++i) {
+            *out++ = ' ';
+            *out++ = 'x';
+            if (shown[i] >= 10) *out++ = (char) ('0' + shown[i] / 10);
+            *out++ = (char) ('0' + shown[i] % 10);
+            *out++ = '=';
+            out = westlake_hex(out, (uint64_t) uc->uc_mcontext.regs[shown[i]]);
+        }
+        int string_readable = 0;
+        char scratch[256];
+        westlake_place(scratch, scratch + sizeof(scratch), (uint64_t) uc->uc_mcontext.regs[19], &string_readable);
+        if (string_readable && westlake_place(scratch, scratch + sizeof(scratch),
+                                              (uint64_t) uc->uc_mcontext.regs[19] + 48, &string_readable) != NULL &&
+            string_readable) {
+            out = westlake_text(out, " *x19=\"", 8);
+            const volatile unsigned char *bytes = (const volatile unsigned char *) (uintptr_t) uc->uc_mcontext.regs[19];
+            for (int i = 0; i < 48 && out + 6 < line + 1700; ++i) {
+                unsigned char c = bytes[i];
+                if (c >= 32 && c < 127 && c != '\\' && c != '"') {
+                    *out++ = (char) c;
+                } else {
+                    static const char digits[] = "0123456789abcdef";
+                    *out++ = '\\';
+                    *out++ = 'x';
+                    *out++ = digits[c >> 4];
+                    *out++ = digits[c & 15];
+                }
+            }
+            *out++ = '"';
+        }
+    }
+    *out++ = '\n';
+    ssize_t written = write(2, line, (size_t) (out - line));
+    (void) written;
+    return false;
+}
+
+__attribute__((constructor)) static void westlake_install_signal_witness(void)
+{
+    typedef void (*AddSpecialFn)(int, struct westlake_signal_chain_action *);
+    AddSpecialFn add = (AddSpecialFn) dlsym(RTLD_DEFAULT, "add_special_signal_handler");
+    if (add == NULL) return;
+    static struct westlake_signal_chain_action action;
+    action.sca_sigaction = westlake_signal_witness;
+    sigemptyset(&action.sca_mask);
+    action.sca_flags = 0;
+    add(SIGILL, &action);
+    add(SIGTRAP, &action);
+    add(SIGBUS, &action);
+}
+
 __attribute__((constructor)) static void initialize_bionic_ctype(void)
 {
     enum {
@@ -2684,6 +3306,34 @@ WESTLAKE_ALOOPER_FORWARD(AHardwareBuffer *, AHardwareBuffer_fromHardwareBuffer, 
                          (env, object))
 WESTLAKE_ALOOPER_FORWARD(void *, AHardwareBuffer_toHardwareBuffer, (void *env, AHardwareBuffer *buffer),
                          (env, buffer))
+/*
+ * The cross-process buffer handoff, and the Surface for a native window: no runtime library defines
+ * them. Gecko's libxul imports all three -- Fennec's failed to relocate on
+ * AHardwareBuffer_recvHandleFromUnixSocket -- for its compositor in a separate GPU process, which
+ * the one app process here never starts. They answer as on a socket that carries no buffer and a
+ * window with no Java Surface: -EINVAL, and null.
+ */
+int AHardwareBuffer_sendHandleToUnixSocket(const AHardwareBuffer *buffer, int socket_fd)
+{
+    (void) buffer;
+    (void) socket_fd;
+    return -EINVAL;
+}
+
+int AHardwareBuffer_recvHandleFromUnixSocket(int socket_fd, AHardwareBuffer **out_buffer)
+{
+    (void) socket_fd;
+    if (out_buffer != NULL) *out_buffer = NULL;
+    return -EINVAL;
+}
+
+void *ANativeWindow_toSurface(void *env, void *window)
+{
+    (void) env;
+    (void) window;
+    return NULL;
+}
+
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
                          (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
                          (network, name, ns_class, ns_type, flags))
@@ -2749,6 +3399,7 @@ typedef struct {
     WlEglImage (*create_image)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *);
     unsigned (*destroy_image)(WlEglDisplay, WlEglImage);
     int (*dup_fence)(WlEglDisplay, void *);
+    void *(*create_window_surface)(WlEglDisplay, void *, void *, const WlEglInt *);
 } WlEglImplementation;
 static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
 static int wl_egl_implementation_count;
@@ -2787,6 +3438,8 @@ static void wl_egl_add_implementation(void *library)
             wl_egl_entry(library, "eglCreateImageKHR");
     e->destroy_image = (unsigned (*)(WlEglDisplay, WlEglImage)) wl_egl_entry(library, "eglDestroyImageKHR");
     e->dup_fence = (int (*)(WlEglDisplay, void *)) wl_egl_entry(library, "eglDupNativeFenceFDANDROID");
+    e->create_window_surface = (void *(*)(WlEglDisplay, void *, void *, const WlEglInt *))
+            wl_egl_entry(library, "eglCreateWindowSurface");
     Dl_info info;
     wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
                   dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
@@ -2845,6 +3498,59 @@ static void wl_destroy_window_buffer(void *window_buffer)
     static void (*destroy)(void *);
     if (destroy == NULL) destroy = (void (*)(void *)) wl_native_window_symbol("OH_NativeWindow_DestroyNativeWindowBuffer");
     if (destroy != NULL && window_buffer != NULL) destroy(window_buffer);
+}
+
+/*
+ * A window surface created from native code. ANativeWindow_fromSurface hands an app the adapter's
+ * AOSP-shaped window (magic ANW1) around an OHNativeWindow, and OH's EGL takes only the
+ * OHNativeWindow: Flutter's Skia renderer, in the apps that opt out of Impeller, got no surface
+ * for its SurfaceView and never drew (Cards with Cats, Mouse Pounce, Lichess). The Java bindings
+ * unwrap the same way (opengl-jni's wl_window_from_surface), and so does the Vulkan shim; hwui
+ * unwraps before it calls EGL. A window that is not the adapter's goes through unchanged.
+ *
+ * An unwrapped window also waits for a free buffer, as Android's dequeue does, instead of failing
+ * after OH's 3000 ms request timeout, the setting the Java bindings make for app producers.
+ */
+typedef void *(*WlAnwGetOh)(void *);
+static WlAnwGetOh wl_anw_get_oh;
+static pthread_once_t wl_anw_get_oh_once = PTHREAD_ONCE_INIT;
+
+static void wl_find_anw_get_oh(void)
+{
+    void *fn = dlsym(RTLD_DEFAULT, "oh_anw_get_oh");
+    if (fn == NULL) {
+        /* The bridge library is not in the global scope everywhere: ask it directly. */
+        void *bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
+        if (bridge != NULL) fn = dlsym(bridge, "oh_anw_get_oh");
+    }
+    wl_anw_get_oh = (WlAnwGetOh) fn;
+}
+
+void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, const WlEglInt *attribs)
+{
+    pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
+    void *oh = wl_anw_get_oh != NULL && window != NULL ? wl_anw_get_oh(window) : NULL;
+    if (oh != NULL) {
+        typedef int32_t (*HandleOpt)(void *, int, ...);
+        HandleOpt opt = (HandleOpt) wl_native_window_symbol("OH_NativeWindow_NativeWindowHandleOpt");
+        if (opt != NULL) opt(oh, 10 /* SET_TIMEOUT, ms */, (int32_t) INT32_MAX);
+        window = oh;
+    }
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    void *surface = NULL;
+    for (int k = 0; k < count && surface == NULL; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->create_window_surface == NULL) continue;
+        surface = e->create_window_surface(display, config, window, attribs);
+        if (surface == NULL && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    if (oh != NULL) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] window surface over the adapter's OH window %p: %p\n", oh, surface);
+        }
+    }
+    return surface;
 }
 
 WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
@@ -3011,4 +3717,81 @@ unsigned eglTerminate(WlEglDisplay display)
         wl_relocs_log("[WESTLAKE-EGL] eglTerminate(%p): display left initialized for the process\n", display);
     }
     return 1;
+}
+
+/*
+ * setcon. Westlake's app process starts in the launcher's domain (su, from the device shell) and
+ * moves to the app's (normal_hap) through OH's HapContext::HapDomainSetcontext, which calls setcon.
+ * A datagram socket connected before that keeps the launcher's label, and the app domain may
+ * neither write to it nor reconnect it: hilog's, inherited from the launcher. Under SELinux
+ * enforcing every app log line was dropped, silently (dontaudit): Telegram's process got 24 lines
+ * into hilog in a run, 2,980 with this. Each connected AF_UNIX datagram socket is noted while
+ * still in the old domain, and after a
+ * successful setcon replaced, on the same descriptor, by one created and connected in the new one.
+ * The switch is made while the process is single-threaded, so the swap races with nothing.
+ */
+#include <sys/un.h>
+
+int setcon(const char *context)
+{
+    static int (*real)(const char *);
+    if (real == NULL) {
+        void *library = dlopen("libselinux.z.so", RTLD_NOW | RTLD_NOLOAD);
+        if (library == NULL) library = dlopen("libselinux.z.so", RTLD_NOW);
+        void *symbol = library != NULL ? dlsym(library, "setcon") : NULL;
+        Dl_info self, found;
+        if (symbol != NULL && dladdr((void *) &setcon, &self) != 0 && dladdr(symbol, &found) != 0 &&
+            found.dli_fbase == self.dli_fbase) {
+            symbol = NULL; /* never this library's own wrapper */
+        }
+        real = (int (*)(const char *)) symbol;
+    }
+    if (real == NULL) {
+        errno = ENOSYS;
+        return -1;
+    }
+    enum { WL_MAX_RENEW = 16 };
+    struct {
+        int fd;
+        struct sockaddr_un peer;
+        socklen_t length;
+    } connected[WL_MAX_RENEW];
+    int count = 0;
+    for (int fd = 0; fd < 1024 && count < WL_MAX_RENEW; fd++) {
+        int type = 0;
+        socklen_t size = sizeof(type);
+        if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &size) != 0 || type != SOCK_DGRAM) continue;
+        struct sockaddr_un peer;
+        socklen_t length = sizeof(peer);
+        memset(&peer, 0, sizeof(peer));
+        if (getpeername(fd, (struct sockaddr *) &peer, &length) != 0 || peer.sun_family != AF_UNIX ||
+            length <= (socklen_t) offsetof(struct sockaddr_un, sun_path) || peer.sun_path[0] == '\0') {
+            continue; /* not connected to a filesystem socket: unnamed, abstract or another family */
+        }
+        connected[count].fd = fd;
+        connected[count].peer = peer;
+        connected[count].length = length;
+        count++;
+    }
+    int rc = real(context);
+    if (rc != 0) return rc;
+    int renewed = 0;
+    for (int i = 0; i < count; i++) {
+        int fd = connected[i].fd;
+        int descriptor_flags = fcntl(fd, F_GETFD);
+        int status_flags = fcntl(fd, F_GETFL);
+        int fresh = socket(AF_UNIX, SOCK_DGRAM, 0);
+        if (fresh < 0) continue;
+        if (connect(fresh, (struct sockaddr *) &connected[i].peer, connected[i].length) != 0 ||
+            (status_flags >= 0 && fcntl(fresh, F_SETFL, status_flags) != 0) || dup2(fresh, fd) < 0) {
+            close(fresh);
+            continue;
+        }
+        if (descriptor_flags >= 0) fcntl(fd, F_SETFD, descriptor_flags);
+        close(fresh);
+        renewed++;
+    }
+    wl_relocs_log("[WESTLAKE-SELINUX] setcon %s: %d of %d connected datagram socket(s) re-created in the new domain\n",
+                  context != NULL ? context : "(null)", renewed, count);
+    return rc;
 }

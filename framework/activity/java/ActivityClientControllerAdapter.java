@@ -184,6 +184,7 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
 
     @Override
     public void activityResumed(IBinder token, boolean handleSplashScreenExit) {
+        if (token != null) taskPosition(token);
         // Android Activity.onResume done → defer OH AbilityState.FOREGROUND
         // report until first hwui frame draws (Bug B fix).
         if (token == null) {
@@ -290,6 +291,7 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
 
     @Override
     public void activityPaused(IBinder token) {
+        if (token != null) taskPosition(token);
         // Android Activity.onPause done → OH AbilityState.INACTIVE (active→inactive transition).
         reportOhLifecycle(token, OH_STATE_INACTIVE, "activityPaused");
     }
@@ -302,7 +304,10 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     }
 
     @Override
-    public void activityDestroyed(IBinder token) { /* no-op — finishActivity already drove OH TerminateAbility */ }
+    public void activityDestroyed(IBinder token) {
+        // finishActivity already drove OH TerminateAbility; only the task model needs the news.
+        leaveTask(token);
+    }
 
     @Override
     public void activityLocalRelaunch(IBinder token) { /* no-op */ }
@@ -341,6 +346,7 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
 
     @Override
     public boolean finishActivity(IBinder token, int code, Intent data, int finishTask) {
+        leaveTask(token);
         try {
             // G2.14f — direct BCP call (see reportOhLifecycle for rationale).
             Long ohAddr = adapter.core.OhTokenRegistry.findOhToken(token);
@@ -395,8 +401,61 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     // Activity state queries.  [STUB]
     // ====================================================================
 
+    // The app's one task: its activity tokens in the order this process first asked about or
+    // reported them, the oldest still alive its root. getTaskForActivity answered -1 for every
+    // activity, so Activity.isTaskRoot() was false and getTaskId() -1: Instagram's launcher activity
+    // logged "InstagramMainActivity is not the root. Finishing activity instead of launching." and
+    // finished as soon as it resumed. An activity first asks about itself in onCreate, before any
+    // activity it starts exists, so first-seen order is creation order.
+    private static final int TASK_ID = 1;
+    private static final java.util.ArrayList<java.lang.ref.WeakReference<IBinder>> sTask =
+            new java.util.ArrayList<>();
+
+    /** Records the token if new; returns its position in the task (0 = root). */
+    private static synchronized int taskPosition(IBinder token) {
+        int position = 0;
+        for (java.util.Iterator<java.lang.ref.WeakReference<IBinder>> it = sTask.iterator(); it.hasNext(); ) {
+            IBinder known = it.next().get();
+            if (known == null) {
+                it.remove();
+            } else if (known == token) {
+                return position;
+            } else {
+                position++;
+            }
+        }
+        sTask.add(new java.lang.ref.WeakReference<>(token));
+        return position;
+    }
+
+    private static synchronized boolean isTaskTop(IBinder token) {
+        taskPosition(token);
+        for (int i = sTask.size() - 1; i >= 0; i--) {
+            IBinder known = sTask.get(i).get();
+            if (known != null) return known == token;
+        }
+        return true;
+    }
+
+    private static synchronized void leaveTask(IBinder token) {
+        sTask.removeIf(ref -> ref.get() == null || ref.get() == token);
+    }
+
+    /** The task's live activity tokens, root first. */
+    public static synchronized java.util.List<IBinder> taskTokens() {
+        java.util.ArrayList<IBinder> live = new java.util.ArrayList<>(sTask.size());
+        for (java.lang.ref.WeakReference<IBinder> ref : sTask) {
+            IBinder token = ref.get();
+            if (token != null) live.add(token);
+        }
+        return live;
+    }
+
+    /** The task's id, as getTaskForActivity answers it. */
+    public static int taskId() { return TASK_ID; }
+
     @Override
-    public boolean isTopOfTask(IBinder token) { return true; }
+    public boolean isTopOfTask(IBinder token) { return token == null || isTaskTop(token); }
 
     @Override
     public boolean willActivityBeVisible(IBinder token) { return true; }
@@ -405,7 +464,11 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     public int getDisplayId(IBinder activityToken) { return 0; }   // OH default display
 
     @Override
-    public int getTaskForActivity(IBinder token, boolean onlyRoot) { return -1; }
+    public int getTaskForActivity(IBinder token, boolean onlyRoot) {
+        if (token == null) return -1;
+        int position = taskPosition(token);
+        return !onlyRoot || position == 0 ? TASK_ID : -1;
+    }
 
     @Override
     public Configuration getTaskConfiguration(IBinder activityToken) { return null; }
