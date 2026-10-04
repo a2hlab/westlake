@@ -1724,6 +1724,29 @@ void *dlopen(const char *filename, int flags)
             }
         }
     }
+    /*
+     * libEGL.so and the GLES libraries by name, from Android code: the EGL implementation the runtime
+     * renders through (where eglGetCurrentDisplay binds in the global scope, the board's driver), not
+     * OH's NDK libEGL.so. That one loads into OH's ndk namespace, where its wrapper cannot open the
+     * GLES libraries it dispatches to ("EglWrapperLayer Init Failed"), and its display is not hwui's.
+     * SDL dlopens these by name and takes every entry point from the handle (see dlsym).
+     */
+    if (basename != NULL && filename != NULL && strchr(filename, '/') == NULL &&
+        (strcmp(basename, "libEGL.so") == 0 || strcmp(basename, "libGLESv2.so") == 0 ||
+         strcmp(basename, "libGLESv3.so") == 0) &&
+        caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+        Dl_info egl;
+        void *current = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
+        void *handle = current != NULL && dladdr(current, &egl) != 0 && egl.dli_fname != NULL
+                       ? real_dlopen(egl.dli_fname, RTLD_NOW | RTLD_NOLOAD) : NULL;
+        if (handle != NULL) {
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                fprintf(stderr, "[WESTLAKE-EGL] %s for an Android library: %s\n", filename, egl.dli_fname);
+            }
+            return handle;
+        }
+    }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
         caller_is_webview(caller, NULL)) {
         actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
@@ -3394,9 +3417,10 @@ void *ANativeWindow_toSurface(void *env, void *window)
  * to libmozglue's own definition, read from its symbol table, whatever namespace loaded it.
  */
 struct westlake_library_symbol {
-    const char *library;
+    const char *library;   /* basename, or NULL to match by base */
     const char *name;
     void *address;
+    uintptr_t base;        /* load base, when library is NULL */
 };
 
 static uint32_t westlake_gnu_hash(const char *name)
@@ -3412,7 +3436,9 @@ static int westlake_find_library_symbol(struct dl_phdr_info *info, size_t size, 
     struct westlake_library_symbol *query = data;
     const char *slash = info->dlpi_name != NULL ? strrchr(info->dlpi_name, '/') : NULL;
     const char *base = slash != NULL ? slash + 1 : info->dlpi_name;
-    if (base == NULL || strcmp(base, query->library) != 0) return 0;
+    if (query->library == NULL ? info->dlpi_addr != query->base : base == NULL || strcmp(base, query->library) != 0) {
+        return 0;
+    }
     const ElfW(Dyn) *dynamic = NULL;
     for (int i = 0; i < info->dlpi_phnum; i++) {
         if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
@@ -3473,7 +3499,7 @@ static void westlake_resolve_mozglue(void)
 {
     int from_mozglue = 0;
     for (int i = 0; i < WL_MOZ_COUNT; i++) {
-        struct westlake_library_symbol query = { "libmozglue.so", westlake_mozglue_names[i], NULL };
+        struct westlake_library_symbol query = { "libmozglue.so", westlake_mozglue_names[i], NULL, 0 };
         dl_iterate_phdr(westlake_find_library_symbol, &query);
         if (query.address != NULL) from_mozglue++;
         westlake_mozglue[i] = query.address != NULL ? query.address : dlsym(RTLD_DEFAULT, westlake_mozglue_names[i]);
@@ -3908,6 +3934,62 @@ unsigned eglTerminate(WlEglDisplay display)
         wl_relocs_log("[WESTLAKE-EGL] eglTerminate(%p): display left initialized for the process\n", display);
     }
     return 1;
+}
+
+/*
+ * dlsym, for the EGL entry points an Android library looks up by handle. SDL dlopens libEGL.so and
+ * takes every entry point from that handle, past this library's: its eglCreateWindowSurface handed
+ * OH's EGL the adapter's AOSP-shaped window, which OH's EGL refuses, and an eglTerminate that way
+ * would tear down the display hwui renders through ("EGL_NOT_INITIALIZED during rendering", then
+ * an abort on hwui's render thread: anarchre). An Android caller's lookup of either gets this
+ * library's, whatever the handle. Every other lookup goes on to musl's dlsym as a tail call, so its
+ * return address -- what RTLD_NEXT is relative to -- is still the caller's.
+ */
+typedef void *(*WestlakeDlsymFn)(void *, const char *);
+static WestlakeDlsymFn westlake_musl_dlsym;
+
+/* musl's dlsym, read from the symbol table of the object that holds getpid. */
+static WestlakeDlsymFn westlake_find_musl_dlsym(void)
+{
+    Dl_info info;
+    struct westlake_library_symbol query = { NULL, "dlsym", NULL, 0 };
+    if (dladdr((void *) &getpid, &info) != 0) query.base = (uintptr_t) info.dli_fbase;
+    if (query.base != 0) dl_iterate_phdr(westlake_find_library_symbol, &query);
+    __atomic_store_n(&westlake_musl_dlsym, (WestlakeDlsymFn) query.address, __ATOMIC_RELEASE);
+    return (WestlakeDlsymFn) query.address;
+}
+
+__attribute__((constructor)) static void westlake_dlsym_init(void)
+{
+    if (westlake_find_musl_dlsym() == NULL) {
+        fprintf(stderr, "[WESTLAKE-LOADER] musl's dlsym not found; EGL lookups by handle are not redirected\n");
+    }
+}
+
+static void *westlake_egl_by_handle(const char *name)
+{
+    if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
+    if (strcmp(name, "eglTerminate") == 0) return (void *) &eglTerminate;
+    return NULL;
+}
+
+void *dlsym(void *handle, const char *name)
+{
+    WestlakeDlsymFn real = __atomic_load_n(&westlake_musl_dlsym, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) real = westlake_find_musl_dlsym();
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL &&
+        name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {
+        void *own = westlake_egl_by_handle(name);
+        void *caller = __builtin_return_address(0);
+        if (own != NULL && caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                wl_relocs_log("[WESTLAKE-EGL] %s by handle from an Android library: this library's\n", name);
+            }
+            return own;
+        }
+    }
+    __attribute__((musttail)) return real(handle, name);
 }
 
 /*
