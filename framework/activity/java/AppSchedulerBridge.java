@@ -805,6 +805,16 @@ public class AppSchedulerBridge {
         cfg.screenHeightDp = hDp;
         cfg.smallestScreenWidthDp = Math.min(wDp, hDp);
 
+        // The window an activity gets here: the full screen, as WindowSessionAdapter's relayout
+        // reports later. WindowManager.getCurrentWindowMetrics() and getMaximumWindowMetrics()
+        // answer from these bounds, and activities are launched with this configuration: left
+        // empty, an activity measuring itself in onCreate got 0x0 (aat divided by the button
+        // count it derived from the width).
+        android.graphics.Rect bounds = new android.graphics.Rect(0, 0, disp.widthPx, disp.heightPx);
+        cfg.windowConfiguration.setBounds(bounds);
+        cfg.windowConfiguration.setAppBounds(bounds);
+        cfg.windowConfiguration.setMaxBounds(bounds);
+
         // Orientation
         cfg.orientation = disp.widthPx >= disp.heightPx
                 ? android.content.res.Configuration.ORIENTATION_LANDSCAPE
