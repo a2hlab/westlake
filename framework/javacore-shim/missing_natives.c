@@ -50,6 +50,12 @@
  *   on it. Replaced with libcore's own logic (UnixFileSystem_md.c): stat, add or clear the owner or
  *   everyone bits, chmod.
  *
+ *   java.io.UnixFileSystem.getSpace0 -- File.getTotalSpace, getFreeSpace and getUsableSpace. The
+ *   runtime's openjdk stub registers a version that answers 0 for every path, so any size an app
+ *   derives from them is 0: CNN sizes its OkHttp cache at half of /data's usable space and its
+ *   Application died on "maxSize <= 0". libcore's logic again: statvfs, the fragment size times
+ *   the block count asked for.
+ *
  *   The loading thread's Java priority -- not a native, a value. libart.so's PaletteSchedGetPriority
  *   is a weak stub that returns success without writing a priority, so ART gives every thread it
  *   attaches, the main thread included, Java priority 0 (Android's main thread has 5), and every
@@ -73,6 +79,7 @@
 #define _GNU_SOURCE
 #define _GNU_SOURCE /* dladdr */
 #include <dlfcn.h>
+#include <errno.h>
 #include <jni.h>
 #include <math.h>
 #include <string.h>
@@ -84,6 +91,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/xattr.h>
 #include <grp.h>
 #include <poll.h>
@@ -603,11 +611,27 @@ static jlong wl_getLastModifiedTime0(JNIEnv* env, jobject self, jobject file)
     return (jlong) st.st_mtim.tv_sec * 1000 + st.st_mtim.tv_nsec / 1000000;
 }
 
+/* java.io.FileSystem's SPACE_TOTAL, SPACE_FREE, SPACE_USABLE. */
+static jlong wl_getSpace0(JNIEnv* env, jobject self, jobject file, jint which)
+{
+    char path[4096];
+    struct statvfs st;
+    (void) self;
+    if (!file_path(env, file, path, sizeof(path)) || statvfs(path, &st) != 0) return 0;
+    switch (which) {
+    case 0: return (jlong) st.f_frsize * (jlong) st.f_blocks;
+    case 1: return (jlong) st.f_frsize * (jlong) st.f_bfree;
+    case 2: return (jlong) st.f_frsize * (jlong) st.f_bavail;
+    default: return 0;
+    }
+}
+
 static const JNINativeMethod kUnixFileSystem[] = {
     { "setPermission0", "(Ljava/io/File;IZZ)Z", (void*) wl_setPermission0 },
     { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
     { "setLastModifiedTime0", "(Ljava/io/File;J)Z", (void*) wl_setLastModifiedTime0 },
     { "getLastModifiedTime0", "(Ljava/io/File;)J", (void*) wl_getLastModifiedTime0 },
+    { "getSpace0", "(Ljava/io/File;I)J", (void*) wl_getSpace0 },
 };
 
 /*
