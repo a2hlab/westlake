@@ -1841,6 +1841,11 @@ public class AppSpawnXInit {
                         System.err.println("[WESTLAKE-STORAGE-750] getAllocatableBytes=" + free);
                         return Long.valueOf(free);
                     }
+                    // StorageStatsService's quota for an app with no usage history. 0 made
+                    // LibreTube's image cache invalid (Coil rejects a size of 0) in onCreate.
+                    if ("getCacheQuotaBytes".equals(name)) {
+                        return Long.valueOf(adapter.core.LocalServiceBinders.CACHE_QUOTA_BYTES);
+                    }
                     if ("isUserKeyUnlocked".equals(name)) {
                         return Boolean.TRUE;
                     }
