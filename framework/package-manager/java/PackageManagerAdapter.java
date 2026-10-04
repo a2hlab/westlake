@@ -1397,10 +1397,33 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             String processFilter,
             java.util.List<android.content.pm.ProviderInfo> out) {
         if (SourcePackageRegistry.contains(packageName)) {
+            // Every provider, disabled ones too, in manifest order: PackageManager gives each authority
+            // to the first provider that declares it, enabled or not, and installs a provider only
+            // under the authorities it won; one left with none is never installed
+            // (ComponentResolver.addProvidersLocked: "Skipping provider name ...: name already used").
+            // Quitter declares a disabled androidx WorkManagerInitializer and then a Flutter plugin's
+            // provider for the same authority, whose class R8 removed: installing the second failed
+            // the bind with ClassNotFoundException, where Android never instantiates it.
             PackageInfo info = SourcePackageRegistry.packageInfo(packageName,
                     android.content.pm.PackageManager.GET_PROVIDERS
-                    | android.content.pm.PackageManager.GET_META_DATA);
+                    | android.content.pm.PackageManager.GET_META_DATA
+                    | android.content.pm.PackageManager.MATCH_DISABLED_COMPONENTS);
+            java.util.Set<String> claimed = new java.util.HashSet<>();
             if (info != null && info.providers != null) for (ProviderInfo provider : info.providers) {
+                String won = null;
+                for (String authority : provider.authority != null ? provider.authority.split(";") : new String[0]) {
+                    if (authority.isEmpty() || !claimed.add(authority)) continue;
+                    won = won == null ? authority : won + ";" + authority;
+                }
+                boolean enabled = provider.enabled
+                        && (provider.applicationInfo == null || provider.applicationInfo.enabled);
+                if (!enabled) continue;
+                if (won == null) {
+                    System.err.println("[WESTLAKE-PM] skipping provider " + provider.name
+                            + ": authority " + provider.authority + " already used");
+                    continue;
+                }
+                provider.authority = won;
                 if (processFilter == null || processFilter.equals(provider.processName)) out.add(provider);
             }
             return;
