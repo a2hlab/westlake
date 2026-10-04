@@ -718,8 +718,31 @@ static jint wl_camera_count(JNIEnv* e, jclass c, jint device, jint policy)
     return 0;
 }
 
+/*
+ * With no camera listed, every id is unknown. Android's JNI answers getCameraInfo for an unknown id
+ * with RuntimeException("Unknown camera ID"), and a connection with -EACCES, which Camera.open turns
+ * into "Fail to connect to camera service". Open Camera asks for camera 0's facing without checking
+ * the count; the missing native threw UnsatisfiedLinkError, which no caller catches.
+ */
+static void wl_camera_info(JNIEnv* e, jclass c, jint id, jint rotation, jint slow, jint policy, jobject info)
+{
+    (void) c; (void) id; (void) rotation; (void) slow; (void) policy; (void) info;
+    jclass failure = (*e)->FindClass(e, "java/lang/RuntimeException");
+    if (failure != NULL) (*e)->ThrowNew(e, failure, "Unknown camera ID");
+}
+
+static jint wl_camera_setup(JNIEnv* e, jobject thiz, jobject self, jint id, jstring package, jint rotation,
+                            jboolean slow, jint client, jint policy)
+{
+    (void) e; (void) thiz; (void) self; (void) id; (void) package; (void) rotation; (void) slow; (void) client;
+    (void) policy;
+    return -EACCES;
+}
+
 static const JNINativeMethod kCamera[] = {
     { "_getNumberOfCameras", "(II)I", (void*) wl_camera_count },
+    { "_getCameraInfo", "(IIIILandroid/hardware/Camera$CameraInfo;)V", (void*) wl_camera_info },
+    { "native_setup", "(Ljava/lang/Object;ILjava/lang/String;IZII)I", (void*) wl_camera_setup },
 };
 
 static void wl_camcorder_init(JNIEnv* e, jclass c) { (void) e; (void) c; }

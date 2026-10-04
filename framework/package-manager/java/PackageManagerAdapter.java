@@ -940,14 +940,21 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public boolean hasSystemFeature(String name, int version) {
         logStub("hasSystemFeature", name);
-        // Phase 1: report common features as available
+        // A feature is claimed only where its Android API reaches the hardware: an app that is
+        // told the hardware exists takes its hardware path without further checks.
         switch (name) {
             case "android.software.webview":
                 return getSideloadedWebViewPackageInfo() != null;
+            // No camera: the board has two (OH's CameraService lists a back and a front one),
+            // but no Android camera service reaches them, so CameraManager lists none. CameraX
+            // checks its camera list against these features: with a back camera claimed and
+            // none listed, its init retries until a timeout and then fails ("Device reporting
+            // less cameras than anticipated"). Claim it again once "media.camera" is provided.
+            // No Bluetooth either. The adapter is present and off (LocalServiceBinders answers
+            // the manager service); claimed, the feature sends apps to ACTION_REQUEST_ENABLE,
+            // which nothing here answers.
             case "android.hardware.touchscreen":
             case "android.hardware.wifi":
-            case "android.hardware.bluetooth":
-            case "android.hardware.camera":
             case "android.hardware.screen.portrait":
             case "android.hardware.screen.landscape":
                 return true;
