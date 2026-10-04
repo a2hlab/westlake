@@ -3324,6 +3324,7 @@ typedef struct {
     WlEglImage (*create_image)(WlEglDisplay, WlEglContext, unsigned, WlEglClientBuffer, const WlEglInt *);
     unsigned (*destroy_image)(WlEglDisplay, WlEglImage);
     int (*dup_fence)(WlEglDisplay, void *);
+    void *(*create_window_surface)(WlEglDisplay, void *, void *, const WlEglInt *);
 } WlEglImplementation;
 static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
 static int wl_egl_implementation_count;
@@ -3362,6 +3363,8 @@ static void wl_egl_add_implementation(void *library)
             wl_egl_entry(library, "eglCreateImageKHR");
     e->destroy_image = (unsigned (*)(WlEglDisplay, WlEglImage)) wl_egl_entry(library, "eglDestroyImageKHR");
     e->dup_fence = (int (*)(WlEglDisplay, void *)) wl_egl_entry(library, "eglDupNativeFenceFDANDROID");
+    e->create_window_surface = (void *(*)(WlEglDisplay, void *, void *, const WlEglInt *))
+            wl_egl_entry(library, "eglCreateWindowSurface");
     Dl_info info;
     wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
                   dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
@@ -3420,6 +3423,59 @@ static void wl_destroy_window_buffer(void *window_buffer)
     static void (*destroy)(void *);
     if (destroy == NULL) destroy = (void (*)(void *)) wl_native_window_symbol("OH_NativeWindow_DestroyNativeWindowBuffer");
     if (destroy != NULL && window_buffer != NULL) destroy(window_buffer);
+}
+
+/*
+ * A window surface created from native code. ANativeWindow_fromSurface hands an app the adapter's
+ * AOSP-shaped window (magic ANW1) around an OHNativeWindow, and OH's EGL takes only the
+ * OHNativeWindow: Flutter's Skia renderer, in the apps that opt out of Impeller, got no surface
+ * for its SurfaceView and never drew (Cards with Cats, Mouse Pounce, Lichess). The Java bindings
+ * unwrap the same way (opengl-jni's wl_window_from_surface), and so does the Vulkan shim; hwui
+ * unwraps before it calls EGL. A window that is not the adapter's goes through unchanged.
+ *
+ * An unwrapped window also waits for a free buffer, as Android's dequeue does, instead of failing
+ * after OH's 3000 ms request timeout, the setting the Java bindings make for app producers.
+ */
+typedef void *(*WlAnwGetOh)(void *);
+static WlAnwGetOh wl_anw_get_oh;
+static pthread_once_t wl_anw_get_oh_once = PTHREAD_ONCE_INIT;
+
+static void wl_find_anw_get_oh(void)
+{
+    void *fn = dlsym(RTLD_DEFAULT, "oh_anw_get_oh");
+    if (fn == NULL) {
+        /* The bridge library is not in the global scope everywhere: ask it directly. */
+        void *bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
+        if (bridge != NULL) fn = dlsym(bridge, "oh_anw_get_oh");
+    }
+    wl_anw_get_oh = (WlAnwGetOh) fn;
+}
+
+void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, const WlEglInt *attribs)
+{
+    pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
+    void *oh = wl_anw_get_oh != NULL && window != NULL ? wl_anw_get_oh(window) : NULL;
+    if (oh != NULL) {
+        typedef int32_t (*HandleOpt)(void *, int, ...);
+        HandleOpt opt = (HandleOpt) wl_native_window_symbol("OH_NativeWindow_NativeWindowHandleOpt");
+        if (opt != NULL) opt(oh, 10 /* SET_TIMEOUT, ms */, (int32_t) INT32_MAX);
+        window = oh;
+    }
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    void *surface = NULL;
+    for (int k = 0; k < count && surface == NULL; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->create_window_surface == NULL) continue;
+        surface = e->create_window_surface(display, config, window, attribs);
+        if (surface == NULL && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    if (oh != NULL) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] window surface over the adapter's OH window %p: %p\n", oh, surface);
+        }
+    }
+    return surface;
 }
 
 WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
