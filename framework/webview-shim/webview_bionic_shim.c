@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <link.h>
@@ -1166,6 +1167,45 @@ static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int
  * holds (their libc++_shared.so), and from the default namespace only the C runtime. NULL when the
  * namespace cannot be made, so the other paths below take over.
  */
+/*
+ * The libraries the written-library namespace shares with the default namespace: the C runtime and
+ * NDK libraries, and every library the APK packages (the .so files in apk_lib_dir). ART's loader put
+ * the packaged ones in the default namespace when the launch made no Android namespace, and a
+ * written library that needs one must get that copy, as it would in Android's single classloader
+ * namespace. Chaquopy's extension modules need libpython3.11.so: found again on this namespace's own
+ * path, a second Python runtime was loaded, never initialized, and an extension module's first call
+ * into it went through a PLT slot left unresolved (econverter, werewolvesgame).
+ */
+static char *westlake_shared_with_default(const char *apk_lib_dir)
+{
+    static const char ndk[] = "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
+                              "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
+                              "libjnigraphics.so:libnativewindow.so:libvulkan.so:libsync.so:libaaudio.so:"
+                              "libcamera2ndk.so:libmediandk.so";
+    size_t size = sizeof(ndk), length = sizeof(ndk) - 1;
+    char *shared = malloc(size);
+    if (shared == NULL) return NULL;
+    memcpy(shared, ndk, sizeof(ndk));
+    DIR *directory = apk_lib_dir != NULL ? opendir(apk_lib_dir) : NULL;
+    for (struct dirent *entry = directory != NULL ? readdir(directory) : NULL; entry != NULL;
+         entry = readdir(directory)) {
+        size_t n = strlen(entry->d_name);
+        if (n < 4 || strcmp(entry->d_name + n - 3, ".so") != 0) continue;
+        if (length + 1 + n + 1 > size) {
+            size_t grown = (size + n + 2) * 2;
+            char *bigger = realloc(shared, grown);
+            if (bigger == NULL) break;
+            shared = bigger;
+            size = grown;
+        }
+        shared[length++] = ':';
+        memcpy(shared + length, entry->d_name, n + 1);
+        length += n;
+    }
+    if (directory != NULL) closedir(directory);
+    return shared;
+}
+
 static void *westlake_load_app_library(const char *path, int flags)
 {
     typedef void (*DlnsInitFn)(Dl_namespace *, const char *);
@@ -1220,29 +1260,32 @@ static void *westlake_load_app_library(const char *path, int flags)
         const char *android_path = getenv("WESTLAKE_ANDROID_NATIVE_SEARCH_PATH");
         const char *app_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
         char search[4096];
-        snprintf(search, sizeof(search), "%s:%s", dir,
-                 android_path != NULL && android_path[0] != '\0' ? android_path
-                 : app_lib_dir != NULL ? app_lib_dir : "/system/lib64");
         Dl_namespace parent, android;
         memset(&parent, 0, sizeof(parent));
         memset(&android, 0, sizeof(android));
+        int has_android = get_fn != NULL && get_fn("westlake_android_app", &android) == 0;
+        /* With an Android namespace, its search path follows the copies' directory. Without one, the
+         * APK's own libraries come from the default namespace, shared by name below, never from the
+         * APK directory on this path: that loaded a second copy of what the default namespace held. */
+        snprintf(search, sizeof(search), "%s%s%s", dir,
+                 has_android && android_path != NULL && android_path[0] != '\0' ? ":" : "",
+                 has_android && android_path != NULL ? android_path : "");
         state = -1;
         if (init_fn != NULL && create_fn != NULL && get_fn != NULL && inherit_fn != NULL && open_fn != NULL &&
             get_fn(NULL, &parent) == 0) {
             init_fn(&ns, "westlake_app_libs");
             if (create_fn(&ns, search, 0) == 0) {
                 /* The Android namespace, when the launch made one, first and whole. */
-                if (get_fn("westlake_android_app", &android) == 0) inherit_fn(&ns, &android, NULL);
-                /* From the default namespace: libc, and the NDK libraries an app's packaged code gets
-                 * there too. WhatsApp's libwhatsappmerged.so needs libandroid.so; with no Android
-                 * namespace in its launch nothing here had one, the load failed, and SoLoader's retry
-                 * outside this namespace could not find libqpl.so beside it. */
-                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
-                               "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
-                               "libjnigraphics.so:libnativewindow.so:libvulkan.so:libsync.so:libaaudio.so:"
-                               "libcamera2ndk.so:libmediandk.so") == 0) {
+                if (has_android) inherit_fn(&ns, &android, NULL);
+                /* From the default namespace: libc, the NDK libraries an app's packaged code gets there
+                 * too, and the APK's own libraries. WhatsApp's libwhatsappmerged.so needs
+                 * libandroid.so; with no Android namespace in its launch nothing here had one, the load
+                 * failed, and SoLoader's retry outside this namespace could not find libqpl.so beside it. */
+                char *shared = westlake_shared_with_default(has_android ? NULL : app_lib_dir);
+                if (shared != NULL && inherit_fn(&ns, &parent, shared) == 0) {
                     state = 1;
                 }
+                free(shared);   /* the loader keeps its own copy of the list */
                 /* This library, global there, as ART's loader does for its namespace: its bionic and
                  * NDK symbols (ASharedMemory_*, __assert, ...) must resolve for what loads here. */
                 Dl_info self;
