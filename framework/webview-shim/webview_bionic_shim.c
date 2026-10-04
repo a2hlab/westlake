@@ -586,6 +586,53 @@ int sigaction64(int signal_number, const struct westlake_webview_bionic_sigactio
 }
 
 /*
+ * Bionic's static mutex initializers. PTHREAD_RECURSIVE_MUTEX_INITIALIZER and
+ * PTHREAD_ERRORCHECK_MUTEX_INITIALIZER put the type in bits 14-15 of the mutex's first word (0x4000
+ * and 0x8000). musl keeps its type in the low bits of that word, so it reads both as a normal mutex,
+ * and a recursive lock deadlocks on its own thread. sentry-native's sentry_init takes its options
+ * lock and, holding it, takes it again in sentry_close: Discord's crash-reporting init never
+ * returned and its main thread waited out two 30 s timeouts before its first frame.
+ *
+ * Before musl sees such a mutex, an unlocked one gets musl's word for its type. musl never writes
+ * either value there (its types fit in the low byte; a destroyed mutex is -1), so the check cannot
+ * touch a musl mutex. A held one is left alone: musl links a held recursive mutex into its owner's
+ * robust list, which a normal lock never did. Every caller binds to these through the preload, so
+ * the first lock of any such mutex converts it.
+ */
+static void westlake_adopt_bionic_mutex_type(pthread_mutex_t *mutex)
+{
+    int *words = (int *) mutex;
+    int type = __atomic_load_n(&words[0], __ATOMIC_RELAXED);
+    if (__builtin_expect(type != 0x4000 && type != 0x8000, 1)) return;
+    if (__atomic_load_n(&words[1], __ATOMIC_ACQUIRE) != 0) return;
+    __atomic_compare_exchange_n(&words[0], &type,
+                                type == 0x4000 ? PTHREAD_MUTEX_RECURSIVE : PTHREAD_MUTEX_ERRORCHECK, 0,
+                                __ATOMIC_ACQ_REL, __ATOMIC_RELAXED);
+}
+
+/* musl's timed lock with no deadline is its lock: the same fast path, then the same wait. */
+int pthread_mutex_lock(pthread_mutex_t *mutex)
+{
+    westlake_adopt_bionic_mutex_type(mutex);
+    return pthread_mutex_timedlock(mutex, NULL);
+}
+
+/*
+ * musl's timed lock with a deadline already past: it takes a free mutex, relocks a recursive one its
+ * owner holds, and otherwise gives up at once -- trylock's answers, with EBUSY for its timeout and
+ * for an error-checking mutex the caller holds. No dlsym: in the copy of this library that ART's
+ * Android namespace loads, after libc, RTLD_NEXT finds nothing, and a trylock that answered EINVAL
+ * there stalled Zoom and failed PROJ's database in OsmAnd.
+ */
+int pthread_mutex_trylock(pthread_mutex_t *mutex)
+{
+    static const struct timespec past = { 0, 0 };
+    westlake_adopt_bionic_mutex_type(mutex);
+    int result = pthread_mutex_timedlock(mutex, &past);
+    return result == ETIMEDOUT || result == EDEADLK ? EBUSY : result;
+}
+
+/*
  * Chromium is Android-built, so its struct addrinfo uses Bionic's pointer
  * order: ai_canonname then ai_addr. OH musl reverses those two members while
  * retaining the same total size. The default OH namespace resolves ordinary
