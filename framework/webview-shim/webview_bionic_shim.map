@@ -1,9 +1,37 @@
+/*
+ * Bionic's symbol versions for the libc entry points this library supplies. OH's loader matches a
+ * versioned import against a versioned library by the version's hash, so an export must carry the
+ * version Bionic gives it: Messenger's libcore.so asks for __system_property_read_callback@LIBC_O
+ * and could not bind to it under LIBC. Unversioned imports match any default version.
+ */
 LIBC_N {
     global:
         __pwrite64_chk;
 };
 
+LIBC_O {
+    global:
+        __system_property_read_callback;
+} LIBC_N;
+
+LIBC_P {
+    global:
+        sigaction64;
+        sigaddset64;
+        sigdelset64;
+        sigemptyset64;
+        sigfillset64;
+        sigismember64;
+        sigprocmask64;
+        pthread_sigmask64;
+} LIBC_O;
+
+LIBC_Q {
+    global:
+        android_fdsan_exchange_owner_tag;
+} LIBC_P;
+
 LIBC {
     global:
         *;
-} LIBC_N;
+} LIBC_Q;
