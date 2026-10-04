@@ -4,6 +4,7 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <link.h>
 #include <locale.h>
 #include <math.h>
 #include <netdb.h>
@@ -3333,6 +3334,153 @@ void *ANativeWindow_toSurface(void *env, void *window)
     (void) window;
     return NULL;
 }
+
+/*
+ * Gecko's allocator, environment and abort, for the libraries that import them by version.
+ *
+ * Firefox's libraries import malloc, free, getenv, abort and a dozen more as name@libmozglue.so:
+ * libmozglue's own definitions (mozjemalloc, its environment lock, its crash annotations). OH's
+ * loader takes an unversioned definition for such an import -- check_verinfo accepts any library
+ * without symbol versions when the import names its version by hash -- and musl's libc comes before
+ * libmozglue in the lookup. So libxul's free was musl's, while moz_xmalloc, defined only in
+ * libmozglue, allocated from mozjemalloc: Fennec died in musl's free two seconds in. Android's
+ * linker binds such an import only to a definition of that version.
+ *
+ * These definitions carry the version, as non-default ones: a versioned import binds here, since
+ * this library is preloaded ahead of libc, and an unversioned import never sees them. Each forwards
+ * to libmozglue's own definition, read from its symbol table, whatever namespace loaded it.
+ */
+struct westlake_library_symbol {
+    const char *library;
+    const char *name;
+    void *address;
+};
+
+static uint32_t westlake_gnu_hash(const char *name)
+{
+    uint32_t hash = 5381;
+    for (const unsigned char *p = (const unsigned char *) name; *p != '\0'; p++) hash = hash * 33 + *p;
+    return hash;
+}
+
+static int westlake_find_library_symbol(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void) size;
+    struct westlake_library_symbol *query = data;
+    const char *slash = info->dlpi_name != NULL ? strrchr(info->dlpi_name, '/') : NULL;
+    const char *base = slash != NULL ? slash + 1 : info->dlpi_name;
+    if (base == NULL || strcmp(base, query->library) != 0) return 0;
+    const ElfW(Dyn) *dynamic = NULL;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
+            dynamic = (const ElfW(Dyn) *) (info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+        }
+    }
+    const ElfW(Sym) *symbols = NULL;
+    const char *strings = NULL;
+    const uint32_t *gnu = NULL, *sysv = NULL;
+    for (const ElfW(Dyn) *entry = dynamic; entry != NULL && entry->d_tag != DT_NULL; entry++) {
+        /* musl leaves the dynamic section's addresses unrelocated. */
+        ElfW(Addr) at = entry->d_un.d_ptr < info->dlpi_addr ? info->dlpi_addr + entry->d_un.d_ptr : entry->d_un.d_ptr;
+        if (entry->d_tag == DT_SYMTAB) symbols = (const ElfW(Sym) *) at;
+        else if (entry->d_tag == DT_STRTAB) strings = (const char *) at;
+        else if (entry->d_tag == DT_GNU_HASH) gnu = (const uint32_t *) at;
+        else if (entry->d_tag == DT_HASH) sysv = (const uint32_t *) at;
+    }
+    if (symbols == NULL || strings == NULL) return 1;
+    if (gnu != NULL) {
+        uint32_t buckets = gnu[0], first = gnu[1], bloom = gnu[2];
+        const uint32_t *bucket = gnu + 4 + bloom * (sizeof(ElfW(Addr)) / sizeof(uint32_t));
+        const uint32_t *chain = bucket + buckets;
+        uint32_t hash = westlake_gnu_hash(query->name);
+        for (uint32_t i = buckets != 0 ? bucket[hash % buckets] : 0; i != 0 && i >= first; i++) {
+            const ElfW(Sym) *symbol = &symbols[i];
+            if ((chain[i - first] | 1) == (hash | 1) && symbol->st_shndx != SHN_UNDEF &&
+                strcmp(strings + symbol->st_name, query->name) == 0) {
+                query->address = (void *) (info->dlpi_addr + symbol->st_value);
+                break;
+            }
+            if (chain[i - first] & 1) break;
+        }
+    } else if (sysv != NULL) {
+        for (uint32_t i = 1; i < sysv[1]; i++) {
+            if (symbols[i].st_shndx != SHN_UNDEF && strcmp(strings + symbols[i].st_name, query->name) == 0) {
+                query->address = (void *) (info->dlpi_addr + symbols[i].st_value);
+                break;
+            }
+        }
+    }
+    return 1;
+}
+
+enum {
+    WL_MOZ_MALLOC, WL_MOZ_FREE, WL_MOZ_CALLOC, WL_MOZ_REALLOC, WL_MOZ_MEMALIGN, WL_MOZ_POSIX_MEMALIGN,
+    WL_MOZ_USABLE_SIZE, WL_MOZ_STRDUP, WL_MOZ_STRNDUP, WL_MOZ_VASPRINTF, WL_MOZ_GETENV, WL_MOZ_PUTENV,
+    WL_MOZ_SETENV, WL_MOZ_UNSETENV, WL_MOZ_ABORT, WL_MOZ_RAISE, WL_MOZ_COUNT
+};
+static const char *const westlake_mozglue_names[WL_MOZ_COUNT] = {
+    "malloc", "free", "calloc", "realloc", "memalign", "posix_memalign", "malloc_usable_size", "strdup",
+    "strndup", "vasprintf", "getenv", "putenv", "setenv", "unsetenv", "abort", "raise",
+};
+static void *westlake_mozglue[WL_MOZ_COUNT];
+static pthread_once_t westlake_mozglue_once = PTHREAD_ONCE_INIT;
+
+/* libmozglue's definitions; libc's for any it lacks (these, being non-default, are never found). */
+static void westlake_resolve_mozglue(void)
+{
+    int from_mozglue = 0;
+    for (int i = 0; i < WL_MOZ_COUNT; i++) {
+        struct westlake_library_symbol query = { "libmozglue.so", westlake_mozglue_names[i], NULL };
+        dl_iterate_phdr(westlake_find_library_symbol, &query);
+        if (query.address != NULL) from_mozglue++;
+        westlake_mozglue[i] = query.address != NULL ? query.address : dlsym(RTLD_DEFAULT, westlake_mozglue_names[i]);
+    }
+    fprintf(stderr, "[WESTLAKE-LOADER] libmozglue.so's versioned calls: %d of %d from libmozglue\n",
+            from_mozglue, WL_MOZ_COUNT);
+}
+
+static void *westlake_mozglue_entry(int index)
+{
+    pthread_once(&westlake_mozglue_once, westlake_resolve_mozglue);
+    return westlake_mozglue[index];
+}
+
+#define WL_MOZGLUE_FORWARD(index, ret, name, params, args)                                      \
+    ret westlake_mozglue_##name params                                                         \
+    {                                                                                          \
+        return ((ret (*) params) westlake_mozglue_entry(index)) args;                          \
+    }                                                                                          \
+    __asm__(".symver westlake_mozglue_" #name ", " #name "@libmozglue.so");
+
+WL_MOZGLUE_FORWARD(WL_MOZ_MALLOC, void *, malloc, (size_t size), (size))
+void westlake_mozglue_free(void *pointer)
+{
+    ((void (*)(void *)) westlake_mozglue_entry(WL_MOZ_FREE))(pointer);
+}
+__asm__(".symver westlake_mozglue_free, free@libmozglue.so");
+WL_MOZGLUE_FORWARD(WL_MOZ_CALLOC, void *, calloc, (size_t count, size_t size), (count, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_REALLOC, void *, realloc, (void *pointer, size_t size), (pointer, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_MEMALIGN, void *, memalign, (size_t alignment, size_t size), (alignment, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_POSIX_MEMALIGN, int, posix_memalign, (void **out, size_t alignment, size_t size),
+                   (out, alignment, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_USABLE_SIZE, size_t, malloc_usable_size, (const void *pointer), (pointer))
+WL_MOZGLUE_FORWARD(WL_MOZ_STRDUP, char *, strdup, (const char *text), (text))
+WL_MOZGLUE_FORWARD(WL_MOZ_STRNDUP, char *, strndup, (const char *text, size_t length), (text, length))
+WL_MOZGLUE_FORWARD(WL_MOZ_VASPRINTF, int, vasprintf, (char **out, const char *format, va_list list),
+                   (out, format, list))
+WL_MOZGLUE_FORWARD(WL_MOZ_GETENV, char *, getenv, (const char *name), (name))
+WL_MOZGLUE_FORWARD(WL_MOZ_PUTENV, int, putenv, (char *text), (text))
+WL_MOZGLUE_FORWARD(WL_MOZ_SETENV, int, setenv, (const char *name, const char *value, int overwrite),
+                   (name, value, overwrite))
+WL_MOZGLUE_FORWARD(WL_MOZ_UNSETENV, int, unsetenv, (const char *name), (name))
+WL_MOZGLUE_FORWARD(WL_MOZ_RAISE, int, raise, (int signal_number), (signal_number))
+
+void westlake_mozglue_abort(void)
+{
+    ((void (*)(void)) westlake_mozglue_entry(WL_MOZ_ABORT))();
+    __builtin_trap();
+}
+__asm__(".symver westlake_mozglue_abort, abort@libmozglue.so");
 
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
                          (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
