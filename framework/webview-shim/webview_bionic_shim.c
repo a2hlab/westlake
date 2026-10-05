@@ -2,8 +2,10 @@
 #define _GNU_SOURCE
 #endif
 
+#include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <link.h>
 #include <locale.h>
 #include <math.h>
 #include <netdb.h>
@@ -1165,6 +1167,45 @@ static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int
  * holds (their libc++_shared.so), and from the default namespace only the C runtime. NULL when the
  * namespace cannot be made, so the other paths below take over.
  */
+/*
+ * The libraries the written-library namespace shares with the default namespace: the C runtime and
+ * NDK libraries, and every library the APK packages (the .so files in apk_lib_dir). ART's loader put
+ * the packaged ones in the default namespace when the launch made no Android namespace, and a
+ * written library that needs one must get that copy, as it would in Android's single classloader
+ * namespace. Chaquopy's extension modules need libpython3.11.so: found again on this namespace's own
+ * path, a second Python runtime was loaded, never initialized, and an extension module's first call
+ * into it went through a PLT slot left unresolved (econverter, werewolvesgame).
+ */
+static char *westlake_shared_with_default(const char *apk_lib_dir)
+{
+    static const char ndk[] = "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
+                              "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
+                              "libjnigraphics.so:libnativewindow.so:libvulkan.so:libsync.so:libaaudio.so:"
+                              "libcamera2ndk.so:libmediandk.so";
+    size_t size = sizeof(ndk), length = sizeof(ndk) - 1;
+    char *shared = malloc(size);
+    if (shared == NULL) return NULL;
+    memcpy(shared, ndk, sizeof(ndk));
+    DIR *directory = apk_lib_dir != NULL ? opendir(apk_lib_dir) : NULL;
+    for (struct dirent *entry = directory != NULL ? readdir(directory) : NULL; entry != NULL;
+         entry = readdir(directory)) {
+        size_t n = strlen(entry->d_name);
+        if (n < 4 || strcmp(entry->d_name + n - 3, ".so") != 0) continue;
+        if (length + 1 + n + 1 > size) {
+            size_t grown = (size + n + 2) * 2;
+            char *bigger = realloc(shared, grown);
+            if (bigger == NULL) break;
+            shared = bigger;
+            size = grown;
+        }
+        shared[length++] = ':';
+        memcpy(shared + length, entry->d_name, n + 1);
+        length += n;
+    }
+    if (directory != NULL) closedir(directory);
+    return shared;
+}
+
 static void *westlake_load_app_library(const char *path, int flags)
 {
     typedef void (*DlnsInitFn)(Dl_namespace *, const char *);
@@ -1219,29 +1260,32 @@ static void *westlake_load_app_library(const char *path, int flags)
         const char *android_path = getenv("WESTLAKE_ANDROID_NATIVE_SEARCH_PATH");
         const char *app_lib_dir = getenv("ASX_NATIVE_LIB_DIR");
         char search[4096];
-        snprintf(search, sizeof(search), "%s:%s", dir,
-                 android_path != NULL && android_path[0] != '\0' ? android_path
-                 : app_lib_dir != NULL ? app_lib_dir : "/system/lib64");
         Dl_namespace parent, android;
         memset(&parent, 0, sizeof(parent));
         memset(&android, 0, sizeof(android));
+        int has_android = get_fn != NULL && get_fn("westlake_android_app", &android) == 0;
+        /* With an Android namespace, its search path follows the copies' directory. Without one, the
+         * APK's own libraries come from the default namespace, shared by name below, never from the
+         * APK directory on this path: that loaded a second copy of what the default namespace held. */
+        snprintf(search, sizeof(search), "%s%s%s", dir,
+                 has_android && android_path != NULL && android_path[0] != '\0' ? ":" : "",
+                 has_android && android_path != NULL ? android_path : "");
         state = -1;
         if (init_fn != NULL && create_fn != NULL && get_fn != NULL && inherit_fn != NULL && open_fn != NULL &&
             get_fn(NULL, &parent) == 0) {
             init_fn(&ns, "westlake_app_libs");
             if (create_fn(&ns, search, 0) == 0) {
                 /* The Android namespace, when the launch made one, first and whole. */
-                if (get_fn("westlake_android_app", &android) == 0) inherit_fn(&ns, &android, NULL);
-                /* From the default namespace: libc, and the NDK libraries an app's packaged code gets
-                 * there too. WhatsApp's libwhatsappmerged.so needs libandroid.so; with no Android
-                 * namespace in its launch nothing here had one, the load failed, and SoLoader's retry
-                 * outside this namespace could not find libqpl.so beside it. */
-                if (inherit_fn(&ns, &parent, "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
-                               "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
-                               "libjnigraphics.so:libnativewindow.so:libvulkan.so:libsync.so:libaaudio.so:"
-                               "libcamera2ndk.so:libmediandk.so") == 0) {
+                if (has_android) inherit_fn(&ns, &android, NULL);
+                /* From the default namespace: libc, the NDK libraries an app's packaged code gets there
+                 * too, and the APK's own libraries. WhatsApp's libwhatsappmerged.so needs
+                 * libandroid.so; with no Android namespace in its launch nothing here had one, the load
+                 * failed, and SoLoader's retry outside this namespace could not find libqpl.so beside it. */
+                char *shared = westlake_shared_with_default(has_android ? NULL : app_lib_dir);
+                if (shared != NULL && inherit_fn(&ns, &parent, shared) == 0) {
                     state = 1;
                 }
+                free(shared);   /* the loader keeps its own copy of the list */
                 /* This library, global there, as ART's loader does for its namespace: its bionic and
                  * NDK symbols (ASharedMemory_*, __assert, ...) must resolve for what loads here. */
                 Dl_info self;
@@ -1678,6 +1722,29 @@ void *dlopen(const char *filename, int flags)
                 }
                 return handle;
             }
+        }
+    }
+    /*
+     * libEGL.so and the GLES libraries by name, from Android code: the EGL implementation the runtime
+     * renders through (where eglGetCurrentDisplay binds in the global scope, the board's driver), not
+     * OH's NDK libEGL.so. That one loads into OH's ndk namespace, where its wrapper cannot open the
+     * GLES libraries it dispatches to ("EglWrapperLayer Init Failed"), and its display is not hwui's.
+     * SDL dlopens these by name and takes every entry point from the handle (see dlsym).
+     */
+    if (basename != NULL && filename != NULL && strchr(filename, '/') == NULL &&
+        (strcmp(basename, "libEGL.so") == 0 || strcmp(basename, "libGLESv2.so") == 0 ||
+         strcmp(basename, "libGLESv3.so") == 0) &&
+        caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+        Dl_info egl;
+        void *current = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
+        void *handle = current != NULL && dladdr(current, &egl) != 0 && egl.dli_fname != NULL
+                       ? real_dlopen(egl.dli_fname, RTLD_NOW | RTLD_NOLOAD) : NULL;
+        if (handle != NULL) {
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                fprintf(stderr, "[WESTLAKE-EGL] %s for an Android library: %s\n", filename, egl.dli_fname);
+            }
+            return handle;
         }
     }
     if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
@@ -3334,6 +3401,156 @@ void *ANativeWindow_toSurface(void *env, void *window)
     return NULL;
 }
 
+/*
+ * Gecko's allocator, environment and abort, for the libraries that import them by version.
+ *
+ * Firefox's libraries import malloc, free, getenv, abort and a dozen more as name@libmozglue.so:
+ * libmozglue's own definitions (mozjemalloc, its environment lock, its crash annotations). OH's
+ * loader takes an unversioned definition for such an import -- check_verinfo accepts any library
+ * without symbol versions when the import names its version by hash -- and musl's libc comes before
+ * libmozglue in the lookup. So libxul's free was musl's, while moz_xmalloc, defined only in
+ * libmozglue, allocated from mozjemalloc: Fennec died in musl's free two seconds in. Android's
+ * linker binds such an import only to a definition of that version.
+ *
+ * These definitions carry the version, as non-default ones: a versioned import binds here, since
+ * this library is preloaded ahead of libc, and an unversioned import never sees them. Each forwards
+ * to libmozglue's own definition, read from its symbol table, whatever namespace loaded it.
+ */
+struct westlake_library_symbol {
+    const char *library;   /* basename, or NULL to match by base */
+    const char *name;
+    void *address;
+    uintptr_t base;        /* load base, when library is NULL */
+};
+
+static uint32_t westlake_gnu_hash(const char *name)
+{
+    uint32_t hash = 5381;
+    for (const unsigned char *p = (const unsigned char *) name; *p != '\0'; p++) hash = hash * 33 + *p;
+    return hash;
+}
+
+static int westlake_find_library_symbol(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void) size;
+    struct westlake_library_symbol *query = data;
+    const char *slash = info->dlpi_name != NULL ? strrchr(info->dlpi_name, '/') : NULL;
+    const char *base = slash != NULL ? slash + 1 : info->dlpi_name;
+    if (query->library == NULL ? info->dlpi_addr != query->base : base == NULL || strcmp(base, query->library) != 0) {
+        return 0;
+    }
+    const ElfW(Dyn) *dynamic = NULL;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
+            dynamic = (const ElfW(Dyn) *) (info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+        }
+    }
+    const ElfW(Sym) *symbols = NULL;
+    const char *strings = NULL;
+    const uint32_t *gnu = NULL, *sysv = NULL;
+    for (const ElfW(Dyn) *entry = dynamic; entry != NULL && entry->d_tag != DT_NULL; entry++) {
+        /* musl leaves the dynamic section's addresses unrelocated. */
+        ElfW(Addr) at = entry->d_un.d_ptr < info->dlpi_addr ? info->dlpi_addr + entry->d_un.d_ptr : entry->d_un.d_ptr;
+        if (entry->d_tag == DT_SYMTAB) symbols = (const ElfW(Sym) *) at;
+        else if (entry->d_tag == DT_STRTAB) strings = (const char *) at;
+        else if (entry->d_tag == DT_GNU_HASH) gnu = (const uint32_t *) at;
+        else if (entry->d_tag == DT_HASH) sysv = (const uint32_t *) at;
+    }
+    if (symbols == NULL || strings == NULL) return 1;
+    if (gnu != NULL) {
+        uint32_t buckets = gnu[0], first = gnu[1], bloom = gnu[2];
+        const uint32_t *bucket = gnu + 4 + bloom * (sizeof(ElfW(Addr)) / sizeof(uint32_t));
+        const uint32_t *chain = bucket + buckets;
+        uint32_t hash = westlake_gnu_hash(query->name);
+        for (uint32_t i = buckets != 0 ? bucket[hash % buckets] : 0; i != 0 && i >= first; i++) {
+            const ElfW(Sym) *symbol = &symbols[i];
+            if ((chain[i - first] | 1) == (hash | 1) && symbol->st_shndx != SHN_UNDEF &&
+                strcmp(strings + symbol->st_name, query->name) == 0) {
+                query->address = (void *) (info->dlpi_addr + symbol->st_value);
+                break;
+            }
+            if (chain[i - first] & 1) break;
+        }
+    } else if (sysv != NULL) {
+        for (uint32_t i = 1; i < sysv[1]; i++) {
+            if (symbols[i].st_shndx != SHN_UNDEF && strcmp(strings + symbols[i].st_name, query->name) == 0) {
+                query->address = (void *) (info->dlpi_addr + symbols[i].st_value);
+                break;
+            }
+        }
+    }
+    return 1;
+}
+
+enum {
+    WL_MOZ_MALLOC, WL_MOZ_FREE, WL_MOZ_CALLOC, WL_MOZ_REALLOC, WL_MOZ_MEMALIGN, WL_MOZ_POSIX_MEMALIGN,
+    WL_MOZ_USABLE_SIZE, WL_MOZ_STRDUP, WL_MOZ_STRNDUP, WL_MOZ_VASPRINTF, WL_MOZ_GETENV, WL_MOZ_PUTENV,
+    WL_MOZ_SETENV, WL_MOZ_UNSETENV, WL_MOZ_ABORT, WL_MOZ_RAISE, WL_MOZ_COUNT
+};
+static const char *const westlake_mozglue_names[WL_MOZ_COUNT] = {
+    "malloc", "free", "calloc", "realloc", "memalign", "posix_memalign", "malloc_usable_size", "strdup",
+    "strndup", "vasprintf", "getenv", "putenv", "setenv", "unsetenv", "abort", "raise",
+};
+static void *westlake_mozglue[WL_MOZ_COUNT];
+static pthread_once_t westlake_mozglue_once = PTHREAD_ONCE_INIT;
+
+/* libmozglue's definitions; libc's for any it lacks (these, being non-default, are never found). */
+static void westlake_resolve_mozglue(void)
+{
+    int from_mozglue = 0;
+    for (int i = 0; i < WL_MOZ_COUNT; i++) {
+        struct westlake_library_symbol query = { "libmozglue.so", westlake_mozglue_names[i], NULL, 0 };
+        dl_iterate_phdr(westlake_find_library_symbol, &query);
+        if (query.address != NULL) from_mozglue++;
+        westlake_mozglue[i] = query.address != NULL ? query.address : dlsym(RTLD_DEFAULT, westlake_mozglue_names[i]);
+    }
+    fprintf(stderr, "[WESTLAKE-LOADER] libmozglue.so's versioned calls: %d of %d from libmozglue\n",
+            from_mozglue, WL_MOZ_COUNT);
+}
+
+static void *westlake_mozglue_entry(int index)
+{
+    pthread_once(&westlake_mozglue_once, westlake_resolve_mozglue);
+    return westlake_mozglue[index];
+}
+
+#define WL_MOZGLUE_FORWARD(index, ret, name, params, args)                                      \
+    ret westlake_mozglue_##name params                                                         \
+    {                                                                                          \
+        return ((ret (*) params) westlake_mozglue_entry(index)) args;                          \
+    }                                                                                          \
+    __asm__(".symver westlake_mozglue_" #name ", " #name "@libmozglue.so");
+
+WL_MOZGLUE_FORWARD(WL_MOZ_MALLOC, void *, malloc, (size_t size), (size))
+void westlake_mozglue_free(void *pointer)
+{
+    ((void (*)(void *)) westlake_mozglue_entry(WL_MOZ_FREE))(pointer);
+}
+__asm__(".symver westlake_mozglue_free, free@libmozglue.so");
+WL_MOZGLUE_FORWARD(WL_MOZ_CALLOC, void *, calloc, (size_t count, size_t size), (count, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_REALLOC, void *, realloc, (void *pointer, size_t size), (pointer, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_MEMALIGN, void *, memalign, (size_t alignment, size_t size), (alignment, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_POSIX_MEMALIGN, int, posix_memalign, (void **out, size_t alignment, size_t size),
+                   (out, alignment, size))
+WL_MOZGLUE_FORWARD(WL_MOZ_USABLE_SIZE, size_t, malloc_usable_size, (const void *pointer), (pointer))
+WL_MOZGLUE_FORWARD(WL_MOZ_STRDUP, char *, strdup, (const char *text), (text))
+WL_MOZGLUE_FORWARD(WL_MOZ_STRNDUP, char *, strndup, (const char *text, size_t length), (text, length))
+WL_MOZGLUE_FORWARD(WL_MOZ_VASPRINTF, int, vasprintf, (char **out, const char *format, va_list list),
+                   (out, format, list))
+WL_MOZGLUE_FORWARD(WL_MOZ_GETENV, char *, getenv, (const char *name), (name))
+WL_MOZGLUE_FORWARD(WL_MOZ_PUTENV, int, putenv, (char *text), (text))
+WL_MOZGLUE_FORWARD(WL_MOZ_SETENV, int, setenv, (const char *name, const char *value, int overwrite),
+                   (name, value, overwrite))
+WL_MOZGLUE_FORWARD(WL_MOZ_UNSETENV, int, unsetenv, (const char *name), (name))
+WL_MOZGLUE_FORWARD(WL_MOZ_RAISE, int, raise, (int signal_number), (signal_number))
+
+void westlake_mozglue_abort(void)
+{
+    ((void (*)(void)) westlake_mozglue_entry(WL_MOZ_ABORT))();
+    __builtin_trap();
+}
+__asm__(".symver westlake_mozglue_abort, abort@libmozglue.so");
+
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
                          (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
                          (network, name, ns_class, ns_type, flags))
@@ -3718,6 +3935,284 @@ unsigned eglTerminate(WlEglDisplay display)
     }
     return 1;
 }
+
+/*
+ * dlsym, for the EGL entry points an Android library looks up by handle. SDL dlopens libEGL.so and
+ * takes every entry point from that handle, past this library's: its eglCreateWindowSurface handed
+ * OH's EGL the adapter's AOSP-shaped window, which OH's EGL refuses, and an eglTerminate that way
+ * would tear down the display hwui renders through ("EGL_NOT_INITIALIZED during rendering", then
+ * an abort on hwui's render thread: anarchre). An Android caller's lookup of either gets this
+ * library's, whatever the handle. Every other lookup goes on to musl's dlsym as a tail call, so its
+ * return address -- what RTLD_NEXT is relative to -- is still the caller's.
+ */
+typedef void *(*WestlakeDlsymFn)(void *, const char *);
+static WestlakeDlsymFn westlake_musl_dlsym;
+
+/* musl's own definition of a name, read from the symbol table of the object that holds getpid. */
+static void *westlake_find_musl_symbol(const char *name)
+{
+    Dl_info info;
+    struct westlake_library_symbol query = { NULL, name, NULL, 0 };
+    if (dladdr((void *) &getpid, &info) != 0) query.base = (uintptr_t) info.dli_fbase;
+    if (query.base != 0) dl_iterate_phdr(westlake_find_library_symbol, &query);
+    return query.address;
+}
+
+static WestlakeDlsymFn westlake_find_musl_dlsym(void)
+{
+    WestlakeDlsymFn found = (WestlakeDlsymFn) westlake_find_musl_symbol("dlsym");
+    __atomic_store_n(&westlake_musl_dlsym, found, __ATOMIC_RELEASE);
+    return found;
+}
+
+__attribute__((constructor)) static void westlake_dlsym_init(void)
+{
+    if (westlake_find_musl_dlsym() == NULL) {
+        fprintf(stderr, "[WESTLAKE-LOADER] musl's dlsym not found; EGL lookups by handle are not redirected\n");
+    }
+}
+
+static void *westlake_egl_by_handle(const char *name)
+{
+    if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
+    if (strcmp(name, "eglTerminate") == 0) return (void *) &eglTerminate;
+    return NULL;
+}
+
+void *dlsym(void *handle, const char *name)
+{
+    WestlakeDlsymFn real = __atomic_load_n(&westlake_musl_dlsym, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) real = westlake_find_musl_dlsym();
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL &&
+        name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {
+        void *own = westlake_egl_by_handle(name);
+        void *caller = __builtin_return_address(0);
+        if (own != NULL && caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+            static int logged;
+            if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                wl_relocs_log("[WESTLAKE-EGL] %s by handle from an Android library: this library's\n", name);
+            }
+            return own;
+        }
+    }
+    __attribute__((musttail)) return real(handle, name);
+}
+
+/*
+ * pthread_create, in Bionic's order. Bionic stores the new thread's handle in *thread before the
+ * thread runs: the thread starts by waiting on a lock that pthread_create releases after that store.
+ * musl stores it once clone has returned, by when the thread may be running. ByteDance's vcbasekit
+ * keeps the handle in the object it hands its thread -- pthread_create(&this->thread_, ..., this) --
+ * and the thread first names itself, with pthread_setname_np(this->thread_, ...). When the thread
+ * won the race, musl's pthread_setname_np read handle 0: TikTok died there on one run and drew on
+ * the one before. An Android caller's thread starts here instead and waits until pthread_create has
+ * stored the handle. Every other caller goes on to musl's as a tail call.
+ */
+#include <linux/futex.h>
+#include <sys/syscall.h>
+
+typedef int (*WestlakePthreadCreateFn)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+static WestlakePthreadCreateFn westlake_musl_pthread_create;
+
+struct westlake_thread_start {
+    void *(*routine)(void *);
+    void *argument;
+    int state; /* 0 until the handle is stored, 1 while pthread_create wakes the thread, then 2 */
+};
+
+static void *westlake_thread_start(void *data)
+{
+    struct westlake_thread_start *start = data;
+    int state;
+    /* The thread frees the record, so it leaves only once pthread_create is done with it (2). */
+    while ((state = __atomic_load_n(&start->state, __ATOMIC_ACQUIRE)) != 2) {
+        if (state == 0) syscall(SYS_futex, &start->state, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+        else sched_yield();
+    }
+    void *(*routine)(void *) = start->routine;
+    void *argument = start->argument;
+    free(start);
+    return routine(argument);
+}
+
+int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restrict attr,
+                   void *(*routine)(void *), void *__restrict argument)
+{
+    WestlakePthreadCreateFn real = __atomic_load_n(&westlake_musl_pthread_create, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakePthreadCreateFn) westlake_find_musl_symbol("pthread_create");
+        if (real == NULL) real = (WestlakePthreadCreateFn) dlsym(RTLD_NEXT, "pthread_create");
+        if (real == NULL) return EAGAIN;
+        __atomic_store_n(&westlake_musl_pthread_create, real, __ATOMIC_RELEASE);
+    }
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        __attribute__((musttail)) return real(thread, attr, routine, argument);
+    }
+    struct westlake_thread_start *start = malloc(sizeof(*start));
+    if (start == NULL) return EAGAIN;
+    start->routine = routine;
+    start->argument = argument;
+    start->state = 0;
+    int result = real(thread, attr, westlake_thread_start, start);
+    if (result != 0) {
+        free(start); /* no thread was started */
+        return result;
+    }
+    __atomic_store_n(&start->state, 1, __ATOMIC_RELEASE);
+    syscall(SYS_futex, &start->state, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    __atomic_store_n(&start->state, 2, __ATOMIC_RELEASE);
+    return 0;
+}
+
+/*
+ * The NDK's system font list (libandroid, API 29): ASystemFontIterator and AFont. Firefox's libxul
+ * imports ASystemFontIterator_open/next/close, AFont_getFontFilePath and AFont_close weakly and, on
+ * a device of API 29 or later, calls them unchecked. Nothing defined them, so the weak imports bound
+ * to address 0, and Fennec's font-list thread jumped there. The iterator lists the fonts the runtime
+ * stages for Android's own font map ($WESTLAKE_RUNTIME_ROOT/fonts, else /system/fonts). Android takes
+ * weight, style and locale from fonts.xml; here they are read from the file name, and a font has no
+ * collection index or variation axes.
+ */
+typedef struct AFont {
+    char *path;
+    uint16_t weight;
+    bool italic;
+} AFont;
+
+typedef struct ASystemFontIterator {
+    DIR *dir;
+    char root[512];
+} ASystemFontIterator;
+
+ASystemFontIterator *ASystemFontIterator_open(void)
+{
+    const char *runtime = getenv("WESTLAKE_RUNTIME_ROOT");
+    char root[512];
+    DIR *dir = NULL;
+    if (runtime != NULL && *runtime != '\0') {
+        snprintf(root, sizeof(root), "%s/fonts", runtime);
+        dir = opendir(root);
+    }
+    if (dir == NULL) {
+        snprintf(root, sizeof(root), "%s", "/system/fonts");
+        dir = opendir(root);
+    }
+    if (dir == NULL) return NULL;
+    ASystemFontIterator *iterator = calloc(1, sizeof(*iterator));
+    if (iterator == NULL) {
+        closedir(dir);
+        return NULL;
+    }
+    iterator->dir = dir;
+    snprintf(iterator->root, sizeof(iterator->root), "%s", root);
+    return iterator;
+}
+
+static uint16_t westlake_font_weight(const char *name)
+{
+    static const struct { const char *word; uint16_t weight; } words[] = {
+        {"Thin", 100}, {"ExtraLight", 200}, {"Light", 300}, {"Medium", 500},
+        {"SemiBold", 600}, {"ExtraBold", 800}, {"Bold", 700}, {"Black", 900},
+    };
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
+        if (strstr(name, words[i].word) != NULL) return words[i].weight;
+    }
+    return 400;
+}
+
+AFont *ASystemFontIterator_next(ASystemFontIterator *iterator)
+{
+    struct dirent *entry;
+    if (iterator == NULL) return NULL;
+    while ((entry = readdir(iterator->dir)) != NULL) {
+        const char *dot = strrchr(entry->d_name, '.');
+        if (dot == NULL || (strcasecmp(dot, ".ttf") != 0 && strcasecmp(dot, ".otf") != 0 &&
+                            strcasecmp(dot, ".ttc") != 0)) {
+            continue;
+        }
+        AFont *font = calloc(1, sizeof(*font));
+        if (font == NULL) return NULL;
+        size_t length = strlen(iterator->root) + strlen(entry->d_name) + 2;
+        font->path = malloc(length);
+        if (font->path == NULL) {
+            free(font);
+            return NULL;
+        }
+        snprintf(font->path, length, "%s/%s", iterator->root, entry->d_name);
+        font->weight = westlake_font_weight(entry->d_name);
+        font->italic = strstr(entry->d_name, "Italic") != NULL;
+        return font;
+    }
+    return NULL;
+}
+
+void ASystemFontIterator_close(ASystemFontIterator *iterator)
+{
+    if (iterator == NULL) return;
+    closedir(iterator->dir);
+    free(iterator);
+}
+
+void AFont_close(AFont *font)
+{
+    if (font == NULL) return;
+    free(font->path);
+    free(font);
+}
+
+/*
+ * The NDK's performance hint API (libandroid, API 33), for a device with no hint service:
+ * APerformanceHint_getManager answers NULL, the NDK's answer on failure, and no session can be
+ * created or used. libxul imports these weakly as well, and calls them on a device of API 33 or later.
+ */
+typedef struct APerformanceHintManager APerformanceHintManager;
+typedef struct APerformanceHintSession APerformanceHintSession;
+
+APerformanceHintManager *APerformanceHint_getManager(void) { return NULL; }
+
+APerformanceHintSession *APerformanceHint_createSession(APerformanceHintManager *manager, const int32_t *threadIds,
+                                                         size_t size, int64_t initialTargetWorkDurationNanos)
+{
+    (void) manager; (void) threadIds; (void) size; (void) initialTargetWorkDurationNanos;
+    return NULL;
+}
+
+int64_t APerformanceHint_getPreferredUpdateRateNanos(APerformanceHintManager *manager) { (void) manager; return -1; }
+
+int APerformanceHint_updateTargetWorkDuration(APerformanceHintSession *session, int64_t targetDurationNanos)
+{
+    (void) session; (void) targetDurationNanos;
+    return EINVAL;
+}
+
+int APerformanceHint_reportActualWorkDuration(APerformanceHintSession *session, int64_t actualDurationNanos)
+{
+    (void) session; (void) actualDurationNanos;
+    return EINVAL;
+}
+
+int APerformanceHint_setThreads(APerformanceHintSession *session, const pid_t *threadIds, size_t size)
+{
+    (void) session; (void) threadIds; (void) size;
+    return EINVAL;
+}
+
+int APerformanceHint_setPreferPowerEfficiency(APerformanceHintSession *session, bool enabled)
+{
+    (void) session; (void) enabled;
+    return EINVAL;
+}
+
+void APerformanceHint_closeSession(APerformanceHintSession *session) { (void) session; }
+
+const char *AFont_getFontFilePath(const AFont *font) { return font != NULL ? font->path : NULL; }
+uint16_t AFont_getWeight(const AFont *font) { return font != NULL ? font->weight : 400; }
+bool AFont_isItalic(const AFont *font) { return font != NULL && font->italic; }
+const char *AFont_getLocale(const AFont *font) { (void) font; return NULL; }
+size_t AFont_getCollectionIndex(const AFont *font) { (void) font; return 0; }
+size_t AFont_getAxisCount(const AFont *font) { (void) font; return 0; }
+uint32_t AFont_getAxisTag(const AFont *font, uint32_t axisIndex) { (void) font; (void) axisIndex; return 0; }
+float AFont_getAxisValue(const AFont *font, uint32_t axisIndex) { (void) font; (void) axisIndex; return 0.0f; }
 
 /*
  * setcon. Westlake's app process starts in the launcher's domain (su, from the device shell) and

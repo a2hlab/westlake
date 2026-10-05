@@ -31,6 +31,14 @@ LIBC_Q {
         android_fdsan_exchange_owner_tag;
 } LIBC_P;
 
+/*
+ * libmozglue.so's version, for the forwarders that give Firefox's libraries libmozglue's own
+ * allocator, environment and abort (see westlake_resolve_mozglue): defined only as non-default
+ * versions, so only an import that names this version binds to them.
+ */
+libmozglue.so {
+};
+
 LIBC {
     global:
         *;

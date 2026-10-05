@@ -1207,10 +1207,6 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     private static void fillMergedConfiguration(MergedConfiguration outMergedConfiguration,
             int width, int height) {
         if (outMergedConfiguration == null) return;
-        Configuration config = new Configuration();
-        config.screenWidthDp = width * 160 / 320; // approximate dp conversion
-        config.screenHeightDp = height * 160 / 320;
-        config.densityDpi = 320;
         // 2026-05-11 G2.14as r6 — populate WindowConfiguration.mBounds.
         // ViewRootImpl.relayoutWindow in LOCAL_LAYOUT mode calls
         //   mWindowLayout.computeFrames(... winConfig.getBounds(),
@@ -1222,19 +1218,35 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // still 0 → death spiral.  Populating winConfig.mBounds with the
         // real window bounds (matches the OH window rect this adapter
         // owns) breaks the spiral.
-        Rect winBounds = new Rect(0, 0, width, height);
-        config.windowConfiguration.setBounds(winBounds);
-        config.windowConfiguration.setAppBounds(winBounds);
-        config.windowConfiguration.setMaxBounds(winBounds);
+        Configuration config = sizedConfiguration(width, height);
         outMergedConfiguration.setOverrideConfiguration(config);
-        // Also set global side identically so both global/override paths
-        // are consistent (ViewRoot picks based on context).
-        Configuration globalConfig = new Configuration(config);
+        // The global side is the display's, as WMS reports it for every window. ViewRootImpl hands
+        // it to ActivityThread's config callback, which applies it to the process's resources, and
+        // a context's Display and WindowManager metrics read their size from those resources'
+        // window bounds. Set from this window, a smaller window shrank the app's whole idea of the
+        // screen: Draw Anywhere's 180x180 overlay button made the display 180 px wide, and placing
+        // its 640 px toolbar threw "Cannot coerce value to an empty range: maximum -460".
+        int[] display = getDefaultDisplaySize();
+        Configuration globalConfig = sizedConfiguration(display[0], display[1]);
         outMergedConfiguration.setGlobalConfiguration(globalConfig);
         System.err.println("[OH_WSA-relayout] outMergedConfiguration set: "
-                + "winConfig.mBounds=" + winBounds
+                + "winConfig.mBounds=" + config.windowConfiguration.getBounds()
                 + " screenDp=" + config.screenWidthDp + "x" + config.screenHeightDp
-                + " densityDpi=" + config.densityDpi);
+                + " densityDpi=" + config.densityDpi
+                + " global=" + globalConfig.screenWidthDp + "x" + globalConfig.screenHeightDp);
+    }
+
+    /** A configuration whose screen and window bounds are width x height pixels. */
+    private static Configuration sizedConfiguration(int width, int height) {
+        Configuration config = new Configuration();
+        config.screenWidthDp = width * 160 / 320; // approximate dp conversion
+        config.screenHeightDp = height * 160 / 320;
+        config.densityDpi = 320;
+        Rect bounds = new Rect(0, 0, width, height);
+        config.windowConfiguration.setBounds(bounds);
+        config.windowConfiguration.setAppBounds(bounds);
+        config.windowConfiguration.setMaxBounds(bounds);
+        return config;
     }
 
     /**

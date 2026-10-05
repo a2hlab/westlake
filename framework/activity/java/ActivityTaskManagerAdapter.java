@@ -144,6 +144,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             IBinder resultTo, String resultWho, int requestCode,
             int flags, ProfilerInfo profilerInfo, Bundle options) throws RemoteException {
         logBridged("startActivity", "-> OH IAbilityManager.StartAbility / StartAbilityInMission");
+        intent = resolveOwnActivity(intent, resolvedType);
         // In-process launch executes the launch transaction on the calling thread. From a worker
         // thread that builds the activity off the main looper, and its lifecycle registry throws
         // ("addObserver must be called on the main thread", "Can't create handler inside thread"):
@@ -170,6 +171,26 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             return 0;   // ActivityManager.START_SUCCESS
         }
         return bridgeStartActivityWithStack(intent, flags, resultTo);
+    }
+
+    /**
+     * An implicit intent that one of the app's own activities handles, made explicit as Android's
+     * activity manager resolves it: through the package manager with MATCH_DEFAULT_ONLY, the best
+     * match taken. Converted to a Want as it was, it named no ability, and OH's ability manager
+     * resolves only OH's own. An alias resolves to the activity it stands for, the class this
+     * process instantiates. Any other intent is returned as it was.
+     */
+    private static Intent resolveOwnActivity(Intent intent, String resolvedType) {
+        if (intent == null || intent.getComponent() != null) return intent;
+        java.util.List<android.content.pm.ResolveInfo> own = adapter.packagemanager.SourcePackageRegistry
+                .queryActivities(intent, resolvedType, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        if (own.isEmpty()) return intent;
+        android.content.pm.ActivityInfo info = own.get(0).activityInfo;
+        String name = info.targetActivity != null ? info.targetActivity : info.name;
+        Intent resolved = new Intent(intent);
+        resolved.setComponent(new ComponentName(info.packageName, name));
+        Log.i(TAG, "startActivity: " + intent + " resolves to the app's own " + name);
+        return resolved;
     }
 
     /** Whether the intent names one of this app's own activities, which launch in this process. */

@@ -185,6 +185,63 @@ public final class SourcePackageRegistry {
         return out;
     }
 
+    /**
+     * The app's own activities an intent resolves to, from their manifest intent filters, as
+     * PackageManagerService's activity resolver answers: with MATCH_DEFAULT_ONLY (what
+     * Intent.resolveActivity and an implicit startActivity ask for) only through a filter in
+     * CATEGORY_DEFAULT, and the highest priority first.
+     *
+     * Implicit queries went to OH's bundle manager alone, which knows nothing of the app's manifest.
+     * Shazam's splash resolves VIEW shazam_activity://configuration in its own package before it
+     * starts its first screen; nothing resolved, nothing started, and the splash finished.
+     */
+    public static synchronized java.util.List<android.content.pm.ResolveInfo> queryActivities(
+            android.content.Intent intent, String resolvedType, long flags) {
+        java.util.List<android.content.pm.ResolveInfo> out = new java.util.ArrayList<>();
+        if (parsed == null || intent == null || parsed.activities == null) return out;
+        android.content.ComponentName component = intent.getComponent();
+        String target = component != null ? component.getPackageName() : intent.getPackage();
+        if (target != null && !target.equals(parsed.packageName)) return out;
+        PackageInfo info = packageInfo(parsed.packageName, flags | PackageManager.GET_ACTIVITIES);
+        if (info == null || info.activities == null) return out;
+        String type = resolvedType != null ? resolvedType : intent.getType();
+        boolean defaultOnly = (flags & PackageManager.MATCH_DEFAULT_ONLY) != 0;
+        for (PackageParser.Activity activity : parsed.activities) {
+            android.content.IntentFilter matched = null;
+            int match = 0;
+            if (component != null) {
+                if (!component.getClassName().equals(activity.info.name)) continue;
+            } else {
+                for (PackageParser.ActivityIntentInfo filter : activity.intents) {
+                    int result = filter.match(intent.getAction(), type, intent.getScheme(), intent.getData(),
+                            intent.getCategories(), "WESTLAKE-PM");
+                    if (result >= 0 && (!defaultOnly || filter.hasCategory(android.content.Intent.CATEGORY_DEFAULT))) {
+                        matched = filter;
+                        match = result;
+                        break;
+                    }
+                }
+                if (matched == null) continue;
+            }
+            for (android.content.pm.ActivityInfo generated : info.activities) {
+                if (generated.name.equals(activity.info.name)) {
+                    android.content.pm.ResolveInfo resolved = new android.content.pm.ResolveInfo();
+                    resolved.activityInfo = generated;
+                    if ((flags & PackageManager.GET_RESOLVED_FILTER) != 0) resolved.filter = matched;
+                    if (matched != null) {
+                        resolved.priority = matched.getPriority();
+                        resolved.match = match;
+                        resolved.isDefault = matched.hasCategory(android.content.Intent.CATEGORY_DEFAULT);
+                    }
+                    out.add(resolved);
+                    break;
+                }
+            }
+        }
+        out.sort((a, b) -> Integer.compare(b.priority, a.priority));   // stable: manifest order within one
+        return out;
+    }
+
     public static synchronized PackageInfo packageInfo(String packageName, long flags) {
         if (!contains(packageName)) return null;
         flags = withDirectBootMatchDefaults(flags);
