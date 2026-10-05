@@ -671,8 +671,158 @@ static jint wl_getGidForName(JNIEnv* env, jclass c, jstring name)
     return gid;
 }
 
+/*
+ * Process.readProcFile and parseProcLine, as android_util_Process.cpp implements them: fields of a
+ * /proc file split by the caller's format words. WhatsApp reads its /proc stats with readProcFile,
+ * which the runtime declares but never registered (UnsatisfiedLinkError on the calling thread).
+ */
+enum {
+    WL_PROC_TERM_MASK = 0xff, WL_PROC_COMBINE = 0x100, WL_PROC_PARENS = 0x200, WL_PROC_QUOTES = 0x400,
+    WL_PROC_CHAR = 0x800, WL_PROC_OUT_STRING = 0x1000, WL_PROC_OUT_LONG = 0x2000, WL_PROC_OUT_FLOAT = 0x4000,
+};
+
+static jboolean wl_parse_proc_line(JNIEnv* env, char* buffer, jint startIndex, jint endIndex, jintArray format,
+                                   jobjectArray outStrings, jlongArray outLongs, jfloatArray outFloats)
+{
+    const jsize NF = (*env)->GetArrayLength(env, format);
+    const jsize NS = outStrings ? (*env)->GetArrayLength(env, outStrings) : 0;
+    const jsize NL = outLongs ? (*env)->GetArrayLength(env, outLongs) : 0;
+    const jsize NR = outFloats ? (*env)->GetArrayLength(env, outFloats) : 0;
+    jint* formatData = (*env)->GetIntArrayElements(env, format, NULL);
+    jlong* longsData = outLongs ? (*env)->GetLongArrayElements(env, outLongs, NULL) : NULL;
+    jfloat* floatsData = outFloats ? (*env)->GetFloatArrayElements(env, outFloats, NULL) : NULL;
+    jsize i = startIndex, di = 0, fi;
+    jboolean res = JNI_TRUE;
+    if (formatData == NULL || (NL > 0 && longsData == NULL) || (NR > 0 && floatsData == NULL)) {
+        if (formatData != NULL) (*env)->ReleaseIntArrayElements(env, format, formatData, 0);
+        if (longsData != NULL) (*env)->ReleaseLongArrayElements(env, outLongs, longsData, 0);
+        if (floatsData != NULL) (*env)->ReleaseFloatArrayElements(env, outFloats, floatsData, 0);
+        jclass oom = (*env)->FindClass(env, "java/lang/OutOfMemoryError");
+        if (oom != NULL) (*env)->ThrowNew(env, oom, NULL);
+        return JNI_FALSE;
+    }
+    for (fi = 0; fi < NF; fi++) {
+        jint mode = formatData[fi];
+        if ((mode & WL_PROC_PARENS) != 0) {
+            i++;
+        } else if ((mode & WL_PROC_QUOTES) != 0) {
+            if (i < endIndex && buffer[i] == '"') i++;
+            else mode &= ~WL_PROC_QUOTES;
+        }
+        const char term = (char) (mode & WL_PROC_TERM_MASK);
+        const jsize start = i;
+        jsize end = -1;
+        if (i >= endIndex) {
+            res = JNI_FALSE;
+            break;
+        }
+        if ((mode & WL_PROC_PARENS) != 0) {
+            while (i < endIndex && buffer[i] != ')') i++;
+            end = i;
+            i++;
+        } else if ((mode & WL_PROC_QUOTES) != 0) {
+            while (i < endIndex && buffer[i] != '"') i++;
+            end = i;
+            i++;
+        }
+        while (i < endIndex && buffer[i] != term) i++;
+        if (end < 0) end = i;
+        if (i < endIndex) {
+            i++;
+            if ((mode & WL_PROC_COMBINE) != 0) {
+                while (i < endIndex && buffer[i] == term) i++;
+            }
+        }
+        if ((mode & (WL_PROC_OUT_FLOAT | WL_PROC_OUT_LONG | WL_PROC_OUT_STRING)) != 0) {
+            char c = buffer[end];
+            buffer[end] = 0;
+            if ((mode & WL_PROC_OUT_FLOAT) != 0 && di < NR) floatsData[di] = strtof(buffer + start, NULL);
+            if ((mode & WL_PROC_OUT_LONG) != 0 && di < NL) {
+                longsData[di] = (mode & WL_PROC_CHAR) != 0 ? buffer[start] : strtoll(buffer + start, NULL, 10);
+            }
+            if ((mode & WL_PROC_OUT_STRING) != 0 && di < NS) {
+                jstring text = (*env)->NewStringUTF(env, buffer + start);
+                (*env)->SetObjectArrayElement(env, outStrings, di, text);
+                if (text != NULL) (*env)->DeleteLocalRef(env, text);
+            }
+            buffer[end] = c;
+            di++;
+        }
+    }
+    (*env)->ReleaseIntArrayElements(env, format, formatData, 0);
+    if (longsData != NULL) (*env)->ReleaseLongArrayElements(env, outLongs, longsData, 0);
+    if (floatsData != NULL) (*env)->ReleaseFloatArrayElements(env, outFloats, floatsData, 0);
+    return res;
+}
+
+static jboolean wl_parseProcLine(JNIEnv* env, jclass c, jbyteArray buffer, jint startIndex, jint endIndex,
+                                 jintArray format, jobjectArray outStrings, jlongArray outLongs, jfloatArray outFloats)
+{
+    jbyte* bytes = (*env)->GetByteArrayElements(env, buffer, NULL);
+    jboolean result;
+    (void) c;
+    if (bytes == NULL) return JNI_FALSE;
+    result = wl_parse_proc_line(env, (char*) bytes, startIndex, endIndex, format, outStrings, outLongs, outFloats);
+    (*env)->ReleaseByteArrayElements(env, buffer, bytes, 0);
+    return result;
+}
+
+static jboolean wl_readProcFile(JNIEnv* env, jclass c, jstring file, jintArray format, jobjectArray outStrings,
+                                jlongArray outLongs, jfloatArray outFloats)
+{
+    const char* path;
+    char stack[4096];
+    char* data = stack;
+    size_t size = sizeof(stack);
+    ssize_t count;
+    jboolean result;
+    int fd;
+    (void) c;
+    if (file == NULL || format == NULL) {
+        jclass npe = (*env)->FindClass(env, "java/lang/NullPointerException");
+        if (npe != NULL) (*env)->ThrowNew(env, npe, NULL);
+        return JNI_FALSE;
+    }
+    path = (*env)->GetStringUTFChars(env, file, NULL);
+    if (path == NULL) return JNI_FALSE;
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    (*env)->ReleaseStringUTFChars(env, file, path);
+    if (fd < 0) return JNI_FALSE;
+    for (;;) {
+        count = pread(fd, data, size, 0);
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0 || (size_t) count < size) break;
+        /* As large as the whole file: grow until a read comes back short. */
+        if (data != stack) free(data);
+        size *= 2;
+        data = malloc(size);
+        if (data == NULL) {
+            close(fd);
+            return JNI_FALSE;
+        }
+    }
+    close(fd);
+    result = count < 0 ? JNI_FALSE
+                       : wl_parse_proc_line(env, data, 0, (jint) count, format, outStrings, outLongs, outFloats);
+    if (data != stack) free(data);
+    return result;
+}
+
 static const JNINativeMethod kProcess[] = {
     { "getGidForName", "(Ljava/lang/String;)I", (void*) wl_getGidForName },
+    { "readProcFile", "(Ljava/lang/String;[I[Ljava/lang/String;[J[F)Z", (void*) wl_readProcFile },
+    { "parseProcLine", "([BII[I[Ljava/lang/String;[J[F)Z", (void*) wl_parseProcLine },
+};
+
+/*
+ * No performance hint service: Android's PerformanceHintManager.create() throws
+ * ServiceNotFoundException when nativeAcquireManager answers 0, and getSystemService answers null.
+ * Unbound, the call threw UnsatisfiedLinkError past that check (Messenger).
+ */
+static jlong wl_acquireHintManager(JNIEnv* e, jclass c) { (void) e; (void) c; return 0; }
+
+static const JNINativeMethod kPerformanceHint[] = {
+    { "nativeAcquireManager", "()J", (void*) wl_acquireHintManager },
 };
 
 static jstring context_from(JNIEnv* env, const char* path)
@@ -763,10 +913,14 @@ static jint wl_camera_setup(JNIEnv* e, jobject thiz, jobject self, jint id, jstr
     return -EACCES;
 }
 
+/* A camera whose setup failed holds nothing; its finalizer still releases it (Open Camera). */
+static void wl_camera_release(JNIEnv* e, jobject thiz) { (void) e; (void) thiz; }
+
 static const JNINativeMethod kCamera[] = {
     { "_getNumberOfCameras", "(II)I", (void*) wl_camera_count },
     { "_getCameraInfo", "(IIIILandroid/hardware/Camera$CameraInfo;)V", (void*) wl_camera_info },
     { "native_setup", "(Ljava/lang/Object;ILjava/lang/String;IZII)I", (void*) wl_camera_setup },
+    { "native_release", "()V", (void*) wl_camera_release },
 };
 
 static void wl_camcorder_init(JNIEnv* e, jclass c) { (void) e; (void) c; }
@@ -932,6 +1086,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int mb = wl_register_ojluni_nio(env);
         int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
                    + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
+                   + bind(env, "android/os/PerformanceHintManager", kPerformanceHint,
+                          (int) (sizeof(kPerformanceHint) / sizeof(kPerformanceHint[0])))
                    + bind(env, "android/os/SELinux", kSELinux, (int) (sizeof(kSELinux) / sizeof(kSELinux[0])))
                    + bind(env, "android/hardware/Camera", kCamera, (int) (sizeof(kCamera) / sizeof(kCamera[0])))
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
