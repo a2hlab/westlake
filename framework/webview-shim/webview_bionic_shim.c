@@ -3793,6 +3793,97 @@ void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, c
     return surface;
 }
 
+/*
+ * ANativeWindow_setBuffersGeometry, as Android answers an app. A width and height of 0 mean the
+ * window's own size: Android's Surface then dequeues buffers at its consumer's default size. The
+ * runtime's definition (libhwui's) handed both to OH's SET_BUFFER_GEOMETRY, and the format to
+ * SET_FORMAT by Android's number, which names another format in OH's numbering (Android's
+ * RGBA_8888, 1, is OH's CLUT1). SDL sets (0, 0, its EGL config's native visual) on its
+ * SurfaceView's window before it creates its EGL surface, as the NDK's documentation recommends,
+ * and every buffer request on that window then failed (NATIVE_ERROR_UNKNOWN): anarchre and
+ * diesimu rendered nothing. This library is preloaded, so an app library's import binds here; any
+ * other caller, or a window that is not the adapter's, gets the next definition unchanged.
+ */
+enum { WL_WINDOW_SET_GEOMETRY = 0, WL_WINDOW_GET_GEOMETRY = 1, WL_WINDOW_SET_FORMAT = 3 };
+
+static int32_t wl_host_window_format(int32_t android)
+{
+    switch (android) {
+        case 1: return 12;     /* RGBA_8888 */
+        case 2: return 11;     /* RGBX_8888 */
+        case 3: return 13;     /* RGB_888 */
+        case 4: return 3;      /* RGB_565 */
+        case 5: return 20;     /* BGRA_8888 */
+        case 0x16: return 39;  /* RGBA_FP16 */
+        case 0x2b: return 34;  /* RGBA_1010102 */
+        default: return -1;
+    }
+}
+
+/* The size a window had before an app sized it, to go back to when the app asks for 0x0. */
+static struct {
+    void *window;
+    int32_t width, height;          /* the window's own */
+    int32_t set_width, set_height;  /* the app's */
+} wl_window_sizes[16];
+static pthread_mutex_t wl_window_sizes_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int32_t ANativeWindow_setBuffersGeometry(void *window, int32_t width, int32_t height, int32_t format)
+{
+    pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
+    void *oh = wl_anw_get_oh != NULL && window != NULL ? wl_anw_get_oh(window) : NULL;
+    typedef int32_t (*HandleOpt)(void *, int, ...);
+    HandleOpt opt = oh != NULL ? (HandleOpt) wl_native_window_symbol("OH_NativeWindow_NativeWindowHandleOpt") : NULL;
+    if (opt == NULL || !caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static int32_t (*next)(void *, int32_t, int32_t, int32_t);
+        if (next == NULL) {
+            next = (int32_t (*)(void *, int32_t, int32_t, int32_t)) dlsym(RTLD_NEXT, "ANativeWindow_setBuffersGeometry");
+        }
+        return next != NULL ? next(window, width, height, format) : -EINVAL;
+    }
+    int32_t result = 0;
+    int32_t host = format != 0 ? wl_host_window_format(format) : -1;
+    if (host >= 0) result = opt(oh, WL_WINDOW_SET_FORMAT, host);   /* 0, or one OH lacks: the window's own */
+    if (result != 0) return result;
+    if (width < 0 || height < 0 || (width == 0) != (height == 0)) return -EINVAL;
+    int32_t current_height = 0, current_width = 0;
+    opt(oh, WL_WINDOW_GET_GEOMETRY, &current_height, &current_width);
+    pthread_mutex_lock(&wl_window_sizes_lock);
+    int slot = -1, unused = -1;
+    for (int i = 0; i < (int) (sizeof(wl_window_sizes) / sizeof(wl_window_sizes[0])); i++) {
+        if (wl_window_sizes[i].window == oh) slot = i;
+        else if (wl_window_sizes[i].window == NULL && unused < 0) unused = i;
+    }
+    if (width != 0) {
+        if (slot < 0 && unused >= 0 && current_width > 0 && current_height > 0) {
+            slot = unused;
+            wl_window_sizes[slot].window = oh;
+            wl_window_sizes[slot].width = current_width;
+            wl_window_sizes[slot].height = current_height;
+        }
+        if (slot >= 0) {
+            wl_window_sizes[slot].set_width = width;
+            wl_window_sizes[slot].set_height = height;
+        }
+        result = opt(oh, WL_WINDOW_SET_GEOMETRY, width, height);
+    } else if (slot >= 0) {
+        /* Back to the window's own size, unless the window manager has sized it since. */
+        if (current_width == wl_window_sizes[slot].set_width && current_height == wl_window_sizes[slot].set_height) {
+            result = opt(oh, WL_WINDOW_SET_GEOMETRY, wl_window_sizes[slot].width, wl_window_sizes[slot].height);
+        }
+        wl_window_sizes[slot].window = NULL;
+    }
+    /* 0x0 on a window the app never sized: it keeps the size the window manager gave it. */
+    pthread_mutex_unlock(&wl_window_sizes_lock);
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-WINDOW] setBuffersGeometry(%d, %d, %d) from an Android library: OH window %p, "
+                      "%dx%d before, format %d: %d\n", width, height, format, oh, current_width, current_height,
+                      host, result);
+    }
+    return result;
+}
+
 WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
 {
     static void *(*create)(void *);
