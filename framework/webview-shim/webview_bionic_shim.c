@@ -3404,7 +3404,8 @@ void *ANativeWindow_toSurface(void *env, void *window)
 /*
  * Gecko's allocator, environment and abort, for the libraries that import them by version.
  *
- * Firefox's libraries import malloc, free, getenv, abort and a dozen more as name@libmozglue.so:
+ * Firefox's libraries import malloc, free, getenv, abort, the C++ allocation operators and more as
+ * name@libmozglue.so:
  * libmozglue's own definitions (mozjemalloc, its environment lock, its crash annotations). OH's
  * loader takes an unversioned definition for such an import -- check_verinfo accepts any library
  * without symbol versions when the import names its version by hash -- and musl's libc comes before
@@ -3485,11 +3486,14 @@ static int westlake_find_library_symbol(struct dl_phdr_info *info, size_t size, 
 enum {
     WL_MOZ_MALLOC, WL_MOZ_FREE, WL_MOZ_CALLOC, WL_MOZ_REALLOC, WL_MOZ_MEMALIGN, WL_MOZ_POSIX_MEMALIGN,
     WL_MOZ_USABLE_SIZE, WL_MOZ_STRDUP, WL_MOZ_STRNDUP, WL_MOZ_VASPRINTF, WL_MOZ_GETENV, WL_MOZ_PUTENV,
-    WL_MOZ_SETENV, WL_MOZ_UNSETENV, WL_MOZ_ABORT, WL_MOZ_RAISE, WL_MOZ_COUNT
+    WL_MOZ_SETENV, WL_MOZ_UNSETENV, WL_MOZ_ABORT, WL_MOZ_RAISE,
+    WL_MOZ_NEW, WL_MOZ_NEW_ARRAY, WL_MOZ_DELETE, WL_MOZ_DELETE_ARRAY, WL_MOZ_DELETE_SIZED, WL_MOZ_COUNT
 };
 static const char *const westlake_mozglue_names[WL_MOZ_COUNT] = {
     "malloc", "free", "calloc", "realloc", "memalign", "posix_memalign", "malloc_usable_size", "strdup",
     "strndup", "vasprintf", "getenv", "putenv", "setenv", "unsetenv", "abort", "raise",
+    /* operator new and new[], delete and delete[], sized delete */
+    "_Znwm", "_Znam", "_ZdlPv", "_ZdaPv", "_ZdlPvm",
 };
 static void *westlake_mozglue[WL_MOZ_COUNT];
 static pthread_once_t westlake_mozglue_once = PTHREAD_ONCE_INIT;
@@ -3543,6 +3547,25 @@ WL_MOZGLUE_FORWARD(WL_MOZ_SETENV, int, setenv, (const char *name, const char *va
                    (name, value, overwrite))
 WL_MOZGLUE_FORWARD(WL_MOZ_UNSETENV, int, unsetenv, (const char *name), (name))
 WL_MOZGLUE_FORWARD(WL_MOZ_RAISE, int, raise, (int signal_number), (signal_number))
+/* The C++ allocation operators, imported by version as well: bound to a libc++'s, a sized delete
+ * from libxul handed musl's free the memory mozjemalloc had allocated (Fennec's launcher thread). */
+WL_MOZGLUE_FORWARD(WL_MOZ_NEW, void *, _Znwm, (size_t size), (size))
+WL_MOZGLUE_FORWARD(WL_MOZ_NEW_ARRAY, void *, _Znam, (size_t size), (size))
+void westlake_mozglue__ZdlPv(void *pointer)
+{
+    ((void (*)(void *)) westlake_mozglue_entry(WL_MOZ_DELETE))(pointer);
+}
+__asm__(".symver westlake_mozglue__ZdlPv, _ZdlPv@libmozglue.so");
+void westlake_mozglue__ZdaPv(void *pointer)
+{
+    ((void (*)(void *)) westlake_mozglue_entry(WL_MOZ_DELETE_ARRAY))(pointer);
+}
+__asm__(".symver westlake_mozglue__ZdaPv, _ZdaPv@libmozglue.so");
+void westlake_mozglue__ZdlPvm(void *pointer, size_t size)
+{
+    ((void (*)(void *, size_t)) westlake_mozglue_entry(WL_MOZ_DELETE_SIZED))(pointer, size);
+}
+__asm__(".symver westlake_mozglue__ZdlPvm, _ZdlPvm@libmozglue.so");
 
 void westlake_mozglue_abort(void)
 {
