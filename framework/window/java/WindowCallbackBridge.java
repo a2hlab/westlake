@@ -83,27 +83,89 @@ public class WindowCallbackBridge {
      * Reflection chain:
      *   W.mViewAncestor (WeakReference<ViewRootImpl>) -> ViewRootImpl
      *     .windowFocusChanged(boolean)  // public, latches + sendMessage
+     *
+     * A window and its SurfaceViews' own OH windows are one focus group: the window is focused
+     * while any of them holds OH focus. Android's SurfaceView is a layer of its window and never
+     * takes focus; OH moves focus to the SurfaceView's window once it shows, and the window saw
+     * that as losing focus. SDL pauses its native loop when its activity loses focus, so anarchre
+     * and diesimu rendered nothing (Flutter draws on regardless).
      */
     private void dispatchWindowFocusChanged(boolean focused) {
         try {
-            java.lang.reflect.Field viewAncestorField = mAndroidWindow.getClass()
-                    .getDeclaredField("mViewAncestor");
-            viewAncestorField.setAccessible(true);
-            Object weakRef = viewAncestorField.get(mAndroidWindow);
-            if (!(weakRef instanceof java.lang.ref.WeakReference)) {
-                Log.w(TAG, "windowFocusChanged: W.mViewAncestor not WeakReference, drop");
-                return;
-            }
-            Object viewRootImpl = ((java.lang.ref.WeakReference<?>) weakRef).get();
+            boolean surface = mAndroidWindow instanceof SurfaceViewWindow;
+            Object viewRootImpl = surface ? ((SurfaceViewWindow) mAndroidWindow).owner() : viewRootOf(mAndroidWindow);
             if (viewRootImpl == null) {
-                Log.w(TAG, "windowFocusChanged: ViewRootImpl already gone, drop");
+                Log.w(TAG, "windowFocusChanged: no ViewRootImpl (gone, or not a ViewRootImpl.W), drop");
                 return;
             }
+            Boolean deliver = updateFocusGroup(viewRootImpl, surface ? mAndroidWindow : null, focused);
+            if (deliver == null) return;   // the group's focus did not change
             java.lang.reflect.Method m = viewRootImpl.getClass()
                     .getMethod("windowFocusChanged", boolean.class);
-            m.invoke(viewRootImpl, focused);
-            Log.d(TAG, "windowFocusChanged latched on ViewRootImpl(focused=" + focused
+            m.invoke(viewRootImpl, deliver);
+            Log.d(TAG, "windowFocusChanged latched on ViewRootImpl(focused=" + deliver
+                       + (surface ? ", from its SurfaceView's window" : "")
                        + ") — main looper will dispatch after setView completes");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to dispatch window focus changed", e);
+        }
+    }
+
+    private static Object viewRootOf(Object window) throws ReflectiveOperationException {
+        java.lang.reflect.Field viewAncestorField;
+        try {
+            viewAncestorField = window.getClass().getDeclaredField("mViewAncestor");
+        } catch (NoSuchFieldException e) {
+            return null;
+        }
+        viewAncestorField.setAccessible(true);
+        Object weakRef = viewAncestorField.get(window);
+        return weakRef instanceof java.lang.ref.WeakReference
+                ? ((java.lang.ref.WeakReference<?>) weakRef).get() : null;
+    }
+
+    /** OH focus held by a window itself, and by its SurfaceViews' windows, per ViewRootImpl. */
+    private static final class FocusGroup {
+        boolean window;
+        final java.util.Set<Object> surfaces = new java.util.HashSet<>();
+        Boolean delivered;
+    }
+
+    private static final java.util.Map<Object, FocusGroup> sFocusGroups = new java.util.WeakHashMap<>();
+
+    /**
+     * Records one member's OH focus (surface null: the window itself) and returns the group's focus
+     * if it changed, else null.
+     */
+    private static Boolean updateFocusGroup(Object viewRootImpl, Object surface, boolean focused) {
+        synchronized (sFocusGroups) {
+            FocusGroup group = sFocusGroups.get(viewRootImpl);
+            if (group == null) {
+                group = new FocusGroup();
+                sFocusGroups.put(viewRootImpl, group);
+            }
+            if (surface == null) {
+                group.window = focused;
+            } else if (focused) {
+                group.surfaces.add(surface);
+            } else {
+                group.surfaces.remove(surface);
+            }
+            boolean now = group.window || !group.surfaces.isEmpty();
+            if (group.delivered != null && group.delivered == now) return null;
+            group.delivered = now;
+            return now;
+        }
+    }
+
+    /** A SurfaceView's window is gone: it holds no focus for its group any more. */
+    static void surfaceWindowGone(SurfaceViewWindow window) {
+        Object viewRootImpl = window.owner();
+        if (viewRootImpl == null) return;
+        Boolean deliver = updateFocusGroup(viewRootImpl, window, false);
+        if (deliver == null) return;
+        try {
+            viewRootImpl.getClass().getMethod("windowFocusChanged", boolean.class).invoke(viewRootImpl, deliver);
         } catch (Exception e) {
             Log.e(TAG, "Failed to dispatch window focus changed", e);
         }
