@@ -3948,15 +3948,21 @@ unsigned eglTerminate(WlEglDisplay display)
 typedef void *(*WestlakeDlsymFn)(void *, const char *);
 static WestlakeDlsymFn westlake_musl_dlsym;
 
-/* musl's dlsym, read from the symbol table of the object that holds getpid. */
-static WestlakeDlsymFn westlake_find_musl_dlsym(void)
+/* musl's own definition of a name, read from the symbol table of the object that holds getpid. */
+static void *westlake_find_musl_symbol(const char *name)
 {
     Dl_info info;
-    struct westlake_library_symbol query = { NULL, "dlsym", NULL, 0 };
+    struct westlake_library_symbol query = { NULL, name, NULL, 0 };
     if (dladdr((void *) &getpid, &info) != 0) query.base = (uintptr_t) info.dli_fbase;
     if (query.base != 0) dl_iterate_phdr(westlake_find_library_symbol, &query);
-    __atomic_store_n(&westlake_musl_dlsym, (WestlakeDlsymFn) query.address, __ATOMIC_RELEASE);
-    return (WestlakeDlsymFn) query.address;
+    return query.address;
+}
+
+static WestlakeDlsymFn westlake_find_musl_dlsym(void)
+{
+    WestlakeDlsymFn found = (WestlakeDlsymFn) westlake_find_musl_symbol("dlsym");
+    __atomic_store_n(&westlake_musl_dlsym, found, __ATOMIC_RELEASE);
+    return found;
 }
 
 __attribute__((constructor)) static void westlake_dlsym_init(void)
@@ -3990,6 +3996,72 @@ void *dlsym(void *handle, const char *name)
         }
     }
     __attribute__((musttail)) return real(handle, name);
+}
+
+/*
+ * pthread_create, in Bionic's order. Bionic stores the new thread's handle in *thread before the
+ * thread runs: the thread starts by waiting on a lock that pthread_create releases after that store.
+ * musl stores it once clone has returned, by when the thread may be running. ByteDance's vcbasekit
+ * keeps the handle in the object it hands its thread -- pthread_create(&this->thread_, ..., this) --
+ * and the thread first names itself, with pthread_setname_np(this->thread_, ...). When the thread
+ * won the race, musl's pthread_setname_np read handle 0: TikTok died there on one run and drew on
+ * the one before. An Android caller's thread starts here instead and waits until pthread_create has
+ * stored the handle. Every other caller goes on to musl's as a tail call.
+ */
+#include <linux/futex.h>
+#include <sys/syscall.h>
+
+typedef int (*WestlakePthreadCreateFn)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+static WestlakePthreadCreateFn westlake_musl_pthread_create;
+
+struct westlake_thread_start {
+    void *(*routine)(void *);
+    void *argument;
+    int state; /* 0 until the handle is stored, 1 while pthread_create wakes the thread, then 2 */
+};
+
+static void *westlake_thread_start(void *data)
+{
+    struct westlake_thread_start *start = data;
+    int state;
+    /* The thread frees the record, so it leaves only once pthread_create is done with it (2). */
+    while ((state = __atomic_load_n(&start->state, __ATOMIC_ACQUIRE)) != 2) {
+        if (state == 0) syscall(SYS_futex, &start->state, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+        else sched_yield();
+    }
+    void *(*routine)(void *) = start->routine;
+    void *argument = start->argument;
+    free(start);
+    return routine(argument);
+}
+
+int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restrict attr,
+                   void *(*routine)(void *), void *__restrict argument)
+{
+    WestlakePthreadCreateFn real = __atomic_load_n(&westlake_musl_pthread_create, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakePthreadCreateFn) westlake_find_musl_symbol("pthread_create");
+        if (real == NULL) real = (WestlakePthreadCreateFn) dlsym(RTLD_NEXT, "pthread_create");
+        if (real == NULL) return EAGAIN;
+        __atomic_store_n(&westlake_musl_pthread_create, real, __ATOMIC_RELEASE);
+    }
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        __attribute__((musttail)) return real(thread, attr, routine, argument);
+    }
+    struct westlake_thread_start *start = malloc(sizeof(*start));
+    if (start == NULL) return EAGAIN;
+    start->routine = routine;
+    start->argument = argument;
+    start->state = 0;
+    int result = real(thread, attr, westlake_thread_start, start);
+    if (result != 0) {
+        free(start); /* no thread was started */
+        return result;
+    }
+    __atomic_store_n(&start->state, 1, __ATOMIC_RELEASE);
+    syscall(SYS_futex, &start->state, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    __atomic_store_n(&start->state, 2, __ATOMIC_RELEASE);
+    return 0;
 }
 
 /*
