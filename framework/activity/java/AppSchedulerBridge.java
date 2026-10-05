@@ -1990,8 +1990,20 @@ public class AppSchedulerBridge {
             // window never showed. The start reports nothing to OH and adds no window (the decor is
             // attached on resume), so it runs here, in Android's order: onCreate, onStart,
             // onRestoreInstanceState, onPostCreate.
-            transaction.addTransactionItem(
-                    android.app.servertransaction.StartActivityItem.obtain(token, null));
+            //
+            // A launch with no OH ability behind it (the direct launch, an in-process start: no OH
+            // token) has no ability manager to race, and it resumes here too, as Android's launch
+            // does: what onCreate, onStart and onPostCreate post to the main thread then runs after
+            // onResume. Started without the resume, Reddit's posts ran while it was only started,
+            // and its splash held every draw in two launches of three. The resume that follows in a
+            // transaction of its own finds the activity resumed and does nothing.
+            if (ohTokenAddr == 0L) {
+                transaction.addTransactionItem(
+                        android.app.servertransaction.ResumeActivityItem.obtain(token, true, false));
+            } else {
+                transaction.addTransactionItem(
+                        android.app.servertransaction.StartActivityItem.obtain(token, null));
+            }
 
             // Register the token mapping for lifecycle events (legacy LifecycleAdapter
             // map; OhTokenRegistry above is the new B.47 path; both kept during cutover).
