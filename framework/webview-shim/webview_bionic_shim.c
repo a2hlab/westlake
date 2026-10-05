@@ -4160,6 +4160,51 @@ void AFont_close(AFont *font)
     free(font);
 }
 
+/*
+ * The NDK's performance hint API (libandroid, API 33), for a device with no hint service:
+ * APerformanceHint_getManager answers NULL, the NDK's answer on failure, and no session can be
+ * created or used. libxul imports these weakly as well, and calls them on a device of API 33 or later.
+ */
+typedef struct APerformanceHintManager APerformanceHintManager;
+typedef struct APerformanceHintSession APerformanceHintSession;
+
+APerformanceHintManager *APerformanceHint_getManager(void) { return NULL; }
+
+APerformanceHintSession *APerformanceHint_createSession(APerformanceHintManager *manager, const int32_t *threadIds,
+                                                         size_t size, int64_t initialTargetWorkDurationNanos)
+{
+    (void) manager; (void) threadIds; (void) size; (void) initialTargetWorkDurationNanos;
+    return NULL;
+}
+
+int64_t APerformanceHint_getPreferredUpdateRateNanos(APerformanceHintManager *manager) { (void) manager; return -1; }
+
+int APerformanceHint_updateTargetWorkDuration(APerformanceHintSession *session, int64_t targetDurationNanos)
+{
+    (void) session; (void) targetDurationNanos;
+    return EINVAL;
+}
+
+int APerformanceHint_reportActualWorkDuration(APerformanceHintSession *session, int64_t actualDurationNanos)
+{
+    (void) session; (void) actualDurationNanos;
+    return EINVAL;
+}
+
+int APerformanceHint_setThreads(APerformanceHintSession *session, const pid_t *threadIds, size_t size)
+{
+    (void) session; (void) threadIds; (void) size;
+    return EINVAL;
+}
+
+int APerformanceHint_setPreferPowerEfficiency(APerformanceHintSession *session, bool enabled)
+{
+    (void) session; (void) enabled;
+    return EINVAL;
+}
+
+void APerformanceHint_closeSession(APerformanceHintSession *session) { (void) session; }
+
 const char *AFont_getFontFilePath(const AFont *font) { return font != NULL ? font->path : NULL; }
 uint16_t AFont_getWeight(const AFont *font) { return font != NULL ? font->weight : 400; }
 bool AFont_isItalic(const AFont *font) { return font != NULL && font->italic; }
