@@ -3972,6 +3972,34 @@ __attribute__((constructor)) static void westlake_dlsym_init(void)
     }
 }
 
+/*
+ * JNI_GetCreatedJavaVMs, answered by the running VM. libnativehelper answers it from the invocation
+ * table its JniInvocation fills. appspawn-x creates the VM through a JniInvocation on startVm()'s
+ * stack, and its destructor clears that table when startVm returns, so for the rest of the process
+ * libnativehelper answers JNI_OK with no VM. Element X's Rust library looks the function up with
+ * dlsym(dlopen(NULL), ...), checks only the result and takes the first JavaVM* it asked for: its
+ * own uninitialized stack. The JNIEnv it got from that pointed at a string in its .rodata, and its
+ * first FindClass faulted. libart's own export answers from the Runtime. This library is preloaded,
+ * ahead of libnativehelper in the global scope, so imports and global lookups both get this one;
+ * an Android library's lookup by any other handle does too (dlsym, below).
+ */
+typedef int (*WestlakeGetVmsFn)(void **, int, int *);
+static WestlakeGetVmsFn westlake_art_get_vms;
+
+int JNI_GetCreatedJavaVMs(void **vms, int size, int *count)
+{
+    WestlakeGetVmsFn art = __atomic_load_n(&westlake_art_get_vms, __ATOMIC_ACQUIRE);
+    if (art == NULL) {
+        struct westlake_library_symbol query = { "libart.so", "JNI_GetCreatedJavaVMs", NULL, 0 };
+        dl_iterate_phdr(westlake_find_library_symbol, &query);
+        art = (WestlakeGetVmsFn) query.address;
+        if (art != NULL) __atomic_store_n(&westlake_art_get_vms, art, __ATOMIC_RELEASE);
+    }
+    if (art != NULL) return art(vms, size, count);
+    if (count != NULL) *count = 0;   /* no runtime loaded yet: no VM */
+    return 0;                        /* JNI_OK */
+}
+
 static void *westlake_egl_by_handle(const char *name)
 {
     if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
@@ -3983,6 +4011,10 @@ void *dlsym(void *handle, const char *name)
 {
     WestlakeDlsymFn real = __atomic_load_n(&westlake_musl_dlsym, __ATOMIC_ACQUIRE);
     if (__builtin_expect(real == NULL, 0)) real = westlake_find_musl_dlsym();
+    if (name != NULL && name[0] == 'J' && strcmp(name, "JNI_GetCreatedJavaVMs") == 0 &&
+        caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        return (void *) &JNI_GetCreatedJavaVMs;
+    }
     if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL &&
         name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {
         void *own = westlake_egl_by_handle(name);
