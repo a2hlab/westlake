@@ -546,7 +546,12 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // BLAST SurfaceControl before its BLASTBufferQueue resolves a window. OH windows cannot be
     // placed here (updateSessionRect has no IPC on this path; every window sits at 0,0), so a
     // smaller SurfaceView -- an inline video, say -- keeps sharing its window as before.
+    // OH moves focus to the SurfaceView's window once it shows; it is created for a SurfaceViewWindow,
+    // through which that focus counts as its activity window's (WindowCallbackBridge).
     private static final Map<Object, Integer> sSurfaceViewSessions = new java.util.IdentityHashMap<>();
+    // The window each such session was created for: it names the SurfaceView's own window, so its
+    // OH focus counts as the window's (WindowCallbackBridge's focus groups).
+    private static final Map<Object, SurfaceViewWindow> sSurfaceViewWindows = new java.util.IdentityHashMap<>();
 
     /** SurfaceView (framework, by reflection) after building its BLAST layer. 0: not taken. */
     public static int attachSurfaceView(Object surfaceView, SurfaceControl blast, String name,
@@ -561,7 +566,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 Long addr = adapter.core.OhTokenRegistry.findOhToken(token);
                 if (addr != null) ohTokenAddr = addr;
             }
-            int[] info = nativeCreateSession(new android.os.Binder(), currentPackageName(),
+            android.view.ViewRootImpl owner = surfaceView instanceof android.view.View
+                    ? ((android.view.View) surfaceView).getViewRootImpl() : null;
+            SurfaceViewWindow window = new SurfaceViewWindow(owner);
+            int[] info = nativeCreateSession(window, currentPackageName(),
                     currentActivityName(), "entry", "SurfaceView:" + name,
                     WindowManager.LayoutParams.TYPE_APPLICATION, 0, width, height, ohTokenAddr);
             if (info == null || info.length < 6 || info[0] <= 0) {
@@ -574,6 +582,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             nativeAttachSessionToSc(blast, sessionId);
             synchronized (sSurfaceViewSessions) {
                 sSurfaceViewSessions.put(surfaceView, sessionId);
+                sSurfaceViewWindows.put(surfaceView, window);
             }
             System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
                     + " -> own sessionId=" + sessionId);
@@ -587,9 +596,12 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /** SurfaceView (framework, by reflection) when it releases its surfaces. */
     public static void detachSurfaceView(Object surfaceView) {
         Integer sessionId;
+        SurfaceViewWindow window;
         synchronized (sSurfaceViewSessions) {
             sessionId = sSurfaceViewSessions.remove(surfaceView);
+            window = sSurfaceViewWindows.remove(surfaceView);
         }
+        if (window != null) WindowCallbackBridge.surfaceWindowGone(window);
         if (sessionId == null) return;
         try {
             nativeDestroySession(sessionId);
