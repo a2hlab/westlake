@@ -144,6 +144,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             IBinder resultTo, String resultWho, int requestCode,
             int flags, ProfilerInfo profilerInfo, Bundle options) throws RemoteException {
         logBridged("startActivity", "-> OH IAbilityManager.StartAbility / StartAbilityInMission");
+        if (intent != null && android.content.pm.PackageManager.ACTION_REQUEST_PERMISSIONS.equals(intent.getAction())) {
+            return answerPermissionRequest(intent, resultTo, resultWho, requestCode);
+        }
         intent = resolveOwnActivity(intent, resolvedType);
         // In-process launch executes the launch transaction on the calling thread. From a worker
         // thread that builds the activity off the main looper, and its lifecycle registry throws
@@ -171,6 +174,48 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             return 0;   // ActivityManager.START_SUCCESS
         }
         return bridgeStartActivityWithStack(intent, flags, resultTo);
+    }
+
+    /**
+     * A runtime permission request, answered in process with the permissions' current grants. Android
+     * starts its permission controller for a result, and the activity hears back in
+     * onRequestPermissionsResult whatever the user chose. Here the request went to OH as an implicit
+     * action OH does not know, and no answer ever came (aat, castlab, Element, msstart and ssh asked
+     * in r85). The answer is what OH has granted the host application, as if the user had decided and
+     * changed nothing: an activity that is refused carries on as it does on Android. It arrives as the
+     * permission controller's result would, through Activity.dispatchActivityResult.
+     */
+    private static int answerPermissionRequest(Intent intent, final IBinder resultTo, final String resultWho,
+            final int requestCode) {
+        String[] names = intent.getStringArrayExtra(android.content.pm.PackageManager.EXTRA_REQUEST_PERMISSIONS_NAMES);
+        if (names == null) names = new String[0];
+        int[] results = new int[names.length];
+        for (int i = 0; i < names.length; i++) {
+            results[i] = adapter.packagemanager.PermissionManagerAdapter.checkProcessPermission(
+                    names[i], -1, android.os.Process.myUid());
+        }
+        final Intent data = new Intent(android.content.pm.PackageManager.ACTION_REQUEST_PERMISSIONS)
+                .putExtra(android.content.pm.PackageManager.EXTRA_REQUEST_PERMISSIONS_NAMES, names)
+                .putExtra(android.content.pm.PackageManager.EXTRA_REQUEST_PERMISSIONS_RESULTS, results);
+        Log.i(TAG, "requestPermissions " + java.util.Arrays.toString(names) + " answered "
+                + java.util.Arrays.toString(results) + " (who=" + resultWho + ", code=" + requestCode + ")");
+        if (resultTo == null) return ActivityManager.START_SUCCESS;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            try {
+                android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
+                if (thread == null || thread.getActivity(resultTo) == null) return;
+                IApplicationThread app = thread.getApplicationThread();
+                android.app.servertransaction.ClientTransaction transaction =
+                        android.app.servertransaction.ClientTransaction.obtain(app);
+                transaction.addTransactionItem(android.app.servertransaction.ActivityResultItem.obtain(resultTo,
+                        java.util.Collections.singletonList(new android.app.ResultInfo(resultWho, requestCode,
+                                android.app.Activity.RESULT_OK, data))));
+                app.scheduleTransaction(transaction);
+            } catch (Throwable t) {
+                Log.e(TAG, "requestPermissions: the answer was not delivered", t);
+            }
+        });
+        return ActivityManager.START_SUCCESS;
     }
 
     /**
