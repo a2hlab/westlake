@@ -4065,6 +4065,111 @@ int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restric
 }
 
 /*
+ * The NDK's system font list (libandroid, API 29): ASystemFontIterator and AFont. Firefox's libxul
+ * imports ASystemFontIterator_open/next/close, AFont_getFontFilePath and AFont_close weakly and, on
+ * a device of API 29 or later, calls them unchecked. Nothing defined them, so the weak imports bound
+ * to address 0, and Fennec's font-list thread jumped there. The iterator lists the fonts the runtime
+ * stages for Android's own font map ($WESTLAKE_RUNTIME_ROOT/fonts, else /system/fonts). Android takes
+ * weight, style and locale from fonts.xml; here they are read from the file name, and a font has no
+ * collection index or variation axes.
+ */
+typedef struct AFont {
+    char *path;
+    uint16_t weight;
+    bool italic;
+} AFont;
+
+typedef struct ASystemFontIterator {
+    DIR *dir;
+    char root[512];
+} ASystemFontIterator;
+
+ASystemFontIterator *ASystemFontIterator_open(void)
+{
+    const char *runtime = getenv("WESTLAKE_RUNTIME_ROOT");
+    char root[512];
+    DIR *dir = NULL;
+    if (runtime != NULL && *runtime != '\0') {
+        snprintf(root, sizeof(root), "%s/fonts", runtime);
+        dir = opendir(root);
+    }
+    if (dir == NULL) {
+        snprintf(root, sizeof(root), "%s", "/system/fonts");
+        dir = opendir(root);
+    }
+    if (dir == NULL) return NULL;
+    ASystemFontIterator *iterator = calloc(1, sizeof(*iterator));
+    if (iterator == NULL) {
+        closedir(dir);
+        return NULL;
+    }
+    iterator->dir = dir;
+    snprintf(iterator->root, sizeof(iterator->root), "%s", root);
+    return iterator;
+}
+
+static uint16_t westlake_font_weight(const char *name)
+{
+    static const struct { const char *word; uint16_t weight; } words[] = {
+        {"Thin", 100}, {"ExtraLight", 200}, {"Light", 300}, {"Medium", 500},
+        {"SemiBold", 600}, {"ExtraBold", 800}, {"Bold", 700}, {"Black", 900},
+    };
+    for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
+        if (strstr(name, words[i].word) != NULL) return words[i].weight;
+    }
+    return 400;
+}
+
+AFont *ASystemFontIterator_next(ASystemFontIterator *iterator)
+{
+    struct dirent *entry;
+    if (iterator == NULL) return NULL;
+    while ((entry = readdir(iterator->dir)) != NULL) {
+        const char *dot = strrchr(entry->d_name, '.');
+        if (dot == NULL || (strcasecmp(dot, ".ttf") != 0 && strcasecmp(dot, ".otf") != 0 &&
+                            strcasecmp(dot, ".ttc") != 0)) {
+            continue;
+        }
+        AFont *font = calloc(1, sizeof(*font));
+        if (font == NULL) return NULL;
+        size_t length = strlen(iterator->root) + strlen(entry->d_name) + 2;
+        font->path = malloc(length);
+        if (font->path == NULL) {
+            free(font);
+            return NULL;
+        }
+        snprintf(font->path, length, "%s/%s", iterator->root, entry->d_name);
+        font->weight = westlake_font_weight(entry->d_name);
+        font->italic = strstr(entry->d_name, "Italic") != NULL;
+        return font;
+    }
+    return NULL;
+}
+
+void ASystemFontIterator_close(ASystemFontIterator *iterator)
+{
+    if (iterator == NULL) return;
+    closedir(iterator->dir);
+    free(iterator);
+}
+
+void AFont_close(AFont *font)
+{
+    if (font == NULL) return;
+    free(font->path);
+    free(font);
+}
+
+const char *AFont_getFontFilePath(const AFont *font) { return font != NULL ? font->path : NULL; }
+uint16_t AFont_getWeight(const AFont *font) { return font != NULL ? font->weight : 400; }
+bool AFont_isItalic(const AFont *font) { return font != NULL && font->italic; }
+const char *AFont_getLocale(const AFont *font) { (void) font; return NULL; }
+size_t AFont_getCollectionIndex(const AFont *font) { (void) font; return 0; }
+size_t AFont_getAxisCount(const AFont *font) { (void) font; return 0; }
+uint32_t AFont_getAxisTag(const AFont *font, uint32_t axisIndex) { (void) font; (void) axisIndex; return 0; }
+float AFont_getAxisValue(const AFont *font, uint32_t axisIndex) { (void) font; (void) axisIndex; return 0.0f; }
+
+/*
  * setcon. Westlake's app process starts in the launcher's domain (su, from the device shell) and
  * moves to the app's (normal_hap) through OH's HapContext::HapDomainSetcontext, which calls setcon.
  * A datagram socket connected before that keeps the launcher's label, and the app domain may
