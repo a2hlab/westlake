@@ -868,11 +868,17 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public ParceledListSlice<ResolveInfo> queryIntentActivities(Intent intent, String resolvedType,
                                                      long flags, int userId) {
         logBridged("queryIntentActivities", intent.toString());
+        // The app's own activities first, matched against their manifest intent filters: OH's
+        // bundle manager knows only OH abilities. An intent for the app's own package ends there.
+        List<ResolveInfo> result = new ArrayList<>(SourcePackageRegistry.queryActivities(intent, resolvedType, flags));
+        String target = intent.getComponent() != null ? intent.getComponent().getPackageName() : intent.getPackage();
+        if (target != null && SourcePackageRegistry.contains(target)) {
+            return new ParceledListSlice<>(result);
+        }
         IntentWantConverter.WantParams want = IntentWantConverter.intentToWant(intent);
         String wantJson = buildWantJson(want);
         String json = nativeQueryAbilityInfos(wantJson, (int) flags);
 
-        List<ResolveInfo> result = new ArrayList<>();
         if (json == null || json.isEmpty()) {
             return new ParceledListSlice<>(result);
         }
