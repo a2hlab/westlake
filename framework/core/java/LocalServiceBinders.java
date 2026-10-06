@@ -104,6 +104,9 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.os.IDeviceIdentifiersPolicyService",
                             LocalServiceBinders::deviceIdentifiers);
                     break;
+                case "launcherapps":
+                    binder = proxy(name, "android.content.pm.ILauncherApps", LocalServiceBinders::launcherApps);
+                    break;
                 case "uri_grants":
                     binder = proxy(name, "android.app.IUriGrantsManager", LocalServiceBinders::uriGrants);
                     break;
@@ -300,6 +303,84 @@ public final class LocalServiceBinders {
                     + " does not meet the requirements to access device identifiers.");
         }
         return DEFAULT;
+    }
+
+    /**
+     * The launcher's view of this device: one user, whose own profile group it is, and the
+     * activities the package manager resolves for MAIN/LAUNCHER with their application (this
+     * process knows its own package; OH abilities come without one, and a launcher loads each
+     * entry's label and icon from it). No shortcut host permission is held, as for any launcher
+     * that is not the default; nothing is installing; starting another application's activity is
+     * accepted and has no effect.
+     */
+    private static Object launcherApps(String method, Object[] args) {
+        switch (method) {
+            case "getUserProfiles": {
+                ArrayList<android.os.UserHandle> users = new ArrayList<>();
+                users.add(android.os.Process.myUserHandle());
+                return users;
+            }
+            case "getLauncherActivities":
+                return new android.content.pm.ParceledListSlice<>(
+                        launcherActivities((String) args[1], (android.os.UserHandle) args[2]));
+            case "resolveLauncherActivityInternal": {
+                android.content.pm.ActivityInfo info = activityInfo((android.content.ComponentName) args[1]);
+                return info == null ? null : new android.content.pm.LauncherActivityInfoInternal(info,
+                        new android.content.pm.IncrementalStatesInfo(false, 1f, 0L), (android.os.UserHandle) args[2]);
+            }
+            case "isPackageEnabled":
+                return applicationInfo((String) args[1]) != null;
+            case "isActivityEnabled":
+                return activityInfo((android.content.ComponentName) args[1]) != null;
+            case "getApplicationInfo":
+                return applicationInfo((String) args[1]);
+            case "getLauncherUserInfo":
+                return new android.content.pm.LauncherUserInfo.Builder(
+                        android.os.UserManager.USER_TYPE_FULL_SYSTEM, 0).build();
+            default:
+                return DEFAULT;
+        }
+    }
+
+    private static android.content.pm.PackageManager packageManager() {
+        android.app.Application application = android.app.ActivityThread.currentApplication();
+        return application != null ? application.getPackageManager() : null;
+    }
+
+    private static java.util.List<android.content.pm.LauncherActivityInfoInternal> launcherActivities(
+            String packageName, android.os.UserHandle user) {
+        ArrayList<android.content.pm.LauncherActivityInfoInternal> found = new ArrayList<>();
+        android.content.pm.PackageManager pm = packageManager();
+        if (pm == null) return found;
+        android.content.Intent main = new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                .addCategory(android.content.Intent.CATEGORY_LAUNCHER);
+        if (packageName != null) main.setPackage(packageName);
+        for (android.content.pm.ResolveInfo info : pm.queryIntentActivities(main, 0)) {
+            if (info.activityInfo == null || info.activityInfo.applicationInfo == null) continue;
+            found.add(new android.content.pm.LauncherActivityInfoInternal(info.activityInfo,
+                    new android.content.pm.IncrementalStatesInfo(false, 1f, 0L), user));
+        }
+        return found;
+    }
+
+    private static android.content.pm.ActivityInfo activityInfo(android.content.ComponentName component) {
+        android.content.pm.PackageManager pm = packageManager();
+        if (pm == null || component == null) return null;
+        try {
+            return pm.getActivityInfo(component, 0);
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return null;
+        }
+    }
+
+    private static android.content.pm.ApplicationInfo applicationInfo(String packageName) {
+        android.content.pm.PackageManager pm = packageManager();
+        if (pm == null || packageName == null) return null;
+        try {
+            return pm.getApplicationInfo(packageName, 0);
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return null;
+        }
     }
 
     /** No trust agents and no secure lock: listeners register and nothing is ever trusted. */

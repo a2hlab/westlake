@@ -74,6 +74,17 @@ public final class OHUserManager {
                         // Weather reaches it through PackageManager.getUserBadgedIcon at launch.
                         case "getProfileType":
                             return ((Integer) arguments[0]) == androidUser ? "" : null;
+                        // The user's profile group is the user alone: no work or private profile
+                        // shares this device. UserManager.getUserProfiles() reads it (launchers,
+                        // clauncher among them, list their apps per profile).
+                        case "getProfileIds":
+                        case "getProfileIdsExcludingHidden":
+                            return ((Integer) arguments[0]) == androidUser ? new int[] {androidUser} : new int[0];
+                        case "getProfileParentId":
+                        case "getCredentialOwnerProfile":
+                            return arguments[0];
+                        case "getProfileParent":
+                            return null;
                         default:
                             break;
                     }
