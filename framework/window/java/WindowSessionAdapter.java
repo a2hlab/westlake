@@ -558,6 +558,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             int width, int height, int windowWidth, int windowHeight, IBinder token) {
         if (blast == null || width <= 0 || height <= 0
                 || width * 10 < windowWidth * 9 || height * 10 < windowHeight * 9) {
+            // Said, so a SurfaceView left sharing its window shows why: usp's GLSurfaceView, short
+            // of its window, took the activity's OH window for its GL and hwui aborted.
+            System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
+                    + " in a " + windowWidth + "x" + windowHeight + " window shares it");
             return 0;
         }
         try {

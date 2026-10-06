@@ -279,24 +279,15 @@ public class AppSchedulerBridge {
                 }
                 System.err.println("[DIRECT-LAUNCH] settle done");
             }
+            // The launch transaction resumes the activity too, as Android's does when no OH ability
+            // stands behind it (nativeOnScheduleLaunchAbility with no token). A resume of its own
+            // after it was refused as a second resume, and still reported the activity resumed again.
             nativeOnScheduleLaunchAbility(null, pkg, activityFqn, 1, null, null, 0L);
             System.err.println("[DIRECT-LAUNCH] scheduleLaunchAbility posted for " + activityFqn);
-
-            // 4. Drive to onResume (else created-but-not-visible). Best-effort.
-            try {
-                directResume(1);
-            } catch (Throwable rt) {
-                System.err.println("[DIRECT-LAUNCH] directResume threw (non-fatal): " + rt);
-            }
         } catch (Throwable t) {
             reportThrowable("[DIRECT-LAUNCH] FAILED", t);
         }
     }
-    /**
-     * Drive the launched Activity (recordId) to onResume so it composites. No OH AMS
-     * exists to send FOREGROUND_NEW on the direct-launch path, so we self-schedule a
-     * ResumeActivityItem on the token the launch stored under recordId.
-     */
     /**
      * ART sampling method trace, on request, for asking what the app's own code actually ran.
      *
@@ -343,22 +334,6 @@ public class AppSchedulerBridge {
         } catch (Throwable t) {
             System.err.println("[WL-METHOD-TRACE] not started: " + t);
         }
-    }
-
-    private static void directResume(int recordId) throws Exception {
-        android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
-        android.app.IApplicationThread appThread = at.getApplicationThread();
-        android.os.IBinder token = adapter.core.OhTokenRegistry.findByRecordId(recordId);
-        if (token == null) {
-            System.err.println("[DIRECT-LAUNCH] directResume: no token for recordId=" + recordId);
-            return;
-        }
-        android.app.servertransaction.ClientTransaction tx =
-                android.app.servertransaction.ClientTransaction.obtain(appThread);
-        tx.addTransactionItem(
-                android.app.servertransaction.ResumeActivityItem.obtain(token, true, false));
-        appThread.scheduleTransaction(tx);
-        System.err.println("[DIRECT-LAUNCH] resume transaction scheduled for recordId=" + recordId);
     }
 
     private static synchronized void ensureBindApplication(
