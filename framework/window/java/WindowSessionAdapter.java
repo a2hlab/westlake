@@ -584,13 +584,6 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             int sessionId = info[0];
             nativeShowWindow(sessionId);
             nativeAttachSessionToSc(blast, sessionId);
-            // Android composes a SurfaceView's layer without blending when its format has no alpha:
-            // SurfaceView marks its surface OPAQUE (RGB_565 unless the app sets a format). OH's RS
-            // blends a surface unless told its buffers are opaque, and PPSSPP, which draws with
-            // alpha 0, showed faintly over the screen below its window.
-            if (opaqueSurface(surfaceView)) {
-                new SurfaceControl.Transaction().setOpaque(blast, true).apply();
-            }
             synchronized (sSurfaceViewSessions) {
                 sSurfaceViewSessions.put(surfaceView, sessionId);
                 sSurfaceViewWindows.put(surfaceView, window);
@@ -601,17 +594,6 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         } catch (Throwable t) {
             System.err.println("[OH_WSA] SurfaceView '" + name + "' own session failed: " + t);
             return 0;
-        }
-    }
-
-    /** Whether SurfaceView marked its surface opaque (SurfaceControl.OPAQUE in mSurfaceFlags). */
-    private static boolean opaqueSurface(Object surfaceView) {
-        try {
-            java.lang.reflect.Field flags = android.view.SurfaceView.class.getDeclaredField("mSurfaceFlags");
-            flags.setAccessible(true);
-            return (flags.getInt(surfaceView) & 0x00000400 /* SurfaceControl.OPAQUE */) != 0;
-        } catch (Throwable t) {
-            return false;
         }
     }
 
