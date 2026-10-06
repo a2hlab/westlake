@@ -1692,6 +1692,26 @@ void *dlopen(const char *filename, int flags)
         }
     }
     /*
+     * libGLESv2.so from Android code: OH's libGLESv3.so. Android's libGLESv2.so carries every
+     * GLES 3.x entry point too (its libGLESv3.so is the same library); OH's NDK libGLESv2.so has
+     * GLES 2 and its OES extensions only. Ebiten (aaaaxy) looks glGenVertexArrays up in that handle
+     * and stopped: "gl: glGenVertexArrays is missing". OH's libGLESv3.so exports every GL name its
+     * libGLESv2.so does. Before the .z.so probe below, which returns the plain name's library
+     * whenever it opens: blocks after it never see a bare name that exists on the board.
+     */
+    const char *gles_caller = NULL;
+    if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
+        caller_is_android_dso(caller, &gles_caller)) {
+        actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            fprintf(stderr,
+                    "[WESTLAKE-WEBVIEW-BIONIC] GLES library translated "
+                    "%s -> %s for %s\n",
+                    filename, actual_filename, gles_caller);
+        }
+    }
+    /*
      * OH names several NDK libraries with a .z.so suffix that Android spells plainly, and an app
      * asking for the Android name gets "No such file or directory" even though the library is
      * there. LocalSend's Flutter engine looks up ANativeWindow_acquire and the AHardwareBuffer
@@ -1745,25 +1765,6 @@ void *dlopen(const char *filename, int flags)
                 fprintf(stderr, "[WESTLAKE-EGL] %s for an Android library: %s\n", filename, egl.dli_fname);
             }
             return handle;
-        }
-    }
-    /*
-     * libGLESv2.so from Android code, when the redirect above did not apply: OH's libGLESv3.so.
-     * Android's libGLESv2.so carries every GLES 3.x entry point too (its libGLESv3.so is the same
-     * library); OH's NDK libGLESv2.so has GLES 2 and its OES extensions only. Ebiten (aaaaxy) looks
-     * glGenVertexArrays up in that handle and stopped: "gl: glGenVertexArrays is missing". OH's
-     * libGLESv3.so exports every GL name its libGLESv2.so does. The WebView was translated first.
-     */
-    const char *gles_caller = NULL;
-    if (basename != NULL && strcmp(basename, "libGLESv2.so") == 0 &&
-        caller_is_android_dso(caller, &gles_caller)) {
-        actual_filename = "/system/lib64/platformsdk/libGLESv3.so";
-        static int logged;
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-            fprintf(stderr,
-                    "[WESTLAKE-WEBVIEW-BIONIC] GLES library translated "
-                    "%s -> %s for %s\n",
-                    filename, actual_filename, gles_caller);
         }
     }
     if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
