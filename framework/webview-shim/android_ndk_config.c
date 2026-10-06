@@ -1,5 +1,5 @@
 /*
- * libandroid's AConfiguration and sensor entry points, for callers in every namespace.
+ * libandroid's AConfiguration, sensor and input entry points, for callers in every namespace.
  *
  * The runtime's libandroid.so (default namespace) has neither, and the WebView shim's copy (the
  * Android namespace) has seven sensor calls and no AConfiguration. SDL2 imports
@@ -13,7 +13,8 @@
  *
  * Sensors answer as a board without them: no sensor is listed or found, a queue can be created,
  * and enabling one fails for want of a sensor. These are the WebView shim libandroid's answers,
- * which these definitions replace for its callers too.
+ * which these definitions replace for its callers too. Input answers as a platform whose input
+ * queue never reaches an app (below).
  */
 #include <dlfcn.h>
 #include <errno.h>
@@ -404,3 +405,131 @@ int ASensor_getFifoReservedEventCount(ASensor const *sensor) { (void) sensor; re
 int ASensor_getReportingMode(ASensor const *sensor) { (void) sensor; return -1; }
 bool ASensor_isWakeUpSensor(ASensor const *sensor) { (void) sensor; return false; }
 int ASensor_getHandle(ASensor const *sensor) { (void) sensor; return -1; }
+
+/* ---- Input: no input queue reaches an app --------------------------------------------------- */
+
+/*
+ * AOSP hands an AInputQueue only to a NativeActivity (onInputQueueCreated), and its events come from
+ * that queue or from AKeyEvent_fromJava/AMotionEvent_fromJava. The runtime has no NativeActivity
+ * natives, and the fromJava calls are not defined here, so no queue or event can reach an app: the
+ * queue calls answer as an empty queue, and the event getters, which have no event to read, zero.
+ * They exist for libraries that link the NDK's input API without using it: Go's mobile runtime links
+ * its NativeActivity glue into every library (aaaaxy's libgojni.so, which loads it from an ordinary
+ * activity), and could not relocate without them.
+ */
+typedef struct AInputEvent AInputEvent;
+typedef struct AInputQueue AInputQueue;
+typedef int (*ALooper_callbackFunc)(int fd, int events, void *data);
+
+void AInputQueue_attachLooper(AInputQueue *queue, void *looper, int ident, ALooper_callbackFunc callback, void *data)
+{
+    (void) queue;
+    (void) looper;
+    (void) ident;
+    (void) callback;
+    (void) data;
+}
+
+void AInputQueue_detachLooper(AInputQueue *queue) { (void) queue; }
+int32_t AInputQueue_hasEvents(AInputQueue *queue) { return queue != NULL ? 0 : -EINVAL; }
+
+int32_t AInputQueue_getEvent(AInputQueue *queue, AInputEvent **outEvent)
+{
+    (void) queue;
+    if (outEvent != NULL) *outEvent = NULL;
+    return -EAGAIN; /* InputQueue::getEvent's WOULD_BLOCK */
+}
+
+int32_t AInputQueue_preDispatchEvent(AInputQueue *queue, AInputEvent *event)
+{
+    (void) queue;
+    (void) event;
+    return 0;
+}
+
+void AInputQueue_finishEvent(AInputQueue *queue, AInputEvent *event, int handled)
+{
+    (void) queue;
+    (void) event;
+    (void) handled;
+}
+
+#define WL_EVENT_GETTER(type, name) \
+    type name(const AInputEvent *event) { (void) event; return 0; }
+#define WL_POINTER_GETTER(type, name) \
+    type name(const AInputEvent *event, size_t pointer) { (void) event; (void) pointer; return 0; }
+#define WL_HISTORICAL_GETTER(type, name) \
+    type name(const AInputEvent *event, size_t pointer, size_t history) \
+    { (void) event; (void) pointer; (void) history; return 0; }
+
+WL_EVENT_GETTER(int32_t, AInputEvent_getType)
+WL_EVENT_GETTER(int32_t, AInputEvent_getDeviceId)
+WL_EVENT_GETTER(int32_t, AInputEvent_getSource)
+void AInputEvent_release(const AInputEvent *event) { (void) event; }
+
+WL_EVENT_GETTER(int32_t, AKeyEvent_getAction)
+WL_EVENT_GETTER(int32_t, AKeyEvent_getFlags)
+WL_EVENT_GETTER(int32_t, AKeyEvent_getKeyCode)
+WL_EVENT_GETTER(int32_t, AKeyEvent_getScanCode)
+WL_EVENT_GETTER(int32_t, AKeyEvent_getMetaState)
+WL_EVENT_GETTER(int32_t, AKeyEvent_getRepeatCount)
+WL_EVENT_GETTER(int64_t, AKeyEvent_getDownTime)
+WL_EVENT_GETTER(int64_t, AKeyEvent_getEventTime)
+
+WL_EVENT_GETTER(int32_t, AMotionEvent_getAction)
+WL_EVENT_GETTER(int32_t, AMotionEvent_getActionButton)
+WL_EVENT_GETTER(int32_t, AMotionEvent_getButtonState)
+WL_EVENT_GETTER(int32_t, AMotionEvent_getClassification)
+WL_EVENT_GETTER(int32_t, AMotionEvent_getEdgeFlags)
+WL_EVENT_GETTER(int32_t, AMotionEvent_getFlags)
+WL_EVENT_GETTER(int32_t, AMotionEvent_getMetaState)
+WL_EVENT_GETTER(int64_t, AMotionEvent_getDownTime)
+WL_EVENT_GETTER(int64_t, AMotionEvent_getEventTime)
+WL_EVENT_GETTER(float, AMotionEvent_getXOffset)
+WL_EVENT_GETTER(float, AMotionEvent_getYOffset)
+WL_EVENT_GETTER(float, AMotionEvent_getXPrecision)
+WL_EVENT_GETTER(float, AMotionEvent_getYPrecision)
+WL_EVENT_GETTER(size_t, AMotionEvent_getPointerCount)
+WL_EVENT_GETTER(size_t, AMotionEvent_getHistorySize)
+WL_POINTER_GETTER(int32_t, AMotionEvent_getPointerId)
+WL_POINTER_GETTER(int32_t, AMotionEvent_getToolType)
+WL_POINTER_GETTER(float, AMotionEvent_getRawX)
+WL_POINTER_GETTER(float, AMotionEvent_getRawY)
+WL_POINTER_GETTER(float, AMotionEvent_getX)
+WL_POINTER_GETTER(float, AMotionEvent_getY)
+WL_POINTER_GETTER(float, AMotionEvent_getPressure)
+WL_POINTER_GETTER(float, AMotionEvent_getSize)
+WL_POINTER_GETTER(float, AMotionEvent_getTouchMajor)
+WL_POINTER_GETTER(float, AMotionEvent_getTouchMinor)
+WL_POINTER_GETTER(float, AMotionEvent_getToolMajor)
+WL_POINTER_GETTER(float, AMotionEvent_getToolMinor)
+WL_POINTER_GETTER(float, AMotionEvent_getOrientation)
+WL_POINTER_GETTER(int64_t, AMotionEvent_getHistoricalEventTime) /* (event, history) */
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalRawX)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalRawY)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalX)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalY)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalPressure)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalSize)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalTouchMajor)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalTouchMinor)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalToolMajor)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalToolMinor)
+WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalOrientation)
+
+float AMotionEvent_getAxisValue(const AInputEvent *event, int32_t axis, size_t pointer)
+{
+    (void) event;
+    (void) axis;
+    (void) pointer;
+    return 0;
+}
+
+float AMotionEvent_getHistoricalAxisValue(const AInputEvent *event, int32_t axis, size_t pointer, size_t history)
+{
+    (void) event;
+    (void) axis;
+    (void) pointer;
+    (void) history;
+    return 0;
+}
