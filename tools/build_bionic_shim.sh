@@ -1,8 +1,8 @@
 #!/bin/bash
 # build_bionic_shim.sh <oh-sdk-native> <out-dir> [description]
 # Builds libwebview_bionic_shim.so: the bionic compatibility layer (webview_bionic_shim.c), the
-# Android OpenSL ES adapter, the DT_ANDROID_RELR loader, libandroid's AConfiguration and sensor
-# calls and Bionic's fts, plus artifacts.json for a launch's --bionic-shim input.
+# Android OpenSL ES adapter, the DT_ANDROID_RELR loader, libandroid's AConfiguration, sensor and
+# input calls and Bionic's fts, plus artifacts.json for a launch's --bionic-shim input.
 set -e
 SDK=$1; O=$2; DESC=${3:-bionic shim}
 W=$(cd "$(dirname "$0")/.." && pwd)/framework/webview-shim
@@ -12,7 +12,7 @@ CC="$SDK/llvm/bin/clang --target=aarch64-linux-ohos --sysroot=$SDK/sysroot -fPIC
 $CC -c $W/webview_bionic_shim.c -o $O/s.o
 $CC -c $W/opensles_android_adapter.c -o $O/sl.o
 $CC -c $W/android_relocs.c -o $O/ar.o
-# libandroid's AConfiguration and sensor calls, for callers in every namespace (JNI for the former).
+# libandroid's AConfiguration, sensor and input calls, for callers in every namespace (JNI for the first).
 $CC -I$W/../../third_party/jni -c $W/android_ndk_config.c -o $O/nc.o
 # Bionic's fts(3), which musl lacks (OpenBSD's code: its fts_set leaves a parameter unused).
 $CC -Wno-unused-parameter -c $W/bionic_fts.c -o $O/ft.o
