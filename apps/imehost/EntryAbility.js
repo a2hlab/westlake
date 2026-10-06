@@ -24,7 +24,7 @@ class EntryAbility extends UIAbility {
         stage.loadContent('pages/Index', error => {
             if (error && error.code) { this.record('load-error', error); return; }
             this.mainWindow = stage.getMainWindowSync();
-            this.mainWindow.setWindowBackgroundColor('#fff4f6f8');
+            this.mainWindow.setWindowBackgroundColor('#ff000000');
             this.record('window-ready', this.mainWindow.getWindowProperties());
         });
     }
