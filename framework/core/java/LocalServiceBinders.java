@@ -100,6 +100,10 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "device_identifiers":
+                    binder = proxy(name, "android.os.IDeviceIdentifiersPolicyService",
+                            LocalServiceBinders::deviceIdentifiers);
+                    break;
                 case "uri_grants":
                     binder = proxy(name, "android.app.IUriGrantsManager", LocalServiceBinders::uriGrants);
                     break;
@@ -281,6 +285,20 @@ public final class LocalServiceBinders {
      * release is accepted. Nothing crosses to OH's own URI permission service.
      */
     private static Object uriGrants(String method, Object[] args) {
+        return DEFAULT;
+    }
+
+    /**
+     * Device identifiers, refused as Android refuses an app without READ_PRIVILEGED_PHONE_STATE:
+     * Build.getSerial throws SecurityException, which callers catch (a device-info plugin answers
+     * "unknown"). With no service it threw NullPointerException instead, and wormhole2's plugin
+     * call failed before its first screen.
+     */
+    private static Object deviceIdentifiers(String method, Object[] args) {
+        if (method.startsWith("getSerial")) {
+            throw new SecurityException(method + ": The uid " + android.os.Process.myUid()
+                    + " does not meet the requirements to access device identifiers.");
+        }
         return DEFAULT;
     }
 

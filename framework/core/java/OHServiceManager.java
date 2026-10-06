@@ -184,6 +184,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "storagestats":
             // BluetoothAdapter, present and off (aat, Beatbridge used a null adapter unchecked).
             case "bluetooth_manager":
+            // Build.getSerial asks it, and dereferenced a null one (wormhole2's device-info plugin).
+            case "device_identifiers":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
