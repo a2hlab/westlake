@@ -1897,7 +1897,11 @@ public class AppSpawnXInit {
                     if ("getCacheQuotaBytes".equals(name)) {
                         return Long.valueOf(adapter.core.LocalServiceBinders.CACHE_QUOTA_BYTES);
                     }
-                    if ("isUserKeyUnlocked".equals(name)) {
+                    // The user's credential-encrypted storage is unlocked: the app runs. Android 15
+                    // renamed the call isCeStorageUnlocked; under the new name it got the default
+                    // false, and StrictMode reported every data access as a credential-protected
+                    // access while locked (OsmAnd logged 20,000 of them while it started).
+                    if ("isUserKeyUnlocked".equals(name) || "isCeStorageUnlocked".equals(name)) {
                         return Boolean.TRUE;
                     }
                     if ("getExternalStorageMountMode".equals(name)) {

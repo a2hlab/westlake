@@ -1979,6 +1979,31 @@ public class AppSchedulerBridge {
             // AbilitySchedulerBridge.onScheduleAbilityTransaction(targetState=FOREGROUND_NEW=5)
             // which is driven by AMS::ForegroundAbility after ApplicationForegrounded reverse
             // callback advances state to FOREGROUNDING. By then, AbilityTransitionDone(FG) returns rc=0.
+            //
+            // The launch does carry the start, though. handleLaunchActivity marks the executor's
+            // pending actions (restore the saved state, call onPostCreate), the start consumes
+            // them, and the executor clears them when its transaction ends. Android starts and
+            // resumes in the launch's own transaction; a resume in a transaction of its own (the
+            // OH foreground step, the direct launch's, an in-process launch's) found them cleared,
+            // and no activity got onRestoreInstanceState or onPostCreate. Linphone's MainActivity
+            // marks its first screen ready in onPostCreate and holds every draw until then: its
+            // window never showed. The start reports nothing to OH and adds no window (the decor is
+            // attached on resume), so it runs here, in Android's order: onCreate, onStart,
+            // onRestoreInstanceState, onPostCreate.
+            //
+            // A launch with no OH ability behind it (the direct launch, an in-process start: no OH
+            // token) has no ability manager to race, and it resumes here too, as Android's launch
+            // does: what onCreate, onStart and onPostCreate post to the main thread then runs after
+            // onResume. Started without the resume, Reddit's posts ran while it was only started,
+            // and its splash held every draw in two launches of three. The resume that follows in a
+            // transaction of its own finds the activity resumed and does nothing.
+            if (ohTokenAddr == 0L) {
+                transaction.addTransactionItem(
+                        android.app.servertransaction.ResumeActivityItem.obtain(token, true, false));
+            } else {
+                transaction.addTransactionItem(
+                        android.app.servertransaction.StartActivityItem.obtain(token, null));
+            }
 
             // Register the token mapping for lifecycle events (legacy LifecycleAdapter
             // map; OhTokenRegistry above is the new B.47 path; both kept during cutover).

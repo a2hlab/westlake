@@ -2119,11 +2119,8 @@ long fpathconf(int fd, int name)
  *
  * __openat_2 is bionic's _FORTIFY_SOURCE wrapper and has openat's semantics exactly.
  *
- * ANativeWindow_lock/unlockAndPost belong to the CPU-rendering path: lock hands the caller a
- * mapped buffer to draw into. Westlake's ANativeWindow adapter has the OH plumbing for that
- * (request buffer, buffer handle, virAddr) but does not implement the pair, so these report the
- * path as unavailable rather than pretending to render. A caller that only links them gets a
- * loadable library; a caller that uses them gets a clear failure instead of a wrong picture.
+ * ANativeWindow_lock/unlockAndPost, the software-rendering pair, are defined below, beside the
+ * other calls on the adapter's windows.
  */
 long __openat_2(int dirfd, const char* path, int flags)
 {
@@ -2132,26 +2129,6 @@ long __openat_2(int dirfd, const char* path, int flags)
     if (real_openat == NULL) real_openat = (OpenatFn)dlsym(RTLD_NEXT, "openat");
     if (real_openat == NULL) { errno = ENOSYS; return -1; }
     return real_openat(dirfd, path, flags);
-}
-
-int ANativeWindow_lock(void* window, void* outBuffer, void* inOutDirtyBounds)
-{
-    (void)window; (void)outBuffer; (void)inOutDirtyBounds;
-    static int logged;
-    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
-        fprintf(stderr, "[WESTLAKE-ANW] ANativeWindow_lock: CPU rendering path not implemented; "
-                "callers with a GPU path are unaffected\n");
-        fflush(stderr);
-    }
-    errno = ENODEV;
-    return -ENODEV;
-}
-
-int ANativeWindow_unlockAndPost(void* window)
-{
-    (void)window;
-    errno = ENODEV;
-    return -ENODEV;
 }
 
 long sysconf(int name)
@@ -3404,7 +3381,8 @@ void *ANativeWindow_toSurface(void *env, void *window)
 /*
  * Gecko's allocator, environment and abort, for the libraries that import them by version.
  *
- * Firefox's libraries import malloc, free, getenv, abort and a dozen more as name@libmozglue.so:
+ * Firefox's libraries import malloc, free, getenv, abort, the C++ allocation operators and more as
+ * name@libmozglue.so:
  * libmozglue's own definitions (mozjemalloc, its environment lock, its crash annotations). OH's
  * loader takes an unversioned definition for such an import -- check_verinfo accepts any library
  * without symbol versions when the import names its version by hash -- and musl's libc comes before
@@ -3485,11 +3463,14 @@ static int westlake_find_library_symbol(struct dl_phdr_info *info, size_t size, 
 enum {
     WL_MOZ_MALLOC, WL_MOZ_FREE, WL_MOZ_CALLOC, WL_MOZ_REALLOC, WL_MOZ_MEMALIGN, WL_MOZ_POSIX_MEMALIGN,
     WL_MOZ_USABLE_SIZE, WL_MOZ_STRDUP, WL_MOZ_STRNDUP, WL_MOZ_VASPRINTF, WL_MOZ_GETENV, WL_MOZ_PUTENV,
-    WL_MOZ_SETENV, WL_MOZ_UNSETENV, WL_MOZ_ABORT, WL_MOZ_RAISE, WL_MOZ_COUNT
+    WL_MOZ_SETENV, WL_MOZ_UNSETENV, WL_MOZ_ABORT, WL_MOZ_RAISE,
+    WL_MOZ_NEW, WL_MOZ_NEW_ARRAY, WL_MOZ_DELETE, WL_MOZ_DELETE_ARRAY, WL_MOZ_DELETE_SIZED, WL_MOZ_COUNT
 };
 static const char *const westlake_mozglue_names[WL_MOZ_COUNT] = {
     "malloc", "free", "calloc", "realloc", "memalign", "posix_memalign", "malloc_usable_size", "strdup",
     "strndup", "vasprintf", "getenv", "putenv", "setenv", "unsetenv", "abort", "raise",
+    /* operator new and new[], delete and delete[], sized delete */
+    "_Znwm", "_Znam", "_ZdlPv", "_ZdaPv", "_ZdlPvm",
 };
 static void *westlake_mozglue[WL_MOZ_COUNT];
 static pthread_once_t westlake_mozglue_once = PTHREAD_ONCE_INIT;
@@ -3543,6 +3524,25 @@ WL_MOZGLUE_FORWARD(WL_MOZ_SETENV, int, setenv, (const char *name, const char *va
                    (name, value, overwrite))
 WL_MOZGLUE_FORWARD(WL_MOZ_UNSETENV, int, unsetenv, (const char *name), (name))
 WL_MOZGLUE_FORWARD(WL_MOZ_RAISE, int, raise, (int signal_number), (signal_number))
+/* The C++ allocation operators, imported by version as well: bound to a libc++'s, a sized delete
+ * from libxul handed musl's free the memory mozjemalloc had allocated (Fennec's launcher thread). */
+WL_MOZGLUE_FORWARD(WL_MOZ_NEW, void *, _Znwm, (size_t size), (size))
+WL_MOZGLUE_FORWARD(WL_MOZ_NEW_ARRAY, void *, _Znam, (size_t size), (size))
+void westlake_mozglue__ZdlPv(void *pointer)
+{
+    ((void (*)(void *)) westlake_mozglue_entry(WL_MOZ_DELETE))(pointer);
+}
+__asm__(".symver westlake_mozglue__ZdlPv, _ZdlPv@libmozglue.so");
+void westlake_mozglue__ZdaPv(void *pointer)
+{
+    ((void (*)(void *)) westlake_mozglue_entry(WL_MOZ_DELETE_ARRAY))(pointer);
+}
+__asm__(".symver westlake_mozglue__ZdaPv, _ZdaPv@libmozglue.so");
+void westlake_mozglue__ZdlPvm(void *pointer, size_t size)
+{
+    ((void (*)(void *, size_t)) westlake_mozglue_entry(WL_MOZ_DELETE_SIZED))(pointer, size);
+}
+__asm__(".symver westlake_mozglue__ZdlPvm, _ZdlPvm@libmozglue.so");
 
 void westlake_mozglue_abort(void)
 {
@@ -3770,6 +3770,280 @@ void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, c
     return surface;
 }
 
+/*
+ * ANativeWindow_setBuffersGeometry, as Android answers an app. A width and height of 0 mean the
+ * window's own size: Android's Surface then dequeues buffers at its consumer's default size. The
+ * runtime's definition (libhwui's) handed both to OH's SET_BUFFER_GEOMETRY, and the format to
+ * SET_FORMAT by Android's number, which names another format in OH's numbering (Android's
+ * RGBA_8888, 1, is OH's CLUT1). SDL sets (0, 0, its EGL config's native visual) on its
+ * SurfaceView's window before it creates its EGL surface, as the NDK's documentation recommends,
+ * and every buffer request on that window then failed (NATIVE_ERROR_UNKNOWN): anarchre and
+ * diesimu rendered nothing. This library is preloaded, so an app library's import binds here; any
+ * other caller, or a window that is not the adapter's, gets the next definition unchanged.
+ */
+enum { WL_WINDOW_SET_GEOMETRY = 0, WL_WINDOW_GET_GEOMETRY = 1, WL_WINDOW_SET_FORMAT = 3 };
+
+static int32_t wl_host_window_format(int32_t android)
+{
+    switch (android) {
+        case 1: return 12;     /* RGBA_8888 */
+        case 2: return 11;     /* RGBX_8888 */
+        case 3: return 13;     /* RGB_888 */
+        case 4: return 3;      /* RGB_565 */
+        case 5: return 20;     /* BGRA_8888 */
+        case 0x16: return 39;  /* RGBA_FP16 */
+        case 0x2b: return 34;  /* RGBA_1010102 */
+        default: return -1;
+    }
+}
+
+/* The size a window had before an app sized it, to go back to when the app asks for 0x0. */
+static struct {
+    void *window;
+    int32_t width, height;          /* the window's own */
+    int32_t set_width, set_height;  /* the app's */
+} wl_window_sizes[16];
+static pthread_mutex_t wl_window_sizes_lock = PTHREAD_MUTEX_INITIALIZER;
+
+int32_t ANativeWindow_setBuffersGeometry(void *window, int32_t width, int32_t height, int32_t format)
+{
+    pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
+    void *oh = wl_anw_get_oh != NULL && window != NULL ? wl_anw_get_oh(window) : NULL;
+    typedef int32_t (*HandleOpt)(void *, int, ...);
+    HandleOpt opt = oh != NULL ? (HandleOpt) wl_native_window_symbol("OH_NativeWindow_NativeWindowHandleOpt") : NULL;
+    if (opt == NULL || !caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static int32_t (*next)(void *, int32_t, int32_t, int32_t);
+        if (next == NULL) {
+            next = (int32_t (*)(void *, int32_t, int32_t, int32_t)) dlsym(RTLD_NEXT, "ANativeWindow_setBuffersGeometry");
+        }
+        return next != NULL ? next(window, width, height, format) : -EINVAL;
+    }
+    int32_t result = 0;
+    int32_t host = format != 0 ? wl_host_window_format(format) : -1;
+    if (host >= 0) result = opt(oh, WL_WINDOW_SET_FORMAT, host);   /* 0, or one OH lacks: the window's own */
+    if (result != 0) return result;
+    if (width < 0 || height < 0 || (width == 0) != (height == 0)) return -EINVAL;
+    int32_t current_height = 0, current_width = 0;
+    opt(oh, WL_WINDOW_GET_GEOMETRY, &current_height, &current_width);
+    pthread_mutex_lock(&wl_window_sizes_lock);
+    int slot = -1, unused = -1;
+    for (int i = 0; i < (int) (sizeof(wl_window_sizes) / sizeof(wl_window_sizes[0])); i++) {
+        if (wl_window_sizes[i].window == oh) slot = i;
+        else if (wl_window_sizes[i].window == NULL && unused < 0) unused = i;
+    }
+    if (width != 0) {
+        if (slot < 0 && unused >= 0 && current_width > 0 && current_height > 0) {
+            slot = unused;
+            wl_window_sizes[slot].window = oh;
+            wl_window_sizes[slot].width = current_width;
+            wl_window_sizes[slot].height = current_height;
+        }
+        if (slot >= 0) {
+            wl_window_sizes[slot].set_width = width;
+            wl_window_sizes[slot].set_height = height;
+        }
+        result = opt(oh, WL_WINDOW_SET_GEOMETRY, width, height);
+    } else if (slot >= 0) {
+        /* Back to the window's own size, unless the window manager has sized it since. */
+        if (current_width == wl_window_sizes[slot].set_width && current_height == wl_window_sizes[slot].set_height) {
+            result = opt(oh, WL_WINDOW_SET_GEOMETRY, wl_window_sizes[slot].width, wl_window_sizes[slot].height);
+        }
+        wl_window_sizes[slot].window = NULL;
+    }
+    /* 0x0 on a window the app never sized: it keeps the size the window manager gave it. */
+    pthread_mutex_unlock(&wl_window_sizes_lock);
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-WINDOW] setBuffersGeometry(%d, %d, %d) from an Android library: OH window %p, "
+                      "%dx%d before, format %d: %d\n", width, height, format, oh, current_width, current_height,
+                      host, result);
+    }
+    return result;
+}
+
+#include <poll.h>
+
+/*
+ * ANativeWindow_lock and ANativeWindow_unlockAndPost, the NDK's software rendering, on the adapter's
+ * windows: lock requests a buffer from the OH window behind it, maps it and hands the caller its
+ * memory in Android's terms (format number, stride in pixels, the whole buffer dirty: its earlier
+ * contents are not kept); unlockAndPost flushes it whole. Surface.lockCanvas draws through the same
+ * pair (libwl_missing_natives), so a SurfaceView drawn with a Canvas shows: nounours's bear was a
+ * transparent hole. Before, both answered -ENODEV, which libflutter.so, linking the pair for its
+ * software fallback, needed only to load; a window that is not the adapter's still gets that.
+ */
+typedef struct {
+    int32_t width, height, stride, format;
+    void *bits;
+    uint32_t reserved[6];
+} WlWindowBuffer;                                   /* ANativeWindow_Buffer */
+typedef struct { int32_t left, top, right, bottom; } WlWindowRect;   /* ARect */
+typedef struct {
+    int32_t fd, width, stride, height, size, format;
+    uint64_t usage;
+    void *vir_addr;
+} WlBufferHandle;                                   /* OH's BufferHandle, its leading fields */
+typedef struct {
+    struct { int32_t x, y; uint32_t w, h; } *rects;
+    int32_t count;
+} WlRegion;                                         /* OH's Region: no rects, the whole buffer */
+
+static int32_t wl_android_window_format(int32_t host)
+{
+    switch (host) {
+        case 12: return 1;     /* RGBA_8888 */
+        case 11: return 2;     /* RGBX_8888 */
+        case 13: return 3;     /* RGB_888 */
+        case 3: return 4;      /* RGB_565 */
+        case 20: return 5;     /* BGRA_8888 */
+        case 39: return 0x16;  /* RGBA_FP16 */
+        case 34: return 0x2b;  /* RGBA_1010102 */
+        default: return 0;
+    }
+}
+
+static int32_t wl_window_pixel_bytes(int32_t android)
+{
+    switch (android) {
+        case 1: case 2: case 5: case 0x2b: return 4;
+        case 3: return 3;
+        case 4: return 2;
+        case 0x16: return 8;
+        default: return 0;
+    }
+}
+
+static struct {
+    void *window, *oh, *buffer, *native_buffer;
+} wl_locked_windows[8];
+static pthread_mutex_t wl_locked_windows_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void *wl_native_buffer_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) library = dlopen("libnative_buffer.so", RTLD_NOW);
+    return library != NULL ? dlsym(library, name) : NULL;
+}
+
+int ANativeWindow_lock(void *window, void *outBuffer, void *inOutDirtyBounds)
+{
+    typedef int32_t (*RequestFn)(void *, void **, int *);
+    typedef WlBufferHandle *(*HandleFn)(void *);
+    typedef int32_t (*AbortFn)(void *, void *);
+    typedef int32_t (*FromWindowBufferFn)(void *, void **);
+    typedef int32_t (*MapFn)(void *, void **);
+    pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
+    void *oh = wl_anw_get_oh != NULL && window != NULL ? wl_anw_get_oh(window) : NULL;
+    RequestFn request = (RequestFn) wl_native_window_symbol("OH_NativeWindow_NativeWindowRequestBuffer");
+    HandleFn handle_of = (HandleFn) wl_native_window_symbol("OH_NativeWindow_GetBufferHandleFromNative");
+    AbortFn abort_buffer = (AbortFn) wl_native_window_symbol("OH_NativeWindow_NativeWindowAbortBuffer");
+    FromWindowBufferFn from_window_buffer =
+            (FromWindowBufferFn) wl_native_buffer_symbol("OH_NativeBuffer_FromNativeWindowBuffer");
+    MapFn map = (MapFn) wl_native_buffer_symbol("OH_NativeBuffer_Map");
+    if (oh == NULL || outBuffer == NULL || request == NULL || handle_of == NULL || abort_buffer == NULL) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-ANW] ANativeWindow_lock on window %p: not the adapter's, no software path\n",
+                          window);
+        }
+        errno = ENODEV;
+        return -ENODEV;
+    }
+    pthread_mutex_lock(&wl_locked_windows_lock);
+    int slot = -1;
+    for (int i = 0; i < (int) (sizeof(wl_locked_windows) / sizeof(wl_locked_windows[0])); i++) {
+        if (wl_locked_windows[i].window == window) {
+            pthread_mutex_unlock(&wl_locked_windows_lock);
+            return -EINVAL;                 /* already locked, as Surface::lock refuses */
+        }
+        if (wl_locked_windows[i].window == NULL && slot < 0) slot = i;
+    }
+    if (slot < 0) {
+        pthread_mutex_unlock(&wl_locked_windows_lock);
+        return -ENOMEM;
+    }
+    wl_locked_windows[slot].window = window;   /* claimed while the buffer is requested */
+    pthread_mutex_unlock(&wl_locked_windows_lock);
+    void *buffer = NULL, *native_buffer = NULL, *bits = NULL;
+    int fence = -1;
+    int32_t result = request(oh, &buffer, &fence);
+    if (fence >= 0) {
+        struct pollfd wait = { .fd = fence, .events = POLLIN };
+        poll(&wait, 1, 3000);
+        close(fence);
+    }
+    WlBufferHandle *handle = result == 0 && buffer != NULL ? handle_of(buffer) : NULL;
+    if (handle != NULL && from_window_buffer != NULL && map != NULL &&
+            from_window_buffer(buffer, &native_buffer) == 0 && native_buffer != NULL) {
+        map(native_buffer, &bits);
+    }
+    if (bits == NULL && handle != NULL) bits = handle->vir_addr;
+    int32_t format = handle != NULL ? wl_android_window_format(handle->format) : 0;
+    int32_t bytes = wl_window_pixel_bytes(format);
+    if (handle == NULL || bits == NULL || bytes == 0) {
+        if (buffer != NULL) abort_buffer(oh, buffer);
+        pthread_mutex_lock(&wl_locked_windows_lock);
+        wl_locked_windows[slot].window = NULL;
+        pthread_mutex_unlock(&wl_locked_windows_lock);
+        wl_relocs_log("[WESTLAKE-ANW] ANativeWindow_lock on OH window %p: request %d, format %d, no buffer\n",
+                      oh, result, handle != NULL ? handle->format : -1);
+        return result != 0 ? -EINVAL : -ENOMEM;
+    }
+    WlWindowBuffer *out = (WlWindowBuffer *) outBuffer;
+    out->width = handle->width;
+    out->height = handle->height;
+    out->stride = handle->stride / bytes;
+    out->format = format;
+    out->bits = bits;
+    memset(out->reserved, 0, sizeof(out->reserved));
+    if (inOutDirtyBounds != NULL) {
+        WlWindowRect *dirty = (WlWindowRect *) inOutDirtyBounds;
+        dirty->left = 0;
+        dirty->top = 0;
+        dirty->right = handle->width;
+        dirty->bottom = handle->height;
+    }
+    pthread_mutex_lock(&wl_locked_windows_lock);
+    wl_locked_windows[slot].oh = oh;
+    wl_locked_windows[slot].buffer = buffer;
+    wl_locked_windows[slot].native_buffer = native_buffer;
+    pthread_mutex_unlock(&wl_locked_windows_lock);
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-ANW] ANativeWindow_lock on OH window %p: %dx%d stride %d format %d\n",
+                      oh, out->width, out->height, out->stride, out->format);
+    }
+    return 0;
+}
+
+int ANativeWindow_unlockAndPost(void *window)
+{
+    typedef int32_t (*FlushFn)(void *, void *, int, WlRegion);
+    typedef int32_t (*UnmapFn)(void *);
+    void *oh = NULL, *buffer = NULL, *native_buffer = NULL;
+    pthread_mutex_lock(&wl_locked_windows_lock);
+    for (int i = 0; i < (int) (sizeof(wl_locked_windows) / sizeof(wl_locked_windows[0])); i++) {
+        if (window != NULL && wl_locked_windows[i].window == window && wl_locked_windows[i].buffer != NULL) {
+            oh = wl_locked_windows[i].oh;
+            buffer = wl_locked_windows[i].buffer;
+            native_buffer = wl_locked_windows[i].native_buffer;
+            memset(&wl_locked_windows[i], 0, sizeof(wl_locked_windows[i]));
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wl_locked_windows_lock);
+    if (buffer == NULL) {
+        errno = ENODEV;
+        return -ENODEV;
+    }
+    UnmapFn unmap = (UnmapFn) wl_native_buffer_symbol("OH_NativeBuffer_Unmap");
+    if (native_buffer != NULL && unmap != NULL) unmap(native_buffer);
+    FlushFn flush = (FlushFn) wl_native_window_symbol("OH_NativeWindow_NativeWindowFlushBuffer");
+    WlRegion whole = { NULL, 0 };
+    int32_t result = flush != NULL ? flush(oh, buffer, -1, whole) : -1;
+    return result == 0 ? 0 : -EINVAL;
+}
+
 WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
 {
     static void *(*create)(void *);
@@ -3972,6 +4246,34 @@ __attribute__((constructor)) static void westlake_dlsym_init(void)
     }
 }
 
+/*
+ * JNI_GetCreatedJavaVMs, answered by the running VM. libnativehelper answers it from the invocation
+ * table its JniInvocation fills. appspawn-x creates the VM through a JniInvocation on startVm()'s
+ * stack, and its destructor clears that table when startVm returns, so for the rest of the process
+ * libnativehelper answers JNI_OK with no VM. Element X's Rust library looks the function up with
+ * dlsym(dlopen(NULL), ...), checks only the result and takes the first JavaVM* it asked for: its
+ * own uninitialized stack. The JNIEnv it got from that pointed at a string in its .rodata, and its
+ * first FindClass faulted. libart's own export answers from the Runtime. This library is preloaded,
+ * ahead of libnativehelper in the global scope, so imports and global lookups both get this one;
+ * an Android library's lookup by any other handle does too (dlsym, below).
+ */
+typedef int (*WestlakeGetVmsFn)(void **, int, int *);
+static WestlakeGetVmsFn westlake_art_get_vms;
+
+int JNI_GetCreatedJavaVMs(void **vms, int size, int *count)
+{
+    WestlakeGetVmsFn art = __atomic_load_n(&westlake_art_get_vms, __ATOMIC_ACQUIRE);
+    if (art == NULL) {
+        struct westlake_library_symbol query = { "libart.so", "JNI_GetCreatedJavaVMs", NULL, 0 };
+        dl_iterate_phdr(westlake_find_library_symbol, &query);
+        art = (WestlakeGetVmsFn) query.address;
+        if (art != NULL) __atomic_store_n(&westlake_art_get_vms, art, __ATOMIC_RELEASE);
+    }
+    if (art != NULL) return art(vms, size, count);
+    if (count != NULL) *count = 0;   /* no runtime loaded yet: no VM */
+    return 0;                        /* JNI_OK */
+}
+
 static void *westlake_egl_by_handle(const char *name)
 {
     if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
@@ -3983,6 +4285,10 @@ void *dlsym(void *handle, const char *name)
 {
     WestlakeDlsymFn real = __atomic_load_n(&westlake_musl_dlsym, __ATOMIC_ACQUIRE);
     if (__builtin_expect(real == NULL, 0)) real = westlake_find_musl_dlsym();
+    if (name != NULL && name[0] == 'J' && strcmp(name, "JNI_GetCreatedJavaVMs") == 0 &&
+        caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        return (void *) &JNI_GetCreatedJavaVMs;
+    }
     if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL &&
         name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {
         void *own = westlake_egl_by_handle(name);
