@@ -16,7 +16,9 @@
 package com.android.internal.os;
 
 import android.os.Process;
+import android.os.SystemProperties;
 import android.util.Log;
+import dalvik.system.RuntimeHooks;
 import dalvik.system.VMRuntime;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -2620,8 +2622,21 @@ public class AppSpawnXInit {
             } catch (Throwable ignore) {}
         });
 
+        // The default time zone's source, as RuntimeInit.commonInit installs it: the
+        // persist.sys.timezone property. With no supplier, libcore reads /etc/timezone, which OH
+        // does not have, and falls back to GMT: every app's clock and calendar showed UTC. OH keeps
+        // the zone the user set in persist.time.timezone, which SystemProperties reads from OH's
+        // parameter store like any other key.
+        try {
+            RuntimeHooks.setTimeZoneIdSupplier(() -> {
+                String zone = SystemProperties.get("persist.sys.timezone");
+                return zone.isEmpty() ? SystemProperties.get("persist.time.timezone") : zone;
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "time zone supplier not installed: " + t);
+        }
+
         // In production, also:
-        // - Set timezone from system property
         // - Configure log redirects (stdout/stderr -> Android log)
         // - Initialize security providers
         Log.d(TAG, "Common runtime initialized");
