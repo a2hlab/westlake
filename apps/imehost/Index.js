@@ -1,4 +1,6 @@
-// Minimal ArkUI control page, compiled directly with the installed SDK es2abc.
+// The host's page, compiled directly with the installed SDK es2abc. Its window is the parent of every
+// Android window, so it shows wherever an Android window does not cover it: it is empty and black,
+// what Android shows behind an app's windows when no wallpaper is there.
 class Index extends ViewPU {
     constructor(parent, params, storage, id = -1, paramsLambda, extraInfo) {
         super(parent, storage, id, extraInfo);
@@ -10,19 +12,8 @@ class Index extends ViewPU {
     aboutToBeDeleted() { SubscriberManager.Get().delete(this.id__()); this.aboutToBeDeletedInternal(); }
     initialRender() {
         this.observeComponentCreation2(() => {
-            Column.create({space: 20}); Column.width('100%'); Column.height('100%');
-            Column.backgroundColor('#fff4f6f8'); Column.padding(30);
+            Column.create(); Column.width('100%'); Column.height('100%'); Column.backgroundColor('#ff000000');
         }, Column);
-        this.observeComponentCreation2(() => {
-            Text.create('Westlake IME host'); Text.fontSize(28); Text.fontColor('#112233');
-        }, Text);
-        Text.pop();
-        this.observeComponentCreation2(() => {
-            TextInput.create({placeholder: 'Native OHOS keyboard control'});
-            TextInput.width('90%'); TextInput.height(60); TextInput.fontSize(22);
-            TextInput.onChange(value => globalThis.requireNapi('hilog').info(0,
-                'WL_IME_HOST', 'native-control changed %{public}s', value));
-        }, TextInput);
         Column.pop();
     }
     rerender() { this.updateDirtyElements(); }
