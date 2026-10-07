@@ -5,11 +5,13 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <link.h>
 #include <locale.h>
 #include <math.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <sched.h>
 #include <signal.h>
 #include <errno.h>
@@ -4604,4 +4606,165 @@ int setcon(const char *context)
     wl_relocs_log("[WESTLAKE-SELINUX] setcon %s: %d of %d connected datagram socket(s) re-created in the new domain\n",
                   context != NULL ? context : "(null)", renewed, count);
     return rc;
+}
+
+/*
+ * getpwnam, getpwuid, getgrnam and getgrgid for Android code, with a result per thread as Bionic
+ * keeps them (in the thread's TLS). musl keeps one static result and one static line buffer for all
+ * threads, and getdelim reallocates that buffer while it reads /etc/group: Material Files looks file
+ * owners up on several threads at once, and its poller thread died in musl's realloc or malloc under
+ * getgrgid in about a third of its launches (r83, and a test after r87). The lookups go through
+ * musl's _r functions, which use only the caller's buffer; a result lives until the thread's next
+ * lookup of its kind. Other callers get musl's own.
+ */
+struct westlake_ids {
+    struct passwd pw;
+    struct group gr;
+    char *pw_buf, *gr_buf;
+    size_t pw_size, gr_size;
+};
+
+static pthread_key_t westlake_ids_key;
+static pthread_once_t westlake_ids_once = PTHREAD_ONCE_INIT;
+static int westlake_ids_ready;
+
+static void westlake_ids_free(void *state)
+{
+    struct westlake_ids *ids = state;
+    free(ids->pw_buf);
+    free(ids->gr_buf);
+    free(ids);
+}
+
+static void westlake_ids_init(void)
+{
+    westlake_ids_ready = pthread_key_create(&westlake_ids_key, westlake_ids_free) == 0;
+}
+
+static struct westlake_ids *westlake_thread_ids(void)
+{
+    pthread_once(&westlake_ids_once, westlake_ids_init);
+    if (!westlake_ids_ready) return NULL;
+    struct westlake_ids *ids = pthread_getspecific(westlake_ids_key);
+    if (ids == NULL && (ids = calloc(1, sizeof(*ids))) != NULL && pthread_setspecific(westlake_ids_key, ids) != 0) {
+        free(ids);
+        ids = NULL;
+    }
+    return ids;
+}
+
+/* Grows the thread's buffer until the _r call fits: ERANGE asks for more room. */
+static int westlake_grow(char **buf, size_t *size, size_t want)
+{
+    if (want <= *size) return 0;
+    char *grown = realloc(*buf, want);
+    if (grown == NULL) return -1;
+    *buf = grown;
+    *size = want;
+    return 0;
+}
+
+typedef int (*WestlakePwLookup)(const void *key, struct passwd *pw, char *buf, size_t size, struct passwd **out);
+typedef int (*WestlakeGrLookup)(const void *key, struct group *gr, char *buf, size_t size, struct group **out);
+
+static struct passwd *westlake_thread_pw(const void *key, WestlakePwLookup lookup)
+{
+    struct westlake_ids *ids = westlake_thread_ids();
+    struct passwd *result = NULL;
+    if (ids == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    for (size_t want = ids->pw_size != 0 ? ids->pw_size : 1024; want <= (size_t) 1 << 20; want *= 2) {
+        if (westlake_grow(&ids->pw_buf, &ids->pw_size, want) != 0) {
+            errno = ENOMEM;
+            return NULL;
+        }
+        int rc = lookup(key, &ids->pw, ids->pw_buf, ids->pw_size, &result);
+        if (rc != ERANGE) {
+            if (rc != 0) errno = rc;
+            return result;
+        }
+    }
+    errno = ERANGE;
+    return NULL;
+}
+
+static struct group *westlake_thread_gr(const void *key, WestlakeGrLookup lookup)
+{
+    struct westlake_ids *ids = westlake_thread_ids();
+    struct group *result = NULL;
+    if (ids == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    for (size_t want = ids->gr_size != 0 ? ids->gr_size : 4096; want <= (size_t) 1 << 20; want *= 2) {
+        if (westlake_grow(&ids->gr_buf, &ids->gr_size, want) != 0) {
+            errno = ENOMEM;
+            return NULL;
+        }
+        int rc = lookup(key, &ids->gr, ids->gr_buf, ids->gr_size, &result);
+        if (rc != ERANGE) {
+            if (rc != 0) errno = rc;
+            return result;
+        }
+    }
+    errno = ERANGE;
+    return NULL;
+}
+
+static int westlake_pw_by_uid(const void *key, struct passwd *pw, char *buf, size_t size, struct passwd **out)
+{
+    return getpwuid_r(*(const uid_t *) key, pw, buf, size, out);
+}
+
+static int westlake_pw_by_name(const void *key, struct passwd *pw, char *buf, size_t size, struct passwd **out)
+{
+    return getpwnam_r((const char *) key, pw, buf, size, out);
+}
+
+static int westlake_gr_by_gid(const void *key, struct group *gr, char *buf, size_t size, struct group **out)
+{
+    return getgrgid_r(*(const gid_t *) key, gr, buf, size, out);
+}
+
+static int westlake_gr_by_name(const void *key, struct group *gr, char *buf, size_t size, struct group **out)
+{
+    return getgrnam_r((const char *) key, gr, buf, size, out);
+}
+
+struct passwd *getpwuid(uid_t uid)
+{
+    typedef struct passwd *(*Fn)(uid_t);
+    static Fn real;
+    if (caller_is_android_dso(__builtin_return_address(0), NULL)) return westlake_thread_pw(&uid, westlake_pw_by_uid);
+    if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "getpwuid");
+    return real != NULL ? real(uid) : NULL;
+}
+
+struct passwd *getpwnam(const char *name)
+{
+    typedef struct passwd *(*Fn)(const char *);
+    static Fn real;
+    if (caller_is_android_dso(__builtin_return_address(0), NULL)) return westlake_thread_pw(name, westlake_pw_by_name);
+    if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "getpwnam");
+    return real != NULL ? real(name) : NULL;
+}
+
+struct group *getgrgid(gid_t gid)
+{
+    typedef struct group *(*Fn)(gid_t);
+    static Fn real;
+    if (caller_is_android_dso(__builtin_return_address(0), NULL)) return westlake_thread_gr(&gid, westlake_gr_by_gid);
+    if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "getgrgid");
+    return real != NULL ? real(gid) : NULL;
+}
+
+struct group *getgrnam(const char *name)
+{
+    typedef struct group *(*Fn)(const char *);
+    static Fn real;
+    if (caller_is_android_dso(__builtin_return_address(0), NULL)) return westlake_thread_gr(name, westlake_gr_by_name);
+    if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "getgrnam");
+    return real != NULL ? real(name) : NULL;
 }
