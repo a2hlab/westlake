@@ -425,6 +425,38 @@ public final class SoftwareAndroidKeyStore extends Provider {
         return (KeyGenParameterSpec) params;
     }
 
+    /**
+     * The legacy KeyPairGeneratorSpec (API 18, deprecated in 23, still accepted by Android's
+     * AndroidKeyStore provider), converted as that provider converts it: its alias, size, algorithm
+     * parameters and certificate subject, serial and validity, with the purposes a pair of its type
+     * gets there. Refused, gitling's Application lost the helper that generates its pair with one,
+     * and its first activity stopped on the null it left.
+     */
+    @SuppressWarnings("deprecation")
+    private static KeyGenParameterSpec fromLegacy(android.security.KeyPairGeneratorSpec legacy, String algorithm)
+            throws InvalidAlgorithmParameterException {
+        String type = legacy.getKeyType();
+        if (type != null && !type.equalsIgnoreCase(algorithm)) {
+            throw new InvalidAlgorithmParameterException("Key type " + type + " does not match " + algorithm);
+        }
+        try {
+            int purposes = KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY;
+            if (KeyProperties.KEY_ALGORITHM_RSA.equalsIgnoreCase(algorithm)) {
+                purposes |= KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT;
+            }
+            KeyGenParameterSpec.Builder builder = new KeyGenParameterSpec.Builder(legacy.getKeystoreAlias(), purposes);
+            if (legacy.getKeySize() != -1) builder.setKeySize(legacy.getKeySize());
+            if (legacy.getAlgorithmParameterSpec() != null) builder.setAlgorithmParameterSpec(legacy.getAlgorithmParameterSpec());
+            builder.setCertificateSubject(legacy.getSubjectDN());
+            builder.setCertificateSerialNumber(legacy.getSerialNumber());
+            builder.setCertificateNotBefore(legacy.getStartDate());
+            builder.setCertificateNotAfter(legacy.getEndDate());
+            return builder.build();
+        } catch (NullPointerException | IllegalArgumentException e) {
+            throw new InvalidAlgorithmParameterException(e);
+        }
+    }
+
     /** KeyGenerator(AES | HmacSHA*, "AndroidKeyStore"). */
     public static final class SecretKeyGenerator extends KeyGeneratorSpi {
         private final String mAlgorithm;
@@ -497,8 +529,10 @@ public final class SoftwareAndroidKeyStore extends Provider {
         }
 
         @Override
+        @SuppressWarnings("deprecation")
         public void initialize(AlgorithmParameterSpec params, SecureRandom random) throws InvalidAlgorithmParameterException {
-            mSpec = requireSpec(params);
+            mSpec = params instanceof android.security.KeyPairGeneratorSpec
+                    ? fromLegacy((android.security.KeyPairGeneratorSpec) params, mAlgorithm) : requireSpec(params);
             mRandom = random != null ? random : new SecureRandom();
         }
 
