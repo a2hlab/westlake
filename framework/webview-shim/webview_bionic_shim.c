@@ -1661,6 +1661,26 @@ void *dlopen(const char *filename, int flags)
         }
     }
     /*
+     * AAudio through dlopen. OH has no libaaudio.so, so Oboe's dlopen of it failed and Oboe fell back
+     * to OpenSL ES. The answer is this shim's own handle, which exports AAudio over OHAudio
+     * (aaudio_ohaudio.c), so Oboe's lookups by handle find it. The libaaudio.so staged beside the
+     * shim only satisfies DT_NEEDED and defines nothing.
+     */
+    if (basename != NULL && strcmp(basename, "libaaudio.so") == 0) {
+        Dl_info self;
+        if (dladdr((void *) &dlopen, &self) != 0 && self.dli_fname != NULL) {
+            void *handle = real_dlopen(self.dli_fname, flags | RTLD_NOLOAD);
+            if (handle != NULL) {
+                static int logged;
+                if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+                    fprintf(stderr, "[WESTLAKE-AAUDIO] dlopen %s -> AAudio over OHAudio in this shim\n",
+                            filename);
+                }
+                return handle;
+            }
+        }
+    }
+    /*
      * WebView's own libraries come from the WebView library directory, which the search path
      * lists last.  Every name in it also exists in the runtime directory, which comes first, so a
      * bare soname from a WebView caller resolves to the runtime's copy.  For libandroid.so that
