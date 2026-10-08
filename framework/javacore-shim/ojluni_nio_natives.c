@@ -84,6 +84,39 @@ void register_java_sun_nio_ch_PollArrayWrapper(JNIEnv* env);
 void register_sun_nio_ch_FileDispatcherImpl(JNIEnv* env);
 void register_java_nio_MappedByteBuffer(JNIEnv* env);
 
+/*
+ * sun.nio.fs.UnixNativeDispatcher's file-time setters, from AOSP's UnixNativeDispatcher.c (built
+ * unmodified). The runtime registers the class's other natives, not these two, so setting a file's
+ * times (Files.setLastModifiedTime, BasicFileAttributeView.setTimes) threw UnsatisfiedLinkError:
+ * gitling's first activity stopped on futimes. Only these are registered here; the rest keep the
+ * runtime's. That file's own init, run once for its copy, looks up the functions they call through
+ * (futimesat), which the runtime's init sets only for its own: without it, futimes threw
+ * "my_ftimesat_func is NULL". Returns 1 when registered.
+ */
+JNIEXPORT jint JNICALL Java_sun_nio_fs_UnixNativeDispatcher_init(JNIEnv* env, jclass c);
+JNIEXPORT void JNICALL Java_sun_nio_fs_UnixNativeDispatcher_futimes(JNIEnv* env, jclass c, jint fd,
+                                                                    jlong accessTime, jlong modificationTime);
+JNIEXPORT void JNICALL Java_sun_nio_fs_UnixNativeDispatcher_utimes0(JNIEnv* env, jclass c, jlong pathAddress,
+                                                                    jlong accessTime, jlong modificationTime);
+
+static int register_file_times(JNIEnv* env)
+{
+    static const JNINativeMethod methods[] = {
+        { "futimes", "(IJJ)V", (void*) Java_sun_nio_fs_UnixNativeDispatcher_futimes },
+        { "utimes0", "(JJJ)V", (void*) Java_sun_nio_fs_UnixNativeDispatcher_utimes0 },
+    };
+    jclass c = (*env)->FindClass(env, "sun/nio/fs/UnixNativeDispatcher");
+    if (c == NULL) {
+        (*env)->ExceptionClear(env);
+        return 0;
+    }
+    Java_sun_nio_fs_UnixNativeDispatcher_init(env, c);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, c);
+    return jniRegisterNativeMethods(env, "sun/nio/fs/UnixNativeDispatcher", methods,
+                                    (int) (sizeof(methods) / sizeof(methods[0]))) == JNI_OK;
+}
+
 /* Returns how many classes were registered. */
 int wl_register_ojluni_nio(JNIEnv* env)
 {
@@ -103,5 +136,6 @@ int wl_register_ojluni_nio(JNIEnv* env)
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         else done++;
     }
+    done += register_file_times(env);
     return done;
 }

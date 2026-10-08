@@ -685,6 +685,64 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
     // ========================================================================
+    // The platform package
+    // ========================================================================
+
+    /**
+     * The platform package, "android": the framework itself, which every Android device lists, with
+     * uid 1000, the SDK level as its version and its own signing certificate. OH's bundle manager has
+     * no such bundle, so getPackageInfo("android") threw NameNotFoundException: the media library's
+     * package validator reads the platform's signature when a media service starts, and NewPipe's
+     * player service and Retro Music's music service failed in onCreate. No caller here is signed
+     * by the platform, so its certificate is one of Westlake's own (self-signed, "CN=Android,
+     * O=Westlake platform"), exactly one, as validators require.
+     */
+    private static final String PLATFORM_CERTIFICATE =
+            "MIIDRjCCAi6gAwIBAgIBATANBgkqhkiG9w0BAQsFADA7MQswCQYDVQQGEwJVUzEaMBgGA1UECgwRV2VzdGxha2UgcGxhdGZv" +
+            "cm0xEDAOBgNVBAMMB0FuZHJvaWQwIBcNMjYxMDA4MTYzNzIwWhgPMjEyNjA5MTQxNjM3MjBaMDsxCzAJBgNVBAYTAlVTMRow" +
+            "GAYDVQQKDBFXZXN0bGFrZSBwbGF0Zm9ybTEQMA4GA1UEAwwHQW5kcm9pZDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoC" +
+            "ggEBAIN3L4z0DYfay1T+emM/JK+AwRO9XcecBghzpCtIwou/KERfwD+wzEbJ1c2mrcnjQgklh0mH4IbTv+73DJoZjN/VsVuW" +
+            "qCZFJO2zSB6+yPwdN+IQF/BTiIJIy4A8r9wbFynBl6qkYZfaLbZqF4PrhhEABMg0s2J/I4eLnxWaf+ULMN1UNhJek9Vip1Um" +
+            "p1A6z7Is8zVVOLn7mDIJo+pHIfe7konwGRXhW3gY3UqxIWA/vC0cXkIk92uHhyyRZi2lgNGDN/Y8WftoHn/jpsO3Nz4kFXkB" +
+            "cKDCnk+BKRxM6pYff0fwUbky7NtqX4CUrIPKW1BkWIIJy2Rm44+sVuJXLckCAwEAAaNTMFEwHQYDVR0OBBYEFGqyKAXlby1x" +
+            "Vu0HU3z9oQk4N8KjMB8GA1UdIwQYMBaAFGqyKAXlby1xVu0HU3z9oQk4N8KjMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcN" +
+            "AQELBQADggEBAHN0GjVVb8fvUztHE4zrEad7Yn4ujDW2ImZ81YwR02eTHVWb4PNfRn0PfV+akZSs44LT4l0TRR0RHvaDM8pL" +
+            "NmGWEevNIJMkVnuAORxSQjf56jDRn5mu6Vw9nfsJsk0bGvENSDztoW5HV/oBzdFsbiCxSAB0z2ZECmYERyhLdyBtiqBWL+d3" +
+            "n9DZBvZPPMFqZfi0ESkSxAwwzVf11e/eIWLrz268tWe+QqVTtmrJK6HF+1vfWsaMVwwPduFsbj3BWqO260djD4DFdXdpaqC4" +
+            "J+FdUFsCw4pfmgHI0qbX4+FC/UClLoUBM9ZROPiXqLcdbWMBaVF/SjNPoBU31KaouLg=";
+
+    private static PackageInfo platformPackageInfo(long flags) {
+        PackageInfo info = new PackageInfo();
+        info.packageName = "android";
+        info.versionName = android.os.Build.VERSION.RELEASE;
+        info.setLongVersionCode(android.os.Build.VERSION.SDK_INT);
+        info.sharedUserId = "android.uid.system";
+        ApplicationInfo app = new ApplicationInfo();
+        app.packageName = "android";
+        app.processName = "system";
+        app.uid = android.os.Process.SYSTEM_UID;
+        app.flags = ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_PERSISTENT | ApplicationInfo.FLAG_INSTALLED;
+        app.enabled = true;
+        app.minSdkVersion = app.targetSdkVersion = android.os.Build.VERSION.SDK_INT;
+        app.sourceDir = app.publicSourceDir = "/system/android/framework/framework-res.apk";
+        app.nonLocalizedLabel = "Android System";
+        info.applicationInfo = app;
+        if ((flags & (android.content.pm.PackageManager.GET_SIGNATURES
+                | android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)) != 0) {
+            android.content.pm.Signature platform = new android.content.pm.Signature(
+                    android.util.Base64.decode(PLATFORM_CERTIFICATE, android.util.Base64.DEFAULT));
+            info.signatures = new android.content.pm.Signature[] {platform};
+            try {
+                info.signingInfo = new android.content.pm.SigningInfo(new android.content.pm.SigningDetails(
+                        info.signatures, android.content.pm.SigningDetails.SignatureSchemeVersion.SIGNING_BLOCK_V3));
+            } catch (java.security.cert.CertificateException e) {
+                Log.w(TAG, "platform package: no signing info: " + e);
+            }
+        }
+        return info;
+    }
+
+    // ========================================================================
     // Category 1: Package Info Queries
     // ========================================================================
 
@@ -696,6 +754,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         logBridged("getPackageInfo", packageName);
         if (SourcePackageRegistry.contains(packageName)) {
             return SourcePackageRegistry.packageInfo(packageName, flags);
+        }
+        if ("android".equals(packageName)) {
+            return platformPackageInfo(flags);
         }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
@@ -745,6 +806,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (SourcePackageRegistry.contains(packageName)) {
             PackageInfo info = SourcePackageRegistry.packageInfo(packageName, flags);
             return info == null ? null : info.applicationInfo;
+        }
+        if ("android".equals(packageName)) {
+            return platformPackageInfo(flags).applicationInfo;
         }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
