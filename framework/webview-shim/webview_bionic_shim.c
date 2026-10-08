@@ -6,10 +6,13 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <grp.h>
+#include <ifaddrs.h>
 #include <link.h>
 #include <locale.h>
 #include <math.h>
 #include <netdb.h>
+#include <netpacket/packet.h>
+#include <net/if.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <sched.h>
@@ -4767,4 +4770,66 @@ struct group *getgrnam(const char *name)
     if (caller_is_android_dso(__builtin_return_address(0), NULL)) return westlake_thread_gr(name, westlake_gr_by_name);
     if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "getgrnam");
     return real != NULL ? real(name) : NULL;
+}
+
+/*
+ * if_nametoindex and if_indextoname, answered from getifaddrs when the lookup is refused. musl asks
+ * SIOCGIFINDEX or SIOCGIFNAME on a socket, and OH's policy refuses an app's domain those ioctls
+ * (EACCES) where Android's allows them; getifaddrs, over netlink, works, and its AF_PACKET entries
+ * carry each link's index. libcore's NetworkInterface.getAll drops an interface whose index comes
+ * back 0, so with every lookup refused, getNetworkInterfaces returned null: yaacc's UPnP service
+ * failed on it at start, and openhab's thread threw. 91 corpus apps make that call, and the native
+ * libraries of 83 import these two (Flutter's dart:io, Tor, WebRTC). For every caller.
+ */
+static unsigned int westlake_link_index(const char *name)
+{
+    unsigned int index = 0;
+    struct ifaddrs *head = NULL;
+    if (getifaddrs(&head) != 0) return 0;
+    for (struct ifaddrs *p = head; p != NULL && index == 0; p = p->ifa_next) {
+        if (p->ifa_addr != NULL && p->ifa_addr->sa_family == AF_PACKET && p->ifa_name != NULL
+                && strcmp(p->ifa_name, name) == 0) {
+            index = (unsigned int) ((const struct sockaddr_ll *) p->ifa_addr)->sll_ifindex;
+        }
+    }
+    freeifaddrs(head);
+    return index;
+}
+
+unsigned int if_nametoindex(const char *name)
+{
+    typedef unsigned int (*Fn)(const char *);
+    static Fn real;
+    if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "if_nametoindex");
+    int saved = errno;
+    unsigned int index = real != NULL ? real(name) : 0;
+    if (index != 0 || name == NULL) return index;
+    int refused = errno;
+    index = westlake_link_index(name);
+    errno = index != 0 ? saved : refused;
+    return index;
+}
+
+char *if_indextoname(unsigned int index, char *name)
+{
+    typedef char *(*Fn)(unsigned int, char *);
+    static Fn real;
+    if (real == NULL) real = (Fn) dlsym(RTLD_NEXT, "if_indextoname");
+    char *found = real != NULL ? real(index, name) : NULL;
+    if (found != NULL || name == NULL) return found;
+    int refused = errno;
+    struct ifaddrs *head = NULL;
+    if (getifaddrs(&head) == 0) {
+        for (struct ifaddrs *p = head; p != NULL && found == NULL; p = p->ifa_next) {
+            if (p->ifa_addr != NULL && p->ifa_addr->sa_family == AF_PACKET && p->ifa_name != NULL
+                    && (unsigned int) ((const struct sockaddr_ll *) p->ifa_addr)->sll_ifindex == index) {
+                strncpy(name, p->ifa_name, IF_NAMESIZE - 1);
+                name[IF_NAMESIZE - 1] = '\0';
+                found = name;
+            }
+        }
+        freeifaddrs(head);
+    }
+    if (found == NULL) errno = refused != 0 ? refused : ENXIO;
+    return found;
 }
