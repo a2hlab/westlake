@@ -189,6 +189,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // LauncherApps' profiles and activity list (the launchers: cclauncher dereferenced a null
             // one in getUserProfiles; clauncher, gadgetbridge and kdeconnect list activities).
             case "launcherapps":
+            // VpnService fetches it itself (prepare, establish); a null one threw in socks5's onCreate.
+            case "vpn_management":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

@@ -107,6 +107,9 @@ public final class LocalServiceBinders {
                 case "launcherapps":
                     binder = proxy(name, "android.content.pm.ILauncherApps", LocalServiceBinders::launcherApps);
                     break;
+                case "vpn_management":
+                    binder = proxy(name, "android.net.IVpnManager", LocalServiceBinders::vpnManager);
+                    break;
                 case "uri_grants":
                     binder = proxy(name, "android.app.IUriGrantsManager", LocalServiceBinders::uriGrants);
                     break;
@@ -303,6 +306,17 @@ public final class LocalServiceBinders {
                     + " does not meet the requirements to access device identifiers.");
         }
         return DEFAULT;
+    }
+
+    /**
+     * VPN management, as on a device where the user has not yet consented to this app's VPN:
+     * prepareVpn answers false, so VpnService.prepare hands the app the consent Intent (which no
+     * dialog answers here), and every other call answers its type's default (no VPN established,
+     * not always-on). VpnService fetches this binder itself, and with no service its prepare
+     * dereferenced null: socks5 died in its first activity's onCreate, blockads's VPN thread at start.
+     */
+    private static Object vpnManager(String method, Object[] args) {
+        return "prepareVpn".equals(method) ? Boolean.FALSE : DEFAULT;
     }
 
     /**
