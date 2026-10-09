@@ -545,7 +545,12 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // the activity's (so above it: OH stacks app windows by creation order) and bound to its
     // BLAST SurfaceControl before its BLASTBufferQueue resolves a window. OH windows cannot be
     // placed here (updateSessionRect has no IPC on this path; every window sits at 0,0), so a
-    // smaller SurfaceView -- an inline video, say -- keeps sharing its window as before.
+    // smaller SurfaceView gets one only where it starts at its window's origin, which a window
+    // of its size sits on; elsewhere -- an inline video, say -- it keeps sharing its window.
+    // Shared, its producer and hwui race for the window's EGL surface: usp's GLSurfaceView
+    // (1200x1152 at the top of a 1200x1920 window) won it in 3 of 5 launches, and hwui aborted
+    // ("drawRenderNode called on a context with no surface!"); when hwui won, the emulator's
+    // screen was missing.
     // OH moves focus to the SurfaceView's window once it shows; it is created for a SurfaceViewWindow,
     // through which that focus counts as its activity window's (WindowCallbackBridge).
     private static final Map<Object, Integer> sSurfaceViewSessions = new java.util.IdentityHashMap<>();
@@ -556,12 +561,17 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /** SurfaceView (framework, by reflection) after building its BLAST layer. 0: not taken. */
     public static int attachSurfaceView(Object surfaceView, SurfaceControl blast, String name,
             int width, int height, int windowWidth, int windowHeight, IBinder token) {
-        if (blast == null || width <= 0 || height <= 0
-                || width * 10 < windowWidth * 9 || height * 10 < windowHeight * 9) {
-            // Said, so a SurfaceView left sharing its window shows why: usp's GLSurfaceView, short
-            // of its window, took the activity's OH window for its GL and hwui aborted.
+        int[] at = new int[2];
+        if (surfaceView instanceof android.view.View) {
+            ((android.view.View) surfaceView).getLocationInWindow(at);
+        }
+        boolean fills = width * 10 >= windowWidth * 9 && height * 10 >= windowHeight * 9;
+        boolean atOrigin = at[0] == 0 && at[1] == 0;
+        if (blast == null || width <= 0 || height <= 0 || !(fills || atOrigin)) {
+            // Said, so a SurfaceView left sharing its window shows why, and where it sits.
             System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
-                    + " in a " + windowWidth + "x" + windowHeight + " window shares it");
+                    + " at " + at[0] + "," + at[1] + " in a " + windowWidth + "x" + windowHeight
+                    + " window shares it");
             return 0;
         }
         try {
@@ -589,7 +599,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 sSurfaceViewWindows.put(surfaceView, window);
             }
             System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
-                    + " -> own sessionId=" + sessionId);
+                    + " at " + at[0] + "," + at[1] + " -> own sessionId=" + sessionId);
             return sessionId;
         } catch (Throwable t) {
             System.err.println("[OH_WSA] SurfaceView '" + name + "' own session failed: " + t);
