@@ -539,6 +539,7 @@ static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int 
 void wl_register_media(JNIEnv* env, JavaVM* vm);
 int wl_register_text(JNIEnv* env);
 int wl_register_audiorecord(JNIEnv* env);
+int wl_register_audio_ports(JNIEnv* env);
 int wl_register_expat(JNIEnv* env);
 int wl_register_ojluni_nio(JNIEnv* env);
 int wl_register_localsocket(JNIEnv* env);
@@ -1084,6 +1085,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                       (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
         int tx = wl_register_text(env);
         int ar = wl_register_audiorecord(env);
+        int ap = wl_register_audio_ports(env);
         int xp = wl_register_expat(env);
         int jl = install_lookup_logging(env, vm);
         int mb = wl_register_ojluni_nio(env);
@@ -1099,12 +1101,12 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 more=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, xp, jl, mb, ls, cv, sc, more);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, more);
         note(line);
     }
     wl_register_media(env, vm);

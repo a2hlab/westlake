@@ -1668,10 +1668,12 @@ public class AppSpawnXInit {
      *     }
      * Button.onClick never fires.
      *
-     * The Proxy implements all 168 IAudioService methods with safe defaults
-     * (false / 0 / null / empty collection / empty array).  HelloWorld only
-     * touches AudioManager via the implicit click-sound path; default-false
-     * silences sound effects without breaking the dispatch chain.
+     * The service is LocalServiceBinders' in-process audio service, the binder
+     * ServiceManager.getService("audio") also answers, so AudioManager's cache
+     * and PlayerBase's own cache see the same answers: a phone's volumes, the
+     * ringer normal, audio focus granted (see LocalServiceBinders.audio). The
+     * typed-default Proxy it replaces answered a maximum volume of 0 and focus
+     * refused.
      *
      * Pattern matches the existing installInputManagerAdapter sService
      * reflection above — same null-cache-injection technique used by adapter
@@ -1679,78 +1681,24 @@ public class AppSpawnXInit {
      */
     private static void installAudioServiceStub() {
         try {
-            Class<?> iAudioServiceCls = Class.forName("android.media.IAudioService");
-            Class<?> audioManagerCls  = Class.forName("android.media.AudioManager");
-
-            // Build an InvocationHandler that returns safe defaults for every
-            // method.  Covers void/primitive/object/array/collection return
-            // types; falls through to null for anything else.  Handles
-            // equals/hashCode/toString explicitly so the proxy behaves like
-            // a normal object identity.
-            java.lang.reflect.InvocationHandler handler =
-                    new java.lang.reflect.InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, java.lang.reflect.Method method,
-                                     Object[] args) {
-                    String name = method.getName();
-                    if ("equals".equals(name) && args != null && args.length == 1) {
-                        return Boolean.valueOf(proxy == args[0]);
-                    }
-                    if ("hashCode".equals(name)) {
-                        return Integer.valueOf(System.identityHashCode(proxy));
-                    }
-                    if ("toString".equals(name)) {
-                        return "IAudioServiceStub@"
-                                + Integer.toHexString(System.identityHashCode(proxy));
-                    }
-                    Class<?> ret = method.getReturnType();
-                    if (ret == void.class)                          return null;
-                    if (ret == boolean.class || ret == Boolean.class)
-                        return Boolean.FALSE;
-                    if (ret == int.class || ret == Integer.class)
-                        return Integer.valueOf(0);
-                    if (ret == long.class || ret == Long.class)
-                        return Long.valueOf(0L);
-                    if (ret == float.class || ret == Float.class)
-                        return Float.valueOf(0f);
-                    if (ret == double.class || ret == Double.class)
-                        return Double.valueOf(0.0);
-                    if (ret == byte.class || ret == Byte.class)
-                        return Byte.valueOf((byte) 0);
-                    if (ret == short.class || ret == Short.class)
-                        return Short.valueOf((short) 0);
-                    if (ret == char.class || ret == Character.class)
-                        return Character.valueOf('\0');
-                    if (java.util.List.class.isAssignableFrom(ret))
-                        return java.util.Collections.emptyList();
-                    if (java.util.Map.class.isAssignableFrom(ret))
-                        return java.util.Collections.emptyMap();
-                    if (java.util.Set.class.isAssignableFrom(ret))
-                        return java.util.Collections.emptySet();
-                    if (ret.isArray()) {
-                        return java.lang.reflect.Array.newInstance(
-                                ret.getComponentType(), 0);
-                    }
-                    // String + other Object types: null
-                    return null;
-                }
-            };
-
-            Object stub = java.lang.reflect.Proxy.newProxyInstance(
-                    iAudioServiceCls.getClassLoader(),
-                    new Class<?>[]{iAudioServiceCls},
-                    handler);
-
+            Class<?> audioManagerCls = Class.forName("android.media.AudioManager");
+            android.os.IBinder binder = adapter.core.LocalServiceBinders.get("audio");
+            Object service = binder == null ? null
+                    : binder.queryLocalInterface("android.media.IAudioService");
+            if (service == null) {
+                System.err.println("[AdapterIAudioSvc] no in-process audio service");
+                System.err.flush();
+                return;
+            }
             // AudioManager keeps a private static IAudioService sService cache;
             // getService() returns this if non-null without calling
-            // ServiceManager.getService("audio") (which would yield null in
-            // the OH adapter environment).
+            // ServiceManager.getService("audio").
             try {
                 Field sService = audioManagerCls.getDeclaredField("sService");
                 sService.setAccessible(true);
-                sService.set(null, stub);
+                sService.set(null, service);
                 System.err.println("[AdapterIAudioSvc] AudioManager.sService stamped with "
-                        + "Proxy stub=" + stub);
+                        + "the in-process audio service");
             } catch (NoSuchFieldException nsf) {
                 System.err.println("[AdapterIAudioSvc] AudioManager.sService not found "
                         + "(field renamed?): " + nsf);

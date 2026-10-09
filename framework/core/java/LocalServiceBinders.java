@@ -521,12 +521,126 @@ public final class LocalServiceBinders {
      * the NPE. Answering the name here gives every cache the same binder.
      *
      * Nothing reaches OH audio through this interface; actual playback is the SoundPool/AVPlayer
-     * backend's business. So it answers as the stub it replaces did, with defaults: no players
-     * tracked, no sound effects, nothing muted. trackPlayer's 0 is a player id the caller only
-     * hands back later.
+     * backend's business. It answers as a phone whose speaker is its only output: every stream
+     * at AudioSystem's default volume out of AudioService's maximum (music 5 of 15), the ringer
+     * normal, the mode normal, and audio focus granted, since one app has nobody to take it from.
+     * A volume set or adjusted reads back, per stream; OH's mixer keeps its own. Players are not
+     * tracked, and there are no sound effects. trackPlayer's 0 is a player id the caller only hands
+     * back later.
+     *
+     * Before, every method answered its type default: a maximum volume of 0, a ringer mode of 0
+     * (silent) and focus refused (AUDIOFOCUS_REQUEST_FAILED), so a player that asks for focus
+     * before it plays never played, and volume controls had nothing to set. The harness's
+     * framework-contracts probe measured it (svc:audio).
      */
     private static Object audio(String method, Object[] args) {
-        return DEFAULT;
+        switch (method) {
+            case "getStreamVolume":
+            case "getLastAudibleStreamVolume":
+                return streamVolume(firstInt(args));
+            case "getStreamMaxVolume":
+                return limit(MAX_STREAM_VOLUME, firstInt(args), 15);
+            case "getStreamMinVolume":
+                return limit(MIN_STREAM_VOLUME, firstInt(args), 0);
+            case "setStreamVolume":
+            case "setStreamVolumeWithAttribution":
+                setStreamVolume((Integer) args[0], (Integer) args[1]);
+                return DEFAULT;
+            case "adjustStreamVolume":
+            case "adjustStreamVolumeWithAttribution":
+                adjustStreamVolume((Integer) args[0], (Integer) args[1]);
+                return DEFAULT;
+            case "adjustSuggestedStreamVolume": {
+                int stream = (Integer) args[1];
+                adjustStreamVolume(stream == Integer.MIN_VALUE ? 3 /* STREAM_MUSIC */ : stream, (Integer) args[0]);
+                return DEFAULT;
+            }
+            case "isStreamMute": {
+                Integer stream = firstInt(args);
+                synchronized (sAudio) {
+                    return stream != null && stream >= 0 && stream < sMuted.length && sMuted[stream];
+                }
+            }
+            case "getRingerModeExternal":
+            case "getRingerModeInternal":
+                return sRingerMode;
+            case "setRingerModeExternal":
+            case "setRingerModeInternal":
+                sRingerMode = (Integer) args[0];
+                return DEFAULT;
+            case "getMode":
+                return sMode;
+            case "setMode":
+                sMode = (Integer) args[0];
+                return DEFAULT;
+            case "requestAudioFocus":
+            case "requestAudioFocusForTest":
+            case "abandonAudioFocus":
+            case "abandonAudioFocusForTest":
+                return 1;   // AUDIOFOCUS_REQUEST_GRANTED
+            case "getUiSoundsStreamType":
+                return 2;   // STREAM_RING: STREAM_SYSTEM's alias on phones
+            case "isStreamAffectedByRingerMode": {
+                Integer stream = firstInt(args);
+                return stream != null && (stream == 1 || stream == 2 || stream == 5 || stream == 7);
+            }
+            case "isStreamAffectedByMute": {
+                Integer stream = firstInt(args);   // AudioSystem.DEFAULT_MUTE_STREAMS_AFFECTED
+                return stream != null && (stream == 0 || stream == 1 || stream == 2 || stream == 3
+                        || stream == 5 || stream == 6);
+            }
+            default:
+                return DEFAULT;
+        }
+    }
+
+    // AudioService's MAX_STREAM_VOLUME and MIN_STREAM_VOLUME, and AudioSystem.DEFAULT_STREAM_VOLUME,
+    // by stream type (voice call, system, ring, music, alarm, notification, bluetooth SCO, system
+    // enforced, DTMF, TTS, accessibility, assistant).
+    private static final int[] MAX_STREAM_VOLUME = {5, 7, 7, 15, 7, 7, 15, 7, 15, 15, 15, 15};
+    private static final int[] MIN_STREAM_VOLUME = {1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0};
+    private static final Object sAudio = new Object();
+    private static final int[] sVolume = {4, 7, 5, 5, 6, 5, 7, 7, 5, 5, 5, 5};
+    private static final boolean[] sMuted = new boolean[12];
+    private static volatile int sRingerMode = 2;   // RINGER_MODE_NORMAL
+    private static volatile int sMode = 0;         // MODE_NORMAL
+
+    private static int limit(int[] table, Integer stream, int fallback) {
+        return stream != null && stream >= 0 && stream < table.length ? table[stream] : fallback;
+    }
+
+    private static int streamVolume(Integer stream) {
+        if (stream == null || stream < 0 || stream >= sVolume.length) return 0;
+        synchronized (sAudio) {
+            return sMuted[stream] ? 0 : sVolume[stream];
+        }
+    }
+
+    private static void setStreamVolume(int stream, int index) {
+        if (stream < 0 || stream >= sVolume.length) return;
+        synchronized (sAudio) {
+            sVolume[stream] = Math.max(MIN_STREAM_VOLUME[stream], Math.min(MAX_STREAM_VOLUME[stream], index));
+            sMuted[stream] = false;
+        }
+    }
+
+    private static void adjustStreamVolume(int stream, int direction) {
+        if (stream < 0 || stream >= sVolume.length) return;
+        synchronized (sAudio) {
+            switch (direction) {
+                case -100: sMuted[stream] = true; break;              // ADJUST_MUTE
+                case 100: sMuted[stream] = false; break;              // ADJUST_UNMUTE
+                case 101: sMuted[stream] = !sMuted[stream]; break;    // ADJUST_TOGGLE_MUTE
+                case 1:
+                case -1:
+                    sVolume[stream] = Math.max(MIN_STREAM_VOLUME[stream],
+                            Math.min(MAX_STREAM_VOLUME[stream], sVolume[stream] + direction));
+                    sMuted[stream] = false;
+                    break;
+                default:
+                    break;   // ADJUST_SAME shows UI only
+            }
+        }
     }
 
     /**
