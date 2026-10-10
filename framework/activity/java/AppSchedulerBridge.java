@@ -1881,7 +1881,8 @@ public class AppSchedulerBridge {
             // + data + type + flags + extras).
             Intent intent = buildIntentFromWant(packageName, activityInfo.name, wantJson);
             // A start from this app's own code: the Intent it passed, extras and action intact.
-            Intent original = PendingLaunchIntents.take(activityInfo.name);
+            PendingLaunchIntents.Entry pending = PendingLaunchIntents.take(activityInfo.name);
+            Intent original = pending != null ? pending.intent : null;
             if (original != null) {
                 original.setComponent(new android.content.ComponentName(packageName, activityInfo.name));
                 intent = original;
@@ -1890,6 +1891,7 @@ public class AppSchedulerBridge {
             // §1.2.4.3: token map. Create/get Android IBinder for this OH token,
             // store mapping for reverse callback (finishActivity / pause / stop).
             IBinder token = OhTokenRegistry.acquireAndroidToken(abilityRecordId, ohTokenAddr);
+            if (pending != null) ActivityResults.bind(token, pending.request);
 
             System.err.println("[B47-SLA] intent.component=" + intent.getComponent()
                     + " action=" + intent.getAction()

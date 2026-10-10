@@ -20,14 +20,17 @@ import java.util.Iterator;
 final class PendingLaunchIntents {
     private static final long MAX_AGE_MS = 10_000;
 
-    private static final class Entry {
+    /** A pending launch: the Intent, and the caller waiting for the activity's result, if any. */
+    static final class Entry {
         final String className;
         final Intent intent;
+        final ActivityResults.Request request;
         final long time;
 
-        Entry(String className, Intent intent) {
+        Entry(String className, Intent intent, ActivityResults.Request request) {
             this.className = className;
             this.intent = intent;
+            this.request = request;
             this.time = SystemClock.uptimeMillis();
         }
     }
@@ -36,14 +39,17 @@ final class PendingLaunchIntents {
 
     private PendingLaunchIntents() {}
 
-    /** Called as startActivity sends the start on: a copy, since the caller may change its Intent. */
-    static synchronized void offer(String className, Intent intent) {
+    /**
+     * Called as startActivity sends the start on: a copy, since the caller may change its Intent, and
+     * the caller's request when it asked for a result (startActivityForResult).
+     */
+    static synchronized void offer(String className, Intent intent, ActivityResults.Request request) {
         if (className == null || intent == null) return;
-        sPending.addLast(new Entry(className, new Intent(intent)));
+        sPending.addLast(new Entry(className, new Intent(intent), request));
     }
 
-    /** The oldest pending Intent for the activity class, or null; entries older than ten seconds expire. */
-    static synchronized Intent take(String className) {
+    /** The oldest pending launch for the activity class, or null; entries older than ten seconds expire. */
+    static synchronized Entry take(String className) {
         long now = SystemClock.uptimeMillis();
         for (Iterator<Entry> it = sPending.iterator(); it.hasNext(); ) {
             Entry entry = it.next();
@@ -51,7 +57,7 @@ final class PendingLaunchIntents {
                 it.remove();
             } else if (entry.className.equals(className)) {
                 it.remove();
-                return entry.intent;
+                return entry;
             }
         }
         return null;
