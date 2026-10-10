@@ -1598,6 +1598,9 @@ public class AppSchedulerBridge {
         public static IBinder findByRecordId(int abilityRecordId) {
             return adapter.core.OhTokenRegistry.findByRecordId(abilityRecordId);
         }
+        public static void forgetRecord(int abilityRecordId) {
+            adapter.core.OhTokenRegistry.forgetRecord(abilityRecordId);
+        }
         public static void setMainSessionId(long ohTokenAddr, int persistentId) {
             adapter.core.OhTokenRegistry.setMainSessionId(ohTokenAddr, persistentId);
         }
@@ -1972,11 +1975,19 @@ public class AppSchedulerBridge {
             // token) has no ability manager to race, and it resumes here too, as Android's launch
             // does: what onCreate, onStart and onPostCreate post to the main thread then runs after
             // onResume. Started without the resume, Reddit's posts ran while it was only started,
-            // and its splash held every draw in two launches of three. The resume that follows in a
-            // transaction of its own finds the activity resumed and does nothing.
+            // and its splash held every draw in two launches of three.
+            //
+            // The native in-process start then resumed the activity again, in a transaction of its
+            // own with an empty ActivityResultItem as its callback. That resume was not a no-op:
+            // ActivityThread pauses a resumed activity before it delivers results and resumes it
+            // after, so every activity an app started got onPause and onResume just after it
+            // started. mpv pauses its player in onPause and does not resume it in onResume: a
+            // picked file opened at 0:00 and stayed there, silent. The native start looks the
+            // record up only for that second resume, so a launch that resumes here forgets it.
             if (ohTokenAddr == 0L) {
                 transaction.addTransactionItem(
                         android.app.servertransaction.ResumeActivityItem.obtain(token, true, false));
+                OhTokenRegistry.forgetRecord(abilityRecordId);
             } else {
                 transaction.addTransactionItem(
                         android.app.servertransaction.StartActivityItem.obtain(token, null));

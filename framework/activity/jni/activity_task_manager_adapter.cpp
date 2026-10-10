@@ -1402,6 +1402,11 @@ jint nativeStartAbility_impl(JNIEnv* env, jclass,
                 // AppSchedulerBridge.directResume() exists for exactly this but is private and
                 // hardcoded to recordId 1 (correct only for the first, direct-launched Activity).
                 // Replicate it here for THIS launch's recordId — no adapter-jar/boot-image work.
+                //
+                // AppSchedulerBridge now resumes an in-process start in its launch transaction and
+                // forgets the record, so this finds no token and schedules nothing. Its empty
+                // ActivityResultItem was not a no-op: ActivityThread pauses a resumed activity
+                // before delivering results, so the activity got onPause and onResume.
                 wl_dl2_resume(env, rec);
                 return 0;
             }
