@@ -66,6 +66,17 @@ public final class OhTokenRegistry {
     }
 
     /**
+     * Forget a record whose launch transaction already resumed its activity. The only reader of
+     * this map is the native in-process start, which looks the record up to resume the activity
+     * in a second transaction; that transaction carries an empty ActivityResultItem, and
+     * ActivityThread pauses a resumed activity before delivering results, so the second resume
+     * cost every in-process activity an onPause and onResume just after it started.
+     */
+    public static void forgetRecord(int abilityRecordId) {
+        sRecordToAndroid.remove(abilityRecordId);
+    }
+
+    /**
      * §3.1.5.6.3 — record OH SCB-auto-created main SceneSession persistentId
      * (when SCB binds an existing main session to our SessionStageAdapter).
      * Triggers the addToDisplay reuse path instead of CreateAndConnect.
