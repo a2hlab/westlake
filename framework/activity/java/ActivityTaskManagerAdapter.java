@@ -148,6 +148,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             return answerPermissionRequest(intent, resultTo, resultWho, requestCode);
         }
         intent = resolveOwnActivity(intent, resolvedType);
+        // startActivityForResult: the started activity's result goes back to resultTo when it
+        // finishes (ActivityResults). Only the app's own activities launch here to answer it.
+        final ActivityResults.Request request = ActivityResults.requested(resultTo, resultWho, requestCode);
         // In-process launch executes the launch transaction on the calling thread. From a worker
         // thread that builds the activity off the main looper, and its lifecycle registry throws
         // ("addObserver must be called on the main thread", "Can't create handler inside thread"):
@@ -166,14 +169,14 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             final IBinder from = resultTo;
             new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
                 try {
-                    bridgeStartActivityWithStack(started, startFlags, from);
+                    bridgeStartActivityWithStack(started, startFlags, from, request);
                 } catch (Throwable t) {
                     System.err.println("[ATMA] deferred startActivity failed: " + t);
                 }
             });
             return 0;   // ActivityManager.START_SUCCESS
         }
-        return bridgeStartActivityWithStack(intent, flags, resultTo);
+        return bridgeStartActivityWithStack(intent, flags, resultTo, request);
     }
 
     /**
@@ -1098,7 +1101,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      * @param flags  Intent flags (FLAG_ACTIVITY_NEW_TASK, CLEAR_TOP, etc.)
      * @return result code
      */
-    private int bridgeStartActivityWithStack(Intent intent, int flags, IBinder resultTo) {
+    private int bridgeStartActivityWithStack(Intent intent, int flags, IBinder resultTo,
+            ActivityResults.Request request) {
         if (intent == null) {
             Log.w(TAG, "bridgeStartActivityWithStack called with null Intent");
             return 0;
@@ -1111,7 +1115,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         // built it, not the one rebuilt from the Want (see PendingLaunchIntents).
         String own = android.app.ActivityThread.currentPackageName();
         if (own != null && own.equals(bundleName) && abilityName != null && !abilityName.isEmpty()) {
-            PendingLaunchIntents.offer(abilityName.startsWith(".") ? bundleName + abilityName : abilityName, intent);
+            PendingLaunchIntents.offer(abilityName.startsWith(".") ? bundleName + abilityName : abilityName, intent,
+                    request);
         }
 
         // 2026-05-19: resolve callerToken once — used by both nativeStartAbility

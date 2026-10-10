@@ -352,6 +352,8 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
 
     @Override
     public boolean finishActivity(IBinder token, int code, Intent data, int finishTask) {
+        // A start for result: the caller hears the result (ActivityResults), as from ATMS.
+        ActivityResults.deliver(token, code, data);
         leaveTask(token);
         try {
             // G2.14f — direct BCP call (see reportOhLifecycle for rationale).
