@@ -353,6 +353,25 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         return frame;
     }
 
+    /**
+     * Android's sub-window types (FIRST_SUB_WINDOW to LAST_SUB_WINDOW): a PopupWindow's panel,
+     * menus, dropdowns, attached dialogs. The native client gives an application window (a dialog)
+     * an OH sub-window session of its own, but asks for these as an OH main window, which this
+     * board refuses (1005); the window then draws into a surface node with no session, which nothing
+     * shows: an overflow menu took taps and was never seen. A sub-window is an application window
+     * placed over its parent, so it asks as one (sessionTypeFor) and gets the display-sized OH
+     * window a dialog gets: placement moves the window's content to its frame inside the OH window
+     * (placeWindow, applyPosition), and an OH window only as wide as the popup clips it away.
+     */
+    private static boolean isSubWindow(int windowType) {
+        return windowType >= WindowManager.LayoutParams.FIRST_SUB_WINDOW
+                && windowType <= WindowManager.LayoutParams.LAST_SUB_WINDOW;
+    }
+
+    private static int sessionTypeFor(int windowType) {
+        return isSubWindow(windowType) ? WindowManager.LayoutParams.TYPE_APPLICATION : windowType;
+    }
+
     /** Move a placed window's layer to its frame; a size update resets the layer to (0,0). */
     private static void applyPosition(SurfaceControl sc, Rect frame) {
         if (sc == null || !sc.isValid() || (frame.left == 0 && frame.top == 0)) return;
@@ -767,9 +786,11 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         System.err.println("[OH_WSA] PRE-native nativeCreateSession");
         int[] sessionInfo;
         try {
+            boolean sub = isSubWindow(windowType);
             sessionInfo = nativeCreateSession(window.asBinder(),
                     bundleName, abilityName, moduleName, windowName,
-                    windowType, layerStackId, width, height,
+                    sessionTypeFor(windowType), layerStackId,
+                    sub ? dispWH[0] : width, sub ? dispWH[1] : height,
                     ohTokenAddr);
             System.err.println("[OH_WSA] POST-native sessionInfo length=" + (sessionInfo == null ? -1 : sessionInfo.length));
         } catch (Throwable t) {
