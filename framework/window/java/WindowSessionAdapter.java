@@ -1262,10 +1262,17 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // measuredWidth/Height=0 (first traversal before any successful
         // measure), computeFrames returns frame=(0,0,0,0) → relayoutAsync=true
         // → outFrames not propagated → mWinFrame stays 0×0 → next measure
-        // still 0 → death spiral.  Populating winConfig.mBounds with the
-        // real window bounds (matches the OH window rect this adapter
-        // owns) breaks the spiral.
-        Configuration config = sizedConfiguration(width, height);
+        // still 0 → death spiral.  Populating winConfig.mBounds breaks the
+        // spiral.
+        //
+        // The bounds are the display's, as WMS gives every window of an activity its activity's
+        // configuration, not the window's own size. ViewRootImpl lays its window out locally inside
+        // these bounds, by its gravity and x/y (WindowLayout, as placeWindow does here), and takes
+        // the frame as its window's position. Inside its own size a centred dialog came out at
+        // (0,0): the app was told its dialog sat at the top left (getLocationOnScreen) while it was
+        // drawn centred, and a popup anchored in that dialog would open in the wrong place.
+        int[] display = getDefaultDisplaySize();
+        Configuration config = sizedConfiguration(display[0], display[1]);
         outMergedConfiguration.setOverrideConfiguration(config);
         // The global side is the display's, as WMS reports it for every window. ViewRootImpl hands
         // it to ActivityThread's config callback, which applies it to the process's resources, and
@@ -1273,11 +1280,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // window bounds. Set from this window, a smaller window shrank the app's whole idea of the
         // screen: Draw Anywhere's 180x180 overlay button made the display 180 px wide, and placing
         // its 640 px toolbar threw "Cannot coerce value to an empty range: maximum -460".
-        int[] display = getDefaultDisplaySize();
         Configuration globalConfig = sizedConfiguration(display[0], display[1]);
         outMergedConfiguration.setGlobalConfiguration(globalConfig);
-        System.err.println("[OH_WSA-relayout] outMergedConfiguration set: "
-                + "winConfig.mBounds=" + config.windowConfiguration.getBounds()
+        System.err.println("[OH_WSA-relayout] outMergedConfiguration set: window=" + width + "x" + height
+                + " winConfig.mBounds=" + config.windowConfiguration.getBounds()
                 + " screenDp=" + config.screenWidthDp + "x" + config.screenHeightDp
                 + " densityDpi=" + config.densityDpi
                 + " global=" + globalConfig.screenWidthDp + "x" + globalConfig.screenHeightDp);
