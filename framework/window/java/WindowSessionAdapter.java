@@ -991,6 +991,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         OhWindowPolicy.remove(window);
         OhInsetsBridge.remove(window);
         logBridged("remove", "-> OH ISession.Disconnect");
+        // Window focus moves to the window under this one, as WMS moves it.
+        WindowCallbackBridge.windowRemoved(window);
 
         // Clean up InputChannel
         InputEventBridge.getInstance().destroyInputChannel(window.asBinder());

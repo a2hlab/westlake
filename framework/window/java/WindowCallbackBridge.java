@@ -158,6 +158,67 @@ public class WindowCallbackBridge {
         }
     }
 
+    /**
+     * A window is being removed. WMS moves window focus to the next window that can take it when the
+     * focused one goes: a dialog dismissed, a popup closed, an activity finished. OH sends this
+     * app's sessions no such event (they are created not focusable, and the focus OH reports is its
+     * own), so the window under a closed dialog never heard it had focus again. The input method
+     * manager serves only the focused window's editor, and ignored its editor's showSoftInput ("not
+     * served"): Markor's editor took taps and brought up no keyboard.
+     */
+    static void windowRemoved(IWindow removed) {
+        Object removedRoot;
+        try {
+            removedRoot = viewRootOf(removed);
+        } catch (ReflectiveOperationException e) {
+            return;
+        }
+        if (removedRoot == null) return;
+        boolean hadFocus;
+        synchronized (sFocusGroups) {
+            FocusGroup group = sFocusGroups.remove(removedRoot);
+            hadFocus = group != null && Boolean.TRUE.equals(group.delivered);
+        }
+        if (!hadFocus) return;
+        Object next = topFocusableRoot(removedRoot);
+        if (next == null) return;
+        Boolean deliver = updateFocusGroup(next, null, true);
+        if (deliver == null) return;
+        try {
+            next.getClass().getMethod("windowFocusChanged", boolean.class).invoke(next, deliver);
+            Log.d(TAG, "window focus handed to the window under the removed one");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to hand window focus on", e);
+        }
+    }
+
+    /**
+     * The ViewRootImpl of the topmost remaining window that can take focus. OH stacks this app's
+     * windows in creation order, which is session order (as OHTouchInjector routes a touch).
+     */
+    private static Object topFocusableRoot(Object exclude) {
+        Object chosen = null;
+        int chosenSession = -1;
+        try {
+            for (android.view.View root : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
+                if (root == null || !root.isAttachedToWindow() || root.getVisibility() != android.view.View.VISIBLE) continue;
+                Object viewRootImpl = root.getViewRootImpl();
+                if (viewRootImpl == null || viewRootImpl == exclude) continue;
+                if (!(root.getLayoutParams() instanceof android.view.WindowManager.LayoutParams)) continue;
+                android.view.WindowManager.LayoutParams lp = (android.view.WindowManager.LayoutParams) root.getLayoutParams();
+                if ((lp.flags & android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0) continue;
+                int session = InputEventBridge.getInstance().getSessionId(root.getWindowToken());
+                if (session > chosenSession) {
+                    chosen = viewRootImpl;
+                    chosenSession = session;
+                }
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "No window to hand focus to", t);
+        }
+        return chosen;
+    }
+
     /** A SurfaceView's window is gone: it holds no focus for its group any more. */
     static void surfaceWindowGone(SurfaceViewWindow window) {
         Object viewRootImpl = window.owner();
