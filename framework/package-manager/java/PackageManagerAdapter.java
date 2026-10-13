@@ -977,6 +977,11 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public int checkPermission(String permName, String pkgName, int userId) {
         logBridged("checkPermission", permName + " for " + pkgName);
+        if ("android.permission.POST_NOTIFICATIONS".equals(permName)
+                && android.app.ActivityThread.currentPackageName() != null
+                && android.app.ActivityThread.currentPackageName().equals(pkgName)) {
+            return PermissionManagerAdapter.postNotifications();
+        }
         String ohPermission = PermissionMapper.mapToOH(permName);
         return nativeCheckPermission(pkgName, ohPermission);
     }

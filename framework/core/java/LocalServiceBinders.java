@@ -34,7 +34,7 @@ import java.util.Set;
  */
 public final class LocalServiceBinders {
     private static final String TAG = "WESTLAKE-LOCAL-SERVICE";
-    private static final Object DEFAULT = new Object();
+    static final Object DEFAULT = new Object();
     private static final Map<String, IBinder> sBinders = new HashMap<>();
     private static final Set<String> sSeen = Collections.synchronizedSet(new HashSet<String>());
     private static volatile ClipData sClip;
@@ -504,13 +504,13 @@ public final class LocalServiceBinders {
      * ParceledListSlice the service returns, and the plain Binder that used to stand in for the
      * service decoded every reply to null, so the NPE landed inside the framework, during bind.
      *
-     * No notification reaches OH through this interface. Posts and channel changes are accepted
-     * and dropped; queries answer what a service with nothing stored reports: no channels, no
-     * active notifications, notifications not enabled (targetSdk 33+ apps start without
-     * POST_NOTIFICATIONS), zen mode off.
+     * LocalNotifications keeps the app's channels and posted notifications and plays a post's
+     * sound, as NotificationManagerService does; notifications are enabled when the user allows
+     * them for the host application on OH. Nothing reaches OH's notification centre. Zen mode off.
+     * Before, posts and channels were dropped: a timer's notification ended it in silence.
      */
     private static Object notification(String method, Object[] args) {
-        return DEFAULT;
+        return LocalNotifications.answer(method, args);
     }
 
     /**
