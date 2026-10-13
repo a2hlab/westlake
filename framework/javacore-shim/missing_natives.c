@@ -22,6 +22,11 @@
  *   liboh_android_runtime.so, whose object tree no longer builds. LocalSend's Flutter engine
  *   reaches it through SurfaceView.performSurfaceTransaction before its first frame.
  *
+ *   android.view.SurfaceControl.nativeAddTransactionCompletedListener -- never registered. A
+ *   relaunched activity keeps its window, and ViewRootImpl asks to report the rebuilt window's
+ *   next draw, adding a completed listener as it does: the missing native killed the main thread
+ *   of every activity that called recreate().
+ *
  *   android.app.ActivityThread.nPurgePendingResources / nInitZygoteChildHeapProfiling -- the
  *   framework calls the first itself, from its low-memory purge, so no app code names it and any
  *   app can reach it once the system is short of memory: RedReader died on it before its first
@@ -206,6 +211,15 @@ JNIEXPORT void JNICALL Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadr
 { (void)env; (void)c; (void)transaction; (void)surface; (void)headroom; }
 
 /*
+ * A completed listener hears when a transaction reached the screen, with its present fence. No
+ * compositor here reports that, so the listener is accepted and never called. Its framework caller,
+ * ViewRootImpl, uses it only to time an app's first presented frame, which then goes unreported.
+ */
+JNIEXPORT void JNICALL Java_android_view_SurfaceControl_nativeAddTransactionCompletedListener(
+        JNIEnv* env, jclass c, jlong transaction, jobject listener)
+{ (void)env; (void)c; (void)transaction; (void)listener; }
+
+/*
  * OpenJDK's contract: the current wall-clock time as nanoseconds since offsetInSeconds, or -1 when
  * that difference does not fit (more than 2^32 seconds either way); Instant.now() then re-reads
  * with a nearer offset.
@@ -354,6 +368,8 @@ static const JNINativeMethod kActivityThread[] = {
 static const JNINativeMethod kSurfaceControl[] = {
     { "nativeSetDesiredHdrHeadroom", "(JJF)V",
       (void*) Java_android_view_SurfaceControl_nativeSetDesiredHdrHeadroom },
+    { "nativeAddTransactionCompletedListener", "(JLjava/util/function/Consumer;)V",
+      (void*) Java_android_view_SurfaceControl_nativeAddTransactionCompletedListener },
 };
 
 #define M(name, sig)      { #name, sig, (void*) Java_java_lang_Math_##name }

@@ -19,7 +19,6 @@
  */
 package adapter.core;
 
-import android.os.Binder;
 import android.os.IBinder;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,14 +35,15 @@ public final class OhTokenRegistry {
     /**
      * Get-or-create an Android-side IBinder for the given OH AbilityRecord token.
      * Caches both directions so subsequent lookups are stable. Called from
-     * AppSchedulerBridge.nativeOnScheduleLaunchAbility (B.47 path).
+     * AppSchedulerBridge.nativeOnScheduleLaunchAbility (B.47 path). An ActivityToken, not a
+     * Binder: ActivityThread will not relaunch an activity whose token is a local Binder.
      */
     public static IBinder acquireAndroidToken(int abilityRecordId, long ohTokenAddr) {
         if (ohTokenAddr != 0L) {
             IBinder existing = sOhToAndroid.get(ohTokenAddr);
             if (existing != null) return existing;
         }
-        IBinder b = new Binder();
+        IBinder b = new ActivityToken();
         if (ohTokenAddr != 0L) {
             sOhToAndroid.put(ohTokenAddr, b);
             sAndroidToOh.put(b, ohTokenAddr);
