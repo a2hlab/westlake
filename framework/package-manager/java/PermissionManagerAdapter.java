@@ -35,7 +35,20 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public static int checkProcessPermission(String permission, int pid, int uid) {
         if (permission == null || uid != android.os.Process.myUid()
                 || (pid != -1 && pid != android.os.Process.myPid())) return PackageManager.PERMISSION_DENIED;
+        if (POST_NOTIFICATIONS.equals(permission)) return postNotifications();
         return Native.granted(PermissionMapper.mapToOH(permission))
+                ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+    }
+
+    private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";
+
+    /**
+     * POST_NOTIFICATIONS is no OH permission: OH keeps a per-application notification switch that
+     * the user turns on (adapter.core.NotificationSwitch). Its mapping to NOTIFICATION_CONTROLLER,
+     * a system permission, read as denied for every app whatever the user had allowed.
+     */
+    public static int postNotifications() {
+        return adapter.core.NotificationSwitch.enabled()
                 ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
     }
     private static final class Native {

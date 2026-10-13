@@ -22,6 +22,9 @@ package adapter.activity;
  * 64-bit value, stable for that app on that device. Jellyfin's API client builds its device
  * identity from it and dies on the null. It is generated once and kept in the app's no_backup
  * directory, so it survives restarts and differs between devices, as Android's does.
+ *
+ * Files: the default sounds' URIs open DefaultSounds' files (openFile), as SettingsProvider opens
+ * the device's ringtones.
  */
 public class WlSettingsProvider extends android.content.ContentProvider {
     @Override public boolean onCreate() { return true; }
@@ -75,7 +78,25 @@ public class WlSettingsProvider extends android.content.ContentProvider {
         return new android.database.MatrixCursor(new String[] { "name", "value" });
     }
 
-    @Override public String getType(android.net.Uri uri) { return null; }
+    @Override
+    public String getType(android.net.Uri uri) {
+        return adapter.core.DefaultSounds.typeOf(uri) != 0 ? "audio/wav" : null;
+    }
+
+    /**
+     * The default ringtone, notification sound and alarm (content://settings/system/ringtone,
+     * notification_sound and alarm_alert, and their "_cache" forms), as SettingsProvider opens
+     * them: MediaPlayer.setDataSource and Ringtone open these URIs to play the device's defaults.
+     * The board has no ringtone files, so these are DefaultSounds' own.
+     */
+    @Override
+    public android.os.ParcelFileDescriptor openFile(android.net.Uri uri, String mode)
+            throws java.io.FileNotFoundException {
+        int type = adapter.core.DefaultSounds.typeOf(uri);
+        java.io.File file = type == 0 ? null : adapter.core.DefaultSounds.file(type);
+        if (file == null) throw new java.io.FileNotFoundException("no settings file for " + uri);
+        return android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+    }
 
     @Override
     public android.net.Uri insert(android.net.Uri uri, android.content.ContentValues values) {
