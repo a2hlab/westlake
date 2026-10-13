@@ -191,6 +191,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "launcherapps":
             // VpnService fetches it itself (prepare, establish); a null one threw in socks5's onCreate.
             case "vpn_management":
+            // TileService.requestListeningState reaches it through StatusBarManager (Chrono's timer).
+            case "statusbar":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

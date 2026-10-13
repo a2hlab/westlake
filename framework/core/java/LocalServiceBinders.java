@@ -180,6 +180,14 @@ public final class LocalServiceBinders {
                 case "bluetooth_manager":
                     binder = proxy(name, "android.bluetooth.IBluetoothManager", (method, args) -> DEFAULT);
                     break;
+                // TileService.requestListeningState, which an app with a Quick Settings tile calls
+                // when its state changes, reaches StatusBarManager with no service behind it: a
+                // NullPointerException on the main thread (Chrono, starting a timer). OH's status
+                // bar is not bridged, so requests are accepted and nothing changes on screen.
+                case "statusbar":
+                    binder = proxy(name, "com.android.internal.statusbar.IStatusBarService",
+                            LocalServiceBinders::statusBar);
+                    break;
                 default:
                     return null;
             }
@@ -240,6 +248,11 @@ public final class LocalServiceBinders {
             default:
                 return DEFAULT;   // no power save, not idle; wake locks are accepted
         }
+    }
+
+    private static Object statusBar(String method, Object[] args) {
+        if ("getDisableFlags".equals(method)) return new int[2];   // nothing disabled
+        return DEFAULT;
     }
 
     private static Object alarm(String method, Object[] args) {
