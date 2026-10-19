@@ -372,6 +372,33 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         return isSubWindow(windowType) ? WindowManager.LayoutParams.TYPE_APPLICATION : windowType;
     }
 
+    /**
+     * The frame a window is attached to. WMS gives a child window (FIRST_SUB_WINDOW to
+     * LAST_SUB_WINDOW: a popup, a panel) its parent's frame, here the display-sized activity
+     * window, and every other window none. ViewRootImpl lays a window that is not laid out in
+     * screen, a dialog, inside its attached frame when it has one. Given its own size as one, a
+     * centred dialog put itself at the top left whenever it laid itself out (a relayout that moves
+     * nothing but its position), while it stayed drawn centred, and taps on its buttons missed:
+     * Chrono's notice, whose OK could not be pressed.
+     */
+    private static Rect attachedFrameFor(int windowType) {
+        if (!isSubWindow(windowType)) return null;
+        int[] display = getDefaultDisplaySize();
+        return new Rect(0, 0, display[0], display[1]);
+    }
+
+    /**
+     * addToDisplay's attached frame: the parent's for a child window, and for others the invalid
+     * (0,0,-1,-1) WMS sends, which ViewRootImpl takes as none. An empty rect is valid to it: a frame
+     * of no size, which put every dialog at the top left.
+     */
+    private static void setAttachedFrame(Rect out, int windowType) {
+        if (out == null) return;
+        Rect attached = attachedFrameFor(windowType);
+        if (attached != null) out.set(attached);
+        else out.set(0, 0, -1, -1);
+    }
+
     /** Move a placed window's layer to its frame; a size update resets the layer to (0,0). */
     private static void applyPosition(SurfaceControl sc, Rect frame) {
         if (sc == null || !sc.isValid() || (frame.left == 0 && frame.top == 0)) return;
@@ -414,7 +441,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
         if (insetsState != null) OhInsetsBridge.copyForWindow(held.window, insetsState);
         if (sizeCompatScale != null && sizeCompatScale.length > 0) sizeCompatScale[0] = 1.0f;
-        if (attachedFrame != null) attachedFrame.set(0, 0, held.width, held.height);
+        setAttachedFrame(attachedFrame, held.windowType);
         if (mMainHandler == null) mMainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
         scheduleHeldBackCheck(key, held.token, android.os.SystemClock.uptimeMillis());
         return buildAddDisplayFlags(attrs);
@@ -502,10 +529,12 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // Its earlier relayouts returned no surface; a forced relayout now picks one up.
         try {
             ClientWindowFrames frames = new ClientWindowFrames();
-            frames.frame.set(0, 0, held.lastWidth, held.lastHeight);
-            frames.displayFrame.set(0, 0, held.lastWidth, held.lastHeight);
-            frames.parentFrame.set(0, 0, held.lastWidth, held.lastHeight);
-            frames.attachedFrame = new Rect(0, 0, held.lastWidth, held.lastHeight);
+            int[] display = getDefaultDisplaySize();
+            frames.frame.set(placeWindow(held.window, rememberAttrs(held.window, null),
+                    held.lastWidth, held.lastHeight));
+            frames.displayFrame.set(0, 0, display[0], display[1]);
+            frames.parentFrame.set(0, 0, display[0], display[1]);
+            frames.attachedFrame = attachedFrameFor(held.windowType);
             InsetsState insets = new InsetsState();
             OhInsetsBridge.copyForWindow(held.window, insets);
             held.window.resized(frames, false /* reportDraw */, new android.util.MergedConfiguration(),
@@ -866,14 +895,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
 
         if (attachedFrame != null) {
             try {
-                // 2026-05-11 G2.14ak — same dayu210 hardcoded fallback removed here.
-                // sessionInfo[3]/[4] come from nativeCreateSession which now gets correct
-                // values from the addToDisplay path above; fallback uses Display.
-                int[] _wh = getDefaultDisplaySize();
-                attachedFrame.set(0, 0,
-                        sessionInfo[3] > 0 ? sessionInfo[3] : _wh[0],
-                        sessionInfo[4] > 0 ? sessionInfo[4] : _wh[1]);
-                System.err.println("[OH_WSA] step6 attachedFrame.set OK");
+                setAttachedFrame(attachedFrame, windowType);
+                System.err.println("[OH_WSA] step6 attachedFrame " + attachedFrame);
             } catch (Throwable t) {
                 System.err.println("[OH_WSA] step6 FAIL " + t);
                 t.printStackTrace(System.err);
@@ -1167,10 +1190,12 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         if (!mReversePushed.contains(window.asBinder())) {
             try {
                 ClientWindowFrames pushedFrames = new ClientWindowFrames();
+                int[] display = getDefaultDisplaySize();
                 pushedFrames.frame.set(placed);
-                pushedFrames.displayFrame.set(0, 0, width, height);
-                pushedFrames.parentFrame.set(0, 0, width, height);
-                pushedFrames.attachedFrame = new Rect(0, 0, width, height);
+                pushedFrames.displayFrame.set(0, 0, display[0], display[1]);
+                pushedFrames.parentFrame.set(0, 0, display[0], display[1]);
+                pushedFrames.attachedFrame = attachedFrameFor(windowAttrs != null ? windowAttrs.type
+                        : WindowManager.LayoutParams.TYPE_APPLICATION);
                 android.util.MergedConfiguration cfg = new android.util.MergedConfiguration();
                 // empty global+override config is fine — Activity already created with
                 // real config; this is just to satisfy the IWindow.resized signature.
