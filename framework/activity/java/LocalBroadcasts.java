@@ -5,11 +5,14 @@ import android.app.ActivityThread;
 import android.content.IIntentReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.ResolveInfo;
 import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -24,6 +27,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * Delivery goes through the receiver's IIntentReceiver (LoadedApk's dispatcher), which posts
  * onReceive to the handler the receiver was registered with, as for a broadcast from the system.
+ * A broadcast to one of the app's manifest receivers, by name or within its package, runs that
+ * receiver in process (ManifestReceivers).
  */
 public final class LocalBroadcasts {
     private static final String TAG = "OH_LocalBroadcasts";
@@ -76,8 +81,8 @@ public final class LocalBroadcasts {
 
     /**
      * sendBroadcast / sendOrderedBroadcast from the app: each of its registered receivers whose
-     * filter matches gets it, then the ordered broadcast's final receiver (resultTo) with the
-     * initial result. Returns ActivityManager.BROADCAST_SUCCESS.
+     * filter matches gets it, then the manifest receivers it reaches, then the ordered broadcast's
+     * final receiver (resultTo) with the result. Returns ActivityManager.BROADCAST_SUCCESS.
      */
     public static int broadcast(Intent intent, String resolvedType, IIntentReceiver resultTo, int resultCode,
             String resultData, Bundle map, boolean ordered, int userId) {
@@ -99,7 +104,12 @@ public final class LocalBroadcasts {
                 }
             }
         }
-        if (resultTo != null) {
+        List<ResolveInfo> manifest = forUs ? ManifestReceivers.receiversFor(intent, resolvedType)
+                : Collections.<ResolveInfo>emptyList();
+        if (!manifest.isEmpty()) {
+            ManifestReceivers.deliver(manifest, intent, resultTo, resultCode, resultData, map, ordered, userId);
+            delivered += manifest.size();
+        } else if (resultTo != null) {
             try {
                 resultTo.performReceive(new Intent(intent), resultCode, resultData, map, false, false, userId);
             } catch (Throwable t) {

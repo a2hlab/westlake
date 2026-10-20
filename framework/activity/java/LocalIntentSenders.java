@@ -1,11 +1,16 @@
 package adapter.activity;
 
 import android.app.ActivityManager;
+import android.app.ActivityThread;
+import android.app.Application;
+import android.content.IIntentReceiver;
 import android.content.IIntentSender;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.IInterface;
+import android.os.UserHandle;
+import android.util.Log;
 
 import java.lang.reflect.Proxy;
 import java.util.Arrays;
@@ -21,12 +26,20 @@ import java.util.Map;
  * AlarmManager.cancel, which throws on null.
  *
  * What the activity manager guarantees at creation is kept: two requests with the same type,
- * package, request code and filter-equal intent get the same sender (so a later cancel matches),
- * FLAG_NO_CREATE answers only an existing one, FLAG_CANCEL_CURRENT replaces it and
- * FLAG_UPDATE_CURRENT refreshes its extras. Sending is accepted and not delivered, the same
- * policy as the in-process alarm service: nothing here reaches OH's WantAgent.
+ * package, request code, flags and filter-equal intent get the same sender (so a later cancel
+ * matches), FLAG_NO_CREATE answers only an existing one, FLAG_CANCEL_CURRENT replaces it and
+ * FLAG_UPDATE_CURRENT refreshes its extras.
+ *
+ * Sending delivers in process, as PendingIntentRecord sends: the intent the sender holds, with what
+ * the caller fills in unless it is immutable, goes to the app's own receivers (broadcast), services
+ * (service, foreground service) or activities (activity, each in turn for a stack); a one-shot
+ * sender is used up. The alarms the app sets are delivered this way (LocalAlarms). Nothing here
+ * reaches OH's WantAgent, so a sender handed to OH (a notification's content intent) still is not
+ * sent from there, and an activity result sender (createPendingResult) is not delivered.
  */
 public final class LocalIntentSenders {
+    private static final String TAG = "[WESTLAKE-PENDING-INTENT]";
+    private static final int FLAG_ONE_SHOT = 1 << 30;
     private static final int FLAG_NO_CREATE = 1 << 29;
     private static final int FLAG_CANCEL_CURRENT = 1 << 28;
     private static final int FLAG_UPDATE_CURRENT = 1 << 27;
@@ -34,57 +47,80 @@ public final class LocalIntentSenders {
     private static final String SENDER_DESCRIPTOR = "android.content.IIntentSender";
 
     private static final Map<Key, Record> sByKey = new HashMap<>();
-    private static final Map<IBinder, Record> sByBinder = new HashMap<>();
 
     private LocalIntentSenders() {}
 
+    /**
+     * PendingIntentRecord.Key: the flags it was asked with, less the three that only steer the
+     * request, are part of what identifies a sender, and the intent is the last one asked for.
+     */
     private static final class Key {
         final int type;
         final String packageName;
         final int requestCode;
         final Intent intent;
+        final int flags;
 
-        Key(int type, String packageName, int requestCode, Intent intent) {
+        Key(int type, String packageName, int requestCode, Intent intent, int flags) {
             this.type = type;
             this.packageName = packageName;
             this.requestCode = requestCode;
             this.intent = intent;
+            this.flags = flags;
         }
 
         @Override
         public boolean equals(Object o) {
             if (!(o instanceof Key)) return false;
             Key k = (Key) o;
-            return type == k.type && requestCode == k.requestCode
+            return type == k.type && requestCode == k.requestCode && flags == k.flags
                     && java.util.Objects.equals(packageName, k.packageName)
                     && (intent == null ? k.intent == null : intent.filterEquals(k.intent));
         }
 
         @Override
         public int hashCode() {
-            return Arrays.hashCode(new Object[] {type, packageName, requestCode,
+            return Arrays.hashCode(new Object[] {type, packageName, requestCode, flags,
                     intent == null ? 0 : intent.filterHashCode()});
+        }
+    }
+
+    /** A sender's binder: it leads back to its record for as long as a PendingIntent holds it. */
+    private static final class SenderBinder extends Binder {
+        final Record record;
+
+        SenderBinder(Record record) {
+            this.record = record;
         }
     }
 
     private static final class Record {
         final Key key;
-        final Binder binder = new Binder();
+        final Binder binder = new SenderBinder(this);
         final boolean immutable;
         Intent[] intents;
+        // Cancelled, replaced or used up: like the activity manager's record, it still answers what
+        // it was (PendingIntent asks before it sends) and sends nothing.
+        boolean cancelled;
 
-        Record(Key key, Intent[] intents, boolean immutable) {
+        Record(Key key, Intent[] intents) {
             this.key = key;
             this.intents = intents;
-            this.immutable = immutable;
+            this.immutable = (key.flags & FLAG_IMMUTABLE) != 0;
+        }
+
+        /** The intent the sender delivers: the last one asked for, as the activity manager keeps it. */
+        Intent last() {
+            return intents != null && intents.length > 0 ? intents[intents.length - 1] : null;
         }
     }
 
     /** IActivityManager.getIntentSender / getIntentSenderWithFeature. */
     public static synchronized IIntentSender get(int type, String packageName, int requestCode,
             Intent[] intents, int flags) {
-        Intent first = intents != null && intents.length > 0 ? intents[0] : null;
-        Key key = new Key(type, packageName, requestCode, first);
+        Intent last = intents != null && intents.length > 0 ? intents[intents.length - 1] : null;
+        Key key = new Key(type, packageName, requestCode, last,
+                flags & ~(FLAG_NO_CREATE | FLAG_CANCEL_CURRENT | FLAG_UPDATE_CURRENT));
         Record record = sByKey.get(key);
         if (record != null && (flags & FLAG_CANCEL_CURRENT) != 0) {
             remove(record);
@@ -92,11 +128,10 @@ public final class LocalIntentSenders {
         }
         if (record == null) {
             if ((flags & FLAG_NO_CREATE) != 0) return null;
-            record = new Record(key, intents, (flags & FLAG_IMMUTABLE) != 0);
+            record = new Record(key, intents);
             attach(record);
             sByKey.put(key, record);
-            sByBinder.put(record.binder, record);
-        } else if ((flags & FLAG_UPDATE_CURRENT) != 0 && first != null) {
+        } else if ((flags & FLAG_UPDATE_CURRENT) != 0 && last != null) {
             record.intents = intents;
         }
         return (IIntentSender) record.binder.queryLocalInterface(SENDER_DESCRIPTOR);
@@ -119,29 +154,105 @@ public final class LocalIntentSenders {
     /** IActivityManager.getIntentForIntentSender. */
     public static synchronized Intent intent(IIntentSender sender) {
         Record record = find(sender);
-        return record == null || record.intents == null || record.intents.length == 0
-                ? null : new Intent(record.intents[0]);
+        return record == null || record.last() == null ? null : new Intent(record.last());
     }
 
-    /** IActivityManager.sendIntentSender: accepted, not delivered; 0 is success to PendingIntent. */
-    public static int send(IIntentSender sender) {
+    /**
+     * IActivityManager.sendIntentSender, as PendingIntentRecord.sendInner sends: returns 0, or
+     * ActivityManager.START_CANCELED for a sender that was cancelled or used up, which PendingIntent
+     * throws as CanceledException. The finished receiver (PendingIntent.OnFinished) hears back once
+     * the intent is on its way, for a broadcast with the result its receivers leave.
+     */
+    public static int send(IIntentSender sender, int code, Intent fillIn, String resolvedType,
+            IIntentReceiver finishedReceiver) {
         Record record;
+        Intent[] intents;
         synchronized (LocalIntentSenders.class) {
             record = find(sender);
+            if (record == null || record.cancelled) {
+                System.err.println(TAG + " send refused: the sender was cancelled");
+                return ActivityManager.START_CANCELED;
+            }
+            if ((record.key.flags & FLAG_ONE_SHOT) != 0) remove(record);
+            intents = record.intents;
         }
-        System.err.println("[WESTLAKE-PENDING-INTENT] send accepted, not delivered: "
-                + (record != null && record.intents != null && record.intents.length > 0
-                        ? record.intents[0] : "unknown sender"));
-        return record != null ? 0 : -96; // ActivityManager.START_CANCELED for a cancelled sender
+        Intent intent = record.last() != null ? new Intent(record.last()) : new Intent();
+        if (!record.immutable && fillIn != null) {
+            int changes = intent.fillIn(fillIn, record.key.flags);
+            if ((changes & Intent.FILL_IN_DATA) == 0) resolvedType = null;
+        } else {
+            resolvedType = null;
+        }
+        int userId = UserHandle.myUserId();
+        System.err.println(TAG + " send " + typeName(record.key.type) + " " + intent);
+        try {
+            switch (record.key.type) {
+                case ActivityManager.INTENT_SENDER_BROADCAST:
+                    // Ordered when a result is asked for; LocalBroadcasts hands the final receiver
+                    // its result.
+                    LocalBroadcasts.broadcast(intent, resolvedType, finishedReceiver, code, null, null,
+                            finishedReceiver != null, userId);
+                    return 0;
+                case ActivityManager.INTENT_SENDER_SERVICE:
+                case ActivityManager.INTENT_SENDER_FOREGROUND_SERVICE:
+                    if (InProcessServiceBinder.start(intent) == null) {
+                        System.err.println(TAG + " no service of the app's for " + intent);
+                    }
+                    break;
+                case ActivityManager.INTENT_SENDER_ACTIVITY:
+                    startActivities(intents, intent);
+                    break;
+                default:
+                    System.err.println(TAG + " not delivered: " + typeName(record.key.type) + " senders are not sent");
+                    break;
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "sending " + intent + " failed", e);
+        }
+        if (finishedReceiver != null) {
+            try {
+                finishedReceiver.performReceive(new Intent(intent), 0, null, null, false, false, userId);
+            } catch (Throwable t) {
+                Log.w(TAG, "the finished receiver of " + intent + " failed", t);
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * An activity sender's activities, started from the application as the activity manager starts
+     * them: in turn, so that a stack (PendingIntent.getActivities) ends with its last one on top.
+     */
+    private static void startActivities(Intent[] intents, Intent last) {
+        Application app = ActivityThread.currentApplication();
+        if (app == null) return;
+        int count = intents != null && intents.length > 1 ? intents.length : 1;
+        for (int i = 0; i < count; i++) {
+            Intent start = i == count - 1 ? last : new Intent(intents[i]);
+            start.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);   // from outside an activity
+            app.startActivity(start);
+        }
+    }
+
+    private static String typeName(int type) {
+        switch (type) {
+            case ActivityManager.INTENT_SENDER_BROADCAST: return "broadcast";
+            case ActivityManager.INTENT_SENDER_ACTIVITY: return "activity";
+            case ActivityManager.INTENT_SENDER_ACTIVITY_RESULT: return "activity result";
+            case ActivityManager.INTENT_SENDER_SERVICE: return "service";
+            case ActivityManager.INTENT_SENDER_FOREGROUND_SERVICE: return "foreground service";
+            default: return "type " + type;
+        }
     }
 
     private static Record find(IIntentSender sender) {
-        return sender == null ? null : sByBinder.get(sender.asBinder());
+        IBinder binder = sender == null ? null : sender.asBinder();
+        return binder instanceof SenderBinder ? ((SenderBinder) binder).record : null;
     }
 
     private static void remove(Record record) {
-        sByKey.remove(record.key);
-        sByBinder.remove(record.binder);
+        record.cancelled = true;
+        if (sByKey.get(record.key) == record) sByKey.remove(record.key);
     }
 
     private static void attach(Record record) {
@@ -153,9 +264,13 @@ public final class LocalIntentSenders {
                         case "equals": return args != null && args.length == 1 && args[0] == self;
                         case "toString": return "LocalIntentSender{" + record.key.packageName + "}";
                         default:
-                            // send(): the oneway entry point, reached when something other than
-                            // PendingIntent.send delivers through the binder itself.
-                            send((IIntentSender) self);
+                            // send(code, intent, resolvedType, whitelistToken, finishedReceiver,
+                            // requiredPermission, options): the oneway entry point, reached when
+                            // something other than PendingIntent.send delivers through the binder.
+                            if ("send".equals(method.getName()) && args != null && args.length > 4) {
+                                send((IIntentSender) self, (Integer) args[0], (Intent) args[1],
+                                        (String) args[2], (IIntentReceiver) args[4]);
+                            }
                             return null;
                     }
                 });

@@ -1333,8 +1333,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public android.content.pm.ParceledListSlice queryIntentReceivers(android.content.Intent arg0, java.lang.String arg1, long arg2, int arg3) throws android.os.RemoteException {
-        logStub("queryIntentReceivers", "");
-        return null;
+        // The app's own receivers, matched against their manifest intent filters.
+        return new android.content.pm.ParceledListSlice<>(SourcePackageRegistry.queryReceivers(arg0, arg1, arg2));
     }
 
 

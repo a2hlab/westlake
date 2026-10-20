@@ -186,6 +186,51 @@ public final class SourcePackageRegistry {
     }
 
     /**
+     * The app's own manifest receivers an intent resolves to, from their intent filters, the highest
+     * priority first (the order an ordered broadcast reaches them in); for an explicit intent, the
+     * receiver it names. queryIntentReceivers answered null, and a broadcast the app sent its own
+     * receivers had nothing to go to. Only this package's receivers are known here.
+     */
+    public static synchronized java.util.List<android.content.pm.ResolveInfo> queryReceivers(
+            android.content.Intent intent, String resolvedType, long flags) {
+        java.util.List<android.content.pm.ResolveInfo> out = new java.util.ArrayList<>();
+        if (parsed == null || intent == null || parsed.receivers == null) return out;
+        android.content.ComponentName component = intent.getComponent();
+        String target = component != null ? component.getPackageName() : intent.getPackage();
+        if (target != null && !target.equals(parsed.packageName)) return out;
+        PackageInfo info = packageInfo(parsed.packageName, flags | PackageManager.GET_RECEIVERS);
+        if (info == null || info.receivers == null) return out;
+        String type = resolvedType != null ? resolvedType : intent.getType();
+        for (PackageParser.Activity receiver : parsed.receivers) {
+            android.content.IntentFilter matched = null;
+            if (component != null) {
+                if (!component.getClassName().equals(receiver.info.name)) continue;
+            } else {
+                for (PackageParser.ActivityIntentInfo filter : receiver.intents) {
+                    if (filter.match(intent.getAction(), type, intent.getScheme(), intent.getData(),
+                            intent.getCategories(), "WESTLAKE-PM") >= 0) {
+                        matched = filter;
+                        break;
+                    }
+                }
+                if (matched == null) continue;
+            }
+            for (android.content.pm.ActivityInfo generated : info.receivers) {
+                if (generated.name.equals(receiver.info.name)) {
+                    android.content.pm.ResolveInfo resolved = new android.content.pm.ResolveInfo();
+                    resolved.activityInfo = generated;
+                    if ((flags & PackageManager.GET_RESOLVED_FILTER) != 0) resolved.filter = matched;
+                    if (matched != null) resolved.priority = matched.getPriority();
+                    out.add(resolved);
+                    break;
+                }
+            }
+        }
+        out.sort((a, b) -> Integer.compare(b.priority, a.priority));   // stable: manifest order within one
+        return out;
+    }
+
+    /**
      * The app's own activities an intent resolves to, from their manifest intent filters, as
      * PackageManagerService's activity resolver answers: with MATCH_DEFAULT_ONLY (what
      * Intent.resolveActivity and an implicit startActivity ask for) only through a filter in
