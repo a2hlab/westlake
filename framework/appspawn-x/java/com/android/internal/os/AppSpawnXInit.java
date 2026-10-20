@@ -1346,8 +1346,12 @@ public class AppSpawnXInit {
                     if ("getIntentForIntentSender".equals(name) && args != null) {
                         return adapter.activity.LocalIntentSenders.intent((android.content.IIntentSender) args[0]);
                     }
-                    if ("sendIntentSender".equals(name) && args != null) {
-                        return adapter.activity.LocalIntentSenders.send((android.content.IIntentSender) args[1]);
+                    // sendIntentSender(caller, target, whitelistToken, code, intent, resolvedType,
+                    // finishedReceiver, requiredPermission, options)
+                    if ("sendIntentSender".equals(name) && args != null && args.length > 6) {
+                        return adapter.activity.LocalIntentSenders.send((android.content.IIntentSender) args[1],
+                                (Integer) args[3], (android.content.Intent) args[4], (String) args[5],
+                                (android.content.IIntentReceiver) args[6]);
                     }
                     // Called by ActivityThread.installContentProviders on the main thread, after
                     // the Application is made and before its onCreate -- the only point of ours

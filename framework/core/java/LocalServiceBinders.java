@@ -29,8 +29,9 @@ import java.util.Set;
  *
  * Same shape as LocationManagerAdapter: a Proxy over the AIDL interface attached to a local
  * Binder, so Stub.asInterface resolves it without a transaction; methods not listed answer the
- * type default. Nothing here reaches OH: alarms are accepted and never delivered, the clipboard is
- * local to the process, and power reports an interactive device without power saving.
+ * type default. Nothing here reaches OH: alarms are delivered in process while the app runs
+ * (LocalAlarms), the clipboard is local to the process, and power reports an interactive device
+ * without power saving.
  */
 public final class LocalServiceBinders {
     private static final String TAG = "WESTLAKE-LOCAL-SERVICE";
@@ -256,7 +257,7 @@ public final class LocalServiceBinders {
     }
 
     private static Object alarm(String method, Object[] args) {
-        return DEFAULT;   // set() is accepted, nothing is ever delivered; no next alarm clock
+        return LocalAlarms.answer(method, args);
     }
 
     /**
