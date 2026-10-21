@@ -23,7 +23,8 @@ import java.util.Map;
  *
  * Posts are kept only when the user lets the app post notifications (NotificationSwitch, the OH
  * per-application switch): Android drops the rest, sound included. Nothing is shown in OH's
- * notification centre; that is the OH notification service's, not bridged here.
+ * notification centre; that is the OH notification service's, not bridged here. Toasts, which go
+ * through the same service, are shown in process (LocalToasts).
  */
 final class LocalNotifications {
     private LocalNotifications() {}
@@ -70,6 +71,11 @@ final class LocalNotifications {
                 synchronized (sActive) {
                     return new ParceledListSlice<>(new ArrayList<>(sActive.values()));
                 }
+            case "enqueueTextToast":
+            case "enqueueToast":
+            case "cancelToast":
+            case "finishToken":
+                return LocalToasts.answer(method, args);
             case "getActiveNotifications":
             case "getActiveNotificationsWithAttribution":
                 synchronized (sActive) {
