@@ -106,6 +106,17 @@ public class InProcessServiceBinder implements Runnable {
     }
 
     /**
+     * A binding the system makes to an in-app service, as JobScheduler binds a JobService: the
+     * service is created on first use and stays bound for the life of the process, and this
+     * returns what its onBind answers. Main thread.
+     */
+    static IBinder bindForSystem(ComponentName comp, Intent intent) throws Exception {
+        Service svc = serviceFor(comp, intent);
+        sBound.add(comp.getClassName());
+        return svc.onBind(intent);
+    }
+
+    /**
      * The in-app service an explicit or package-scoped service intent names, or null when it names
      * none of this app's declared services (what ActivityManager answers for a service it cannot
      * find).

@@ -2179,10 +2179,9 @@ public class AppSpawnXInit {
      * "null cannot be cast to non-null type android.app.job.JobScheduler", thrown from Split.io
      * inside androidx.startup, which aborted the whole startup chain.
      *
-     * <p>This replaces the entry in SYSTEM_SERVICE_FETCHERS with one backed by a scheduler that
-     * accepts and remembers jobs but never runs them. Schedule, query and cancel stay coherent
-     * and jobs simply never fire, which is the honest behaviour for a device with no job service.
-     * Anything that depends on jobs actually executing needs a real OH-backed scheduler.
+     * <p>This replaces the entry in SYSTEM_SERVICE_FETCHERS with one backed by the in-process
+     * scheduler (LocalJobs), which runs the app's jobs while the app runs. The scheduler before it
+     * accepted every job and ran none.
      */
     private static void installJobSchedulerStub() {
         try {
@@ -2200,7 +2199,7 @@ public class AppSpawnXInit {
                     implType.getDeclaredConstructor(
                             Class.forName("android.content.Context"), ijs);
             ctor.setAccessible(true);
-            final Object binder = newNoopJobSchedulerBinder(ijs);
+            final Object binder = adapter.activity.LocalJobs.scheduler();
             final Object[] cached = new Object[1];
 
             Object fetcher = java.lang.reflect.Proxy.newProxyInstance(
@@ -2248,40 +2247,6 @@ public class AppSpawnXInit {
             // init over it is not.
             System.err.println("[JobSchedulerStub] install FAIL: " + t);
         }
-    }
-
-    /**
-     * A no-op IJobScheduler: accepts every schedule with RESULT_SUCCESS and reports nothing
-     * pending. JobSchedulerImpl forwards all of its API to this binder, so the app sees a
-     * coherent scheduler whose jobs never fire.
-     */
-    private static Object newNoopJobSchedulerBinder(Class<?> ijs) {
-        return java.lang.reflect.Proxy.newProxyInstance(
-                ijs.getClassLoader(), new Class<?>[] {ijs},
-                (proxy, method, args) -> {
-                    String name = method.getName();
-                    Class<?> rt = method.getReturnType();
-                    if ("schedule".equals(name) || "enqueue".equals(name)
-                            || "scheduleAsPackage".equals(name)) {
-                        return 1; // JobScheduler.RESULT_SUCCESS
-                    }
-                    if (java.util.List.class.isAssignableFrom(rt)) {
-                        return new java.util.ArrayList<>();
-                    }
-                    // getAllPendingJobs answers a ParceledListSlice, which JobSchedulerImpl
-                    // unwraps before the app sees it: null threw inside the framework (Fossify
-                    // Gallery's MainActivity.onCreate).
-                    if (rt == android.content.pm.ParceledListSlice.class) {
-                        return android.content.pm.ParceledListSlice.emptyList();
-                    }
-                    if (java.util.Map.class.isAssignableFrom(rt)) {
-                        return new java.util.HashMap<>();
-                    }
-                    if ("asBinder".equals(name)) return null;
-                    if (rt == boolean.class) return Boolean.FALSE;
-                    if (rt.isPrimitive() && rt != void.class) return 0;
-                    return null;
-                });
     }
 
     private static void installSettingsContentProviderStub() {
