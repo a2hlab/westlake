@@ -160,9 +160,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         // activity after the caller's current message, never inside startActivity. Instagram's
         // BloksSignedOutFragmentActivity starts ModalActivity and then sets what ModalActivity's
         // onCreate requires; launched in place, that onCreate threw "Required value was null" up
-        // through the caller. A start that leaves the app keeps its synchronous result, which
-        // Instrumentation turns into ActivityNotFoundException.
-        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper() || startsOwnActivity(intent)) {
+        // through the caller.
+        if (intent == null || startsOwnActivity(intent)) {
             // A copy, as AMS takes it when startActivity is called: the caller may reuse its Intent.
             final Intent started = intent != null ? new Intent(intent) : null;
             final int startFlags = flags;
@@ -174,9 +173,66 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
                     System.err.println("[ATMA] deferred startActivity failed: " + t);
                 }
             });
-            return 0;   // ActivityManager.START_SUCCESS
+            return ActivityManager.START_SUCCESS;
         }
-        return bridgeStartActivityWithStack(intent, flags, resultTo, request);
+        return startOutside(intent, flags, resultTo, request);
+    }
+
+    /**
+     * A start that leaves the app, resolved before anything starts, as ActivityStarter resolves it:
+     * an intent nothing handles answers START_INTENT_NOT_RESOLVED, which Instrumentation throws as
+     * ActivityNotFoundException, on whichever thread the app started it from. It is not handed to OH,
+     * where a failed implicit start puts up a dead-end dialog or sends the app to the back. Before,
+     * such a start reported success from a worker thread, and OH's refusal code from the main thread,
+     * which Instrumentation takes for success too: a web link, a share or the system file picker
+     * opened nothing and the app was not told. A start OH refuses after all is not found either.
+     *
+     * Two kinds of start keep a way out that Android does not have here. Intent.createChooser never
+     * throws (startChooser), and a text share that nothing handles goes on to the native start, which
+     * puts the text on the clipboard instead.
+     */
+    private int startOutside(Intent intent, int flags, IBinder resultTo, ActivityResults.Request request) {
+        if (Intent.ACTION_CHOOSER.equals(intent.getAction())) return startChooser(intent, flags, resultTo, request);
+        if (!adapter.packagemanager.PackageManagerAdapter.ohHandles(intent) && !sharesText(intent)) {
+            Log.i(TAG, "startActivity: nothing handles " + intent);
+            return notFound(intent);
+        }
+        int result = bridgeStartActivityWithStack(intent, flags, resultTo, request);
+        if (result != 0) {
+            Log.i(TAG, "startActivity: OH did not start " + intent + " (" + result + ")");
+            return notFound(intent);
+        }
+        return ActivityManager.START_SUCCESS;
+    }
+
+    /**
+     * Intent.createChooser: Android's chooser always opens, offering what handles the intent it
+     * wraps, or saying that nothing does. It never throws, so neither does this; when nothing here
+     * handles the wrapped intent, nothing opens.
+     */
+    private int startChooser(Intent chooser, int flags, IBinder resultTo, ActivityResults.Request request) {
+        Intent target = chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent.class);
+        if (target != null && (adapter.packagemanager.PackageManagerAdapter.ohHandles(target) || sharesText(target))) {
+            int result = bridgeStartActivityWithStack(chooser, flags, resultTo, request);
+            if (result != 0) Log.i(TAG, "startActivity: OH did not start the chooser's " + target + " (" + result + ")");
+        } else {
+            Log.i(TAG, "startActivity: nothing handles the chooser's " + target);
+        }
+        return ActivityManager.START_SUCCESS;
+    }
+
+    /** A text share with no target named: the native start copies its text to the clipboard. */
+    private static boolean sharesText(Intent intent) {
+        if (!Intent.ACTION_SEND.equals(intent.getAction())) return false;
+        if (intent.getComponent() != null || intent.getPackage() != null) return false;
+        CharSequence text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        return text != null && text.length() > 0;
+    }
+
+    /** What ActivityStarter answers for an intent nothing handles, by name or by its filters. */
+    private static int notFound(Intent intent) {
+        return intent.getComponent() != null ? ActivityManager.START_CLASS_NOT_FOUND
+                : ActivityManager.START_INTENT_NOT_RESOLVED;
     }
 
     /**
