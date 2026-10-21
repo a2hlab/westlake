@@ -939,14 +939,16 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (target != null && SourcePackageRegistry.contains(target)) {
             return new ParceledListSlice<>(result);
         }
+        result.addAll(ohAbilities(intent, flags));
+        return new ParceledListSlice<>(result);
+    }
+
+    /** OH's abilities an intent resolves to, from its bundle manager: what handles it outside the app. */
+    private static List<ResolveInfo> ohAbilities(Intent intent, long flags) {
+        List<ResolveInfo> result = new ArrayList<>();
         IntentWantConverter.WantParams want = IntentWantConverter.intentToWant(intent);
-        String wantJson = buildWantJson(want);
-        String json = nativeQueryAbilityInfos(wantJson, (int) flags);
-
-        if (json == null || json.isEmpty()) {
-            return new ParceledListSlice<>(result);
-        }
-
+        String json = nativeQueryAbilityInfos(buildWantJson(want), (int) flags);
+        if (json == null || json.isEmpty()) return result;
         try {
             org.json.JSONArray array = new org.json.JSONArray(json);
             for (int i = 0; i < array.length(); i++) {
@@ -963,8 +965,17 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         } catch (org.json.JSONException e) {
             Log.e(TAG, "queryIntentActivities: parse error", e);
         }
+        return result;
+    }
 
-        return new ParceledListSlice<>(result);
+    /**
+     * Whether an OH ability handles the intent: ActivityTaskManagerAdapter asks before it starts
+     * anything outside the app, as ActivityStarter resolves an intent before it starts it.
+     */
+    public static boolean ohHandles(Intent intent) {
+        boolean handled = !ohAbilities(intent, 0).isEmpty();
+        Log.i(TAG, "ohHandles " + intent + " -> " + handled);
+        return handled;
     }
 
     // ========================================================================
@@ -1061,7 +1072,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     // Utility Methods
     // ========================================================================
 
-    private String buildWantJson(IntentWantConverter.WantParams want) {
+    private static String buildWantJson(IntentWantConverter.WantParams want) {
         StringBuilder sb = new StringBuilder("{");
         if (want.bundleName != null) {
             sb.append("\"bundleName\":\"").append(want.bundleName).append("\",");
