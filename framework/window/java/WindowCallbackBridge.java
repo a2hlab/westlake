@@ -89,6 +89,14 @@ public class WindowCallbackBridge {
      * takes focus; OH moves focus to the SurfaceView's window once it shows, and the window saw
      * that as losing focus. SDL pauses its native loop when its activity loses focus, so anarchre
      * and diesimu rendered nothing (Flutter draws on regardless).
+     *
+     * A window that cannot take focus (FLAG_NOT_FOCUSABLE: a toast, a popup that is not focusable)
+     * never gets it on Android, and the window under it keeps it. OH moves its focus to every new
+     * window, so the window under a toast lost focus while the toast showed, and an editor under a
+     * dropdown would lose its keyboard. OH's focus for such a window is only recorded
+     * (sUnfocusableHolder). A focus loss is delivered a moment later (FOCUS_LOSS_DELAY_MS), and not
+     * at all when OH has only moved focus to such a window of this app. When a window that can take
+     * focus gains it, a window OH no longer focuses loses it then (loseStaleFocus).
      */
     private void dispatchWindowFocusChanged(boolean focused) {
         try {
@@ -98,16 +106,114 @@ public class WindowCallbackBridge {
                 Log.w(TAG, "windowFocusChanged: no ViewRootImpl (gone, or not a ViewRootImpl.W), drop");
                 return;
             }
-            Boolean deliver = updateFocusGroup(viewRootImpl, surface ? mAndroidWindow : null, focused);
-            if (deliver == null) return;   // the group's focus did not change
-            java.lang.reflect.Method m = viewRootImpl.getClass()
-                    .getMethod("windowFocusChanged", boolean.class);
-            m.invoke(viewRootImpl, deliver);
-            Log.d(TAG, "windowFocusChanged latched on ViewRootImpl(focused=" + deliver
-                       + (surface ? ", from its SurfaceView's window" : "")
-                       + ") — main looper will dispatch after setView completes");
+            if (!surface) {
+                if (!focusable(viewRootImpl)) {
+                    synchronized (sFocusGroups) {
+                        if (focused) {
+                            sUnfocusableHolder = new java.lang.ref.WeakReference<>(viewRootImpl);
+                            sUnfocusableSince = android.os.SystemClock.uptimeMillis();
+                        } else if (sUnfocusableHolder.get() == viewRootImpl) {
+                            sUnfocusableHolder = new java.lang.ref.WeakReference<>(null);
+                        }
+                    }
+                    Log.d(TAG, "OH focus " + focused + " for a window that cannot take focus: not delivered");
+                    return;
+                }
+                synchronized (sFocusGroups) {
+                    sOhFocus.put(viewRootImpl, focused);
+                }
+                if (!focused) {
+                    final long at = android.os.SystemClock.uptimeMillis();
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> loseFocus(viewRootImpl, at),
+                            FOCUS_LOSS_DELAY_MS);
+                    return;
+                }
+                loseStaleFocus(viewRootImpl);
+            }
+            deliver(viewRootImpl, surface ? mAndroidWindow : null, focused, surface ? ", from its SurfaceView's window" : "");
         } catch (Exception e) {
             Log.e(TAG, "Failed to dispatch window focus changed", e);
+        }
+    }
+
+    // How long a focus loss waits for OH to say where focus went, and how close to it OH's focus of
+    // a window that cannot take focus counts as the reason, before or after.
+    private static final long FOCUS_LOSS_DELAY_MS = 150;
+    private static final long FOCUS_MOVE_WINDOW_MS = 500;
+    // OH's latest focus for each window that can take focus, and the window that cannot take focus
+    // OH last gave its focus to, since when.
+    private static final java.util.Map<Object, Boolean> sOhFocus = new java.util.WeakHashMap<>();
+    private static java.lang.ref.WeakReference<Object> sUnfocusableHolder = new java.lang.ref.WeakReference<>(null);
+    private static long sUnfocusableSince;
+
+    private static void deliver(Object viewRootImpl, Object surface, boolean focused, String note) throws Exception {
+        Boolean deliver = updateFocusGroup(viewRootImpl, surface, focused);
+        if (deliver == null) return;   // the group's focus did not change
+        viewRootImpl.getClass().getMethod("windowFocusChanged", boolean.class).invoke(viewRootImpl, deliver);
+        Log.d(TAG, "windowFocusChanged latched on ViewRootImpl(focused=" + deliver + note
+                   + ") — main looper will dispatch after setView completes");
+    }
+
+    /** Main thread: OH's focus loss for the window, unless OH gave it back or moved it to a window that cannot take it. */
+    private static void loseFocus(Object viewRootImpl, long at) {
+        synchronized (sFocusGroups) {
+            if (Boolean.TRUE.equals(sOhFocus.get(viewRootImpl))) return;
+            Object holder = sUnfocusableHolder.get();
+            if (holder != null && attached(holder) && sUnfocusableSince >= at - FOCUS_MOVE_WINDOW_MS) {
+                Log.d(TAG, "focus loss not delivered: OH moved focus to a window that cannot take it");
+                return;
+            }
+        }
+        try {
+            deliver(viewRootImpl, null, false, "");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to dispatch window focus changed", e);
+        }
+    }
+
+    /**
+     * A window that can take focus gains it: any other window that still has focus here while OH no
+     * longer gives it focus loses it, as when a dialog comes up over a toast that had OH's focus.
+     */
+    private static void loseStaleFocus(Object gaining) {
+        java.util.List<Object> stale = new java.util.ArrayList<>();
+        synchronized (sFocusGroups) {
+            for (java.util.Map.Entry<Object, FocusGroup> entry : sFocusGroups.entrySet()) {
+                Object root = entry.getKey();
+                FocusGroup group = entry.getValue();
+                if (root == gaining || !Boolean.TRUE.equals(group.delivered) || !group.surfaces.isEmpty()) continue;
+                if (!Boolean.TRUE.equals(sOhFocus.get(root))) stale.add(root);
+            }
+        }
+        for (Object root : stale) {
+            try {
+                deliver(root, null, false, ", a window that can take focus has it now");
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to dispatch window focus changed", e);
+            }
+        }
+    }
+
+    /** Whether the window can take focus: not FLAG_NOT_FOCUSABLE. */
+    private static boolean focusable(Object viewRootImpl) {
+        try {
+            Object view = viewRootImpl.getClass().getMethod("getView").invoke(viewRootImpl);
+            if (!(view instanceof android.view.View)) return true;
+            Object lp = ((android.view.View) view).getLayoutParams();
+            return !(lp instanceof android.view.WindowManager.LayoutParams)
+                    || (((android.view.WindowManager.LayoutParams) lp).flags
+                            & android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0;
+        } catch (ReflectiveOperationException e) {
+            return true;
+        }
+    }
+
+    private static boolean attached(Object viewRootImpl) {
+        try {
+            Object view = viewRootImpl.getClass().getMethod("getView").invoke(viewRootImpl);
+            return view instanceof android.view.View && ((android.view.View) view).isAttachedToWindow();
+        } catch (ReflectiveOperationException e) {
+            return false;
         }
     }
 

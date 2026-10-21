@@ -368,8 +368,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 && windowType <= WindowManager.LayoutParams.LAST_SUB_WINDOW;
     }
 
+    /**
+     * The window type the native client asks OH for. A sub-window asks as an application window
+     * (isSubWindow). So does a toast: the native client would ask for OH's own toast window, a
+     * system window this application may not create. Its window is the display-sized one a dialog
+     * gets, and placement puts the toast at the bottom (placeWindow); it is neither touchable nor
+     * focusable, so taps and focus pass to the window under it (LocalToasts).
+     */
     private static int sessionTypeFor(int windowType) {
-        return isSubWindow(windowType) ? WindowManager.LayoutParams.TYPE_APPLICATION : windowType;
+        return isSubWindow(windowType) || windowType == WindowManager.LayoutParams.TYPE_TOAST
+                ? WindowManager.LayoutParams.TYPE_APPLICATION : windowType;
     }
 
     /**
