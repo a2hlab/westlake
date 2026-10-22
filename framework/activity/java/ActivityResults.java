@@ -1,5 +1,6 @@
 package adapter.activity;
 
+import android.app.Activity;
 import android.app.ActivityThread;
 import android.app.IApplicationThread;
 import android.app.ResultInfo;
@@ -29,6 +30,12 @@ import java.util.WeakHashMap;
  * launch binds it to the new activity's token, and finishActivity delivers the result to the
  * caller with an ActivityResultItem, as the permission-request answer is delivered
  * (ActivityTaskManagerAdapter.answerPermissionRequest).
+ *
+ * A caller that is finishing or gone gets nothing, as in the activity manager, which keeps a result
+ * only for a caller still in its task. The result is delivered on the main thread right where the
+ * caller was found alive (sendNow): scheduled, it ran after the caller's own destroy had already
+ * removed its record, and the transaction threw on the main thread. AnkiDroid's launcher activity
+ * starts its deck picker for a result and finishes itself, and died that way.
  */
 final class ActivityResults {
     /** Who asked for a result: the caller's token, its embedded id and its request code. */
@@ -69,25 +76,34 @@ final class ActivityResults {
             request = sPending.remove(finishing);
         }
         if (request == null) return;
-        new Handler(Looper.getMainLooper()).post(() -> {
-            try {
-                ActivityThread thread = ActivityThread.currentActivityThread();
-                if (thread == null || thread.getActivity(request.resultTo) == null) {
-                    System.err.println("[WESTLAKE-RESULT] the caller of requestCode=" + request.requestCode
-                            + " is gone; result dropped");
-                    return;
-                }
-                IApplicationThread app = thread.getApplicationThread();
-                ClientTransaction transaction = ClientTransaction.obtain(app);
-                transaction.addTransactionItem(ActivityResultItem.obtain(request.resultTo, Collections.singletonList(
-                        new ResultInfo(request.resultWho, request.requestCode, resultCode, data))));
-                app.scheduleTransaction(transaction);
-                System.err.println("[WESTLAKE-RESULT] delivered requestCode=" + request.requestCode
-                        + " resultCode=" + resultCode + " data=" + (data != null) + " to "
-                        + thread.getActivity(request.resultTo).getClass().getName());
-            } catch (Throwable t) {
-                System.err.println("[WESTLAKE-RESULT] delivery failed: " + t);
+        new Handler(Looper.getMainLooper()).post(
+                () -> sendNow(request.resultTo, request.resultWho, request.requestCode, resultCode, data));
+    }
+
+    /**
+     * Main thread: delivers a result to the activity that asked for it, at once, unless that activity
+     * is finishing or gone. The check and the delivery run together, so the caller cannot be
+     * destroyed in between.
+     */
+    static void sendNow(IBinder resultTo, String resultWho, int requestCode, int resultCode, Intent data) {
+        try {
+            ActivityThread thread = ActivityThread.currentActivityThread();
+            Activity caller = thread != null ? thread.getActivity(resultTo) : null;
+            if (caller == null || caller.isFinishing() || caller.isDestroyed()) {
+                System.err.println("[WESTLAKE-RESULT] the caller of requestCode=" + requestCode
+                        + " is finishing or gone; result dropped");
+                return;
             }
-        });
+            IApplicationThread app = thread.getApplicationThread();
+            ClientTransaction transaction = ClientTransaction.obtain(app);
+            transaction.addTransactionItem(ActivityResultItem.obtain(resultTo, Collections.singletonList(
+                    new ResultInfo(resultWho, requestCode, resultCode, data))));
+            thread.executeTransaction(transaction);
+            System.err.println("[WESTLAKE-RESULT] delivered requestCode=" + requestCode
+                    + " resultCode=" + resultCode + " data=" + (data != null) + " to "
+                    + caller.getClass().getName());
+        } catch (Throwable t) {
+            System.err.println("[WESTLAKE-RESULT] delivery failed: " + t);
+        }
     }
 }

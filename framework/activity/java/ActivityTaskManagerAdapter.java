@@ -187,13 +187,23 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      * which Instrumentation takes for success too: a web link, a share or the system file picker
      * opened nothing and the app was not told. A start OH refuses after all is not found either.
      *
-     * Two kinds of start keep a way out that Android does not have here. Intent.createChooser never
-     * throws (startChooser), and a text share that nothing handles goes on to the native start, which
-     * puts the text on the clipboard instead.
+     * Three kinds of start keep a way out that Android does not have here. Intent.createChooser never
+     * throws (startChooser); a screen that every Android device has opens nothing (alwaysOnAndroid),
+     * as apps take those screens for granted; and a text share that nothing handles goes on to the
+     * native start, which puts the text on the clipboard instead.
      */
     private int startOutside(Intent intent, int flags, IBinder resultTo, ActivityResults.Request request) {
         if (Intent.ACTION_CHOOSER.equals(intent.getAction())) return startChooser(intent, flags, resultTo, request);
         if (!adapter.packagemanager.PackageManagerAdapter.ohHandles(intent) && !sharesText(intent)) {
+            if (alwaysOnAndroid(intent)) {
+                // Apps start these screens unguarded: aat asks for all-files access in Settings as it
+                // starts, socks5 for VPN consent, viewer for a document. Each died when the start
+                // threw. Nothing opens and no result comes back, as while the user is still on that
+                // screen. A RESULT_CANCELED at once would bring a resumed caller through onPause and
+                // onResume, and an app that asks again in onResume would ask without end.
+                Log.i(TAG, "startActivity: an Android screen this device does not have, nothing opens: " + intent);
+                return ActivityManager.START_SUCCESS;
+            }
             Log.i(TAG, "startActivity: nothing handles " + intent);
             return notFound(intent);
         }
@@ -219,6 +229,30 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             Log.i(TAG, "startActivity: nothing handles the chooser's " + target);
         }
         return ActivityManager.START_SUCCESS;
+    }
+
+    /** Android's own applications, which every device has: their screens are started by name too. */
+    private static final java.util.Set<String> ANDROID_PACKAGES = new java.util.HashSet<>(java.util.Arrays.asList(
+            "android", "com.android.settings", "com.android.systemui", "com.android.vpndialogs",
+            "com.android.documentsui", "com.google.android.documentsui", "com.android.intentresolver",
+            "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+            "com.android.packageinstaller", "com.google.android.packageinstaller"));
+
+    /** The pickers that every Android device has: the Storage Access Framework's and the photo picker. */
+    private static final java.util.Set<String> PICKER_ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
+            Intent.ACTION_OPEN_DOCUMENT, Intent.ACTION_CREATE_DOCUMENT, Intent.ACTION_OPEN_DOCUMENT_TREE,
+            Intent.ACTION_GET_CONTENT, android.provider.MediaStore.ACTION_PICK_IMAGES));
+
+    /**
+     * A screen that every Android device has: one of Settings' by its action
+     * (android.provider.Settings.ACTION_*), a document or photo picker, or a screen of Android's own
+     * applications by name, as VpnService.prepare names VPN consent.
+     */
+    private static boolean alwaysOnAndroid(Intent intent) {
+        String target = intent.getComponent() != null ? intent.getComponent().getPackageName() : intent.getPackage();
+        if (target != null) return ANDROID_PACKAGES.contains(target);
+        String action = intent.getAction();
+        return action != null && (action.startsWith("android.settings.") || PICKER_ACTIONS.contains(action));
     }
 
     /** A text share with no target named: the native start copies its text to the clipboard. */
@@ -259,21 +293,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         Log.i(TAG, "requestPermissions " + java.util.Arrays.toString(names) + " answered "
                 + java.util.Arrays.toString(results) + " (who=" + resultWho + ", code=" + requestCode + ")");
         if (resultTo == null) return ActivityManager.START_SUCCESS;
-        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-            try {
-                android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
-                if (thread == null || thread.getActivity(resultTo) == null) return;
-                IApplicationThread app = thread.getApplicationThread();
-                android.app.servertransaction.ClientTransaction transaction =
-                        android.app.servertransaction.ClientTransaction.obtain(app);
-                transaction.addTransactionItem(android.app.servertransaction.ActivityResultItem.obtain(resultTo,
-                        java.util.Collections.singletonList(new android.app.ResultInfo(resultWho, requestCode,
-                                android.app.Activity.RESULT_OK, data))));
-                app.scheduleTransaction(transaction);
-            } catch (Throwable t) {
-                Log.e(TAG, "requestPermissions: the answer was not delivered", t);
-            }
-        });
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> ActivityResults.sendNow(
+                resultTo, resultWho, requestCode, android.app.Activity.RESULT_OK, data));
         return ActivityManager.START_SUCCESS;
     }
 
