@@ -193,6 +193,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "vpn_management":
             // TileService.requestListeningState reaches it through StatusBarManager (Chrono's timer).
             case "statusbar":
+            // Adobe Reader casts RestrictionsManager non-null in Application.onCreate.
+            case "restrictions":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
