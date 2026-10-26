@@ -1274,7 +1274,21 @@ public class AppSpawnXInit {
                                     new adapter.activity.InProcessServiceBinder(service, comp, connection));
                             return 1;
                         }
+                        // A guest package's service (microG Companion's licensing service, which
+                        // PairIP's license check binds by action), run in process by GuestHost.
+                        android.content.pm.ServiceInfo guest = adapter.activity.GuestHost.resolveService(service);
+                        if (connection != null && guest != null) {
+                            System.err.println("[" + label + "] " + name + " -> guest " + guest.packageName + "/" + guest.name);
+                            adapter.activity.GuestHost.bind(service, guest, connection);
+                            return 1;
+                        }
                         return 0;
+                    }
+                    // getContentProvider(caller, callingPackage, authority, userId, stable): a guest
+                    // package's provider (GmsCore's settings, which Companion reads). The type
+                    // default (null) left every authority outside the app without a provider.
+                    if ("getContentProvider".equals(name) && args != null && args.length > 2) {
+                        return adapter.activity.GuestHost.provider((String) args[2]);
                     }
                     // Nothing is held for an in-process binding, so releasing one always succeeds.
                     if ("unbindService".equals(name)) return Boolean.TRUE;
