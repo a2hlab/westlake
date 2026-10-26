@@ -73,6 +73,15 @@ Sign-In); 12 merge androidx.credentials' Play-services `HiddenActivity`; 28 Play
 legacy key); 10 request `READ_GSERVICES`; 4 use the SMS retriever; 2 `CHECK_LICENSE`; none ships
 Google's PairIP license check. So Play Store's package matters as much as GmsCore.
 
+**Correction (2026-10-26).** The HK top 1000 differs: 224 of its 982 apps ship PairIP's license
+check (`com.pairip.licensecheck`), and every one of the 13 in the top 100 stopped there. The check
+passes locally only when the installer is `com.android.vending`; otherwise it binds Companion's
+`ILicensingService` (`checkLicenseV2`) and opens an error activity when the bind fails. Hosting
+Companion in process (build 123: `GuestPackages`, `GuestHost`) is the first step of this design to
+ship: with no Google account Companion suppresses the negative V2 result, PairIP gets no answer and
+the app runs, as on a microG phone without sign-in; with an account Companion fetches Google's
+signed license.
+
 ### 1. The availability gate
 
 Before a GoogleApi client connects, and in most SDKs' start-up checks, the library runs

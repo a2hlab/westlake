@@ -758,6 +758,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if ("android".equals(packageName)) {
             return platformPackageInfo(flags);
         }
+        if (GuestPackages.contains(packageName)) {
+            return GuestPackages.packageInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
                     + System.getenv("ASX_WEBVIEW_APK"));
@@ -809,6 +812,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         }
         if ("android".equals(packageName)) {
             return platformPackageInfo(flags).applicationInfo;
+        }
+        if (GuestPackages.contains(packageName)) {
+            return GuestPackages.applicationInfo(packageName, flags);
         }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
@@ -1004,6 +1010,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public int getPackageUid(String packageName, long flags, int userId) {
         logBridged("getPackageUid", packageName);
         if (SourcePackageRegistry.contains(packageName)) return android.os.Process.myUid();
+        if (GuestPackages.contains(packageName)) return android.os.Process.myUid();
         return nativeGetUidByBundleName(packageName);
     }
 
@@ -1228,6 +1235,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
                             : (info.services == null ? "null" : String.valueOf(info.services.length))));
             return null;
         }
+        if (GuestPackages.contains(arg0.getPackageName())) return GuestPackages.serviceInfo(arg0, arg1);
         return ServiceInfoResolver.resolve(arg0, arg1);
     }
 
@@ -1243,6 +1251,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             }
             return null;
         }
+        if (GuestPackages.contains(arg0.getPackageName())) return GuestPackages.providerInfo(arg0, arg1);
         return ProviderInfoResolver.resolve(arg0, arg1);
     }
 
@@ -1352,14 +1361,17 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public android.content.pm.ResolveInfo resolveService(android.content.Intent arg0, java.lang.String arg1, long arg2, int arg3) throws android.os.RemoteException {
         java.util.List<android.content.pm.ResolveInfo> found = SourcePackageRegistry.queryServices(arg0, arg1, arg2);
+        if (found.isEmpty()) found = GuestPackages.queryServices(arg0, arg1, arg2);
         return found.isEmpty() ? null : found.get(0);
     }
 
 
     @Override
     public android.content.pm.ParceledListSlice queryIntentServices(android.content.Intent arg0, java.lang.String arg1, long arg2, int arg3) throws android.os.RemoteException {
-        // The app's own services, matched against their manifest intent filters.
-        return new android.content.pm.ParceledListSlice<>(SourcePackageRegistry.queryServices(arg0, arg1, arg2));
+        // The app's own services, matched against their manifest intent filters, then the guests'.
+        java.util.List<android.content.pm.ResolveInfo> found = SourcePackageRegistry.queryServices(arg0, arg1, arg2);
+        found.addAll(GuestPackages.queryServices(arg0, arg1, arg2));
+        return new android.content.pm.ParceledListSlice<>(found);
     }
 
 
@@ -1412,6 +1424,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      */
     @Override
     public android.content.pm.ProviderInfo resolveContentProvider(java.lang.String authority, long flags, int userId) throws android.os.RemoteException {
+        android.content.pm.ProviderInfo guest = GuestPackages.resolveProvider(authority, flags);
+        if (guest != null) return guest;
         String packageName = SourcePackageRegistry.packageForUid(android.os.Process.myUid());
         if (authority == null || authority.isEmpty() || packageName == null) {
             logStub("resolveContentProvider", "");

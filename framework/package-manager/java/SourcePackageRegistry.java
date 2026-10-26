@@ -52,6 +52,11 @@ public final class SourcePackageRegistry {
         return parsed != null && parsed.packageName.equals(packageName);
     }
 
+    /** The app's data directory, which also holds the guest packages' (GuestPackages). */
+    public static synchronized String dataDir() {
+        return location != null ? location.dataDir : null;
+    }
+
     public static synchronized String packageForUid(int uid) {
         return parsed != null && uid == location.uid ? parsed.packageName : null;
     }
