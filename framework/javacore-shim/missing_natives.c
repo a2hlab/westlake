@@ -530,6 +530,54 @@ static void note(const char* text)
     (void) write(2, text, n);
 }
 
+/*
+ * /proc/self/cmdline names the process, as zygote's setArgV0 leaves it: the process name in the
+ * argument area, the rest zeroed. liboh_android_runtime's setArgV0Native sets only the thread name,
+ * so a child kept the launcher's arguments and apps that read their process name from cmdline
+ * got "/data/local/tmp/asx/appspawn-x": goline passed it to WebView.setDataDirectorySuffix,
+ * which refused the path separator, in Application.onCreate. setArgV0 has already run when this
+ * library loads, so the name is Process.myProcessName(). Truncated to the area, as on Android.
+ */
+static int set_cmdline_to_process_name(JNIEnv* env)
+{
+    char stat[1024];
+    unsigned long long arg_start = 0, arg_end = 0;
+    const char* p;
+    const char* name;
+    jclass c;
+    jmethodID m;
+    jstring js;
+    size_t length;
+    int fd, n, field;
+    fd = open("/proc/self/stat", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    n = (int) read(fd, stat, sizeof(stat) - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    stat[n] = 0;
+    p = strrchr(stat, ')');   /* comm can hold spaces; fields count from after it */
+    if (p == NULL) return 0;
+    for (field = 2; *p != 0 && field < 48; p++) {
+        if (*p == ' ') field++;
+    }
+    if (field != 48 || sscanf(p, "%llu %llu", &arg_start, &arg_end) != 2 || arg_end <= arg_start) return 0;
+    c = (*env)->FindClass(env, "android/os/Process");
+    if (c == NULL) { (*env)->ExceptionClear(env); return 0; }
+    m = (*env)->GetStaticMethodID(env, c, "myProcessName", "()Ljava/lang/String;");
+    js = m != NULL ? (jstring) (*env)->CallStaticObjectMethod(env, c, m) : NULL;
+    (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, c);
+    if (js == NULL) return 0;
+    name = (*env)->GetStringUTFChars(env, js, NULL);
+    if (name == NULL) { (*env)->ExceptionClear(env); (*env)->DeleteLocalRef(env, js); return 0; }
+    length = (size_t) (arg_end - arg_start);
+    memset((void*) (uintptr_t) arg_start, 0, length);
+    strncpy((char*) (uintptr_t) arg_start, name, length - 1);
+    (*env)->ReleaseStringUTFChars(env, js, name);
+    (*env)->DeleteLocalRef(env, js);
+    return 1;
+}
+
 static int bind(JNIEnv* env, const char* cls, const JNINativeMethod* table, int count)
 {
     jclass c = (*env)->FindClass(env, cls);
@@ -1097,6 +1145,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int sq = bind(env, "android/database/sqlite/SQLiteGlobal", kSqliteGlobal,
                       (int) (sizeof(kSqliteGlobal) / sizeof(kSqliteGlobal[0])));
         int sp = wrap_system_properties(env);
+        int cl = set_cmdline_to_process_name(env);
         int pr = normalize_thread_priority(env);
         int fs = bind(env, "java/io/UnixFileSystem", kUnixFileSystem,
                       (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
@@ -1119,12 +1168,12 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d more=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d cmdline=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, more);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, cl, more);
         note(line);
     }
     wl_register_media(env, vm);

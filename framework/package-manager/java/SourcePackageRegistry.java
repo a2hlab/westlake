@@ -71,6 +71,11 @@ public final class SourcePackageRegistry {
         info.primaryCpuAbi = "arm64-v8a";
         info.seInfo = "default";
         info.seInfoUser = "";
+        // PackageParser leaves an application without android:process unnamed, and
+        // PackageManagerService's fixProcessName names it after the package. Office's
+        // ApplicationUtils.isPrimaryProcess compares getApplicationInfo(...).processName with
+        // the running process's name and threw NullPointerException in Application.onCreate.
+        if (info.processName == null) info.processName = info.packageName;
     }
 
     /**

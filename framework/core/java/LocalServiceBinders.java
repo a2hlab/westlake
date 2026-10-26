@@ -114,6 +114,9 @@ public final class LocalServiceBinders {
                 case "uri_grants":
                     binder = proxy(name, "android.app.IUriGrantsManager", LocalServiceBinders::uriGrants);
                     break;
+                case "restrictions":
+                    binder = proxy(name, "android.content.IRestrictionsManager", LocalServiceBinders::restrictions);
+                    break;
                 case "trust":
                     binder = proxy(name, "android.app.trust.ITrustManager", LocalServiceBinders::trust);
                     break;
@@ -408,6 +411,23 @@ public final class LocalServiceBinders {
             return pm.getApplicationInfo(packageName, 0);
         } catch (android.content.pm.PackageManager.NameNotFoundException e) {
             return null;
+        }
+    }
+
+    /**
+     * Application restrictions on a device with no device or profile owner: none, and no
+     * restrictions provider. RestrictionsManagerService answers an empty Bundle, not null.
+     * With no service getSystemService returned null, and Adobe Reader's Kotlin cast to
+     * RestrictionsManager threw in Application.onCreate.
+     */
+    private static Object restrictions(String method, Object[] args) {
+        switch (method) {
+            case "getApplicationRestrictions":
+                return new android.os.Bundle();
+            case "getApplicationRestrictionsPerAdminForUser":
+                return new ArrayList<android.os.Bundle>();
+            default:
+                return DEFAULT;   // hasRestrictionsProvider false, createLocalApprovalIntent null
         }
     }
 
