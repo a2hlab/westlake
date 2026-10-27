@@ -4754,6 +4754,15 @@ void *dlsym(void *handle, const char *name)
         caller_is_android_dso(__builtin_return_address(0), NULL)) {
         return (void *) &JNI_GetCreatedJavaVMs;
     }
+    /* Go's Android runtime (runtime/cgo, inittls) takes a successful lookup of this name as "Android
+     * Q or later" and keeps its g pointer in Bionic's TLS_SLOT_APP above the thread pointer. musl has
+     * no such slot (static TLS sits there), so g is overwritten and Go's first callback from Java
+     * faults (ProtonVPN's libgojni). Found by name it is absent, as before Q, and Go probes for a
+     * pthread key instead; libraries that import it by version still bind to it. */
+    if (name != NULL && name[0] == 'a' && strcmp(name, "android_get_device_api_level") == 0 &&
+        caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        return NULL;
+    }
     if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL &&
         name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {
         void *own = westlake_egl_by_handle(name);
