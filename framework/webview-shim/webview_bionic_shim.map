@@ -29,6 +29,7 @@ LIBC_P {
 LIBC_Q {
     global:
         android_fdsan_exchange_owner_tag;
+        android_get_device_api_level;
 } LIBC_P;
 
 /*
@@ -37,6 +38,25 @@ LIBC_Q {
  * versions, so only an import that names this version binds to them.
  */
 libmozglue.so {
+};
+
+/*
+ * libnativewindow.so's version, for the buffer and dataspace calls its importers ask for by
+ * name@LIBNATIVEWINDOW: Maps' and YouTube's libgoogle3.so, TensorFlow Lite's GPU delegate, two
+ * games' frame-rate layer. A versioned import does not bind to a definition under another version,
+ * and the catch-all below would give these LIBC. Unversioned importers (Instagram's
+ * libgraphics-core.so) match this as the default version, so they bind as before.
+ */
+LIBNATIVEWINDOW {
+    global:
+        AHardwareBuffer_acquire;
+        AHardwareBuffer_allocate;
+        AHardwareBuffer_describe;
+        AHardwareBuffer_lock;
+        AHardwareBuffer_release;
+        AHardwareBuffer_unlock;
+        ANativeWindow_getBuffersDataSpace;
+        ANativeWindow_setBuffersDataSpace;
 };
 
 LIBC {

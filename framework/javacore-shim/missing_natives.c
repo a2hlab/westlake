@@ -610,6 +610,8 @@ int wl_register_localsocket(JNIEnv* env);
 int wl_register_surface_canvas(JNIEnv* env);
 int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
+int wl_register_extractor(JNIEnv* env);
+int wl_register_video_codec(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
 {
@@ -728,14 +730,16 @@ static const JNINativeMethod kNet[] = {
 static jint wl_getGidForName(JNIEnv* env, jclass c, jstring name)
 {
     const char* chars;
-    struct group* g;
+    struct group gr, *g = NULL;
+    char buf[1024];
     jint gid = -1;
     (void) c;
     if (name == NULL) return -1;
     chars = (*env)->GetStringUTFChars(env, name, NULL);
     if (chars == NULL) return -1;
-    g = getgrnam(chars);
-    if (g != NULL) gid = (jint) g->gr_gid;
+    /* getgrnam keeps its line in a static buffer it frees on the next call: two threads asking
+     * at once (LINE Webtoon's queues) free each other's line, and musl's allocator faults. */
+    if (getgrnam_r(chars, &gr, buf, sizeof buf, &g) == 0 && g != NULL) gid = (jint) g->gr_gid;
     (*env)->ReleaseStringUTFChars(env, name, chars);
     return gid;
 }
@@ -892,6 +896,81 @@ static jlong wl_acquireHintManager(JNIEnv* e, jclass c) { (void) e; (void) c; re
 
 static const JNINativeMethod kPerformanceHint[] = {
     { "nativeAcquireManager", "()J", (void*) wl_acquireHintManager },
+};
+
+/*
+ * Debug.getPss, as Android reports it: the proportional set size of the process in kB, plus the
+ * part of it that has been swapped out (AOSP android_os_Debug.cpp, which reads the same two files
+ * through libmeminfo). Android adds the graphics memory a memtrack HAL reports; OH has no such HAL
+ * and no accounting of its own, so the graphics figures stay 0, which is what a device without
+ * memtrack reports too. Unbound, the call threw UnsatisfiedLinkError before any screen (Kling).
+ */
+struct wl_proc_memory {
+    jlong pss;
+    jlong uss;
+    jlong rss;
+    jlong swap_pss;
+};
+
+static int wl_read_proc_memory(int pid, struct wl_proc_memory* out)
+{
+    static const char* const names[] = { "smaps_rollup", "smaps" };
+    char path[64];
+    char line[256];
+    size_t which;
+    for (which = 0; which < sizeof(names) / sizeof(names[0]); which++) {
+        unsigned long long value;
+        FILE* file;
+        int found = 0;
+        snprintf(path, sizeof(path), "/proc/%d/%s", pid, names[which]);
+        file = fopen(path, "re");
+        if (file == NULL) continue;
+        memset(out, 0, sizeof(*out));
+        while (fgets(line, sizeof(line), file) != NULL) {
+            if (sscanf(line, "Pss: %llu kB", &value) == 1) { out->pss += (jlong) value; found = 1; }
+            else if (sscanf(line, "Rss: %llu kB", &value) == 1) out->rss += (jlong) value;
+            else if (sscanf(line, "SwapPss: %llu kB", &value) == 1) out->swap_pss += (jlong) value;
+            else if (sscanf(line, "Private_Clean: %llu kB", &value) == 1) out->uss += (jlong) value;
+            else if (sscanf(line, "Private_Dirty: %llu kB", &value) == 1) out->uss += (jlong) value;
+        }
+        fclose(file);
+        if (found) return 1;
+    }
+    return 0;
+}
+
+static jlong wl_debug_getPssPid(JNIEnv* env, jclass c, jint pid, jlongArray usage, jlongArray memtrack)
+{
+    struct wl_proc_memory memory;
+    (void) c;
+    if (!wl_read_proc_memory((int) pid, &memory)) return 0;
+    if (usage != NULL) {
+        jlong values[3];
+        jsize length = (*env)->GetArrayLength(env, usage);
+        values[0] = memory.uss;
+        values[1] = memory.swap_pss;
+        values[2] = memory.rss;
+        if (length > 3) length = 3;
+        if (length > 0) (*env)->SetLongArrayRegion(env, usage, 0, length, values);
+    }
+    if (memtrack != NULL) {
+        jlong zeros[4] = { 0, 0, 0, 0 };
+        jsize length = (*env)->GetArrayLength(env, memtrack);
+        if (length > 4) length = 4;
+        if (length > 0) (*env)->SetLongArrayRegion(env, memtrack, 0, length, zeros);
+    }
+    /* Swapped pages would count towards Pss had they stayed resident, as AOSP's own comment says. */
+    return memory.pss + memory.swap_pss;
+}
+
+static jlong wl_debug_getPss(JNIEnv* env, jclass c)
+{
+    return wl_debug_getPssPid(env, c, (jint) getpid(), NULL, NULL);
+}
+
+static const JNINativeMethod kDebug[] = {
+    { "getPss", "()J", (void*) wl_debug_getPss },
+    { "getPss", "(I[J[J)J", (void*) wl_debug_getPssPid },
 };
 
 static jstring context_from(JNIEnv* env, const char* path)
@@ -1159,21 +1238,24 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int cv = wl_register_surface_canvas(env);
         int sc = wl_register_sqlite_collations(env);
         int ns = wl_register_notification_switch(env);
+        int ex = wl_register_extractor(env);
+        int vc = wl_register_video_codec(env);
         int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
                    + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
                    + bind(env, "android/os/PerformanceHintManager", kPerformanceHint,
                           (int) (sizeof(kPerformanceHint) / sizeof(kPerformanceHint[0])))
                    + bind(env, "android/os/SELinux", kSELinux, (int) (sizeof(kSELinux) / sizeof(kSELinux[0])))
+                   + bind(env, "android/os/Debug", kDebug, (int) (sizeof(kDebug) / sizeof(kDebug[0])))
                    + bind(env, "android/hardware/Camera", kCamera, (int) (sizeof(kCamera) / sizeof(kCamera[0])))
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d cmdline=%d more=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d MediaExtractor=%d VideoCodec=%d cmdline=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, cl, more);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, cl, more);
         note(line);
     }
     wl_register_media(env, vm);

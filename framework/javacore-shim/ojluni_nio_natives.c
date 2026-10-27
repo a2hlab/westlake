@@ -117,6 +117,24 @@ static int register_file_times(JNIEnv* env)
                                     (int) (sizeof(methods) / sizeof(methods[0]))) == JNI_OK;
 }
 
+/*
+ * sun.nio.fs.UnixCopyFile.transfer, from AOSP's UnixCopyFile.c (built unmodified): the copy loop
+ * behind Files.copy and Files.move between file systems. The runtime declares it and registers
+ * nothing, so Apple Music stopped on it in its first moments, before any screen. Returns 1 when
+ * registered.
+ */
+JNIEXPORT void JNICALL Java_sun_nio_fs_UnixCopyFile_transfer(JNIEnv* env, jclass c, jint dst, jint src,
+                                                             jlong cancelAddress);
+
+static int register_copy_file(JNIEnv* env)
+{
+    static const JNINativeMethod methods[] = {
+        { "transfer", "(IIJ)V", (void*) Java_sun_nio_fs_UnixCopyFile_transfer },
+    };
+    return jniRegisterNativeMethods(env, "sun/nio/fs/UnixCopyFile", methods,
+                                    (int) (sizeof(methods) / sizeof(methods[0]))) == JNI_OK;
+}
+
 /* Returns how many classes were registered. */
 int wl_register_ojluni_nio(JNIEnv* env)
 {
@@ -137,5 +155,6 @@ int wl_register_ojluni_nio(JNIEnv* env)
         else done++;
     }
     done += register_file_times(env);
+    done += register_copy_file(env);
     return done;
 }

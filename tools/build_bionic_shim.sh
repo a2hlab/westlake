@@ -2,8 +2,8 @@
 # build_bionic_shim.sh <oh-sdk-native> <out-dir> [description]
 # Builds libwebview_bionic_shim.so: the bionic compatibility layer (webview_bionic_shim.c), the
 # Android OpenSL ES adapter, AAudio over OHAudio, the DT_ANDROID_RELR loader, libandroid's
-# AConfiguration, sensor and input calls and Bionic's fts; the libaaudio.so staged beside it for
-# DT_NEEDED; and artifacts.json for a launch's --bionic-shim input.
+# AConfiguration, sensor and input calls and Bionic's fts; the libaaudio.so and libnativewindow.so
+# staged beside it for DT_NEEDED; and artifacts.json for a launch's --bionic-shim input.
 set -e
 SDK=$1; O=$2; DESC=${3:-bionic shim}
 W=$(cd "$(dirname "$0")/.." && pwd)/framework/webview-shim
@@ -31,11 +31,17 @@ $SDK/llvm/bin/clang --target=aarch64-linux-ohos --sysroot=$SDK/sysroot -fuse-ld=
 $CC -c $W/libaaudio_stub.c -o $O/as.o
 $SDK/llvm/bin/clang --target=aarch64-linux-ohos -fuse-ld=lld -nostdlib -shared -Wl,--build-id=sha1 \
   -Wl,-soname,libaaudio.so $O/as.o -o $O/libaaudio.so
+# libnativewindow.so: the same, and its version script declares the LIBNATIVEWINDOW its importers
+# name in DT_VERNEED (the shim's own exports carry that version, where the definitions are).
+$CC -c $W/libnativewindow_stub.c -o $O/nw.o
+$SDK/llvm/bin/clang --target=aarch64-linux-ohos -fuse-ld=lld -nostdlib -shared -Wl,--build-id=sha1 \
+  -Wl,-soname,libnativewindow.so -Wl,--version-script=$W/libnativewindow_stub.map $O/nw.o \
+  -o $O/libnativewindow.so
 rm -f $O/*.o
 python3 - "$O" "$DESC" <<'PY'
 import hashlib, json, pathlib, sys
 o = pathlib.Path(sys.argv[1])
-names = ["libwebview_bionic_shim.so", "libaaudio.so"]
+names = ["libwebview_bionic_shim.so", "libaaudio.so", "libnativewindow.so"]
 data = {name: (o / name).read_bytes() for name in names}
 (o / "artifacts.json").write_text(json.dumps({"schema": "a2hlab-source-bionic-shim/v1", "source": sys.argv[2],
  "compiler": "OH SDK llvm clang", "errors": [],

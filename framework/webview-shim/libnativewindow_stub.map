@@ -1,0 +1,7 @@
+/*
+ * The version libnativewindow.so's importers name in DT_VERNEED, declared empty: this library
+ * defines no entry point, and the loader finds the definitions (under the same version) in the
+ * preloaded shim.
+ */
+LIBNATIVEWINDOW {
+};

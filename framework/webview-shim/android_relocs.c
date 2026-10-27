@@ -134,6 +134,109 @@ __attribute__((visibility("hidden"))) void *wl_dlopen_android_relocs(void *(*rea
     return handle;
 }
 
+/* Calls fn with each DT_NEEDED name of the ELF file at path (bare names only). */
+static void wl_for_each_needed(const char *path, void (*fn)(const char *name, void *ctx), void *ctx)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    struct stat st;
+    if (fd < 0) return;
+    if (fstat(fd, &st) != 0 || st.st_size < (off_t) sizeof(Elf64_Ehdr)) { close(fd); return; }
+    unsigned char *data = mmap(NULL, (size_t) st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (data == MAP_FAILED) return;
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
+    const Elf64_Phdr *ph = (const Elf64_Phdr *) (data + eh->e_phoff);
+    const Elf64_Dyn *dyn = NULL;
+    size_t count = 0;
+    uint64_t strtab = 0, stroff = 0, strsz = 0;
+    if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0 || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_phoff + (uint64_t) eh->e_phnum * sizeof(Elf64_Phdr) > (uint64_t) st.st_size) goto done;
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type == PT_DYNAMIC && ph[i].p_offset + ph[i].p_filesz <= (uint64_t) st.st_size) {
+            dyn = (const Elf64_Dyn *) (data + ph[i].p_offset);
+            count = ph[i].p_filesz / sizeof(Elf64_Dyn);
+        }
+    }
+    for (size_t k = 0; dyn != NULL && k < count && dyn[k].d_tag != DT_NULL; ++k) {
+        if (dyn[k].d_tag == DT_STRTAB) strtab = dyn[k].d_un.d_ptr;
+        if (dyn[k].d_tag == DT_STRSZ) strsz = dyn[k].d_un.d_val;
+    }
+    for (int i = 0; strtab != 0 && i < eh->e_phnum; ++i) {
+        if (ph[i].p_type == PT_LOAD && ph[i].p_vaddr <= strtab && strtab < ph[i].p_vaddr + ph[i].p_filesz) {
+            stroff = ph[i].p_offset + (strtab - ph[i].p_vaddr);
+        }
+    }
+    if (stroff == 0 || stroff + strsz > (uint64_t) st.st_size) goto done;
+    for (size_t k = 0; k < count && dyn[k].d_tag != DT_NULL; ++k) {
+        if (dyn[k].d_tag != DT_NEEDED || dyn[k].d_un.d_val >= strsz) continue;
+        const char *name = (const char *) data + stroff + dyn[k].d_un.d_val;
+        if (strchr(name, '/') != NULL || strnlen(name, strsz - dyn[k].d_un.d_val) >= 256) continue;
+        fn(name, ctx);
+    }
+done:
+    munmap(data, (size_t) st.st_size);
+}
+
+static void wl_copy_apk_needed_from_apk(const char *name, void *ctx);
+static void wl_copy_apk_one(const char *name, void *ctx);
+
+struct wl_apk_needed {
+    const char *sibling_dir;    /* the library's own directory, whose siblings are copied anyway */
+    int sibling_dir_len;
+    const char *apk_lib_dir;
+    const char *dir;
+    int (*shared)(const char *name);
+    int depth;
+};
+
+static void wl_copy_apk_one(const char *name, void *ctx)
+{
+    struct wl_apk_needed *c = (struct wl_apk_needed *) ctx;
+    char sibling[1024], packaged[1024], target[1024];
+    snprintf(sibling, sizeof(sibling), "%.*s/%s", c->sibling_dir_len, c->sibling_dir, name);
+    snprintf(packaged, sizeof(packaged), "%s/%s", c->apk_lib_dir, name);
+    if (access(sibling, R_OK) == 0 || access(packaged, R_OK) != 0 || c->shared(name)) return;
+    snprintf(target, sizeof(target), "%s/%s", c->dir, name);
+    if (access(target, R_OK) == 0) return;   /* copied already, with what it needs */
+    int rc = wl_write_loadable_copy(packaged, target, wl_needs_android_relocs(packaged));
+    wl_relocs_log("[WESTLAKE-LOADER] %s: the APK's copy beside it in %s: %s\n", name, c->dir,
+                  rc == 0 ? "copied" : "failed");
+    if (rc == 0 && c->depth < 6) {
+        struct wl_apk_needed next = *c;
+        next.depth = c->depth + 1;
+        wl_for_each_needed(packaged, wl_copy_apk_needed_from_apk, &next);
+    }
+}
+
+/* A dependency of an APK library being copied: everything beside that library is in the APK
+ * directory, so the "beside" test (which would skip all of them) is left out. */
+static void wl_copy_apk_needed_from_apk(const char *name, void *ctx)
+{
+    struct wl_apk_needed *c = (struct wl_apk_needed *) ctx;
+    struct wl_apk_needed self = *c;
+    self.sibling_dir = "/nonexistent";
+    self.sibling_dir_len = (int) strlen(self.sibling_dir);
+    wl_copy_apk_one(name, &self);
+}
+
+/*
+ * Copies into dir each DT_NEEDED library of path, transitively, that is not beside it, that the
+ * APK packages, and that the written-library namespace does not share with the default namespace
+ * (shared(name) says which it does: those already loaded there). An APK library not yet loaded,
+ * found by name through the default namespace, came from the default path, which reaches
+ * /system/lib64 before the APK directory: Messenger's libearlystartup.so, the first library it
+ * loads, needs libc++_shared.so and libbreakpad.so, and both ended up bound to OH's libc++
+ * (std::__h, not std::__ndk1). Android loads each from the app's library path.
+ */
+__attribute__((visibility("hidden"))) void wl_copy_apk_needed(const char *path, const char *apk_lib_dir,
+                                                              const char *dir, int (*shared)(const char *name))
+{
+    const char *slash = strrchr(path, '/');
+    if (slash == NULL || apk_lib_dir == NULL || dir == NULL || shared == NULL) return;
+    struct wl_apk_needed ctx = { path, (int) (slash - path), apk_lib_dir, dir, shared, 0 };
+    wl_for_each_needed(path, wl_copy_apk_one, &ctx);
+}
+
 /*
  * Copies path's DT_NEEDED siblings (files of those names beside it) into dir, retagged where they
  * have DT_ANDROID_RELR, following their own DT_NEEDED a few levels down, so a loader searching dir
