@@ -1094,6 +1094,7 @@ static int westlake_library_is_refused(const char *basename)
 int wl_needs_android_relocs(const char *path);
 int wl_write_loadable_copy(const char *path, const char *target, int retag);
 void wl_copy_needed_siblings(const char *path, const char *dir, int depth);
+void wl_copy_apk_needed(const char *path, const char *apk_lib_dir, const char *dir, int (*shared)(const char *name));
 void *wl_dlopen_android_relocs(void *(*real_dlopen)(const char *, int), const char *path, const char *target,
                                int flags);
 void wl_relocs_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -1181,7 +1182,20 @@ static void *westlake_load_android_relocs(void *(*real_dlopen)(const char *, int
  * path, a second Python runtime was loaded, never initialized, and an extension module's first call
  * into it went through a PLT slot left unresolved (econverter, werewolvesgame).
  */
-static char *westlake_shared_with_default(const char *apk_lib_dir)
+typedef void *(*WlDlopenNsFn)(Dl_namespace *, const char *, int);
+
+/* The APK libraries the written-library namespace shares with the default namespace, ':'-separated
+ * with a leading and trailing ':', for westlake_app_ns_shares; NULL when it shares none. */
+static char *g_apk_shared;
+
+static int westlake_app_ns_shares(const char *name)
+{
+    char key[300];
+    snprintf(key, sizeof(key), ":%s:", name);
+    return g_apk_shared != NULL && strstr(g_apk_shared, key) != NULL;
+}
+
+static char *westlake_shared_with_default(const char *apk_lib_dir, Dl_namespace *parent, WlDlopenNsFn open_fn)
 {
     static const char ndk[] = "libc.so:libdl.so:libm.so:libz.so:liblog.so:libandroid.so:"
                               "libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libOpenSLES.so:"
@@ -1196,6 +1210,16 @@ static char *westlake_shared_with_default(const char *apk_lib_dir)
          entry = readdir(directory)) {
         size_t n = strlen(entry->d_name);
         if (n < 4 || strcmp(entry->d_name + n - 3, ".so") != 0) continue;
+        /* Only a library ART's loader has already loaded there (Chaquopy's libpython): one not yet
+         * loaded would be looked up by name on the default path, which reaches /system/lib64 before
+         * the APK directory, and a name OH also has (libc++_shared.so) resolves to OH's even when
+         * loaded, since a library loaded by path has no short name. The namespace loads those
+         * from its own directory (wl_copy_apk_needed). */
+        char system[512], packaged[1024];
+        snprintf(system, sizeof(system), "/system/lib64/%s", entry->d_name);
+        snprintf(packaged, sizeof(packaged), "%s/%s", apk_lib_dir, entry->d_name);
+        if (access(system, F_OK) == 0 || parent == NULL || open_fn == NULL ||
+            open_fn(parent, packaged, RTLD_NOW | RTLD_NOLOAD) == NULL) continue;
         if (length + 1 + n + 1 > size) {
             size_t grown = (size + n + 2) * 2;
             char *bigger = realloc(shared, grown);
@@ -1208,8 +1232,17 @@ static char *westlake_shared_with_default(const char *apk_lib_dir)
         length += n;
     }
     if (directory != NULL) closedir(directory);
+    /* The APK part of the list, for westlake_app_ns_shares. */
+    const char *apk_part = shared + sizeof(ndk) - 1;
+    free(g_apk_shared);
+    g_apk_shared = malloc(strlen(apk_part) + 2);
+    if (g_apk_shared != NULL) sprintf(g_apk_shared, "%s:", apk_part);
     return shared;
 }
+
+/* Whether the written-library namespace inherits an Android namespace (else it shares the APK's
+ * loaded libraries with the default namespace and copies the rest; see wl_copy_apk_needed). */
+static int westlake_app_ns_has_android;
 
 static void *westlake_load_app_library(const char *path, int flags)
 {
@@ -1269,6 +1302,7 @@ static void *westlake_load_app_library(const char *path, int flags)
         memset(&parent, 0, sizeof(parent));
         memset(&android, 0, sizeof(android));
         int has_android = get_fn != NULL && get_fn("westlake_android_app", &android) == 0;
+        westlake_app_ns_has_android = has_android;
         /* With an Android namespace, its search path follows the copies' directory. Without one, the
          * APK's own libraries come from the default namespace, shared by name below, never from the
          * APK directory on this path: that loaded a second copy of what the default namespace held. */
@@ -1286,7 +1320,7 @@ static void *westlake_load_app_library(const char *path, int flags)
                  * too, and the APK's own libraries. WhatsApp's libwhatsappmerged.so needs
                  * libandroid.so; with no Android namespace in its launch nothing here had one, the load
                  * failed, and SoLoader's retry outside this namespace could not find libqpl.so beside it. */
-                char *shared = westlake_shared_with_default(has_android ? NULL : app_lib_dir);
+                char *shared = westlake_shared_with_default(has_android ? NULL : app_lib_dir, &parent, open_fn);
                 if (shared != NULL && inherit_fn(&ns, &parent, shared) == 0) {
                     state = 1;
                 }
@@ -1312,6 +1346,7 @@ static void *westlake_load_app_library(const char *path, int flags)
         return NULL;
     }
     wl_copy_needed_siblings(path, dir, 0);
+    if (!westlake_app_ns_has_android) wl_copy_apk_needed(path, getenv("ASX_NATIVE_LIB_DIR"), dir, westlake_app_ns_shares);
     void *handle = open_fn(&ns, base + 1, flags);
     const char *error = handle == NULL ? dlerror() : NULL;
     wl_relocs_log("[WESTLAKE-LOADER] %s: %s by name from %s%s%s\n", path, handle != NULL ? "loaded" : "failed", dir,
@@ -2467,6 +2502,20 @@ int __system_property_get(const char *name, char *value)
     return length;
 }
 
+/*
+ * Bionic's android_get_device_api_level (API 29, LIBC_Q): ro.build.version.sdk as a number, which
+ * is what the framework reports as Build.VERSION.SDK_INT. Maps' and YouTube's libgoogle3.so import
+ * it by version, and a library that fails to relocate is never loaded.
+ */
+int android_get_device_api_level(void)
+{
+    char value[WEBVIEW_PROP_VALUE_MAX] = {0};
+    if (__system_property_get("ro.build.version.sdk", value) <= 0) {
+        return -1;
+    }
+    return atoi(value);
+}
+
 const struct prop_info *__system_property_find(const char *name)
 {
     if (name == NULL) {
@@ -3361,14 +3410,165 @@ WESTLAKE_ALOOPER_FORWARD(int, ALooper_addFd,
 WESTLAKE_ALOOPER_FORWARD(int, ALooper_removeFd, (ALooper *looper, int fd), (looper, fd))
 
 /*
+ * libandroid's ASurfaceControl and ASurfaceTransaction (API 29), which neither the runtime's
+ * libandroid.so nor the native bridge has: YouTube's libgoogle3.so imports eleven of them and, being
+ * BIND_NOW, did not load at all. OH has no child-surface API this runtime can hand an app, so a
+ * surface control cannot be created and the create calls answer NULL, which is Android's own answer
+ * when the compositor refuses one; callers check it and keep drawing into their window. A
+ * transaction is a real object, so the code that builds one before it has a control works, and
+ * apply runs its completion callback with no stats, as the WebView's libandroid does for Chromium.
+ */
+typedef void (*WlTransactionCallback)(void *context, void *stats);
+typedef struct {
+    void *context;
+    WlTransactionCallback callback;
+} WlSurfaceTransaction;
+
+void *ASurfaceControl_create(void *parent, const char *debug_name)
+{
+    fprintf(stderr, "[WESTLAKE-BIONIC] ASurfaceControl_create(%s): no child surfaces on OH\n",
+            debug_name != NULL ? debug_name : "");
+    (void) parent;
+    return NULL;
+}
+
+void *ASurfaceControl_createFromWindow(void *window, const char *debug_name)
+{
+    return ASurfaceControl_create(window, debug_name);
+}
+
+void ASurfaceControl_acquire(void *surface_control) { (void) surface_control; }
+void ASurfaceControl_release(void *surface_control) { (void) surface_control; }
+
+void *ASurfaceTransaction_create(void)
+{
+    return calloc(1, sizeof(WlSurfaceTransaction));
+}
+
+void ASurfaceTransaction_delete(void *transaction)
+{
+    free(transaction);
+}
+
+void ASurfaceTransaction_setOnComplete(void *transaction, void *context, WlTransactionCallback callback)
+{
+    WlSurfaceTransaction *t = (WlSurfaceTransaction *) transaction;
+    if (t == NULL) return;
+    t->context = context;
+    t->callback = callback;
+}
+
+void ASurfaceTransaction_apply(void *transaction)
+{
+    WlSurfaceTransaction *t = (WlSurfaceTransaction *) transaction;
+    if (t == NULL || t->callback == NULL) return;
+    WlTransactionCallback callback = t->callback;
+    t->callback = NULL;
+    callback(t->context, NULL);
+}
+
+/* Every setter names a surface control, and none can exist, so there is nothing to change. */
+void ASurfaceTransaction_reparent(void *transaction, void *surface_control, void *new_parent)
+{
+    (void) transaction; (void) surface_control; (void) new_parent;
+}
+
+void ASurfaceTransaction_setBuffer(void *transaction, void *surface_control, void *buffer,
+                                   int acquire_fence_fd)
+{
+    (void) transaction; (void) surface_control; (void) buffer;
+    if (acquire_fence_fd >= 0) close(acquire_fence_fd);
+}
+
+void ASurfaceTransaction_setBufferDataSpace(void *transaction, void *surface_control, int32_t data_space)
+{
+    (void) transaction; (void) surface_control; (void) data_space;
+}
+
+void ASurfaceTransaction_setGeometry(void *transaction, void *surface_control, const void *source,
+                                     const void *destination, int32_t transform)
+{
+    (void) transaction; (void) surface_control; (void) source; (void) destination; (void) transform;
+}
+
+void ASurfaceTransaction_setVisibility(void *transaction, void *surface_control, int8_t visibility)
+{
+    (void) transaction; (void) surface_control; (void) visibility;
+}
+
+void ASurfaceTransaction_setZOrder(void *transaction, void *surface_control, int32_t z_order)
+{
+    (void) transaction; (void) surface_control; (void) z_order;
+}
+
+int ASurfaceTransactionStats_getPreviousReleaseFenceFd(void *stats, void *surface_control)
+{
+    (void) stats; (void) surface_control;
+    return -1;
+}
+
+/*
+ * The five AMediaCodec calls the runtime's libmediandk.so does not define (async mode, the codec's
+ * name, encoder input surfaces), which YouTube's libgoogle3.so imports beside the ones it does.
+ * Each answers with the NDK's own status for a codec without the feature, so a caller falls back to
+ * the synchronous calls that exist; the codec object itself belongs to libmediandk.
+ */
+enum { WL_AMEDIA_ERROR_UNSUPPORTED = -10002, WL_AMEDIA_ERROR_INVALID_OPERATION = -10005 };
+
+int AMediaCodec_getName(void *codec, char **out_name)
+{
+    (void) codec;
+    if (out_name != NULL) *out_name = NULL;
+    return WL_AMEDIA_ERROR_UNSUPPORTED;
+}
+
+void AMediaCodec_releaseName(void *codec, char *name)
+{
+    (void) codec;
+    free(name);
+}
+
+int AMediaCodec_setAsyncNotifyCallback(void *codec, const void *callback, void *userdata)
+{
+    (void) codec; (void) callback; (void) userdata;
+    fprintf(stderr, "[WESTLAKE-BIONIC] AMediaCodec_setAsyncNotifyCallback: async mode unsupported\n");
+    return WL_AMEDIA_ERROR_UNSUPPORTED;
+}
+
+int AMediaCodec_createInputSurface(void *codec, void **surface)
+{
+    (void) codec;
+    if (surface != NULL) *surface = NULL;
+    return WL_AMEDIA_ERROR_UNSUPPORTED;
+}
+
+int AMediaCodec_signalEndOfInputStream(void *codec)
+{
+    (void) codec;
+    return WL_AMEDIA_ERROR_INVALID_OPERATION;
+}
+
+/*
  * AHardwareBuffer and the multinetwork DNS calls, for the same reason: the WebView shim's
  * libandroid.so has neither, so Instagram's libscrollmerged.so failed to relocate on
  * AHardwareBuffer_unlock. The runtime's libandroid.so imports AHardwareBuffer from libhwui.so;
  * a lookup through its handle searches its dependencies and finds libhwui's definition.
  */
 typedef struct AHardwareBuffer AHardwareBuffer;
-typedef struct AHardwareBuffer_Desc AHardwareBuffer_Desc;
 typedef struct ARect ARect;
+
+/* Android's descriptor, as the NDK declares it: the plane geometry below reads the format and the
+ * stride (in pixels, as Android reports it) out of it. */
+typedef struct AHardwareBuffer_Desc {
+    uint32_t width;
+    uint32_t height;
+    uint32_t layers;
+    uint32_t format;
+    uint64_t usage;
+    uint32_t stride;
+    uint32_t rfu0;
+    uint64_t rfu1;
+} AHardwareBuffer_Desc;
 
 WESTLAKE_ALOOPER_FORWARD(int, AHardwareBuffer_allocate, (const AHardwareBuffer_Desc *desc, AHardwareBuffer **out),
                          (desc, out))
@@ -3410,6 +3610,237 @@ void *ANativeWindow_toSurface(void *env, void *window)
     (void) env;
     (void) window;
     return NULL;
+}
+
+/*
+ * libnativewindow.so, the NDK library twelve of the HK top 1000 name in DT_NEEDED: Maps' and
+ * YouTube's libgoogle3.so, TensorFlow Lite's GPU delegate (Amazon, LINE and a homework app),
+ * Bilibili's filter SDK, two games' frame-rate layer, iQIYI, Luminar, Chromecast and xiaohongshu.
+ * OH has no library of that name, so their load failed before a symbol was looked up;
+ * libnativewindow_stub.c gives the linker the name. Each importer is linked BIND_NOW, so every
+ * entry point it names must resolve, not only the ones it calls.
+ *
+ * The runtime's libhwui.so defines all of them but the seven below: SurfaceTexture's five public
+ * calls (it defines the platform's own, which TextureView uses) and two buffer calls. Eight more
+ * are imported as name@LIBNATIVEWINDOW, so the version script gives those forwarders that version:
+ * a versioned import does not bind to an unversioned definition.
+ */
+
+/* OH's native image library, opened at the first SurfaceTexture call. */
+static void *westlake_native_image_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) library = dlopen("libnative_image.so", RTLD_NOW | RTLD_LOCAL);
+    return library != NULL ? dlsym(library, name) : NULL;
+}
+
+/* OH's native buffer library, for the plane geometry of a buffer whose pixels have no size. */
+static void *westlake_native_buffer_symbol(const char *name)
+{
+    static void *library;
+    if (library == NULL) library = dlopen("libnative_buffer.so", RTLD_NOW | RTLD_LOCAL);
+    return library != NULL ? dlsym(library, name) : NULL;
+}
+
+WESTLAKE_ALOOPER_FORWARD(int32_t, ANativeWindow_getBuffersDataSpace, (void *window), (window))
+WESTLAKE_ALOOPER_FORWARD(int32_t, ANativeWindow_setBuffersDataSpace, (void *window, int32_t dataspace),
+                         (window, dataspace))
+
+/*
+ * The facade libhwui.so hands the app (ASurfaceTexture_fromSurfaceTexture): the JavaVM, the Java
+ * SurfaceTexture, then the consumer handle of the framework's own SurfaceTexture state
+ * (native/hwui/oh_surface_texture.cpp, which the deployed library stores at 0, 8 and 16). Only the
+ * consumer is read, and only once the JavaVM is this process's and the bridge has accepted the
+ * handle -- oh_surface_texture_get_native_image checks its own magic -- so a facade of another
+ * shape answers with an error instead of a wild pointer.
+ */
+struct westlake_hwui_surface_texture {
+    void *vm;
+    void *java_texture;
+    void *consumer;
+};
+
+static void *westlake_surface_texture_image(void *facade)
+{
+    typedef void *(*ImageOfConsumerFn)(void *);
+    typedef int (*CreatedVmsFn)(void **, int, int *);
+    static ImageOfConsumerFn image_of_consumer;
+    const struct westlake_hwui_surface_texture *texture = facade;
+    CreatedVmsFn created_vms;
+    void *vms[1];
+    int count = 0;
+    if (facade == NULL) return NULL;
+    if (image_of_consumer == NULL) {
+        void *bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
+        if (bridge != NULL)
+            image_of_consumer = (ImageOfConsumerFn) dlsym(bridge, "oh_surface_texture_get_native_image");
+        if (image_of_consumer == NULL) return NULL;
+    }
+    created_vms = (CreatedVmsFn) dlsym(RTLD_DEFAULT, "JNI_GetCreatedJavaVMs");
+    if (created_vms == NULL || created_vms(vms, 1, &count) != 0 || count != 1) return NULL;
+    if (texture->vm != vms[0]) return NULL;
+    return image_of_consumer(texture->consumer);
+}
+
+/* OH's consumer answers each of the five with the call of the same meaning; its error becomes
+ * Android's BAD_VALUE, which is what a SurfaceTexture reports for a frame it cannot deliver. */
+int ASurfaceTexture_attachToGLContext(void *texture, uint32_t tex_name)
+{
+    typedef int32_t (*AttachFn)(void *, uint32_t);
+    void *image = westlake_surface_texture_image(texture);
+    AttachFn attach = (AttachFn) westlake_native_image_symbol("OH_NativeImage_AttachContext");
+    if (image == NULL || attach == NULL) return -EINVAL;
+    return attach(image, tex_name) == 0 ? 0 : -EINVAL;
+}
+
+int ASurfaceTexture_detachFromGLContext(void *texture)
+{
+    typedef int32_t (*DetachFn)(void *);
+    void *image = westlake_surface_texture_image(texture);
+    DetachFn detach = (DetachFn) westlake_native_image_symbol("OH_NativeImage_DetachContext");
+    if (image == NULL || detach == NULL) return -EINVAL;
+    return detach(image) == 0 ? 0 : -EINVAL;
+}
+
+int ASurfaceTexture_updateTexImage(void *texture)
+{
+    typedef int32_t (*UpdateFn)(void *);
+    void *image = westlake_surface_texture_image(texture);
+    UpdateFn update = (UpdateFn) westlake_native_image_symbol("OH_NativeImage_UpdateSurfaceImage");
+    if (image == NULL || update == NULL) return -EINVAL;
+    return update(image) == 0 ? 0 : -EINVAL;
+}
+
+/* The matrix the Java SurfaceTexture's own path reads (OH_NativeImage_GetTransformMatrix), so a
+ * frame is sampled the same way whichever path the app used to get it. With nothing to report the
+ * caller is left the identity, which samples the texture as it is. */
+void ASurfaceTexture_getTransformMatrix(void *texture, float matrix[16])
+{
+    typedef int32_t (*MatrixFn)(void *, float *);
+    void *image = westlake_surface_texture_image(texture);
+    MatrixFn transform = (MatrixFn) westlake_native_image_symbol("OH_NativeImage_GetTransformMatrix");
+    int i;
+    if (matrix == NULL) return;
+    if (image != NULL && transform != NULL && transform(image, matrix) == 0) return;
+    for (i = 0; i < 16; i++) matrix[i] = (i % 5) == 0 ? 1.0f : 0.0f;
+}
+
+int64_t ASurfaceTexture_getTimestamp(void *texture)
+{
+    typedef int64_t (*TimestampFn)(void *);
+    void *image = westlake_surface_texture_image(texture);
+    TimestampFn timestamp = (TimestampFn) westlake_native_image_symbol("OH_NativeImage_GetTimestamp");
+    return image != NULL && timestamp != NULL ? timestamp(image) : 0;
+}
+
+/*
+ * Android answers whether a descriptor could be allocated. OH has no such question, so the only
+ * truthful answer is the allocation itself, released at once.
+ */
+int AHardwareBuffer_isSupported(const AHardwareBuffer_Desc *desc)
+{
+    AHardwareBuffer *buffer = NULL;
+    if (desc == NULL || AHardwareBuffer_allocate(desc, &buffer) != 0 || buffer == NULL) return 0;
+    AHardwareBuffer_release(buffer);
+    return 1;
+}
+
+/* Android's planes of a locked buffer, as the NDK declares them. */
+typedef struct AHardwareBuffer_Plane {
+    void *data;
+    uint32_t pixelStride;
+    uint32_t rowStride;
+} AHardwareBuffer_Plane;
+
+typedef struct AHardwareBuffer_Planes {
+    uint32_t planeCount;
+    AHardwareBuffer_Plane planes[4];
+} AHardwareBuffer_Planes;
+
+/* OH's, from native_buffer.h: an offset into the mapped buffer rather than an address. */
+struct westlake_oh_buffer_plane {
+    uint64_t offset;
+    uint32_t row_stride;
+    uint32_t column_stride;
+};
+
+struct westlake_oh_buffer_planes {
+    uint32_t plane_count;
+    struct westlake_oh_buffer_plane planes[4];
+};
+
+/*
+ * The bytes one pixel of an Android buffer format occupies, or 0 where a pixel has no size: a
+ * planar (camera) format, a depth or stencil format, anything unknown. Android reports a buffer's
+ * stride in pixels, so a single plane's row stride is this many bytes times that stride.
+ */
+static uint32_t westlake_android_buffer_pixel_bytes(uint32_t format)
+{
+    switch (format) {
+    case 1:    /* R8G8B8A8_UNORM */
+    case 2:    /* R8G8B8X8_UNORM */
+    case 0x2b: /* R10G10B10A2_UNORM */
+        return 4;
+    case 3:    /* R8G8B8_UNORM */
+        return 3;
+    case 4:    /* R5G6B5_UNORM */
+        return 2;
+    case 0x16: /* R16G16B16A16_FLOAT */
+        return 8;
+    case 0x21: /* BLOB */
+    case 0x38: /* R8_UNORM */
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * The planes of a locked buffer. OH's MapPlanes describes every format, planar or not, and is the
+ * only mapping taken, so the caller's AHardwareBuffer_unlock still balances it. Where OH has no
+ * MapPlanes, a format whose pixels have a size is one plane of the ordinary lock; a planar format
+ * has no such answer and says so.
+ */
+int AHardwareBuffer_lockPlanes(AHardwareBuffer *buffer, uint64_t usage, int32_t fence,
+                               const ARect *rect, AHardwareBuffer_Planes *out)
+{
+    typedef int32_t (*MapPlanesFn)(void *, void **, struct westlake_oh_buffer_planes *);
+    typedef int (*SyncWaitFn)(int, int);
+    static const uint64_t cpu_usage = 0xfULL; /* CPU_READ_MASK | CPU_WRITE_MASK */
+    MapPlanesFn map_planes = (MapPlanesFn) westlake_native_buffer_symbol("OH_NativeBuffer_MapPlanes");
+    AHardwareBuffer_Desc desc;
+    void *address = NULL;
+    uint32_t i;
+    if (buffer == NULL || out == NULL || usage == 0 || (usage & ~cpu_usage) != 0) return -EINVAL;
+    memset(out, 0, sizeof(*out));
+    memset(&desc, 0, sizeof(desc));
+    AHardwareBuffer_describe(buffer, &desc);
+    if (rect != NULL) {
+        const int32_t *bounds = (const int32_t *) rect; /* left, top, right, bottom */
+        if (bounds[0] < 0 || bounds[1] < 0 || bounds[2] < bounds[0] || bounds[3] < bounds[1] ||
+            (uint32_t) bounds[2] > desc.width || (uint32_t) bounds[3] > desc.height) return -EINVAL;
+    }
+    if (map_planes != NULL) {
+        struct westlake_oh_buffer_planes planes;
+        SyncWaitFn sync_wait = (SyncWaitFn) westlake_runtime_android_symbol("sync_wait");
+        memset(&planes, 0, sizeof(planes));
+        if (fence >= 0 && sync_wait != NULL && sync_wait(fence, -1) != 0) return -errno;
+        if (map_planes(buffer, &address, &planes) != 0 || address == NULL) return -EIO;
+        out->planeCount = planes.plane_count < 4 ? planes.plane_count : 4;
+        for (i = 0; i < out->planeCount; i++) {
+            out->planes[i].data = (unsigned char *) address + planes.planes[i].offset;
+            out->planes[i].pixelStride = planes.planes[i].column_stride;
+            out->planes[i].rowStride = planes.planes[i].row_stride;
+        }
+        return 0;
+    }
+    if (westlake_android_buffer_pixel_bytes(desc.format) == 0) return -ENOTSUP;
+    if (AHardwareBuffer_lock(buffer, usage, fence, rect, &address) != 0 || address == NULL) return -EIO;
+    out->planeCount = 1;
+    out->planes[0].data = address;
+    out->planes[0].pixelStride = westlake_android_buffer_pixel_bytes(desc.format);
+    out->planes[0].rowStride = desc.stride * westlake_android_buffer_pixel_bytes(desc.format);
+    return 0;
 }
 
 /*
@@ -4852,4 +5283,35 @@ char *if_indextoname(unsigned int index, char *name)
     }
     if (found == NULL) errno = refused != 0 ? refused : ENXIO;
     return found;
+}
+
+/*
+ * SkRefCntBase::internal_dispose, for the two copies of Skia's reference counting in this process.
+ *
+ * libhwui.so is built release: its copy of this inline virtual deletes the object and leaves the
+ * count at 0. liboh_hwui_shim.so, which supplies the Skia sources OH's own build leaves out
+ * (SkAnimatedImage, SkAndroidCodec), is built with assertions on: its destructors assert the count
+ * is 1, which the debug copy of this function restores before deleting. Both export the symbol
+ * weakly, so one definition serves the whole process -- and when libhwui's wins, every
+ * SkAnimatedImage destruction aborts in ReelShort's finalizer thread on
+ *   fatal error: "assertf(this->getRefCnt() == 1): fRefCnt was 0"
+ * which is an abort in an app that merely showed an animated image (AnimatedImageDrawable: an
+ * animated WebP or GIF).
+ *
+ * This definition is preloaded, so it is the one both libraries bind: it restores the count the
+ * asserting destructors expect and then deletes through the vtable, which the release destructors
+ * are indifferent to. The proper fix is to build the hwui shim's Skia sources release, as libhwui
+ * is (NDEBUG in tools/build_hwui_shims.py); that build's link step cannot be run here.
+ */
+void _ZNK12SkRefCntBase16internal_disposeEv(const void *object);
+void _ZNK12SkRefCntBase16internal_disposeEv(const void *object)
+{
+    /* SkRefCntBase: the vtable pointer, then fRefCnt. Slot 1 of the vtable is the deleting
+     * destructor, which is what both copies of this function call. */
+    typedef void (*Delete)(const void *);
+    void *const *vtable;
+    if (object == NULL) return;
+    *(int32_t *) ((char *) object + 8) = 1;
+    vtable = *(void *const *const *) object;
+    ((Delete) vtable[1])(object);
 }
