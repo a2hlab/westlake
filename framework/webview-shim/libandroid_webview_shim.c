@@ -614,7 +614,7 @@ int AAsset_isAllocated(AAsset *asset)
     return fn != NULL ? fn(asset) : 0;
 }
 
-ALooper *ALooper_prepare(int opts)
+static ALooper *prepare_thread_looper(int opts)
 {
     if (g_thread_looper == NULL) {
         g_thread_looper = calloc(1, sizeof(*g_thread_looper));
@@ -641,8 +641,28 @@ ALooper *ALooper_prepare(int opts)
     return g_thread_looper;
 }
 
+ALooper *ALooper_prepare(int opts)
+{
+    return prepare_thread_looper(opts);
+}
+
+/* On Android a thread that runs a Java Looper has an ALooper too: the same android::Looper. Here
+ * ALooper_prepare adopts that thread's Java MessageQueue through the bridge, so answer with it.
+ * GameActivity (Cocos) asks on the main thread without preparing and refuses a null looper. The
+ * check is the preloaded bionic shim's, which has the JavaVM. The looper is made by the static
+ * function: a call to ALooper_prepare would bind to the preloaded shim's, which makes the runtime's. */
 ALooper *ALooper_forThread(void)
 {
+    if (g_thread_looper == NULL) {
+        typedef int (*Fn)(void);
+        static Fn has_java_looper;
+        if (has_java_looper == NULL) {
+            has_java_looper = (Fn)dlsym(RTLD_DEFAULT, "westlake_thread_has_java_looper");
+        }
+        if (has_java_looper != NULL && has_java_looper()) {
+            prepare_thread_looper(0);
+        }
+    }
     return g_thread_looper;
 }
 
@@ -663,6 +683,9 @@ void ALooper_release(ALooper *looper)
 int ALooper_addFd(ALooper *looper, int fd, int ident, int events,
                   ALooper_callbackFunc callback, void *data)
 {
+    /* Registered with the backend, which the thread's Java MessageQueue polls, and also here: a
+     * thread without a Java Looper (a NativeActivity or GameActivity app thread) polls with
+     * ALooper_pollOnce, which sees only this table. */
     int result = -1;
     if (looper != NULL && looper->backend != NULL) {
         typedef int (*Fn)(void *, int, int, int, ALooper_callbackFunc, void *);
@@ -670,7 +693,8 @@ int ALooper_addFd(ALooper *looper, int fd, int ident, int events,
         if (fn != NULL) {
             result = fn(looper->backend, fd, ident, events, callback, data);
         }
-    } else if (looper != NULL && fd >= 0 && (ident >= 0 || callback != NULL)) {
+    }
+    if (looper != NULL && fd >= 0 && (ident >= 0 || callback != NULL)) {
         int slot = -1;
         for (int i = 0; i < WL_ALOOPER_MAX_FDS; ++i) {
             if (looper->fds[i].fd == fd) {
@@ -687,7 +711,7 @@ int ALooper_addFd(ALooper *looper, int fd, int ident, int events,
             looper->fds[slot].events = events;
             looper->fds[slot].callback = callback;
             looper->fds[slot].data = data;
-            result = 1;
+            if (looper->backend == NULL) result = 1;
         }
     }
     fprintf(stderr,
@@ -708,12 +732,13 @@ int ALooper_removeFd(ALooper *looper, int fd)
         if (fn != NULL) {
             result = fn(looper->backend, fd);
         }
-    } else if (looper != NULL && fd >= 0) {
-        result = 0;
+    }
+    if (looper != NULL && fd >= 0) {
+        if (looper->backend == NULL) result = 0;
         for (int i = 0; i < WL_ALOOPER_MAX_FDS; ++i) {
             if (looper->fds[i].fd == fd) {
                 looper->fds[i].fd = -1;
-                result = 1;
+                if (looper->backend == NULL) result = 1;
                 break;
             }
         }

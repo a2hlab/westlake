@@ -5418,3 +5418,32 @@ void _ZNK12SkRefCntBase16internal_disposeEv(const void *object)
     vtable = *(void *const *const *) object;
     ((Delete) vtable[1])(object);
 }
+
+/* Bionic's libc exports the classification functions behind its <math.h> macros as functions
+ * (isfinite and friends were functions before C99); NDK code built against old headers imports
+ * them by name. musl has only the macros, so StarMaker's libffmpeg.so failed to load on
+ * __isfinite. The whole set the harness's NDK coverage lists as missing is defined here. */
+int __isfinite(double x) { return isfinite(x); }
+int __isfinitef(float x) { return isfinite(x); }
+int __isfinitel(long double x) { return isfinite(x); }
+int __isinf(double x) { return isinf(x); }
+int __isinff(float x) { return isinf(x); }
+int __isinfl(long double x) { return isinf(x); }
+int __isnan(double x) { return isnan(x); }
+int __isnanf(float x) { return isnan(x); }
+int __isnanl(long double x) { return isnan(x); }
+int __isnormal(double x) { return isnormal(x); }
+int __isnormalf(float x) { return isnormal(x); }
+int __isnormall(long double x) { return isnormal(x); }
+/* Bionic's FP_* values are bit flags (infinite 1, NaN 2, normal 4, subnormal 8, zero 16), not musl's
+ * 0 to 4, so the class is translated. */
+int __fpclassifyd(double x)
+{
+    switch (fpclassify(x)) {
+    case FP_INFINITE: return 0x01;
+    case FP_NAN: return 0x02;
+    case FP_NORMAL: return 0x04;
+    case FP_SUBNORMAL: return 0x08;
+    default: return 0x10;
+    }
+}
