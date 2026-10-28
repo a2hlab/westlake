@@ -3,7 +3,8 @@
 # Builds libwebview_bionic_shim.so: the bionic compatibility layer (webview_bionic_shim.c), the
 # Android OpenSL ES adapter, AAudio over OHAudio, the DT_ANDROID_RELR loader, libandroid's
 # AConfiguration, sensor and input calls and Bionic's fts; the libaaudio.so and libnativewindow.so
-# staged beside it for DT_NEEDED; and artifacts.json for a launch's --bionic-shim input.
+# staged beside it for DT_NEEDED; the Android namespace's libandroid.so; and artifacts.json for a
+# launch's --bionic-shim input.
 set -e
 SDK=$1; O=$2; DESC=${3:-bionic shim}
 W=$(cd "$(dirname "$0")/.." && pwd)/framework/webview-shim
@@ -37,11 +38,25 @@ $CC -c $W/libnativewindow_stub.c -o $O/nw.o
 $SDK/llvm/bin/clang --target=aarch64-linux-ohos -fuse-ld=lld -nostdlib -shared -Wl,--build-id=sha1 \
   -Wl,-soname,libnativewindow.so -Wl,--version-script=$W/libnativewindow_stub.map $O/nw.o \
   -o $O/libnativewindow.so
+# libandroid.so: the Android namespace's libandroid (libandroid_webview_shim.c), replacing the
+# WebView input's captured copy. It links OH's libsurface.z.so, which the SDK does not ship, so a
+# link-time stub names its imports; the device's library answers them at load.
+for f in GetBufferHandleFromNative NativeWindowCancelBuffer NativeWindowFlushBuffer NativeWindowHandleOpt \
+    NativeWindowRequestBuffer OH_NativeBufferFromNativeWindowBuffer OH_NativeBuffer_Map OH_NativeBuffer_MapWaitFence; do
+  echo "void $f(void) {}"
+done > $O/surface_stub.c
+mkdir -p $O/stub
+$SDK/llvm/bin/clang --target=aarch64-linux-ohos -fuse-ld=lld -nostdlib -shared -Wl,-soname,libsurface.z.so \
+  $O/surface_stub.c -o $O/stub/libsurface.z.so
+$CC -I$W/../../third_party/jni -c $W/libandroid_webview_shim.c -o $O/la.o
+$SDK/llvm/bin/clang --target=aarch64-linux-ohos --sysroot=$SDK/sysroot -fuse-ld=lld -shared -Wl,--build-id=sha1 \
+  -Wl,-soname,libandroid.so $O/la.o -L$O/stub -lsurface.z -ldl -o $O/libandroid.so
+rm -rf $O/stub $O/surface_stub.c
 rm -f $O/*.o
 python3 - "$O" "$DESC" <<'PY'
 import hashlib, json, pathlib, sys
 o = pathlib.Path(sys.argv[1])
-names = ["libwebview_bionic_shim.so", "libaaudio.so", "libnativewindow.so"]
+names = ["libwebview_bionic_shim.so", "libaaudio.so", "libnativewindow.so", "libandroid.so"]
 data = {name: (o / name).read_bytes() for name in names}
 (o / "artifacts.json").write_text(json.dumps({"schema": "a2hlab-source-bionic-shim/v1", "source": sys.argv[2],
  "compiler": "OH SDK llvm clang", "errors": [],
