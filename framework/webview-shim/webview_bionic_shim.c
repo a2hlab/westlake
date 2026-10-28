@@ -2629,11 +2629,71 @@ unsigned long long strtoull_l(const char *text, char **end, int base, locale_t l
     return strtoull(text, end, base);
 }
 
+/*
+ * Bionic's fdsan (API 29), answered as fdsan disabled: musl tracks no fd owners, so tags are made
+ * and read as Bionic makes them and nothing is enforced. ANDROID_FDSAN_ERROR_LEVEL_DISABLED is a
+ * real Bionic state. TP-Link's libfdsan-lib.so finds these by name in "libc.so" (musl here, which
+ * has none -- see dlsym below) and called the null it got back.
+ */
 void android_fdsan_exchange_owner_tag(int fd, uint64_t expected_tag, uint64_t new_tag)
 {
     (void)fd;
     (void)expected_tag;
     (void)new_tag;
+}
+
+uint64_t android_fdsan_create_owner_tag(int type, uint64_t tag)
+{
+    if (tag == 0) return 0;
+    return ((uint64_t)(uint8_t)type << 56) | (tag & ((UINT64_C(1) << 56) - 1));
+}
+
+uint64_t android_fdsan_get_owner_tag(int fd)
+{
+    (void)fd;
+    return 0;
+}
+
+const char *android_fdsan_get_tag_type(uint64_t tag)
+{
+    static const char *const kTypes[] = {
+        "not owned", "FILE*", "DIR*", "unique_fd", "sqlite", "FileInputStream", "FileOutputStream",
+        "RandomAccessFile", "ParcelFileDescriptor", "ART FdFile", "DatagramSocketImpl", "SocketImpl",
+        "ZipArchive", "native_handle_t", "Parcel",
+    };
+    uint8_t type = (uint8_t)(tag >> 56);
+    if (tag == 0) return kTypes[0];
+    if (type == 255) return "native object of unknown type";
+    if (type == 254) return "Java object of unknown type";
+    return type < sizeof(kTypes) / sizeof(kTypes[0]) ? kTypes[type] : "unknown type";
+}
+
+uint64_t android_fdsan_get_tag_value(uint64_t tag)
+{
+    return tag & ((UINT64_C(1) << 56) - 1);
+}
+
+int android_fdsan_close_with_tag(int fd, uint64_t tag)
+{
+    (void)tag;
+    return close(fd);
+}
+
+int android_fdsan_get_error_level(void)
+{
+    return 0;   /* ANDROID_FDSAN_ERROR_LEVEL_DISABLED */
+}
+
+int android_fdsan_set_error_level(int new_level)
+{
+    (void)new_level;
+    return 0;   /* the previous level: disabled, and it stays so */
+}
+
+int android_fdsan_set_error_level_from_property(int default_level)
+{
+    (void)default_level;
+    return 0;
 }
 
 void android_set_abort_message(const char *message)
@@ -3394,8 +3454,23 @@ static void *westlake_runtime_android_symbol(const char *name)
         return real args;                                                             \
     }
 
-WESTLAKE_ALOOPER_FORWARD(ALooper *, ALooper_forThread, (void), ())
 WESTLAKE_ALOOPER_FORWARD(ALooper *, ALooper_prepare, (int opts), (opts))
+
+int westlake_thread_has_java_looper(void);
+
+/* The runtime's libandroid answers only for a thread that called ALooper_prepare. On Android a
+ * thread running a Java Looper has an ALooper as well (both front the thread's one Looper), and
+ * Cocos's library load refused to continue without the main thread's: such a thread is given its
+ * ALooper here, by ALooper_prepare, which adopts the queue the Java Looper already polls. */
+ALooper *ALooper_forThread(void)
+{
+    static ALooper *(*real)(void);
+    ALooper *looper;
+    if (real == NULL) real = (ALooper *(*)(void)) westlake_runtime_android_symbol("ALooper_forThread");
+    looper = real != NULL ? real() : NULL;
+    if (looper == NULL && westlake_thread_has_java_looper()) looper = ALooper_prepare(0);
+    return looper;
+}
 WESTLAKE_ALOOPER_FORWARD(void, ALooper_acquire, (ALooper *looper), (looper))
 WESTLAKE_ALOOPER_FORWARD(void, ALooper_release, (ALooper *looper), (looper))
 WESTLAKE_ALOOPER_FORWARD(int, ALooper_pollOnce, (int timeout, int *fd, int *events, void **data),
@@ -4762,6 +4837,25 @@ void *dlsym(void *handle, const char *name)
     if (name != NULL && name[0] == 'a' && strcmp(name, "android_get_device_api_level") == 0 &&
         caller_is_android_dso(__builtin_return_address(0), NULL)) {
         return NULL;
+    }
+    /* Bionic's fdsan, asked of "libc.so" by handle: that handle is musl's, which has none. */
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && name[0] == 'a' &&
+        strncmp(name, "android_fdsan_", 14) == 0 && caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static const struct { const char *name; void *address; } kFdsan[] = {
+            { "android_fdsan_close_with_tag", (void *) &android_fdsan_close_with_tag },
+            { "android_fdsan_create_owner_tag", (void *) &android_fdsan_create_owner_tag },
+            { "android_fdsan_exchange_owner_tag", (void *) &android_fdsan_exchange_owner_tag },
+            { "android_fdsan_get_error_level", (void *) &android_fdsan_get_error_level },
+            { "android_fdsan_get_owner_tag", (void *) &android_fdsan_get_owner_tag },
+            { "android_fdsan_get_tag_type", (void *) &android_fdsan_get_tag_type },
+            { "android_fdsan_get_tag_value", (void *) &android_fdsan_get_tag_value },
+            { "android_fdsan_set_error_level", (void *) &android_fdsan_set_error_level },
+            { "android_fdsan_set_error_level_from_property",
+              (void *) &android_fdsan_set_error_level_from_property },
+        };
+        for (size_t i = 0; i < sizeof(kFdsan) / sizeof(kFdsan[0]); i++) {
+            if (strcmp(name, kFdsan[i].name) == 0) return kFdsan[i].address;
+        }
     }
     if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL &&
         name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {

@@ -100,6 +100,7 @@
 #include <sys/xattr.h>
 #include <grp.h>
 #include <poll.h>
+#include <pthread.h>
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_acos(JNIEnv* env, jclass c, jdouble a)
 { (void)env; (void)c; return acos(a); }
 JNIEXPORT jdouble JNICALL Java_java_lang_Math_asin(JNIEnv* env, jclass c, jdouble a)
@@ -612,6 +613,7 @@ int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
+int wl_register_image_reader(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
 {
@@ -1200,6 +1202,78 @@ static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
     return 1;
 }
 
+/*
+ * The WebView support hold, released when the Application exists.
+ *
+ * Before bind, the native bridge pins WebViewFactory.sWebViewSupported to FALSE (no WebView while
+ * the Application is being constructed), and it pins FALSE once more the moment
+ * ActivityThread.currentApplication() is set. The Java release of that second pin runs at
+ * publishContentProviders, after every content provider's onCreate. Google Mobile Ads starts its
+ * work from its own init provider, so its threads asked for CookieManager and the user agent
+ * inside that window, were told the device has no WebView, and the uncaught exception killed the
+ * app (StoryReel). The bridge cannot be rebuilt, so this thread clears the cached FALSE as soon as
+ * the Application exists, and WebViewFactory asks PackageManager again: a device without WebView
+ * still answers FALSE. It stops at that one clear, at a published TRUE, or after 15 s.
+ */
+static void* webview_hold_watch(void* arg)
+{
+    JavaVM* vm = arg;
+    JNIEnv* env = NULL;
+    JavaVMAttachArgs attach = { JNI_VERSION_1_6, "wl-webview-hold", NULL };
+    jclass factory, thread, booleans;
+    jfieldID supported;
+    jmethodID current;
+    jobject yes, no;
+    int i;
+    if ((*vm)->AttachCurrentThreadAsDaemon(vm, &env, &attach) != JNI_OK || env == NULL) return NULL;
+    factory = (*env)->FindClass(env, "android/webkit/WebViewFactory");
+    thread = (*env)->FindClass(env, "android/app/ActivityThread");
+    booleans = (*env)->FindClass(env, "java/lang/Boolean");
+    supported = factory != NULL ? (*env)->GetStaticFieldID(env, factory, "sWebViewSupported", "Ljava/lang/Boolean;") : NULL;
+    current = thread != NULL ? (*env)->GetStaticMethodID(env, thread, "currentApplication", "()Landroid/app/Application;") : NULL;
+    yes = booleans != NULL ? (*env)->GetStaticObjectField(env, booleans,
+            (*env)->GetStaticFieldID(env, booleans, "TRUE", "Ljava/lang/Boolean;")) : NULL;
+    no = booleans != NULL ? (*env)->GetStaticObjectField(env, booleans,
+            (*env)->GetStaticFieldID(env, booleans, "FALSE", "Ljava/lang/Boolean;")) : NULL;
+    if ((*env)->ExceptionCheck(env) || supported == NULL || current == NULL || yes == NULL || no == NULL) {
+        (*env)->ExceptionClear(env);
+        (*vm)->DetachCurrentThread(vm);
+        return NULL;
+    }
+    for (i = 0; i < 15000; i++) {
+        jobject app = (*env)->CallStaticObjectMethod(env, thread, current);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        if (app != NULL) {
+            jobject value = (*env)->GetStaticObjectField(env, factory, supported);
+            bool published = (*env)->IsSameObject(env, value, yes);
+            bool held = (*env)->IsSameObject(env, value, no);
+            if (value != NULL) (*env)->DeleteLocalRef(env, value);
+            (*env)->DeleteLocalRef(env, app);
+            if (published) break;
+            if (held) {
+                char line[128];
+                (*env)->SetStaticObjectField(env, factory, supported, NULL);
+                snprintf(line, sizeof(line), "[WL-WEBVIEW-HOLD] cleared the held FALSE %d ms in, once the Application existed\n", i);
+                note(line);
+                break;
+            }
+        }
+        usleep(1000);
+    }
+    (*vm)->DetachCurrentThread(vm);
+    return NULL;
+}
+
+static void start_webview_hold_watch(JavaVM* vm)
+{
+    pthread_t thread;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&thread, &attr, webview_hold_watch, vm) != 0) note("[WL-WEBVIEW-HOLD] no watch thread\n");
+    pthread_attr_destroy(&attr);
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     JNIEnv* env = NULL;
@@ -1240,6 +1314,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int ns = wl_register_notification_switch(env);
         int ex = wl_register_extractor(env);
         int vc = wl_register_video_codec(env);
+        int ir = wl_register_image_reader(env);
         int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
                    + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
                    + bind(env, "android/os/PerformanceHintManager", kPerformanceHint,
@@ -1250,14 +1325,15 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d MediaExtractor=%d VideoCodec=%d cmdline=%d more=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d MediaExtractor=%d VideoCodec=%d ImageReader=%d cmdline=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, cl, more);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, ir, cl, more);
         note(line);
     }
     wl_register_media(env, vm);
+    start_webview_hold_watch(vm);
     return JNI_VERSION_1_6;
 }

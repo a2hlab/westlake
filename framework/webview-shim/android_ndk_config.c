@@ -169,6 +169,35 @@ AConfiguration *AConfiguration_new(void)
     return calloc(1, sizeof(AConfiguration));
 }
 
+/* Whether the calling thread runs a Java Looper (Looper.myLooper() != null): on Android that thread
+ * has an ALooper too, which ALooper_forThread answers. A thread the VM does not know has none. */
+int westlake_thread_has_java_looper(void)
+{
+    JavaVM *vm = wl_java_vm();
+    JNIEnv *env = NULL;
+    jclass looper;
+    jmethodID my_looper;
+    jobject current;
+    if (vm == NULL || (*vm)->GetEnv(vm, (void **) &env, JNI_VERSION_1_6) != JNI_OK || env == NULL) return 0;
+    if ((*env)->ExceptionCheck(env)) return 0;
+    looper = (*env)->FindClass(env, "android/os/Looper");
+    my_looper = looper != NULL ? (*env)->GetStaticMethodID(env, looper, "myLooper", "()Landroid/os/Looper;") : NULL;
+    current = my_looper != NULL ? (*env)->CallStaticObjectMethod(env, looper, my_looper) : NULL;
+    if (wl_clear(env)) current = NULL;
+    if (current != NULL) (*env)->DeleteLocalRef(env, current);
+    if (looper != NULL) (*env)->DeleteLocalRef(env, looper);
+    return current != NULL;
+}
+
+/* ANativeActivity_setWindowFormat, which the runtime's libandroid lacks (Unreal Engine 4's libUE4.so
+ * imports it and failed to load). OH's window takes the format of the buffers drawn into it, so the
+ * request has nothing to set. */
+void ANativeActivity_setWindowFormat(void *activity, int32_t format)
+{
+    (void) activity;
+    (void) format;
+}
+
 void AConfiguration_delete(AConfiguration *config)
 {
     free(config);
