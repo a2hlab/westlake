@@ -792,6 +792,29 @@ int avcProfile(const Video* v)
     return -1;
 }
 
+/* The window behind a Java Surface: the runtime's ANativeWindow (*anw, which the caller then holds),
+ * unwrapped to the OH window it stands for, as the bionic shim's eglCreateWindowSurface does. */
+void* ohWindowOf(JNIEnv* env, jobject surface, void** anw)
+{
+    typedef void* (*FromSurface)(JNIEnv*, jobject);
+    typedef void* (*Unwrap)(void*);
+    FromSurface fromSurface = (FromSurface) dlsym(RTLD_DEFAULT, "ANativeWindow_fromSurface");
+    Unwrap unwrap = (Unwrap) dlsym(RTLD_DEFAULT, "oh_anw_get_oh");
+    if (unwrap == nullptr) {
+        void* bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
+        if (bridge != nullptr) unwrap = (Unwrap) dlsym(bridge, "oh_anw_get_oh");
+    }
+    *anw = fromSurface != nullptr && surface != nullptr ? fromSurface(env, surface) : nullptr;
+    return *anw != nullptr && unwrap != nullptr ? unwrap(*anw) : nullptr;
+}
+
+void releaseWindow(void* anw)
+{
+    typedef void (*Release)(void*);
+    Release release = anw != nullptr ? (Release) dlsym(RTLD_DEFAULT, "ANativeWindow_release") : nullptr;
+    if (release != nullptr) release(anw);
+}
+
 void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray values, jobject surface,
                 jobject crypto, jobject descrambler, jint flags)
 {
@@ -856,18 +879,8 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
     oh.formatDestroy(format);
     /* OH takes the output window after Configure and before Prepare. */
     if (rc == 0 && surface != nullptr && oh.setSurface != nullptr) {
-        /* The window behind the Java Surface: the runtime's ANativeWindow, unwrapped to the OH
-         * window it stands for, as the bionic shim's eglCreateWindowSurface does. */
-        typedef void* (*FromSurface)(JNIEnv*, jobject);
-        typedef void* (*Unwrap)(void*);
-        FromSurface fromSurface = (FromSurface) dlsym(RTLD_DEFAULT, "ANativeWindow_fromSurface");
-        Unwrap unwrap = (Unwrap) dlsym(RTLD_DEFAULT, "oh_anw_get_oh");
-        if (unwrap == nullptr) {
-            void* bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
-            if (bridge != nullptr) unwrap = (Unwrap) dlsym(bridge, "oh_anw_get_oh");
-        }
-        void* window = fromSurface != nullptr ? fromSurface(env, surface) : nullptr;
-        void* ohWindow = window != nullptr && unwrap != nullptr ? unwrap(window) : nullptr;
+        void* window = nullptr;
+        void* ohWindow = ohWindowOf(env, surface, &window);
         if (ohWindow != nullptr && oh.setSurface(v->codec, static_cast<OHNativeWindow*>(ohWindow)) == 0) {
             v->window = window;
             v->surface = true;
@@ -876,11 +889,7 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
              * player configured for a Surface cannot read; refuse, as a codec that cannot attach
              * its output does. */
             vlog("[WL-VIDEOCODEC] no OH window behind the Surface (anw=%p oh=%p)", window, ohWindow);
-            if (window != nullptr) {
-                typedef void (*Release)(void*);
-                Release release = (Release) dlsym(RTLD_DEFAULT, "ANativeWindow_release");
-                if (release != nullptr) release(window);
-            }
+            releaseWindow(window);
             rc = -1;
         }
     }
@@ -1255,6 +1264,38 @@ jobject lCapabilities(JNIEnv* env, jclass c, jint index, jstring type)
 
 }  // namespace
 
+/*
+ * MediaCodec.native_setSurface (setOutputSurface), which the bridge never registered: ExoPlayer
+ * moves a playing decoder between its placeholder and the view's Surface with it. OH switches a
+ * surface-mode decoder's output window in place, as Android does.
+ */
+void wSetSurface(JNIEnv* env, jobject thiz, jobject surface)
+{
+    Video* v = videoOf(env, thiz);
+    if (v == nullptr || !v->surface || oh.setSurface == nullptr) {
+        throwState(env, "the codec was not configured for a Surface");
+        return;
+    }
+    void* window = nullptr;
+    void* ohWindow = ohWindowOf(env, surface, &window);
+    int rc = ohWindow != nullptr ? oh.setSurface(v->codec, static_cast<OHNativeWindow*>(ohWindow)) : -1;
+    vlog("[WL-VIDEOCODEC] setSurface anw=%p oh=%p -> %d", window, ohWindow, rc);
+    if (rc != 0) {
+        releaseWindow(window);
+        jclass illegal = env->FindClass("java/lang/IllegalArgumentException");
+        if (illegal != nullptr) env->ThrowNew(illegal, "the Surface cannot take the codec's output");
+        return;
+    }
+    releaseWindow(v->window);
+    v->window = window;
+}
+
+/*
+ * MediaCodec.setVideoScalingMode, which the bridge never registered (ExoPlayer calls it on every
+ * video codec): OH scales the decoded frame to its window itself, so the mode has nothing to set.
+ */
+void wSetVideoScalingMode(JNIEnv*, jobject, jint) {}
+
 /* Returns how many natives were wrapped; 0 leaves both classes as the bridge registered them. */
 /*
  * MediaCodec.getOwnCodecInfo, which the bridge never registered (ReelShort's player stops on it):
@@ -1399,6 +1440,8 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
         {"getCanonicalName", "()Ljava/lang/String;", (void*) wCanonicalName},
         {"native_setCallback", "(Landroid/media/MediaCodec$Callback;)V", (void*) wSetCallback},
         {"getOwnCodecInfo", "()Landroid/media/MediaCodecInfo;", (void*) wOwnCodecInfo},
+        {"setVideoScalingMode", "(I)V", (void*) wSetVideoScalingMode},
+        {"native_setSurface", "(Landroid/view/Surface;)V", (void*) wSetSurface},
     };
     static const JNINativeMethod kList[] = {
         {"native_getCodecCount", "()I", (void*) lCount},
