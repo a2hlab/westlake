@@ -1570,6 +1570,33 @@ static void *westlake_open_routed_lib(const char *path, int flags)
  * namespace through it (looked up with dlsym(RTLD_DEFAULT), which finds this one), not through
  * dlopen: Threads' libc++_shared.so went that way, so the redirect above is applied here too.
  */
+/*
+ * A path naming the C library this process already runs on. OH's /system/lib64/libc.so is a link to
+ * musl's dynamic linker, which the kernel mapped and musl does not know by file: System.loadLibrary
+ * ("c") resolved to that path (StarMaker, Magic Tiles, a Unity game), and dlopen mapped a second
+ * musl, whose initialization took the process down without a word. Such a path is answered by name,
+ * which musl answers with the running libc.
+ */
+static int westlake_names_running_libc(const char *file)
+{
+    if (file == NULL || strchr(file, '/') == NULL) return 0;
+    static dev_t libc_dev;
+    static ino_t libc_ino;
+    static int known;
+    if (!__atomic_load_n(&known, __ATOMIC_ACQUIRE)) {
+        Dl_info info;
+        struct stat st;
+        if (dladdr((void *) &getpid, &info) == 0 || info.dli_fname == NULL || stat(info.dli_fname, &st) != 0) {
+            return 0;
+        }
+        libc_dev = st.st_dev;
+        libc_ino = st.st_ino;
+        __atomic_store_n(&known, 1, __ATOMIC_RELEASE);
+    }
+    struct stat st;
+    return stat(file, &st) == 0 && st.st_dev == libc_dev && st.st_ino == libc_ino;
+}
+
 void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
 {
     typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
@@ -1579,6 +1606,7 @@ void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
         errno = ENOSYS;
         return NULL;
     }
+    if (westlake_names_running_libc(file)) file = "libc.so";
     char staged[512];
     const char *redirected = westlake_staged_apk_member(file, staged, sizeof(staged));
     const char *path = redirected != NULL ? redirected : file;
@@ -1617,6 +1645,7 @@ void *dlopen(const char *filename, int flags)
         return NULL;
     }
 
+    if (westlake_names_running_libc(filename)) filename = "libc.so";
     const char *actual_filename = filename;
     const char *basename = filename != NULL ? strrchr(filename, '/') : NULL;
     basename = basename != NULL ? basename + 1 : filename;
@@ -4821,6 +4850,24 @@ static void *westlake_egl_by_handle(const char *name)
     return NULL;
 }
 
+/*
+ * eglGetProcAddress, as an Android library gets it by handle. Cocos's EGL loader takes
+ * eglGetProcAddress from its handle to libEGL.so and every other entry point from that, core ones
+ * included, so its eglCreateWindowSurface was OH's: given the adapter's AOSP-shaped window it failed
+ * ("Create window surface failed"), and the engine faulted on the missing surface. The two entry
+ * points above come from this library; every other name from the implementation the handle named.
+ */
+typedef void *(*WestlakeEglProcFn)(const char *);
+static WestlakeEglProcFn westlake_egl_get_proc;
+
+static void *westlake_egl_get_proc_address(const char *name)
+{
+    void *own = name != NULL ? westlake_egl_by_handle(name) : NULL;
+    if (own != NULL) return own;
+    WestlakeEglProcFn next = __atomic_load_n(&westlake_egl_get_proc, __ATOMIC_ACQUIRE);
+    return next != NULL ? next(name) : NULL;
+}
+
 void *dlsym(void *handle, const char *name)
 {
     WestlakeDlsymFn real = __atomic_load_n(&westlake_musl_dlsym, __ATOMIC_ACQUIRE);
@@ -4861,6 +4908,15 @@ void *dlsym(void *handle, const char *name)
         name[0] == 'e' && name[1] == 'g' && name[2] == 'l') {
         void *own = westlake_egl_by_handle(name);
         void *caller = __builtin_return_address(0);
+        if (own == NULL && strcmp(name, "eglGetProcAddress") == 0 &&
+            caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+            void *next = real(handle, name);
+            if (next == NULL) return NULL;
+            WestlakeEglProcFn expected = NULL;
+            __atomic_compare_exchange_n(&westlake_egl_get_proc, &expected, (WestlakeEglProcFn) next, 0,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+            own = (void *) &westlake_egl_get_proc_address;
+        }
         if (own != NULL && caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
             static int logged;
             if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
@@ -4870,6 +4926,65 @@ void *dlsym(void *handle, const char *name)
         }
     }
     __attribute__((musttail)) return real(handle, name);
+}
+
+/*
+ * Thread-specific keys out of range. musl indexes the thread's table with the key unchecked, and
+ * Bionic checks it: Magic Tiles' libsdk_bc_lib.so read key 128, one past musl's table, from its
+ * initializer and faulted in the guard page behind it. Such a key reads NULL and cannot be set,
+ * as on Android; a failed key creation is logged once, since that is how a library comes to hold
+ * one.
+ */
+#define WESTLAKE_MUSL_KEYS 128
+
+typedef void *(*WestlakeGetSpecificFn)(pthread_key_t);
+typedef int (*WestlakeSetSpecificFn)(pthread_key_t, const void *);
+typedef int (*WestlakeKeyCreateFn)(pthread_key_t *, void (*)(void *));
+static WestlakeGetSpecificFn westlake_musl_getspecific;
+static WestlakeSetSpecificFn westlake_musl_setspecific;
+static WestlakeKeyCreateFn westlake_musl_key_create;
+
+void *pthread_getspecific(pthread_key_t key)
+{
+    if (__builtin_expect(key >= WESTLAKE_MUSL_KEYS, 0)) return NULL;
+    WestlakeGetSpecificFn real = __atomic_load_n(&westlake_musl_getspecific, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakeGetSpecificFn) westlake_find_musl_symbol("pthread_getspecific");
+        if (real == NULL) return NULL;
+        __atomic_store_n(&westlake_musl_getspecific, real, __ATOMIC_RELEASE);
+    }
+    return real(key);
+}
+
+int pthread_setspecific(pthread_key_t key, const void *value)
+{
+    if (__builtin_expect(key >= WESTLAKE_MUSL_KEYS, 0)) return EINVAL;
+    WestlakeSetSpecificFn real = __atomic_load_n(&westlake_musl_setspecific, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakeSetSpecificFn) westlake_find_musl_symbol("pthread_setspecific");
+        if (real == NULL) return EINVAL;
+        __atomic_store_n(&westlake_musl_setspecific, real, __ATOMIC_RELEASE);
+    }
+    return real(key, value);
+}
+
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
+{
+    WestlakeKeyCreateFn real = __atomic_load_n(&westlake_musl_key_create, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakeKeyCreateFn) westlake_find_musl_symbol("pthread_key_create");
+        if (real == NULL) return EAGAIN;
+        __atomic_store_n(&westlake_musl_key_create, real, __ATOMIC_RELEASE);
+    }
+    int result = real(key, destructor);
+    static int logged;
+    if (result != 0 && !__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        Dl_info info;
+        void *caller = __builtin_return_address(0);
+        wl_relocs_log("[WESTLAKE-TSD] pthread_key_create failed (%d) for %s\n", result,
+                      dladdr(caller, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
+    }
+    return result;
 }
 
 /*
