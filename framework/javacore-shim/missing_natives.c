@@ -95,6 +95,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/xattr.h>
@@ -536,32 +537,61 @@ static void note(const char* text)
  * argument area, the rest zeroed. liboh_android_runtime's setArgV0Native sets only the thread name,
  * so a child kept the launcher's arguments and apps that read their process name from cmdline
  * got "/data/local/tmp/asx/appspawn-x": goline passed it to WebView.setDataDirectorySuffix,
- * which refused the path separator, in Application.onCreate. setArgV0 has already run when this
- * library loads, so the name is Process.myProcessName(). Truncated to the area, as on Android.
+ * which refused the path separator, in Application.onCreate. Truncated to the area, as on Android.
  */
-static int set_cmdline_to_process_name(JNIEnv* env)
+static void wl_set_cmdline(const char* name)
 {
     char stat[1024];
     unsigned long long arg_start = 0, arg_end = 0;
     const char* p;
+    size_t length;
+    int fd, n, field;
+    fd = open("/proc/self/stat", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    n = (int) read(fd, stat, sizeof(stat) - 1);
+    close(fd);
+    if (n <= 0) return;
+    stat[n] = 0;
+    p = strrchr(stat, ')');   /* comm can hold spaces; fields count from after it */
+    if (p == NULL) return;
+    for (field = 2; *p != 0 && field < 48; p++) {
+        if (*p == ' ') field++;
+    }
+    if (field != 48 || sscanf(p, "%llu %llu", &arg_start, &arg_end) != 2 || arg_end <= arg_start) return;
+    length = (size_t) (arg_end - arg_start);
+    memset((void*) (uintptr_t) arg_start, 0, length);
+    strncpy((char*) (uintptr_t) arg_start, name, length - 1);
+}
+
+/*
+ * Process.setArgV0, as Android's does it: the thread name and cmdline both. The launch names the
+ * process for the host first (org.westlake.imehost), and handleBindApplication renames it for the
+ * app once this library is loaded; with only the thread name renamed, cmdline kept the host's
+ * name. Apps check it: a music player's string decoder (libincore.so) looks for its package in
+ * /proc/<pid>/cmdline and decoded every name wrong without it, and getSystemService was handed
+ * the undecoded text.
+ */
+static void wl_setArgV0Native(JNIEnv* env, jclass c, jstring name)
+{
+    char thread_name[16] = {0};
+    const char* utf;
+    (void) c;
+    if (name == NULL) return;
+    utf = (*env)->GetStringUTFChars(env, name, NULL);
+    if (utf == NULL) return;
+    strncpy(thread_name, utf, sizeof(thread_name) - 1);
+    prctl(PR_SET_NAME, (unsigned long) thread_name, 0, 0, 0);
+    wl_set_cmdline(utf);
+    (*env)->ReleaseStringUTFChars(env, name, utf);
+}
+
+/* setArgV0 has already run when this library loads, so the name is Process.myProcessName(). */
+static int set_cmdline_to_process_name(JNIEnv* env)
+{
     const char* name;
     jclass c;
     jmethodID m;
     jstring js;
-    size_t length;
-    int fd, n, field;
-    fd = open("/proc/self/stat", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return 0;
-    n = (int) read(fd, stat, sizeof(stat) - 1);
-    close(fd);
-    if (n <= 0) return 0;
-    stat[n] = 0;
-    p = strrchr(stat, ')');   /* comm can hold spaces; fields count from after it */
-    if (p == NULL) return 0;
-    for (field = 2; *p != 0 && field < 48; p++) {
-        if (*p == ' ') field++;
-    }
-    if (field != 48 || sscanf(p, "%llu %llu", &arg_start, &arg_end) != 2 || arg_end <= arg_start) return 0;
     c = (*env)->FindClass(env, "android/os/Process");
     if (c == NULL) { (*env)->ExceptionClear(env); return 0; }
     m = (*env)->GetStaticMethodID(env, c, "myProcessName", "()Ljava/lang/String;");
@@ -571,9 +601,7 @@ static int set_cmdline_to_process_name(JNIEnv* env)
     if (js == NULL) return 0;
     name = (*env)->GetStringUTFChars(env, js, NULL);
     if (name == NULL) { (*env)->ExceptionClear(env); (*env)->DeleteLocalRef(env, js); return 0; }
-    length = (size_t) (arg_end - arg_start);
-    memset((void*) (uintptr_t) arg_start, 0, length);
-    strncpy((char*) (uintptr_t) arg_start, name, length - 1);
+    wl_set_cmdline(name);
     (*env)->ReleaseStringUTFChars(env, js, name);
     (*env)->DeleteLocalRef(env, js);
     return 1;
@@ -883,10 +911,75 @@ static jboolean wl_readProcFile(JNIEnv* env, jclass c, jstring file, jintArray f
     return result;
 }
 
+/*
+ * Process.readProcLines, as AOSP's android_util_Process.cpp does it: the first 4 KB of the file;
+ * a line starting with one of reqFields gives the number after it (skipping blanks) to the same
+ * index of outFields, which are cleared first. Youku reads /proc/self/status through it at startup.
+ */
+static void wl_readProcLines(JNIEnv* env, jclass c, jstring file, jobjectArray reqFields, jlongArray outFields)
+{
+    char buffer[4096];
+    const char* path;
+    jlong* sizes;
+    jsize count, i;
+    ssize_t len;
+    int fd, found = 0;
+    (void) c;
+    if (file == NULL || reqFields == NULL || outFields == NULL) {
+        jclass npe = (*env)->FindClass(env, "java/lang/NullPointerException");
+        if (npe != NULL) (*env)->ThrowNew(env, npe, NULL);
+        return;
+    }
+    count = (*env)->GetArrayLength(env, reqFields);
+    if ((*env)->GetArrayLength(env, outFields) < count) count = (*env)->GetArrayLength(env, outFields);
+    path = (*env)->GetStringUTFChars(env, file, NULL);
+    if (path == NULL) return;
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    (*env)->ReleaseStringUTFChars(env, file, path);
+    if (fd < 0) return;
+    do {
+        len = read(fd, buffer, sizeof(buffer) - 1);
+    } while (len < 0 && errno == EINTR);
+    close(fd);
+    if (len < 0) return;
+    buffer[len] = 0;
+    sizes = (*env)->GetLongArrayElements(env, outFields, NULL);
+    if (sizes == NULL) return;
+    for (i = 0; i < count; i++) sizes[i] = 0;
+    for (char* p = buffer; *p != 0 && found < count;) {
+        int skip_to_eol = 1;
+        for (i = 0; i < count; i++) {
+            jstring field = (jstring) (*env)->GetObjectArrayElement(env, reqFields, i);
+            const char* name = field != NULL ? (*env)->GetStringUTFChars(env, field, NULL) : NULL;
+            size_t n = name != NULL ? strlen(name) : 0;
+            int match = n > 0 && strncmp(p, name, n) == 0;
+            if (name != NULL) (*env)->ReleaseStringUTFChars(env, field, name);
+            if (field != NULL) (*env)->DeleteLocalRef(env, field);
+            if (!match) continue;
+            p += n;
+            while (*p == ' ' || *p == '\t') p++;
+            char* num = p;
+            while (*p >= '0' && *p <= '9') p++;
+            skip_to_eol = *p != '\n';
+            if (*p != 0) *p++ = 0;
+            sizes[i] = strtoll(num, NULL, 10);
+            found++;
+            break;
+        }
+        if (skip_to_eol) {
+            while (*p != 0 && *p != '\n') p++;
+            if (*p == '\n') p++;
+        }
+    }
+    (*env)->ReleaseLongArrayElements(env, outFields, sizes, 0);
+}
+
 static const JNINativeMethod kProcess[] = {
     { "getGidForName", "(Ljava/lang/String;)I", (void*) wl_getGidForName },
     { "readProcFile", "(Ljava/lang/String;[I[Ljava/lang/String;[J[F)Z", (void*) wl_readProcFile },
     { "parseProcLine", "([BII[I[Ljava/lang/String;[J[F)Z", (void*) wl_parseProcLine },
+    { "readProcLines", "(Ljava/lang/String;[Ljava/lang/String;[J)V", (void*) wl_readProcLines },
+    { "setArgV0Native", "(Ljava/lang/String;)V", (void*) wl_setArgV0Native },
 };
 
 /*
