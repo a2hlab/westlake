@@ -63,6 +63,7 @@ accounts with HK numbers, and market data.
 |---|---|---|---|
 | first | build 124 + media natives | 118 of 196 (60%) | baseline |
 | rerun of the 78 not drawing | build 124, shim with the 10-28 fixes | 15 of the 78 now draw | about 133 of 196 (68%) |
+| four fixes below | build 125 | 7 more draw | about 140 of 196 (71%) |
 
 The 15: Alipay, Life360, TP-Link Tapo, StarMaker, Telegram X (Challegram), Magic Tiles, a Unity
 title from Cocone (it draws its own network error dialog, likely the board network), two short-drama
@@ -109,13 +110,15 @@ What moved apps in ranks 101-300 (2026-10-27 to 10-28):
   WebView start-up hold is released for ads SDKs that start from a provider, and Rive's GL pointers
   are bound at staging.
 
-### Where the rest stop (ranks 101-300, 63 apps)
+### Where the rest stop (ranks 101-300, 56 apps)
 
 - **App protection, about 20, not being worked on.** PairIP's native library (10, crashing before the
   Application exists or stalling in its VM), commercial packers (Ijiami, Bangcle, Baidu, DexProtector
   and others), and one runtime-protection library that HSBC, PayMe and Octopus share, which installs
   its signal handlers and then exits.
-- **Fixed, being checked on the board now:**
+- **Fixed and checked on the board (build 125):** seven more apps draw, Yandex Browser among
+  them, with no regressions
+  among nine that already drew (YouTube, Instagram, Facebook, Maps, Alipay and others):
   - the process name in `/proc/self/cmdline`, which stayed the host's name after the app renamed its
     process: a string decoder that checks it failed, and SDKs use it to recognise the main process
     (the likely cause of several "not initialised" failures: MMKV, Kotlin `lateinit` properties);
@@ -133,13 +136,11 @@ What moved apps in ranks 101-300 (2026-10-27 to 10-28):
 
 ## Next
 
-1. **Check the four fixes above** on their apps and on apps that already draw, then make build 125,
-   the new shim and the new runtime override the defaults.
-2. **Ranks 301-1000.** Rounds of about 200 overnight on the current stack; group the blockers by
+1. **Ranks 301-1000.** Rounds of about 200 overnight on the current stack; group the blockers by
    cause as before.
-3. **Video playback, not just decoding.** A probe check that plays the clip and counts rendered
+2. **Video playback, not just decoding.** A probe check that plays the clip and counts rendered
    frames; software decoder speed at 720p and 1080p on the board; how often HEVC appears.
-4. **microG phase work.** Sign-in and push, once test accounts exist.
-5. **Draws a view but not a frame:** the Cocos surface that renders but never shows, Flutter's
+3. **microG phase work.** Sign-in and push, once test accounts exist.
+4. **Draws a view but not a frame:** the Cocos surface that renders but never shows, Flutter's
    hardware-buffer image view, and the keep-screen-on window flag, whose library is not staged.
-6. **Per-app crashes** after the shared causes are cleared.
+5. **Per-app crashes** after the shared causes are cleared.
