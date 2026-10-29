@@ -1,4 +1,4 @@
-# Hong Kong top 1000: plan and progress (2026-10-27)
+# Hong Kong top 1000: plan and progress (2026-10-27, updated 2026-10-28)
 
 ## The goal
 
@@ -57,6 +57,18 @@ accounts with HK numbers, and market data.
 | microG | build 123 (microG guests) | 66 of 99 | +7 |
 | media | build 124 + media natives + new shim | 72 of 99 | +6, 9 advanced |
 
+### Device rounds, ranks 101-300
+
+| round | stack | drawing | change |
+|---|---|---|---|
+| first | build 124 + media natives | 118 of 196 (60%) | baseline |
+| rerun of the 78 not drawing | build 124, shim with the 10-28 fixes | 15 of the 78 now draw | about 133 of 196 (68%) |
+
+The 15: Alipay, Life360, TP-Link Tapo, StarMaker, Telegram X (Challegram), Magic Tiles, a Unity
+title from Cocone (it draws its own network error dialog, likely the board network), two short-drama
+apps, two PDF readers, two cleaners, an AI language tutor and an AI photo app. The 118 that drew
+before were not relaunched in the rerun.
+
 What moved apps, in order:
 
 - **Process identity (build 122).** The process name, `ApplicationInfo.processName` and the
@@ -80,23 +92,54 @@ frames, which players drop. Concurrent `getgrnam` calls corrupt musl's heap.
 
 A check of 14 video-heavy apps after the decoder change showed no regressions, with 11 drawing.
 
-### Where the rest stop
+What moved apps in ranks 101-300 (2026-10-27 to 10-28):
 
-- **Before the app starts (11):** mostly PairIP's native library (`libpairipcore.so`, 78 of 982
-  apps), which crashes before the Application is created. Not being worked on.
-- **Draws a view but not a frame (8)** and **bound or at the first activity (7):** individual causes,
-  including myTV SUPER (a missing class at start-up), DramaWave (finishes its own activity) and
-  TataLand (black after its intro video).
-- **Native crashes in the app's own libraries:** ProtonVPN (its Go library, a regression on the new
-  stack), Kling (Cronet start-up), KKBOX, Meitu, Douyin, Bigo.
+- **ImageReader** over an OH consumer surface, with Android's public format map: the media probe
+  now passes 8 of 8. ExoPlayer's `setVideoScalingMode` and `setOutputSurface` calls answered.
+- **Loading the C library by path.** OH's `/system/lib64/libc.so` is a link to musl's dynamic
+  linker; `System.loadLibrary("c")` mapped a second musl and the process died without a word
+  (StarMaker, Magic Tiles, the Unity title). Such a load now gets the running libc.
+- **Thread-specific keys.** musl indexes keys 0-127 without a check; bionic checks. A key of 128 from
+  an ads SDK corrupted memory in Magic Tiles; out-of-range keys are now refused.
+- **Linker scripts named .so.** An APK's text `libc++.so` was staged as a library and shadowed a
+  system dependency; non-ELF files are no longer staged.
+- **EGL through eglGetProcAddress.** Engines that take every EGL entry point from
+  `eglGetProcAddress` on a `libEGL.so` handle (Cocos) now get Westlake's window handling.
+- **Earlier the same week:** ProtonVPN's Go library crash on the new stack is gone (it draws), the
+  WebView start-up hold is released for ads SDKs that start from a provider, and Rive's GL pointers
+  are bound at staging.
+
+### Where the rest stop (ranks 101-300, 63 apps)
+
+- **App protection, about 20, not being worked on.** PairIP's native library (10, crashing before the
+  Application exists or stalling in its VM), commercial packers (Ijiami, Bangcle, Baidu, DexProtector
+  and others), and one runtime-protection library that HSBC, PayMe and Octopus share, which installs
+  its signal handlers and then exits.
+- **Fixed, being checked on the board now:**
+  - the process name in `/proc/self/cmdline`, which stayed the host's name after the app renamed its
+    process: a string decoder that checks it failed, and SDKs use it to recognise the main process
+    (the likely cause of several "not initialised" failures: MMKV, Kotlin `lateinit` properties);
+  - `Process.readProcLines`, missing (Youku);
+  - null constructor entries in libraries an app downloads at run time, which the launcher already
+    cleans for packaged ones (Honor of Kings);
+  - the in-process Settings provider installed after the app's own providers, so a provider that
+    read a setting at start-up failed (Yandex Browser). This one is in framework build 125.
+- **Draws a view but not a frame (14):** individual causes. Cocos games create their surface and
+  render frames that never show; Flutter's image view needs `Image.getHardwareBuffer`; a few resume
+  their activity and never draw.
+- **Per-app:** Unreal Engine's `NativeActivity.loadNativeCode` (PES), Roblox, Netflix's native
+  crash, Flightradar24 opening the Play Store from its splash screen, Lottie failing to parse an
+  animation, and a vendor GPU driver abort.
 
 ## Next
 
-1. **ProtonVPN regression.** Bisect the shim and the runtime override with two launches, and fix the cause.
-2. **Ranks 101-300 overnight.** The first fresh evidence on the new stack; group its blockers by cause.
-3. **ImageReader port** over OH_NativeImage (756 of 982 apps; camera, scanners, GPU readback), with
-   the probe check as its acceptance test.
-4. **Video playback, not just decoding.** A probe check that plays the clip and counts rendered
+1. **Check the four fixes above** on their apps and on apps that already draw, then make build 125,
+   the new shim and the new runtime override the defaults.
+2. **Ranks 301-1000.** Rounds of about 200 overnight on the current stack; group the blockers by
+   cause as before.
+3. **Video playback, not just decoding.** A probe check that plays the clip and counts rendered
    frames; software decoder speed at 720p and 1080p on the board; how often HEVC appears.
-5. **microG phase work.** Sign-in and push, once test accounts exist.
+4. **microG phase work.** Sign-in and push, once test accounts exist.
+5. **Draws a view but not a frame:** the Cocos surface that renders but never shows, Flutter's
+   hardware-buffer image view, and the keep-screen-on window flag, whose library is not staged.
 6. **Per-app crashes** after the shared causes are cleared.
