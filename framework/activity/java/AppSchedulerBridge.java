@@ -519,10 +519,12 @@ public class AppSchedulerBridge {
             // androidx.startup's initializers run; in manifest order Citymapper's
             // InitializationProvider came first and died on "Default FirebaseApp is not initialized".
             realProviders.sort((p1, p2) -> Integer.compare(p2.initOrder, p1.initOrder));
-            // §611e: append the in-process settings provider (see WlSettingsProvider).
-            // Installed into the process-local provider map at bind, so every
-            // Settings/DeviceConfig read resolves locally instead of NPEing on the
-            // absent settings service.
+            // §611e: the in-process settings provider (see WlSettingsProvider), installed into
+            // the process-local provider map at bind, so every Settings/DeviceConfig read
+            // resolves locally instead of NPEing on the absent settings service. First, as
+            // Android's lives in another process and is there before any app provider: Yandex's
+            // BrowserProvider.onCreate creates an AutofillManager, whose DeviceConfig read hit a
+            // null provider when this one was installed last.
             try {
                 android.content.pm.ProviderInfo spi = new android.content.pm.ProviderInfo();
                 spi.name = "adapter.activity.WlSettingsProvider";
@@ -532,7 +534,7 @@ public class AppSchedulerBridge {
                 spi.exported = false;
                 spi.enabled = true;
                 spi.applicationInfo = appInfo;
-                realProviders.add(spi);
+                realProviders.add(0, spi);
             } catch (Throwable t) {
                 System.err.println("[B43-BIND] settings provider append failed: " + t);
             }
