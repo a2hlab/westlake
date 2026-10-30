@@ -1,4 +1,4 @@
-# Hong Kong top 1000: plan and progress (2026-10-27, updated 2026-10-28)
+# Hong Kong top 1000: plan and progress (2026-10-27, updated 2026-10-30)
 
 ## The goal
 
@@ -134,13 +134,66 @@ What moved apps in ranks 101-300 (2026-10-27 to 10-28):
   crash, Flightradar24 opening the Play Store from its splash screen, Lottie failing to parse an
   animation, and a vendor GPU driver abort.
 
+### Device rounds, ranks 301-500 (2026-10-29 to 10-30)
+
+First round on build 125: **128 of 190 draw (67%)**; 15 reach a view, 3 an activity, 12 bind, 32 stop
+in runtime start-up. App protection again accounts for the largest share (PairIP about 10, and a new
+one, NetEase Yidun, in 3 games). Fixes since, each checked against apps that already drew:
+
+- **NDK names that were missing** (build 126, merged): `libsync.so` (Firefox's engine needs it; Firefox
+  now draws), the rest of the AMediaDrm calls answered as "no DRM scheme", `wcslcpy`/`wcslcat`, and
+  OpenSL's echo-cancellation, gain-control and noise-suppression interface IDs. Twelve control apps
+  still draw. The other three apps now get past loading and stop on later, separate crashes.
+- **An app library's own symbols bound to itself** (under test). On Android a library's calls to
+  functions it defines itself stay inside it; OH's loader looks in the board's libraries first, so
+  an app that ships its own copy of LZMA, OpenSSL, ffmpeg or sqlite can be bound to the board's
+  copy. Trip.com's 7-zip code reached the board's liblzma and crashed. Staging now binds such
+  references to the library's own definitions, skipping C/C++ runtime and JNI names and libraries
+  that share those names with another packaged library. 135 of the 212 drawing apps are affected,
+  so the whole set is being rerun: so far Trip.com, Douyin, LINE Webtoon, Alipay HK and two drama apps
+  draw, with no regressions.
+- **Device identity properties** (under test). Native reads of `ro.product.model`,
+  `ro.product.manufacturer` and the like were empty, because OH keeps them as `const.product.*`; Meitu's
+  device-info library copies from a null pointer when both are empty. 214 apps read them natively.
+
+### microG: what is broken and the fix plan (2026-10-30)
+
+308 of 430 recent app logs use microG, but two Westlake bugs stopped most of what they asked for.
+The board's network is not the problem: it resolves Google's hosts to Google's addresses, the TLS
+certificate verifies, and the check-in endpoint answers.
+
+1. **Make apps accept microG** (built as build 127, round queued).
+   - microG's Application was never made in 106 apps. `makeApplicationInner` hands a second package
+     to `NetworkSecurityConfigProvider.handleNewApplication`, which throws "Found multiple
+     conflicting per-domain rules" when the app's cleartext default differs from microG's and
+     either has per-domain rules (microG's has). Every GCM and advertising-ID bind failed; where the
+     defaults agreed, microG's config silently replaced the app's. The guest now runs on the app's
+     network policy, and the app's config is restored after.
+   - `GuestPackages` reported microG's own certificate, so the client libraries' availability check
+     answered `SERVICE_INVALID` / "Google Play services not available" (56 apps). The design called
+     for Google's certificate; it now comes from microG's own `fake-signature` meta-data (the 2008
+     certificate, the same for both packages), as microG-hosting ROMs do.
+2. **Dynamite modules (Maps SDK, Cast, ML Kit, ads).** Few apps reach module loading today because
+   the availability check fails first; once it passes, many will. That can go either way: Maps-based
+   screens may start working, and apps that fell back quietly may now fail on a module microG lacks
+   (the NYT app already dies in its Application on Cast's `ModuleUnavailableException`). The step-1
+   round includes YouTube, Maps, Instagram and other drawing apps as controls for exactly this.
+3. **Guest activities.** Google sign-in, the account picker and the error-resolution dialogs are
+   microG activities, and `GuestHost` runs only services and providers. They have to open in the
+   app's own task (OH refuses starts from outside the app).
+4. **One microG per app**, for now: each app checks in and opens its own push connection, and push
+   arrives only while that app runs. The shared daemon of the design's phase 3 is a later step.
+
+Not being worked on: Play Integrity and SafetyNet attestation (microG cannot pass the strong checks).
+
 ## Next
 
-1. **Ranks 301-1000.** Rounds of about 200 overnight on the current stack; group the blockers by
+1. **Ranks 501-1000.** Rounds of about 200 overnight on the current stack; group the blockers by
    cause as before.
 2. **Video playback, not just decoding.** A probe check that plays the clip and counts rendered
    frames; software decoder speed at 720p and 1080p on the board; how often HEVC appears.
-3. **microG phase work.** Sign-in and push, once test accounts exist.
+3. **microG**, in the order above: the step-1 round, then Dynamite modules or guest activities,
+   whichever the logs show more of; sign-in and push checks once test accounts exist.
 4. **Draws a view but not a frame:** the Cocos surface that renders but never shows, Flutter's
    hardware-buffer image view, and the keep-screen-on window flag, whose library is not staged.
 5. **Per-app crashes** after the shared causes are cleared.
