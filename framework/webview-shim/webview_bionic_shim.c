@@ -2513,21 +2513,55 @@ static const struct {
     { "dalvik.vm.heapsize",        "512m" },
 };
 
+/*
+ * The device's identity, which Android keeps under ro.product.* and OH under const.product.* and
+ * ohos.boot.hardware. Read under the Android names, every one was empty, which no Android device
+ * answers: Meitu's liblabdeviceinfo.so joins ro.product.manufacturer and ro.product.model and,
+ * when both are empty, copies from a null pointer (SIGSEGV in memcpy on its analytics thread).
+ * The board's own values are passed through, whatever they are.
+ */
+static const struct {
+    const char *name;
+    const char *oh_name;
+} g_oh_property_aliases[] = {
+    { "ro.product.model",               "const.product.model" },
+    { "ro.product.vendor.model",        "const.product.model" },
+    { "ro.product.manufacturer",        "const.product.manufacturer" },
+    { "ro.product.vendor.manufacturer", "const.product.manufacturer" },
+    { "ro.product.brand",               "const.product.brand" },
+    { "ro.product.vendor.brand",        "const.product.brand" },
+    { "ro.product.name",                "const.product.name" },
+    { "ro.product.device",              "const.product.name" },
+    { "ro.product.board",               "ohos.boot.hardware" },
+    { "ro.board.platform",              "ohos.boot.hardware" },
+    { "ro.hardware",                    "ohos.boot.hardware" },
+};
+
+/* A property by its Android name: OH's store, then the OH name it is kept under, then the table
+ * above. Returns the value's length, 0 when nothing answers. */
+static int read_android_property(const char *name, char *value)
+{
+    int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
+    for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
+        if (strcmp(name, g_oh_property_aliases[i].name) == 0) {
+            length = read_oh_property(g_oh_property_aliases[i].oh_name, value, WEBVIEW_PROP_VALUE_MAX);
+        }
+    }
+    for (size_t i = 0; length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+        if (strcmp(name, g_android_properties[i].name) == 0) {
+            snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
+            length = (int)strlen(value);
+        }
+    }
+    return length;
+}
+
 int __system_property_get(const char *name, char *value)
 {
     if (name == NULL || value == NULL) {
         return 0;
     }
-    int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
-    if (length == 0) {
-        for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
-            if (strcmp(name, g_android_properties[i].name) == 0) {
-                snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
-                length = (int)strlen(value);
-                break;
-            }
-        }
-    }
+    int length = read_android_property(name, value);
     fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s=%s\n", name, value);
     return length;
 }
@@ -2552,7 +2586,7 @@ const struct prop_info *__system_property_find(const char *name)
         return NULL;
     }
     char value[WEBVIEW_PROP_VALUE_MAX];
-    if (read_oh_property(name, value, sizeof(value)) == 0) {
+    if (read_android_property(name, value) == 0) {
         return NULL;
     }
 
