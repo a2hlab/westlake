@@ -28,6 +28,7 @@
 #include <sys/select.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <wchar.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 
@@ -3013,6 +3014,28 @@ char *__strncpy_chk2(char *dst, const char *src, size_t count,
         }
     }
     return result;
+}
+
+/*
+ * wcslcpy/wcslcat: bionic's (BSD) bounded wide-string copies; musl has neither. ibisPaint's
+ * libibispaint.so imports wcslcpy and failed to relocate. Both return the length they tried to make.
+ */
+size_t wcslcpy(wchar_t *dst, const wchar_t *src, size_t size)
+{
+    size_t length = wcslen(src);
+    if (size != 0) {
+        size_t count = length < size - 1 ? length : size - 1;
+        wmemcpy(dst, src, count);
+        dst[count] = L'\0';
+    }
+    return length;
+}
+
+size_t wcslcat(wchar_t *dst, const wchar_t *src, size_t size)
+{
+    size_t used = wcsnlen(dst, size);
+    if (used == size) return size + wcslen(src);
+    return used + wcslcpy(dst + used, src, size - used);
 }
 
 /*

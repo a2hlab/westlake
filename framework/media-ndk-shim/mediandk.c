@@ -419,6 +419,23 @@ NO_DRM(AMediaDrm_getProvisionRequest, const uint8_t** request, size_t* requestSi
 NO_DRM(AMediaDrm_provideProvisionResponse, const uint8_t* response, size_t responseSize)
 NO_DRM(AMediaDrm_setPropertyString, const char* name, const char* value)
 NO_DRM(AMediaDrm_setPropertyByteArray, const char* name, const uint8_t* value, size_t valueSize)
+/* The rest of NdkMediaDrm.h: an anti-fraud SDK's libliteye.so imports
+ * AMediaDrm_getPropertyByteArray and failed to relocate without it. */
+NO_DRM(AMediaDrm_getPropertyString, const char* name, const char** value)
+NO_DRM(AMediaDrm_getPropertyByteArray, const char* name, void* value)
+NO_DRM(AMediaDrm_restoreKeys, const void* sessionId, const void* keySetId)
+NO_DRM(AMediaDrm_removeKeys, const void* keySetIdOrSessionId)
+NO_DRM(AMediaDrm_queryKeyStatus, const void* sessionId, void* keyValuePairs, size_t* numPairs)
+NO_DRM(AMediaDrm_getSecureStops, void* secureStops, size_t* numSecureStops)
+NO_DRM(AMediaDrm_releaseSecureStops, const void* ssRelease)
+NO_DRM(AMediaDrm_encrypt, const void* sessionId, const char* cipherAlgorithm, uint8_t* keyId, uint8_t* iv,
+       const uint8_t* input, uint8_t* output, size_t dataSize)
+NO_DRM(AMediaDrm_decrypt, const void* sessionId, const char* cipherAlgorithm, uint8_t* keyId, uint8_t* iv,
+       const uint8_t* input, uint8_t* output, size_t dataSize)
+NO_DRM(AMediaDrm_sign, const void* sessionId, const char* macAlgorithm, uint8_t* keyId, uint8_t* message,
+       size_t messageSize, uint8_t* signature, size_t* signatureSize)
+NO_DRM(AMediaDrm_verify, const void* sessionId, const char* macAlgorithm, uint8_t* keyId,
+       const uint8_t* message, size_t messageSize, const uint8_t* signature, size_t signatureSize)
 
 /* --- AMediaExtractor: exists, but accepts no data source --------------------------------------- */
 
