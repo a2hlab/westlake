@@ -223,6 +223,19 @@ static const struct SLInterfaceID_ westlake_sl_iid_android_config = {
     0x89f6a7e0, 0xbeac, 0x11df, 0x8b5c, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
 const SLInterfaceID SL_IID_ANDROIDCONFIGURATION = &westlake_sl_iid_android_config;
 
+/* Android's recorder pre-processing interface IDs (the AudioEffect types AEC, AGC and NS). A
+ * library that imports them failed to relocate (a slots game's libSlots.so); no engine object
+ * offers these interfaces here, so GetInterface answers them as it answers any unknown ID. */
+static const struct SLInterfaceID_ westlake_sl_iid_android_aec = {
+    0x7b491460, 0x8d4d, 0x11e0, 0xbd61, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
+static const struct SLInterfaceID_ westlake_sl_iid_android_agc = {
+    0x0a8abfe0, 0x654c, 0x11e0, 0xba26, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
+static const struct SLInterfaceID_ westlake_sl_iid_android_ns = {
+    0x58b4b260, 0x8e06, 0x11e0, 0xaa8e, {0x00, 0x02, 0xa5, 0xd5, 0xc5, 0x1b}};
+const SLInterfaceID SL_IID_ANDROIDACOUSTICECHOCANCELLATION = &westlake_sl_iid_android_aec;
+const SLInterfaceID SL_IID_ANDROIDAUTOMATICGAINCONTROL = &westlake_sl_iid_android_agc;
+const SLInterfaceID SL_IID_ANDROIDNOISESUPPRESSION = &westlake_sl_iid_android_ns;
+
 static const char *const oh_iid_names[] = {
     "SL_IID_3DCOMMIT", "SL_IID_3DDOPPLER", "SL_IID_3DGROUPING", "SL_IID_3DLOCATION",
     "SL_IID_3DMACROSCOPIC", "SL_IID_3DSOURCE", "SL_IID_AUDIODECODERCAPABILITIES",
