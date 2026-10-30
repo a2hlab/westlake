@@ -10,6 +10,9 @@ import android.content.pm.PackageParser;
 import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
+import android.content.pm.Signature;
+import android.content.pm.SigningDetails;
+import android.content.pm.SigningInfo;
 import android.content.pm.pkg.FrameworkPackageUserState;
 import android.os.Parcel;
 import android.os.Process;
@@ -140,6 +143,9 @@ public final class GuestPackages {
         } finally {
             parcel.recycle();
         }
+        if ((flags & (PackageManager.GET_SIGNATURES | PackageManager.GET_SIGNING_CERTIFICATES)) != 0) {
+            fakeSignature(guest.parsed, value);
+        }
         applyLocation(value.applicationInfo, guest);
         if ((flags & PackageManager.GET_META_DATA) != 0) applyDefaults(value.applicationInfo);
         applyLocation(value.activities, guest);
@@ -147,6 +153,33 @@ public final class GuestPackages {
         applyLocation(value.services, guest);
         applyLocation(value.providers, guest);
         return value;
+    }
+
+    /**
+     * microG's signature spoofing, as the ROMs that host microG implement it: a package that
+     * requests FAKE_PACKAGE_SIGNATURE and names a certificate in its "fake-signature" meta-data is
+     * reported with that certificate. GmsCore and Companion name Google's, which the Play services
+     * client libraries in apps check before they use either package; with microG's own
+     * certificate they answered SERVICE_INVALID and "Google Play services not available"
+     * (AdvertisingIdClient, Firebase, sign-in, maps).
+     */
+    private static void fakeSignature(PackageParser.Package parsed, PackageInfo value) {
+        if (parsed.mAppMetaData == null || parsed.requestedPermissions == null
+                || !parsed.requestedPermissions.contains("android.permission.FAKE_PACKAGE_SIGNATURE")) {
+            return;
+        }
+        String certificate = parsed.mAppMetaData.getString("fake-signature");
+        if (certificate == null || certificate.isEmpty()) return;
+        Signature[] fake = { new Signature(certificate) };
+        if (value.signatures != null) value.signatures = fake;
+        if (value.signingInfo != null) {
+            try {
+                value.signingInfo = new SigningInfo(
+                        new SigningDetails(fake, SigningDetails.SignatureSchemeVersion.SIGNING_BLOCK_V3));
+            } catch (java.security.cert.CertificateException e) {
+                value.signingInfo = null;
+            }
+        }
     }
 
     public static ApplicationInfo applicationInfo(String packageName, long flags) {

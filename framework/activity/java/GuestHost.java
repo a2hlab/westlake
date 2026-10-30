@@ -24,6 +24,7 @@ import android.app.Service;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
@@ -31,6 +32,7 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.security.net.config.ApplicationConfig;
 import android.util.Log;
 
 import adapter.packagemanager.GuestPackages;
@@ -64,10 +66,28 @@ public final class GuestHost {
         // main thread's must stay the app's (ServiceLoader and reflection libraries read it).
         Thread current = Thread.currentThread();
         ClassLoader saved = current.getContextClassLoader();
+        // makeApplicationInner also hands the guest to NetworkSecurityConfigProvider
+        // .handleNewApplication, which merges a second package's network security config into the
+        // process's. microG's has per-domain rules, so wherever the app's cleartext default differs
+        // it threw "Found multiple conflicting per-domain rules" and microG's Application was never
+        // made (every GCM and advertising-ID bind failed); where it agreed, microG's config
+        // replaced the app's own. The guest runs on the app's network policy: no config of its
+        // own, the app's cleartext default, and the app's config left in place afterwards.
+        ApplicationConfig network = ApplicationConfig.getDefaultInstance();
+        if (network != null) {
+            ApplicationInfo info = apk.getApplicationInfo();
+            info.networkSecurityConfigRes = 0;
+            if (network.isCleartextTrafficPermitted()) {
+                info.flags |= ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC;
+            } else {
+                info.flags &= ~ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC;
+            }
+        }
         try {
             return apk.makeApplicationInner(false, thread.getInstrumentation());
         } finally {
             current.setContextClassLoader(saved);
+            if (network != null) ApplicationConfig.setDefaultInstance(network);
         }
     }
 
