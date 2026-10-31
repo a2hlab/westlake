@@ -2537,9 +2537,9 @@ static const struct {
     { "ro.hardware",                    "ohos.boot.hardware" },
 };
 
-/* A property by its Android name: OH's store, then the OH name it is kept under, then the table
- * above. Returns the value's length, 0 when nothing answers. */
-static int read_android_property(const char *name, char *value)
+/* A property by its Android name: OH's store, then the OH name it is kept under, then (with_table)
+ * the table above. Returns the value's length, 0 when nothing answers. */
+static int read_android_property(const char *name, char *value, int with_table)
 {
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
     for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
@@ -2547,7 +2547,7 @@ static int read_android_property(const char *name, char *value)
             length = read_oh_property(g_oh_property_aliases[i].oh_name, value, WEBVIEW_PROP_VALUE_MAX);
         }
     }
-    for (size_t i = 0; length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+    for (size_t i = 0; with_table && length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
         if (strcmp(name, g_android_properties[i].name) == 0) {
             snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
             length = (int)strlen(value);
@@ -2561,7 +2561,7 @@ int __system_property_get(const char *name, char *value)
     if (name == NULL || value == NULL) {
         return 0;
     }
-    int length = read_android_property(name, value);
+    int length = read_android_property(name, value, 1);
     fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s=%s\n", name, value);
     return length;
 }
@@ -2586,7 +2586,12 @@ const struct prop_info *__system_property_find(const char *name)
         return NULL;
     }
     char value[WEBVIEW_PROP_VALUE_MAX];
-    if (read_android_property(name, value) == 0) {
+    /*
+     * Not the table: Chromium reads the API level by find + read_callback, and finding
+     * ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*, which the
+     * WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43 apps).
+     */
+    if (read_android_property(name, value, 0) == 0) {
         return NULL;
     }
 
