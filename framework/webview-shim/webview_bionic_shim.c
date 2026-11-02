@@ -2561,9 +2561,16 @@ int __system_property_get(const char *name, char *value)
     if (name == NULL || value == NULL) {
         return 0;
     }
-    int length = read_android_property(name, value, 1);
+    /*
+     * value is the caller's PROP_VALUE_MAX (92) bytes. Reading into it with this file's 256-byte
+     * limit put a NUL at value[255], in the caller's frames: for ro.product.model in Chromium's
+     * user-agent code, on a byte of a saved return address.
+     */
+    char found[WEBVIEW_PROP_VALUE_MAX];
+    read_android_property(name, found, 1);
+    snprintf(value, 92, "%s", found);                /* bionic's PROP_VALUE_MAX */
     fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s=%s\n", name, value);
-    return length;
+    return (int)strlen(value);
 }
 
 /*
