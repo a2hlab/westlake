@@ -1,4 +1,4 @@
-# Hong Kong top 1000: plan and progress (2026-10-27, updated 2026-10-30)
+# Hong Kong top 1000: plan and progress (2026-10-27, updated 2026-11-02)
 
 ## The goal
 
@@ -162,7 +162,7 @@ one, NetEase Yidun, in 3 games). Fixes since, each checked against apps that alr
 The board's network is not the problem: it resolves Google's hosts to Google's addresses, the TLS
 certificate verifies, and the check-in endpoint answers.
 
-1. **Make apps accept microG** (built as build 127, round queued).
+1. **Make apps accept microG** (done, see the results below).
    - microG's Application was never made in 106 apps. `makeApplicationInner` hands a second package
      to `NetworkSecurityConfigProvider.handleNewApplication`, which throws "Found multiple
      conflicting per-domain rules" when the app's cleartext default differs from microG's and
@@ -186,14 +186,61 @@ certificate verifies, and the check-in endpoint answers.
 
 Not being worked on: Play Integrity and SafetyNet attestation (microG cannot pass the strong checks).
 
+### microG step 1 and product properties: results (2026-11-02)
+
+Both are merged (westlake #60, #61) and are the defaults for new rounds: build 128 and the matching
+bionic shim.
+
+**microG.** 112 of 130 apps drew on the step-1 round, and Alipay made 113 of 131 once its launch was
+fixed (it now draws). The conflicting-rules and `SERVICE_INVALID` errors fell to 0 of 130 logs, from
+61 and 54 of 114 on the earlier round.
+
+Passing the availability check sends apps through Google code they used to skip, as expected, and
+two apps dropped because of it:
+
+- **ESPN (fixed):** Cast starts `MediaRouter2`, whose constructor throws "Null or empty
+  currentSystemRoutes". `media_router` now answers the device's own route and session. ESPN and
+  Apple TV both draw. 20 of the 23 apps that touch the router draw, and the other 3 match their
+  earlier best.
+- **GPS tracker (open):** deadlocks at Application.onCreate. AdMob's init thread holds a lock while
+  `WebSettings.getDefaultUserAgent` waits for WebView to start on the main thread, and the main
+  thread waits on that lock in `MobileAds.setRequestConfiguration`. Rung 1 on all 4 runs with the
+  change, drawing on both without. Wrapping the provider in `WebViewFactory` is not the answer: a
+  non-null `sProviderInstance` makes `setDataDirectorySuffix` throw.
+
+**Product properties.** `ro.product.*`, `ro.board.platform` and `ro.hardware` now answer from OH's
+names. On build 128, 46 of 49 apps draw, including both Meitu apps (rung 1 before). The change took
+three fixes:
+
+- Finding them through `__system_property_find` moved Chromium onto `ASharedMemory_*` calls that
+  WebView's `libandroid` lacks, so the find path leaves out the Android table.
+- Reads used a 256-byte limit on the caller's 92-byte buffer, and the NUL overwrote a saved return
+  address in Chromium's user-agent code.
+- OH's `default` brand and manufacturer are placeholders, and answering them crashed Baitu's
+  protection library. They are no longer answered.
+
+**Run-to-run variation.** Each suspect was run twice on each side, and most "regressions" against an
+app's best rung were not caused by the change under test:
+
+| App | Old side | New side | Reading |
+|---|---|---|---|
+| WeChat | 2, 4 | 1, 4 | Varies on both |
+| FIFA Mobile | 5, 2 | 5, 2 | Varies on both |
+| OnSpace | 5, 1 | 1, 1 (and 4 once) | Varies on both |
+| Kling, Haochang | 2, 2 | 2, 2 | No change; the higher best was a single run |
+| Banliao | 1 | 1 | Mali abort on every run; why it left rung 4 is not known |
+
+A single drop against the best rung ever seen is therefore weak evidence. Judge a change by repeat
+runs on both sides.
+
 ## Next
 
 1. **Ranks 501-1000.** Rounds of about 200 overnight on the current stack; group the blockers by
    cause as before.
 2. **Video playback, not just decoding.** A probe check that plays the clip and counts rendered
    frames; software decoder speed at 720p and 1080p on the board; how often HEVC appears.
-3. **microG**, in the order above: the step-1 round, then Dynamite modules or guest activities,
-   whichever the logs show more of; sign-in and push checks once test accounts exist.
+3. **microG**, in the order above: the AdMob and WebView deadlock, then Dynamite modules or guest
+   activities, whichever the logs show more of; sign-in and push checks once test accounts exist.
 4. **Draws a view but not a frame:** the Cocos surface that renders but never shows, Flutter's
    hardware-buffer image view, and the keep-screen-on window flag, whose library is not staged.
 5. **Per-app crashes** after the shared causes are cleared.
