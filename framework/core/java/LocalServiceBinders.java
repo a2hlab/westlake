@@ -438,7 +438,42 @@ public final class LocalServiceBinders {
 
     /** No remote routes: clients register and discover nothing; playback stays on the device. */
     private static Object mediaRouter(String method, Object[] args) {
-        return DEFAULT;
+        // MediaRouter2's constructor refuses to run without a system route and a system session
+        // ("Null or empty currentSystemRoutes"). Cast's CastContext reaches it through androidx
+        // MediaRouter once Play services checks pass (ESPN at Application.onCreate, Apple TV). The
+        // device's own output is the one route a phone always has, as SystemMediaRoute2Provider
+        // answers it; nothing here selects or casts anywhere.
+        switch (method) {
+            case "getSystemRoutes":
+                return Collections.singletonList(systemRoute());
+            case "getSystemSessionInfo":
+            case "getSystemSessionInfoForPackage":
+                return new android.media.RoutingSessionInfo.Builder(SYSTEM_SESSION_ID, "")
+                        .setSystemSession(true)
+                        .addSelectedRoute(DEVICE_ROUTE_ID)
+                        .setProviderId(SYSTEM_ROUTE_PROVIDER)
+                        .build();
+            default:
+                return DEFAULT;
+        }
+    }
+
+    private static final String SYSTEM_ROUTE_PROVIDER = "com.android.server.media.SystemMediaRoute2Provider";
+    private static final String SYSTEM_SESSION_ID = "SYSTEM_SESSION";
+    private static final String DEVICE_ROUTE_ID = "DEVICE_ROUTE";
+
+    private static android.media.MediaRoute2Info systemRoute() {
+        return new android.media.MediaRoute2Info.Builder(DEVICE_ROUTE_ID, "Phone")
+                .setVolumeHandling(android.media.MediaRoute2Info.PLAYBACK_VOLUME_VARIABLE)
+                .setVolumeMax(15)
+                .setVolume(8)
+                .setType(android.media.MediaRoute2Info.TYPE_BUILTIN_SPEAKER)
+                .addFeature(android.media.MediaRoute2Info.FEATURE_LIVE_AUDIO)
+                .addFeature(android.media.MediaRoute2Info.FEATURE_LIVE_VIDEO)
+                .setConnectionState(android.media.MediaRoute2Info.CONNECTION_STATE_CONNECTED)
+                .setSystemRoute(true)
+                .setProviderId(SYSTEM_ROUTE_PROVIDER)
+                .build();
     }
 
     /** No wallpaper and no wallpaper colours: the framework's nullable answers. */
