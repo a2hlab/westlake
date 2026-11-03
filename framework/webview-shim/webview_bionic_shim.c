@@ -2545,6 +2545,12 @@ static int read_android_property(const char *name, char *value, int with_table)
     for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
         if (strcmp(name, g_oh_property_aliases[i].name) == 0) {
             length = read_oh_property(g_oh_property_aliases[i].oh_name, value, WEBVIEW_PROP_VALUE_MAX);
+            /* "default" is OH's placeholder for a brand or manufacturer nobody set, not a name.
+             * Answered as one, it crashed an app's protection library on launch (Baitu). */
+            if (strcmp(value, "default") == 0) {
+                value[0] = '\0';
+                length = 0;
+            }
         }
     }
     for (size_t i = 0; with_table && length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
