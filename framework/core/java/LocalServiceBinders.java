@@ -161,6 +161,16 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.app.admin.IDevicePolicyManager",
                             (method, args) -> DEFAULT);
                     break;
+                // Nothing pinned and no other profiles. Both managers are built on
+                // getServiceOrThrow, so without a binder they are null: androidx.slice's provider
+                // asks for pinned slices while the app binds (Todoist, Compass), and Calendar asks
+                // for its target profiles in Application.onCreate.
+                case "slice":
+                    binder = proxy(name, "android.app.slice.ISliceManager", (method, args) -> DEFAULT);
+                    break;
+                case "crossprofileapps":
+                    binder = proxy(name, "android.content.pm.ICrossProfileApps", (method, args) -> DEFAULT);
+                    break;
                 case "servicediscovery":
                     binder = proxy(name, "android.net.nsd.INsdManager", LocalServiceBinders::nsd);
                     break;
@@ -712,12 +722,17 @@ public final class LocalServiceBinders {
             case "checkOperation":
             case "checkOperationRaw":
             case "checkAudioOperation":
+            case "checkOperationForDevice":
+            case "checkOperationRawForDevice":
                 return mode;
             case "noteOperation":
             case "startOperation":
             case "noteProxyOperation":
             case "startProxyOperation":
             case "startProxyOperationWithState":
+            case "noteProxyOperationWithState":
+            case "noteOperationForDevice":
+            case "startOperationForDevice":
                 return new android.app.SyncNotedAppOp(mode, code, null,
                         android.app.ActivityThread.currentPackageName());
             default:
