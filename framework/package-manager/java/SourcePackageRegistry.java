@@ -103,6 +103,38 @@ public final class SourcePackageRegistry {
     }
 
     /** Diagnostic: metadata size on Firebase's discovery service, or -1 / -2 when absent. */
+    /**
+     * SigningDetails parcels its public keys as Serializable objects and reads them back with the
+     * boot class loader. On Android they come from system_server, so their classes are the boot
+     * Conscrypt's. Here the package manager runs in the app's process, where parsing a certificate
+     * uses the first security provider, and Play services installs its own first: the copy below
+     * then cannot find com.google.android.gms.org.conscrypt.OpenSSLRSAPublicKey, the throw reaches
+     * Play services' crash handler, and that handler ends the process. Make the keys with the boot
+     * provider, as system_server would. Without it, the keys are dropped: only
+     * SigningInfo.getPublicKeys reads them, and the certificates themselves stay.
+     */
+    private static void bootClassSigningKeys(PackageInfo value) {
+        if (value.signingInfo == null) return;
+        android.content.pm.SigningDetails details = value.signingInfo.getSigningDetails();
+        android.content.pm.Signature[] signers = details.getSignatures();
+        if (signers == null) return;
+        android.util.ArraySet<java.security.PublicKey> keys = new android.util.ArraySet<>(signers.length);
+        try {
+            java.security.cert.CertificateFactory factory =
+                    java.security.cert.CertificateFactory.getInstance("X.509", "AndroidOpenSSL");
+            for (android.content.pm.Signature signer : signers) {
+                keys.add(factory.generateCertificate(
+                        new java.io.ByteArrayInputStream(signer.toByteArray())).getPublicKey());
+            }
+        } catch (java.security.GeneralSecurityException e) {
+            System.err.println("[SOURCE-PKG] signing keys dropped: " + e);
+            keys = null;
+        }
+        value.signingInfo = new android.content.pm.SigningInfo(new android.content.pm.SigningDetails(
+                signers, details.getSignatureSchemeVersion(), keys,
+                details.getPastSigningCertificates()));
+    }
+
     private static int probeDiscoveryMeta(PackageInfo info) {
         if (info == null || info.services == null) return -2;
         for (android.content.pm.ServiceInfo s : info.services) {
@@ -320,6 +352,7 @@ public final class SourcePackageRegistry {
                 0, 0, granted, FrameworkPackageUserState.DEFAULT, 0);
         if (value == null) return null;
         int preMeta = probeDiscoveryMeta(value);
+        bootClassSigningKeys(value);
         // PackageParser can share objects with its resident state. Match Binder
         // value semantics so an app cannot mutate future package-manager results.
         Parcel parcel = Parcel.obtain();

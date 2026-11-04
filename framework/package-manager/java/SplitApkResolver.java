@@ -105,6 +105,34 @@ public final class SplitApkResolver {
         apply(packageInfo, info, splits, "scanned");
     }
 
+    /**
+     * What SplitDependencyLoader.createDependenciesFromPackage would produce, keyed by split index
+     * plus one, with the base at 0: the base depends on nothing and lists its config splits, and a
+     * feature split depends on the base. LoadedApk walks this whenever the app asks for isolated
+     * split loading, as Play services does, and a null array throws while its context is made.
+     * The split manifests are not read here, so a split's kind comes from Android's naming
+     * convention, and a feature split's own config splits are treated as the base's.
+     */
+    private static android.util.SparseArray<int[]> dependencies(String[] names) {
+        android.util.SparseArray<int[]> dependencies = new android.util.SparseArray<>();
+        int configs = 0;
+        for (String name : names) {
+            if (name.startsWith("config.")) configs++;
+        }
+        int[] base = new int[configs + 1];
+        base[0] = -1;
+        int next = 1;
+        for (int i = 0; i < names.length; i++) {
+            if (names[i].startsWith("config.")) {
+                base[next++] = i + 1;
+            } else {
+                dependencies.put(i + 1, new int[] {0});
+            }
+        }
+        dependencies.put(0, base);
+        return dependencies;
+    }
+
     private static void apply(PackageInfo packageInfo, ApplicationInfo info,
             TreeMap<String, String> splits, String source) {
         int count = splits.size();
@@ -120,6 +148,7 @@ public final class SplitApkResolver {
         info.splitNames = names;
         info.splitSourceDirs = paths;
         info.splitPublicSourceDirs = paths.clone();
+        info.splitDependencies = dependencies(names);
         if (packageInfo != null) {
             packageInfo.splitNames = names.clone();
             packageInfo.splitRevisionCodes = new int[count];
