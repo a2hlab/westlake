@@ -1268,8 +1268,9 @@ public class AppSpawnXInit {
                         android.content.Intent service = (android.content.Intent) args[2];
                         android.app.IServiceConnection connection = (android.app.IServiceConnection) args[4];
                         // By name or, as Play services binds its own shared preferences service, by
-                        // action within the app's package. Android resolves both.
-                        android.content.ComponentName comp = adapter.activity.InProcessServiceBinder.resolveInApp(service);
+                        // action within the app's package.
+                        android.content.ComponentName comp = service != null ? service.getComponent() : null;
+                        if (comp == null) comp = adapter.activity.InProcessServiceBinder.resolveInApp(service);
                         if (connection != null && adapter.activity.InProcessServiceBinder.isInApp(comp)) {
                             System.err.println("[" + label + "] " + name + " -> in-process " + comp);
                             new android.os.Handler(android.os.Looper.getMainLooper()).post(
