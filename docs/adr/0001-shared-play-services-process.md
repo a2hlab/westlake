@@ -1,6 +1,6 @@
 # ADR-0001: Run unmodified Play services as one shared, unprivileged Westlake process
 
-- **Status:** proposed
+- **Status:** accepted (transport and design; the legal questions below remain open)
 - **Date:** 2026-11-03
 - **Extends:** [the microG integration design](../MICROG-INTEGRATION-DESIGN-2026-10-24.md), whose "gmsd" this makes the target
 
