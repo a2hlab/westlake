@@ -72,6 +72,8 @@ public final class PlayServicesChannel {
     private static final int PROVIDER = 10;
     private static final int STOP = 11;
     private static final int WHO_AM_I = 12;
+    /** From the host to a client's callback: a broadcast for that app, such as a push message. */
+    private static final int DELIVER_BROADCAST = 1;
 
     private static final long BIND_TIMEOUT_SECONDS = 30;
     private static final long BOOT_ANNOUNCE_DELAY_MS = 5000;
@@ -92,6 +94,8 @@ public final class PlayServicesChannel {
     // ---- App side ----
 
     private static final Object CLIENT_LOCK = new Object();
+    /** Held here, since the channel only holds what it has been sent while the peer does. */
+    private static final Binder sCallback = new ClientCallback();
     private static SocketBinder sChannel;
     private static final Set<String> sAbsent = Collections.synchronizedSet(new HashSet<>());
     private static final Set<String> sPresent = Collections.synchronizedSet(new HashSet<>());
@@ -223,6 +227,7 @@ public final class PlayServicesChannel {
         try {
             data.writeString(packageName);
             data.writeTypedObject(own, 0);
+            data.writeStrongBinder(sCallback);
             root.transact(HELLO, data, reply, 0);
             reply.readException();
             sRemoteRoot = reply.readString();
@@ -249,6 +254,25 @@ public final class PlayServicesChannel {
         } finally {
             data.recycle();
             reply.recycle();
+        }
+    }
+
+    /** What the host calls in this app. */
+    private static final class ClientCallback extends Binder {
+        @Override
+        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            if (code != DELIVER_BROADCAST) return super.onTransact(code, data, reply, flags);
+            Intent intent = data.readTypedObject(Intent.CREATOR);
+            String type = data.readString();
+            IBinder result = data.readStrongBinder();
+            int resultCode = data.readInt();
+            String resultData = data.readString();
+            android.os.Bundle map = data.readBundle(PlayServicesChannel.class.getClassLoader());
+            boolean ordered = data.readBoolean();
+            int user = UserHandle.myUserId();
+            new Handler(Looper.getMainLooper()).post(() -> LocalBroadcasts.broadcast(intent, type,
+                    android.content.IIntentReceiver.Stub.asInterface(result), resultCode, resultData, map, ordered, user));
+            return true;
         }
     }
 
@@ -461,6 +485,39 @@ public final class PlayServicesChannel {
         return System.getenv(SERVE) != null;
     }
 
+    private static final java.util.Map<String, IBinder> sClientCallbacks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * In the host, hands a broadcast aimed at a connected app to that app. False if it isn't for one,
+     * and the caller goes on as usual. An app with no process can't be reached yet: starting it needs
+     * a way for this process to ask for a spawn.
+     */
+    public static boolean deliverToClient(Intent intent, String type, android.content.IIntentReceiver result,
+            int resultCode, String resultData, android.os.Bundle map, boolean ordered) {
+        if (!isHost() || intent == null) return false;
+        String target = targetPackage(intent);
+        IBinder callback = target == null ? null : sClientCallbacks.get(target);
+        if (callback == null || !callback.isBinderAlive()) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0);
+            data.writeString(type);
+            data.writeStrongBinder(result != null ? result.asBinder() : null);
+            data.writeInt(resultCode);
+            data.writeString(resultData);
+            data.writeBundle(map);
+            data.writeBoolean(ordered);
+            callback.transact(DELIVER_BROADCAST, data, null, IBinder.FLAG_ONEWAY);
+            System.err.println(TAG + "delivered " + intent.getAction() + " to " + target);
+            return true;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "delivery of " + intent.getAction() + " to " + target + " failed: " + e);
+            return false;
+        } finally {
+            data.recycle();
+        }
+    }
+
     /** Starts serving if this process was asked to. Call once the Application exists. */
     public static void startHostIfAsked() {
         final String name = System.getenv(SERVE);
@@ -596,11 +653,13 @@ public final class PlayServicesChannel {
         private void hello(Parcel data) {
             String claimed = data.readString();
             PackageInfo info = data.readTypedObject(PackageInfo.CREATOR);
+            IBinder callback = data.readStrongBinder();
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
             }
             int uid = RemotePackages.registerClient(info, Process.myUid());
             mChannel.setCaller(uid, mPeerPid);
+            if (callback != null) sClientCallbacks.put(claimed, callback);
             mIdentified = true;
             System.err.println(TAG + "client " + claimed + " pid=" + mPeerPid + " uid=" + uid);
         }
