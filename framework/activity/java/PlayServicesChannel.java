@@ -74,6 +74,7 @@ public final class PlayServicesChannel {
     private static final int WHO_AM_I = 12;
 
     private static final long BIND_TIMEOUT_SECONDS = 30;
+    private static final long BOOT_ANNOUNCE_DELAY_MS = 5000;
     private static final long HELLO_PACKAGE_FLAGS = PackageManager.GET_SIGNATURES
             | PackageManager.GET_SIGNING_CERTIFICATES | PackageManager.GET_META_DATA
             | PackageManager.GET_PERMISSIONS;
@@ -465,9 +466,24 @@ public final class PlayServicesChannel {
         final String name = System.getenv(SERVE);
         if (name == null) return;
         SocketBinder.installCallingIdentity();
+        announceBoot();
         Thread thread = new Thread(() -> serve(name), "play-services-host");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /**
+     * This process stands in for one that has been running since the device booted, and Play services
+     * starts its check-in with Google, which push registration needs, from these broadcasts.
+     */
+    private static void announceBoot() {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            String self = application().getPackageName();
+            for (String action : new String[] {Intent.ACTION_LOCKED_BOOT_COMPLETED, Intent.ACTION_BOOT_COMPLETED}) {
+                application().sendBroadcast(new Intent(action).setPackage(self));
+            }
+            System.err.println(TAG + "announced boot");
+        }, BOOT_ANNOUNCE_DELAY_MS);
     }
 
     private static void serve(String name) {

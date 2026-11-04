@@ -304,16 +304,24 @@ static jint calling_pid(void)
     return t_calling_uid != 0 ? t_calling_pid : (jint)getpid();
 }
 
-/* The token's layout is libbinder's: uid in the high half, pid in the low. */
+/*
+ * The token's layout is libbinder's: uid in the high half, pid in the low, and the top bit of the low
+ * half set once an identity has been cleared. Looper compares tokens across messages and reports any
+ * change, and its first token came from libbinder, so this must match bit for bit.
+ */
+#define EXPLICIT_IDENTITY 0x80000000u
+static __thread uint32_t t_explicit;
+
 static jlong identity_token(void)
 {
-    return (jlong)(((uint64_t)(uint32_t)calling_uid() << 32) | (uint32_t)calling_pid());
+    return (jlong)(((uint64_t)(uint32_t)calling_uid() << 32) | ((uint32_t)calling_pid() | t_explicit));
 }
 
 static void set_identity(jlong token)
 {
     t_calling_uid = (jint)((uint64_t)token >> 32);
-    t_calling_pid = (jint)(token & 0xffffffff);
+    t_calling_pid = (jint)((uint32_t)token & ~EXPLICIT_IDENTITY);
+    t_explicit = (uint32_t)token & EXPLICIT_IDENTITY;
 }
 
 static jlong critical_clear_identity(void)
@@ -321,6 +329,7 @@ static jlong critical_clear_identity(void)
     jlong old = identity_token();
     t_calling_uid = 0;
     t_calling_pid = 0;
+    t_explicit = EXPLICIT_IDENTITY;
     return old;
 }
 
@@ -347,6 +356,7 @@ JNIEXPORT jlong JNICALL Java_adapter_core_SocketBinderNative_setCallingIdentity(
     jlong old = identity_token();
     t_calling_uid = uid;
     t_calling_pid = pid;
+    t_explicit = 0;
     return old;
 }
 
