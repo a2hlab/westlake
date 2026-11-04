@@ -12,6 +12,12 @@ import java.util.Map;
 
 /** Current-user lifecycle queries backed by the OpenHarmony account service. */
 public final class OHUserManager {
+    private static android.content.pm.UserInfo ownerInfo() {
+        return new android.content.pm.UserInfo(UserHandle.myUserId(), "Owner", android.content.pm.UserInfo.FLAG_PRIMARY
+                | android.content.pm.UserInfo.FLAG_ADMIN | android.content.pm.UserInfo.FLAG_FULL
+                | android.content.pm.UserInfo.FLAG_MAIN);
+    }
+
     private static native int[] nativeState();
 
     private OHUserManager() {}
@@ -85,6 +91,19 @@ public final class OHUserManager {
                             return arguments[0];
                         case "getProfileParent":
                             return null;
+                        // The one full user, who is also the main one: UserManager.isMainUser and
+                        // isAdminUser read this record (Play services asks at start-up, on a thread
+                        // whose uncaught throw ends its process). No other user exists.
+                        case "getUserInfo":
+                            return ((Integer) arguments[0]) == androidUser ? ownerInfo() : null;
+                        case "getPrimaryUser":
+                            return ownerInfo();
+                        case "getMainUserId":
+                            return androidUser;
+                        case "isHeadlessSystemUserMode":
+                            return Boolean.FALSE;
+                        case "isUserForeground":
+                            return ((Integer) arguments[0]) == androidUser;
                         default:
                             break;
                     }
