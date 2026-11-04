@@ -72,7 +72,9 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.content.IClipboard", LocalServiceBinders::clipboard);
                     break;
                 case "account":
-                    binder = proxy(name, "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+                    binder = System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null
+                            ? proxy(name, "android.accounts.IAccountManager", LocalAccounts::answer, false)
+                            : proxy(name, "android.accounts.IAccountManager", (method, args) -> DEFAULT);
                     break;
                 case "audio":
                     binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
@@ -218,6 +220,12 @@ public final class LocalServiceBinders {
     }
 
     private static IBinder proxy(String name, String descriptor, Answers answers) throws ClassNotFoundException {
+        return proxy(name, descriptor, answers, true);
+    }
+
+    /** useTable false: the service holds state, so the fixed answers in ServiceAnswers don't apply. */
+    private static IBinder proxy(String name, String descriptor, Answers answers, boolean useTable)
+            throws ClassNotFoundException {
         Class<?> iface = Class.forName(descriptor);
         Binder binder = new Binder();
         Object local = Proxy.newProxyInstance(LocalServiceBinders.class.getClassLoader(), new Class<?>[] {iface},
@@ -229,8 +237,10 @@ public final class LocalServiceBinders {
                         if (sSeen.add(name + "." + call)) {
                             System.err.println("[" + TAG + "] " + name + "." + call);
                         }
-                        Object listed = ServiceAnswers.lookup(name, call, method.getReturnType());
-                        if (listed != ServiceAnswers.NOT_LISTED) return listed;
+                        if (useTable) {
+                            Object listed = ServiceAnswers.lookup(name, call, method.getReturnType());
+                            if (listed != ServiceAnswers.NOT_LISTED) return listed;
+                        }
                         Object value = answers.answer(call, args);
                         return value == DEFAULT ? defaultValue(method.getReturnType()) : value;
                     }
