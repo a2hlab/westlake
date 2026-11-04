@@ -107,7 +107,10 @@ work until a switch is decided.
   handle except through OH's own IPC, and Android's and OH's binder use would share a driver. This is
   the fallback if sockets prove too slow, and it needs its own experiment first. Its appeal is that
   `libwestlake_binder` is AOSP's full binder library, so Parcels, binder objects, file descriptors
-  and death notices would work with little new code, if a first handle can be exchanged.
+  and death notices would work with little new code, if a first handle can be exchanged. The obvious
+  route is closed: of the 370 services listed in the board's `service_contexts`, policy lets none of
+  `normal_hap`, `su` or `appspawn` add a service to samgr. The remaining idea, OH's ability connection,
+  gives a handle only on OH IPC's own binder file descriptor, which `libwestlake_binder` doesn't use.
 - **microG in the shared process, behind the same binder.** It avoids the question of Google's APKs
   and is a valid first test of the binder. It stays available if the legal answer is no.
 
