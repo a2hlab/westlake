@@ -462,16 +462,19 @@ public final class SocketBinderProbe {
         });
     }
 
+    static void serve(int listener) throws Exception {
+        System.out.println("listening");
+        while (true) {
+            int client = SocketBinder.accept(listener);
+            new SocketBinder(client, new Service(), "client");
+        }
+    }
+
     /** Called by the test launcher, which has already loaded the native library. */
     public static int main2(String[] args) throws Exception {
         String name = args[1];
         if (args[0].equals("server")) {
-            int listener = SocketBinder.listen(name);
-            System.out.println("listening");
-            while (true) {
-                int client = SocketBinder.accept(listener);
-                new SocketBinder(client, new Service(), "client");
-            }
+            serve(SocketBinder.listen(name));
         }
         SocketBinder channel = new SocketBinder(SocketBinder.connect(name), null, "server");
         runChecks(channel.getRemoteRoot());
