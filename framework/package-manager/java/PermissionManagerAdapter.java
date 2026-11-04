@@ -129,6 +129,10 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
         // Android answers for any package and never throws here: another package, which this
         // process cannot see installed, holds nothing (Messenger's Firebase checked one and died on
         // the SecurityException).
+        if (RemotePackages.contains(packageName)) {
+            return RemotePackages.holdsPermission(packageName, permissionName)
+                    ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+        }
         if (!isOwn(packageName, userId)) return PackageManager.PERMISSION_DENIED;
         if (!android.companion.virtual.VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT.equals(persistentDeviceId)) return PackageManager.PERMISSION_DENIED;
         return checkProcessPermission(permissionName, -1, android.os.Process.myUid());
@@ -136,6 +140,11 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
 
     @Override
     public int checkUidPermission(int uid, java.lang.String permissionName, int deviceId) throws android.os.RemoteException {
+        String remote = RemotePackages.packageForUid(uid);
+        if (remote != null) {
+            return RemotePackages.holdsPermission(remote, permissionName)
+                    ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+        }
         return deviceId == 0 ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED;
     }
 

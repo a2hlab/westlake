@@ -42,6 +42,17 @@ final class SocketBinderNative {
      */
     static native int recv(int fd, byte[] buf, int off, int len, int[] fds) throws java.io.IOException;
 
+    /** The process id of a connected socket's peer. */
+    static native int peerPid(int fd) throws java.io.IOException;
+
+    /** Replaces Binder's calling-identity natives with ones that answer from setCallingIdentity. */
+    static native void installCallingIdentity();
+
+    /** Sets this thread's caller and returns the previous one, for restoreCallingIdentity. */
+    static native long setCallingIdentity(int uid, int pid);
+
+    static native void restoreCallingIdentity(long identity);
+
     /** Unblocks a thread in recv on this socket, without closing it. */
     static native void shutdown(int fd);
 

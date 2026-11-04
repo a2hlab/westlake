@@ -241,12 +241,20 @@ public class AppSchedulerBridge {
             System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir
                     + " splits=" + (ai.splitSourceDirs == null ? 0 : ai.splitSourceDirs.length));
 
+            PlayServicesChannel.installClient();
+
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
             ensureBindApplication(at, pkg, null);
             System.err.println("[DIRECT-LAUNCH] bind done sBindAppDone=" + sBindAppDone);
             if (!sBindAppDone) {
                 throw new IllegalStateException("Application binding failed; activity launch withheld");
+            }
+            PlayServicesChannel.startHostIfAsked();
+            // The shared Play services process runs with no activity (ADR-0001).
+            if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))) {
+                System.err.println("[DIRECT-LAUNCH] no activity for " + pkg);
+                return;
             }
 
             // 3. WESTLAKE §653 (2026-08-15): let the app's OWN asynchronous initialisation settle

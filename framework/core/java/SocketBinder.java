@@ -138,6 +138,8 @@ public final class SocketBinder {
     private final List<DeathLink> mDeathLinks = new ArrayList<>();
     private final ExecutorService mPool;
     private volatile boolean mDead;
+    private volatile int mCallerUid;
+    private volatile int mCallerPid;
 
     private static final class DeathLink {
         final Proxy proxy;
@@ -196,6 +198,22 @@ public final class SocketBinder {
 
     public static int connect(String name) throws IOException {
         return SocketBinderNative.connect(name);
+    }
+
+    /** Who Binder.getCallingUid and getCallingPid say is calling while this channel's calls are served. */
+    public void setCaller(int uid, int pid) {
+        mCallerPid = pid;
+        mCallerUid = uid;
+    }
+
+    /** Makes Binder's calling identity answer from setCaller. Once per process, in the serving process. */
+    public static void installCallingIdentity() {
+        SocketBinderNative.installCallingIdentity();
+    }
+
+    /** The process id of a connected socket's peer, as the kernel reports it. */
+    public static int peerPid(int fd) throws IOException {
+        return SocketBinderNative.peerPid(fd);
     }
 
     /** The peer whose call this thread is serving, or null if it is serving none. */
@@ -416,6 +434,7 @@ public final class SocketBinder {
         Parcel reply = Parcel.obtain();
         Inbound outer = sInbound.get();
         sInbound.set(new Inbound(this, call.txn, outer));
+        long identity = mCallerUid != 0 ? SocketBinderNative.setCallingIdentity(mCallerUid, mCallerPid) : 0;
         Frame answer = new Frame();
         answer.type = TYPE_REPLY;
         answer.txn = call.txn;
@@ -435,6 +454,7 @@ public final class SocketBinder {
                 answer.flags = invoke(target, call, data, reply, oneway, answer) ? 1 : 0;
             }
         } finally {
+            if (mCallerUid != 0) SocketBinderNative.restoreCallingIdentity(identity);
             sInbound.set(outer);
         }
         try {

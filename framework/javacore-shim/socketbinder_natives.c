@@ -273,6 +273,90 @@ JNIEXPORT jint JNICALL Java_adapter_core_SocketBinderNative_recv(JNIEnv* env, jc
     return (jint)got;
 }
 
+JNIEXPORT jint JNICALL Java_adapter_core_SocketBinderNative_peerPid(JNIEnv* env, jclass c, jint fd)
+{
+    (void)c;
+    struct ucred credentials;
+    socklen_t length = sizeof(credentials);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0) {
+        throw_errno(env, "peer credentials");
+        return -1;
+    }
+    return credentials.pid;
+}
+
+/*
+ * Who Binder.getCallingUid answers for. Every Westlake process shares one OH uid and no call here
+ * arrives through the driver, so libbinder's answer would always be this process. Set while serving
+ * a socket channel's call; otherwise this thread answers for itself, as a local call does.
+ * Binder's natives are @CriticalNative, so they take no JNIEnv and must stay this simple.
+ */
+static __thread jint t_calling_uid;
+static __thread jint t_calling_pid;
+
+static jint calling_uid(void)
+{
+    return t_calling_uid != 0 ? t_calling_uid : (jint)getuid();
+}
+
+static jint calling_pid(void)
+{
+    return t_calling_uid != 0 ? t_calling_pid : (jint)getpid();
+}
+
+/* The token's layout is libbinder's: uid in the high half, pid in the low. */
+static jlong identity_token(void)
+{
+    return (jlong)(((uint64_t)(uint32_t)calling_uid() << 32) | (uint32_t)calling_pid());
+}
+
+static void set_identity(jlong token)
+{
+    t_calling_uid = (jint)((uint64_t)token >> 32);
+    t_calling_pid = (jint)(token & 0xffffffff);
+}
+
+static jlong critical_clear_identity(void)
+{
+    jlong old = identity_token();
+    t_calling_uid = 0;
+    t_calling_pid = 0;
+    return old;
+}
+
+JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_installCallingIdentity(JNIEnv* env, jclass c)
+{
+    (void)c;
+    static const JNINativeMethod methods[] = {
+        {"getCallingUid", "()I", (void*)calling_uid},
+        {"getCallingPid", "()I", (void*)calling_pid},
+        {"clearCallingIdentity", "()J", (void*)critical_clear_identity},
+        {"restoreCallingIdentity", "(J)V", (void*)set_identity},
+    };
+    jclass binder = (*env)->FindClass(env, "android/os/Binder");
+    if (binder != NULL) {
+        (*env)->RegisterNatives(env, binder, methods, sizeof(methods) / sizeof(methods[0]));
+        (*env)->DeleteLocalRef(env, binder);
+    }
+}
+
+JNIEXPORT jlong JNICALL Java_adapter_core_SocketBinderNative_setCallingIdentity(JNIEnv* env, jclass c, jint uid, jint pid)
+{
+    (void)env;
+    (void)c;
+    jlong old = identity_token();
+    t_calling_uid = uid;
+    t_calling_pid = pid;
+    return old;
+}
+
+JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_restoreCallingIdentity(JNIEnv* env, jclass c, jlong identity)
+{
+    (void)env;
+    (void)c;
+    set_identity(identity);
+}
+
 JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_shutdown(JNIEnv* env, jclass c, jint fd)
 {
     (void)env;
@@ -301,6 +385,10 @@ int wl_register_socket_binder(JNIEnv* env)
         NATIVE(connect, "(Ljava/lang/String;)I"),
         NATIVE(send, "(I[BII[I)I"),
         NATIVE(recv, "(I[BII[I)I"),
+        NATIVE(peerPid, "(I)I"),
+        NATIVE(installCallingIdentity, "()V"),
+        NATIVE(setCallingIdentity, "(II)J"),
+        NATIVE(restoreCallingIdentity, "(J)V"),
         NATIVE(shutdown, "(I)V"),
         NATIVE(close, "(I)V"),
     };

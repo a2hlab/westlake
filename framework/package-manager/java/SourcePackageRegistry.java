@@ -113,7 +113,7 @@ public final class SourcePackageRegistry {
      * provider, as system_server would. Without it, the keys are dropped: only
      * SigningInfo.getPublicKeys reads them, and the certificates themselves stay.
      */
-    private static void bootClassSigningKeys(PackageInfo value) {
+    static void bootClassSigningKeys(PackageInfo value) {
         if (value.signingInfo == null) return;
         android.content.pm.SigningDetails details = value.signingInfo.getSigningDetails();
         android.content.pm.Signature[] signers = details.getSignatures();
