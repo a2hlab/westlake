@@ -103,7 +103,8 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public boolean isAutoRevokeExempted(String pkg, int user) { own(pkg,user); return false; }
     public boolean isRegisteredAttributionSource(AttributionSourceState source) { return false; }
     public android.os.IBinder registerAttributionSource(AttributionSourceState source) { throw controllerRequired(); }
-    public void addOnPermissionsChangeListener(IOnPermissionsChangeListener listener) { throw new UnsupportedOperationException("OH permission-change subscription unavailable"); }
+    // Android never refuses a listener. OH offers no subscription, so this one never hears a change.
+    public void addOnPermissionsChangeListener(IOnPermissionsChangeListener listener) {}
     public void removeOnPermissionsChangeListener(IOnPermissionsChangeListener listener) {}
     public boolean addPermission(PermissionInfo permission, boolean async) { throw controllerRequired(); }
     public void removePermission(String name) { throw controllerRequired(); }
