@@ -76,10 +76,8 @@ and a single place to fix Play services behaviour.
 
 **Costs and risks:**
 - The binder is the largest new component, and every Play services call will depend on it.
-- Its Parcel handling needs checking. `Parcel` in `libwestlake_binder` exposes its object table
-  (`ipcObjects`), so binder objects and file descriptors should be readable from it, but this has
-  not been tried across processes. `framework/android-runtime` also holds an older binder stub whose
-  comments say no binder library exists, and those comments are out of date.
+- `framework/android-runtime` holds an older binder stub whose comments say no binder library exists.
+  Those comments are out of date.
 - `gmsd` needs a process that outlives apps. The board image can allow that. A commercial device may
   freeze or refuse it, as the microG design notes.
 - All apps share one OH uid and one file sandbox until appspawn-x has per-app mounts, so `gmsd`'s
@@ -107,7 +105,10 @@ work until a switch is decided.
   handle except through OH's own IPC, and Android's and OH's binder use would share a driver. This is
   the fallback if sockets prove too slow, and it needs its own experiment first. Its appeal is that
   `libwestlake_binder` is AOSP's full binder library, so Parcels, binder objects, file descriptors
-  and death notices would work with little new code, if a first handle can be exchanged.
+  and death notices would work with little new code, if a first handle can be exchanged. The obvious
+  route is closed: of the 370 services listed in the board's `service_contexts`, policy lets none of
+  `normal_hap`, `su` or `appspawn` add a service to samgr. The remaining idea, OH's ability connection,
+  gives a handle only on OH IPC's own binder file descriptor, which `libwestlake_binder` doesn't use.
 - **microG in the shared process, behind the same binder.** It avoids the question of Google's APKs
   and is a valid first test of the binder. It stays available if the legal answer is no.
 
@@ -133,6 +134,23 @@ work until a switch is decided.
 
 Stop and re-decide if milestone 2 shows that binder objects can't cross reliably, or if milestone 5
 fails for a reason that honest device answers can't fix.
+
+## Results
+
+**Milestone 2 passed on the test board (2026-11-04).** `SocketBinder` ran between two Westlake
+processes spawned by one appspawn-x under enforcing SELinux. All checks in `tests/socketbinder`
+passed: binder objects and their identity and release, callbacks on the waiting thread, file
+descriptors both ways, a binder and a descriptor inside a `Bundle`, exceptions, 2,000 ordered oneway
+calls, the size limit and death notices. A small call took 258 microseconds, with no kernel binder
+figure to compare yet.
+
+That test is narrower than the target design:
+- Both processes were the same test app, not an app and Play services, so no real client has used it.
+- They found each other through an abstract socket name the test chose. Any process with the same
+  network view could connect, so the channels appspawn-x creates must replace it before real use.
+- It has no caller identity yet (milestone 4). `Binder.getCallingUid` still answers for the local
+  process, and only `SocketBinder.callingPeer()` knows the peer.
+- Nothing routes binds to it yet, so no app behaves differently.
 
 ## Sources
 

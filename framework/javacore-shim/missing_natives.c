@@ -639,6 +639,7 @@ int wl_register_localsocket(JNIEnv* env);
 int wl_register_surface_canvas(JNIEnv* env);
 int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
+int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
 int wl_register_image_reader(JNIEnv* env);
@@ -1405,6 +1406,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int cv = wl_register_surface_canvas(env);
         int sc = wl_register_sqlite_collations(env);
         int ns = wl_register_notification_switch(env);
+        wl_register_socket_binder(env);
         int ex = wl_register_extractor(env);
         int vc = wl_register_video_codec(env);
         int ir = wl_register_image_reader(env);
