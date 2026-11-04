@@ -56,7 +56,7 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.app.IUiModeManager", LocalServiceBinders::uiMode);
                     break;
                 case "power":
-                    binder = proxy(name, "android.os.IPowerManager", LocalServiceBinders::power);
+                    binder = proxy(name, "android.os.IPowerManager", (method, args) -> DEFAULT);
                     break;
                 case "thermalservice": {
                     // PowerManager's fetcher also requires the thermal service.
@@ -72,7 +72,7 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.content.IClipboard", LocalServiceBinders::clipboard);
                     break;
                 case "account":
-                    binder = proxy(name, "android.accounts.IAccountManager", LocalServiceBinders::account);
+                    binder = proxy(name, "android.accounts.IAccountManager", (method, args) -> DEFAULT);
                     break;
                 case "audio":
                     binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
@@ -159,13 +159,13 @@ public final class LocalServiceBinders {
                     break;
                 case "device_policy":
                     binder = proxy(name, "android.app.admin.IDevicePolicyManager",
-                            LocalServiceBinders::devicePolicy);
+                            (method, args) -> DEFAULT);
                     break;
                 case "servicediscovery":
                     binder = proxy(name, "android.net.nsd.INsdManager", LocalServiceBinders::nsd);
                     break;
                 case "usagestats":
-                    binder = proxy(name, "android.app.usage.IUsageStatsManager", LocalServiceBinders::usageStats);
+                    binder = proxy(name, "android.app.usage.IUsageStatsManager", (method, args) -> DEFAULT);
                     break;
                 // No USB device or accessory attached: the device list is empty, nothing to open
                 // or ask permission for. OH's USB service is not bridged.
@@ -216,6 +216,8 @@ public final class LocalServiceBinders {
                         if (sSeen.add(name + "." + call)) {
                             System.err.println("[" + TAG + "] " + name + "." + call);
                         }
+                        Object listed = ServiceAnswers.lookup(name, call, method.getReturnType());
+                        if (listed != ServiceAnswers.NOT_LISTED) return listed;
                         Object value = answers.answer(call, args);
                         return value == DEFAULT ? defaultValue(method.getReturnType()) : value;
                     }
@@ -226,31 +228,12 @@ public final class LocalServiceBinders {
 
     private static Object uiMode(String method, Object[] args) {
         switch (method) {
-            case "getCurrentModeType":
-                return Configuration.UI_MODE_TYPE_NORMAL;
             case "getNightMode": {
                 int night = Resources.getSystem().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
                 return night == Configuration.UI_MODE_NIGHT_YES ? 2 /* MODE_NIGHT_YES */ : 1 /* MODE_NIGHT_NO */;
             }
-            case "getNightModeCustomType":
-                return -1;     // MODE_NIGHT_CUSTOM_TYPE_UNKNOWN
-            case "getAttentionModeThemeOverlay":
-                return 1000;   // MODE_ATTENTION_THEME_OVERLAY_OFF
-            case "getProjectingPackages":
-                return new ArrayList<String>();
             default:
                 return DEFAULT;   // car mode off, nothing locked, standard contrast (0f)
-        }
-    }
-
-    private static Object power(String method, Object[] args) {
-        switch (method) {
-            case "isInteractive":
-            case "isDisplayInteractive":
-            case "isWakeLockLevelSupported":
-                return Boolean.TRUE;
-            default:
-                return DEFAULT;   // no power save, not idle; wake locks are accepted
         }
     }
 
@@ -642,13 +625,6 @@ public final class LocalServiceBinders {
             case "setMode":
                 sMode = (Integer) args[0];
                 return DEFAULT;
-            case "requestAudioFocus":
-            case "requestAudioFocusForTest":
-            case "abandonAudioFocus":
-            case "abandonAudioFocusForTest":
-                return 1;   // AUDIOFOCUS_REQUEST_GRANTED
-            case "getUiSoundsStreamType":
-                return 2;   // STREAM_RING: STREAM_SYSTEM's alias on phones
             case "isStreamAffectedByRingerMode": {
                 Integer stream = firstInt(args);
                 return stream != null && (stream == 1 || stream == 2 || stream == 5 || stream == 7);
@@ -810,29 +786,6 @@ public final class LocalServiceBinders {
     }
 
     /**
-     * A personal phone nobody manages: no device or profile owner, no active admin, no policy set.
-     * Every query then answers the type default (camera and screen capture allowed, no password
-     * requirement, no lock-task packages), and admin calls are accepted and change nothing.
-     *
-     * CameraX checks DevicePolicyManager.getCameraDisabled before it lists cameras, and casts the
-     * manager non-null: the null manager failed every init attempt (FairScan, six seconds of
-     * retries before its camera screen).
-     *
-     * Two answers differ from the default: a provisioned device says so, and USB data signalling
-     * is on unless a policy turned it off. Storage encryption answers the default, unsupported,
-     * which is what Android reports without file encryption; the board sets no fscrypt policy.
-     */
-    private static Object devicePolicy(String method, Object[] args) {
-        switch (method) {
-            case "isDeviceProvisioned":
-            case "isUsbDataSignalingEnabled":
-                return Boolean.TRUE;
-            default:
-                return DEFAULT;
-        }
-    }
-
-    /**
      * Network service discovery with nothing behind it: OH's mDNS is not bridged, so every request
      * fails as NsdService reports an internal error, through the callback the app connected with.
      * NsdManager's constructor connects first and throws on a null connector; that killed Internet
@@ -875,21 +828,6 @@ public final class LocalServiceBinders {
             System.err.println("[" + TAG + "] servicediscovery " + failure + " not delivered: " + t);
         }
         return DEFAULT;
-    }
-
-    /**
-     * Usage stats as an app without usage access sees them on Android: every query answers empty
-     * (PACKAGE_USAGE_STATS is not granted), and the caller, running in the foreground, is in the
-     * ACTIVE standby bucket. linphone asks for its bucket while it starts and threw on the null
-     * service.
-     */
-    private static Object usageStats(String method, Object[] args) {
-        switch (method) {
-            case "getAppStandbyBucket":
-                return 10;   // UsageStatsManager.STANDBY_BUCKET_ACTIVE
-            default:
-                return DEFAULT;   // not inactive; event and stats queries empty (null events, empty slices)
-        }
     }
 
     /**
@@ -960,22 +898,6 @@ public final class LocalServiceBinders {
         return total;
     }
 
-    private static Object account(String method, Object[] args) {
-        // There is no account database on the board and no authenticator to add one to, so the
-        // truthful answer is "signed in nowhere": an empty account list, no features, no token.
-        // Wikipedia asks through AccountManager.get(context) in BaseActivity.onCreate and never
-        // null-checks the manager, so the binder has to exist even though it owns nothing.
-        switch (method) {
-            case "addAccountExplicitly":
-            case "removeAccountExplicitly":
-            case "hasFeatures":
-            case "someUserHasAccount":
-            case "accountAuthenticated":
-                return Boolean.FALSE;
-            default:
-                return DEFAULT;   // arrays come back empty, everything else null or zero
-        }
-    }
 
     private static Object clipboard(String method, Object[] args) {
         ClipData clip = sClip;
