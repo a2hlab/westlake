@@ -24,7 +24,8 @@ no container, no VM and no second Android system.
   run. Three fixes got it there (westlake #65).
 - Its crash handler ends the process silently on any uncaught exception, with no crash dump.
 - Westlake reports API level 34, so Play services 26.x is refused as needing a newer SDK.
-- Not tried: sign-in, push, any other app using this process, or a run longer than 5 minutes.
+- Not tried at the time of this decision: sign-in, push, any other app using this process, or a run
+  longer than 5 minutes. See Results for what has been measured since.
 
 **How the two systems differ:**
 
@@ -144,13 +145,32 @@ descriptors both ways, a binder and a descriptor inside a `Bundle`, exceptions, 
 calls, the size limit and death notices. A small call took 258 microseconds, with no kernel binder
 figure to compare yet.
 
-That test is narrower than the target design:
-- Both processes were the same test app, not an app and Play services, so no real client has used it.
-- They found each other through an abstract socket name the test chose. Any process with the same
-  network view could connect, so the channels appspawn-x creates must replace it before real use.
-- It has no caller identity yet (milestone 4). `Binder.getCallingUid` still answers for the local
-  process, and only `SocketBinder.callingPeer()` knows the peer.
-- Nothing routes binds to it yet, so no app behaves differently.
+**Milestone 3 passed on the test board (2026-11-04).** Play services ran with no activity as its own
+process, and a real app ran beside it. Google's client library inside that app returned
+`isGooglePlayServicesAvailable` = 0. Real binders then served Phenotype, measurement, push
+registration and wearable calls, and the app received a push token from Google.
+
+**Also measured:**
+- Play services' check-in with `android.googleapis.com` succeeds, with no spoofed answers. It starts
+  from the boot broadcasts, which the host now sends to its own package.
+- The availability check needs a Google-signed Play Store package, and check-in looks for Services
+  Framework. Both are package details only in this process. Running Play Store's code there ended the
+  process for every app when billing was bound, and Services Framework's provider needs an Application
+  while Play services' own is still attaching. So billing and licence checks report unavailable.
+- Two apps at once get separate virtual uids, and the process sees each one's package and certificate
+  through the APIs Play services uses (`getCallingUid`, `getPackagesForUid`, `getPackageInfo`). Play
+  services' own code reporting a caller has not been observed yet, so milestone 4 isn't passed.
+
+**Limits of what exists:**
+- An app states its own package and nothing verifies it. The kernel reports only a pid, all processes
+  share one uid, and OH's `hidepid` hides one app's `/proc` entries from another. The channels are found
+  through an abstract socket name. Decision 5's channels from appspawn-x must replace this before any
+  real credentials are used.
+- Each process is launched separately with its own appspawn-x, not by one appspawn-x as decision 5
+  describes.
+- Delivering a push message to an app, and starting a closed app, are not built.
+- Play services uses about one CPU core during its first minutes on the board. Whether that settles
+  has not been measured.
 
 ## Sources
 

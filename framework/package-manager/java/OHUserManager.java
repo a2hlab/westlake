@@ -104,6 +104,56 @@ public final class OHUserManager {
                             return Boolean.FALSE;
                         case "isUserForeground":
                             return ((Integer) arguments[0]) == androidUser;
+                        // The one user is an ordinary system user, not headless, not a profile.
+                        case "isUserOfType":
+                            return ((Integer) arguments[0]) == androidUser
+                                    && android.os.UserManager.USER_TYPE_FULL_SYSTEM.equals(arguments[1]);
+                        case "isAdminUser":
+                        case "isForegroundUserAdmin":
+                            return Boolean.TRUE;
+                        case "isSameProfileGroup":
+                            return arguments[0].equals(arguments[1]);
+                        case "getUsers":
+                        case "getProfiles":
+                            return new java.util.ArrayList<>(java.util.Collections.singletonList(ownerInfo()));
+                        // Read-only questions about a device with one user, no guests and no
+                        // seed accounts. Play services asks these on threads where a throw ends it.
+                        case "getSeedAccountName":
+                        case "getSeedAccountType":
+                        case "getSeedAccountOptions":
+                        case "getUserAccount":
+                        case "getGuestUsers":
+                        case "getUserRestrictionSource":
+                            return null;
+                        case "someUserHasSeedAccount":
+                        case "someUserHasAccount":
+                        case "isUserTypeEnabled":
+                        case "canAddMoreUsersOfType":
+                        case "canAddMoreProfilesToUser":
+                        case "canAddMoreManagedProfiles":
+                        case "canAddPrivateProfile":
+                        case "canHaveRestrictedProfile":
+                        case "hasRestrictedProfiles":
+                        case "isPreCreated":
+                        case "isUserSwitcherEnabled":
+                        case "hasBadge":
+                            return Boolean.FALSE;
+                        case "isUserUnlockingOrUnlocked":
+                        case "isUserUnlocked":
+                        case "isUserRunning":
+                        case "isUserVisible":
+                        case "isUserNameSet":
+                            return Boolean.TRUE;
+                        case "getRemainingCreatableUserCount":
+                        case "getRemainingCreatableProfileCount":
+                        case "getUserSwitchability":
+                            return 0;
+                        case "getUserCreationTime":
+                        case "getUserStartRealtime":
+                        case "getUserUnlockRealtime":
+                            return 0L;
+                        case "getUserName":
+                            return ownerInfo().name;
                         default:
                             break;
                     }

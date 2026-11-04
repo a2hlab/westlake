@@ -155,6 +155,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // RoleManager's constructor requires it; Fossify Messages asks whether it holds the
             // SMS role before its first screen.
             case "role":
+            // Play services casts SafetyCenterManager non-null and asks whether it is enabled; it is not.
+            case "safety_center":
             // WallpaperManager's globals dereference the service (Retro Music); Kotlin casts the
             // WifiManager non-null (openHAB).
             case "wallpaper":

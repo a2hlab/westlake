@@ -761,6 +761,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (GuestPackages.contains(packageName)) {
             return GuestPackages.packageInfo(packageName, flags);
         }
+        if (RemotePackages.contains(packageName)) {
+            return RemotePackages.packageInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
                     + System.getenv("ASX_WEBVIEW_APK"));
@@ -815,6 +818,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         }
         if (GuestPackages.contains(packageName)) {
             return GuestPackages.applicationInfo(packageName, flags);
+        }
+        if (RemotePackages.contains(packageName)) {
+            return RemotePackages.applicationInfo(packageName, flags);
         }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
@@ -994,6 +1000,11 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public int checkPermission(String permName, String pkgName, int userId) {
         logBridged("checkPermission", permName + " for " + pkgName);
+        if (RemotePackages.contains(pkgName)) {
+            return RemotePackages.holdsPermission(pkgName, permName)
+                    ? android.content.pm.PackageManager.PERMISSION_GRANTED
+                    : android.content.pm.PackageManager.PERMISSION_DENIED;
+        }
         if ("android.permission.POST_NOTIFICATIONS".equals(permName)
                 && android.app.ActivityThread.currentPackageName() != null
                 && android.app.ActivityThread.currentPackageName().equals(pkgName)) {
@@ -1011,6 +1022,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         logBridged("getPackageUid", packageName);
         if (SourcePackageRegistry.contains(packageName)) return android.os.Process.myUid();
         if (GuestPackages.contains(packageName)) return android.os.Process.myUid();
+        int remoteUid = RemotePackages.uidOf(packageName);
+        if (remoteUid >= 0) return remoteUid;
+        if (RemotePackages.contains(packageName)) return android.os.Process.myUid();
         return nativeGetUidByBundleName(packageName);
     }
 
@@ -1236,6 +1250,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             return null;
         }
         if (GuestPackages.contains(arg0.getPackageName())) return GuestPackages.serviceInfo(arg0, arg1);
+        if (RemotePackages.contains(arg0.getPackageName())) return RemotePackages.serviceInfo(arg0, arg1);
         return ServiceInfoResolver.resolve(arg0, arg1);
     }
 
@@ -1252,6 +1267,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             return null;
         }
         if (GuestPackages.contains(arg0.getPackageName())) return GuestPackages.providerInfo(arg0, arg1);
+        if (RemotePackages.contains(arg0.getPackageName())) return RemotePackages.providerInfo(arg0, arg1);
         return ProviderInfoResolver.resolve(arg0, arg1);
     }
 
@@ -1281,6 +1297,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public java.lang.String[] getPackagesForUid(int arg0) throws android.os.RemoteException {
         String sourcePackage = SourcePackageRegistry.packageForUid(arg0);
         if (sourcePackage != null) return new String[] {sourcePackage};
+        String remotePackage = RemotePackages.packageForUid(arg0);
+        if (remotePackage != null) return new String[] {remotePackage};
         logStub("getPackagesForUid", "");
         return null;
     }
@@ -1290,6 +1308,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public java.lang.String getNameForUid(int arg0) throws android.os.RemoteException {
         String sourcePackage = SourcePackageRegistry.packageForUid(arg0);
         if (sourcePackage != null) return sourcePackage;
+        String remotePackage = RemotePackages.packageForUid(arg0);
+        if (remotePackage != null) return remotePackage;
         logStub("getNameForUid", "");
         return null;
     }
@@ -1362,6 +1382,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public android.content.pm.ResolveInfo resolveService(android.content.Intent arg0, java.lang.String arg1, long arg2, int arg3) throws android.os.RemoteException {
         java.util.List<android.content.pm.ResolveInfo> found = SourcePackageRegistry.queryServices(arg0, arg1, arg2);
         if (found.isEmpty()) found = GuestPackages.queryServices(arg0, arg1, arg2);
+        if (found.isEmpty()) found = RemotePackages.queryServices(arg0, arg1, arg2);
         return found.isEmpty() ? null : found.get(0);
     }
 
@@ -1371,6 +1392,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         // The app's own services, matched against their manifest intent filters, then the guests'.
         java.util.List<android.content.pm.ResolveInfo> found = SourcePackageRegistry.queryServices(arg0, arg1, arg2);
         found.addAll(GuestPackages.queryServices(arg0, arg1, arg2));
+        found.addAll(RemotePackages.queryServices(arg0, arg1, arg2));
         return new android.content.pm.ParceledListSlice<>(found);
     }
 
@@ -1426,6 +1448,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public android.content.pm.ProviderInfo resolveContentProvider(java.lang.String authority, long flags, int userId) throws android.os.RemoteException {
         android.content.pm.ProviderInfo guest = GuestPackages.resolveProvider(authority, flags);
         if (guest != null) return guest;
+        android.content.pm.ProviderInfo remote = RemotePackages.resolveProvider(authority, flags);
+        if (remote != null) return remote;
         String packageName = SourcePackageRegistry.packageForUid(android.os.Process.myUid());
         if (authority == null || authority.isEmpty() || packageName == null) {
             logStub("resolveContentProvider", "");

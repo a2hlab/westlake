@@ -1,0 +1,149 @@
+package adapter.packagemanager;
+
+import android.content.ComponentName;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.ProviderInfo;
+import android.content.pm.ResolveInfo;
+import android.content.pm.ServiceInfo;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Packages that run in another Westlake process (ADR-0001). There are two uses:
+ *
+ * In an app, Play services' packages are answered by the Play services process, through a Source
+ * that PlayServicesChannel sets.
+ *
+ * In the Play services process, the apps connected to it are recorded here, each with the virtual
+ * uid that Binder.getCallingUid answers while serving it. Every Westlake process shares one OH uid,
+ * so this is what lets Play services tell its callers apart.
+ */
+public final class RemotePackages {
+    /** Answers about the packages in the process at the other end of a channel. */
+    public interface Source {
+        boolean owns(String packageName);
+        PackageInfo packageInfo(String packageName, long flags);
+        ApplicationInfo applicationInfo(String packageName, long flags);
+        ServiceInfo serviceInfo(ComponentName component, long flags);
+        ProviderInfo providerInfo(ComponentName component, long flags);
+        ProviderInfo resolveProvider(String authority, long flags);
+        List<ResolveInfo> queryServices(Intent intent, String type, long flags);
+    }
+
+    /** Appended to the Westlake user's base, above any uid an installed OH app is given. */
+    private static final int FIRST_APP_ID = 10200;
+    private static final int PER_USER_RANGE = 100000;
+
+    private static volatile Source sSource;
+    private static final Map<String, PackageInfo> sClients = new HashMap<>();
+    private static final Map<String, Integer> sUids = new HashMap<>();
+    private static final Map<Integer, String> sPackages = new HashMap<>();
+
+    private RemotePackages() {}
+
+    public static void setSource(Source source) {
+        sSource = source;
+    }
+
+    /**
+     * Records an app connected to this process and returns its virtual uid, which stays the same
+     * for a package however often it reconnects.
+     */
+    public static synchronized int registerClient(PackageInfo info, int ownUid) {
+        Integer uid = sUids.get(info.packageName);
+        if (uid == null) {
+            int user = ownUid / PER_USER_RANGE;
+            uid = user * PER_USER_RANGE + FIRST_APP_ID + sUids.size();
+            sUids.put(info.packageName, uid);
+            sPackages.put(uid, info.packageName);
+        }
+        info.applicationInfo.uid = uid;
+        sClients.put(info.packageName, info);
+        return uid;
+    }
+
+    private static synchronized PackageInfo client(String packageName) {
+        return sClients.get(packageName);
+    }
+
+    public static boolean contains(String packageName) {
+        if (packageName == null) return false;
+        if (client(packageName) != null) return true;
+        Source source = sSource;
+        return source != null && source.owns(packageName);
+    }
+
+    public static PackageInfo packageInfo(String packageName, long flags) {
+        PackageInfo known = client(packageName);
+        if (known != null) return known;
+        Source source = sSource;
+        return source == null ? null : source.packageInfo(packageName, flags);
+    }
+
+    public static ApplicationInfo applicationInfo(String packageName, long flags) {
+        PackageInfo known = client(packageName);
+        if (known != null) return known.applicationInfo;
+        Source source = sSource;
+        return source == null ? null : source.applicationInfo(packageName, flags);
+    }
+
+    public static ServiceInfo serviceInfo(ComponentName component, long flags) {
+        Source source = sSource;
+        return source == null ? null : source.serviceInfo(component, flags);
+    }
+
+    public static ProviderInfo providerInfo(ComponentName component, long flags) {
+        Source source = sSource;
+        return source == null ? null : source.providerInfo(component, flags);
+    }
+
+    public static ProviderInfo resolveProvider(String authority, long flags) {
+        Source source = sSource;
+        return source == null ? null : source.resolveProvider(authority, flags);
+    }
+
+    public static List<ResolveInfo> queryServices(Intent intent, String type, long flags) {
+        Source source = sSource;
+        if (source == null) return Collections.emptyList();
+        List<ResolveInfo> found = source.queryServices(intent, type, flags);
+        return found == null ? Collections.emptyList() : new ArrayList<>(found);
+    }
+
+    /**
+     * Whether a package in another process holds a permission, going by what its manifest requests
+     * or defines. A package uses what it defines (Play services' c2dm SEND, which Firebase checks
+     * before it will use it). This process can't see what that process was really granted.
+     */
+    public static boolean holdsPermission(String packageName, String permission) {
+        if (!contains(packageName)) return false;
+        PackageInfo info = packageInfo(packageName, android.content.pm.PackageManager.GET_PERMISSIONS);
+        if (info == null) return false;
+        if (info.requestedPermissions != null) {
+            for (String requested : info.requestedPermissions) {
+                if (permission.equals(requested)) return true;
+            }
+        }
+        if (info.permissions != null) {
+            for (android.content.pm.PermissionInfo defined : info.permissions) {
+                if (permission.equals(defined.name)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** The virtual uid of a connected app, or -1. */
+    public static synchronized int uidOf(String packageName) {
+        Integer uid = sUids.get(packageName);
+        return uid == null ? -1 : uid;
+    }
+
+    /** The connected app with this virtual uid, or null. */
+    public static synchronized String packageForUid(int uid) {
+        return sPackages.get(uid);
+    }
+}

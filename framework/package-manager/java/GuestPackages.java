@@ -135,6 +135,7 @@ public final class GuestPackages {
                 0, 0, new java.util.HashSet<String>(guest.parsed.requestedPermissions),
                 FrameworkPackageUserState.DEFAULT, 0);
         if (value == null) return null;
+        SourcePackageRegistry.bootClassSigningKeys(value);
         Parcel parcel = Parcel.obtain();
         try {
             value.writeToParcel(parcel, 0);

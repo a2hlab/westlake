@@ -1267,7 +1267,10 @@ public class AppSpawnXInit {
                             && args != null && args.length > 4) {
                         android.content.Intent service = (android.content.Intent) args[2];
                         android.app.IServiceConnection connection = (android.app.IServiceConnection) args[4];
+                        // By name or, as Play services binds its own shared preferences service, by
+                        // action within the app's package.
                         android.content.ComponentName comp = service != null ? service.getComponent() : null;
+                        if (comp == null) comp = adapter.activity.InProcessServiceBinder.resolveInApp(service);
                         if (connection != null && adapter.activity.InProcessServiceBinder.isInApp(comp)) {
                             System.err.println("[" + label + "] " + name + " -> in-process " + comp);
                             new android.os.Handler(android.os.Looper.getMainLooper()).post(
@@ -1282,13 +1285,21 @@ public class AppSpawnXInit {
                             adapter.activity.GuestHost.bind(service, guest, connection);
                             return 1;
                         }
+                        // A service in the shared Play services process (ADR-0001).
+                        if (connection != null && adapter.activity.PlayServicesChannel.handles(service)) {
+                            System.err.println("[" + label + "] " + name + " -> Play services process " + service);
+                            return adapter.activity.PlayServicesChannel.bind(service, ((Number) args[5]).intValue(), connection);
+                        }
                         return 0;
                     }
                     // getContentProvider(caller, callingPackage, authority, userId, stable): a guest
                     // package's provider (GmsCore's settings, which Companion reads). The type
                     // default (null) left every authority outside the app without a provider.
                     if ("getContentProvider".equals(name) && args != null && args.length > 2) {
-                        return adapter.activity.GuestHost.provider((String) args[2]);
+                        android.app.ContentProviderHolder guestProvider =
+                                adapter.activity.GuestHost.provider((String) args[2]);
+                        return guestProvider != null ? guestProvider
+                                : adapter.activity.PlayServicesChannel.provider((String) args[2]);
                     }
                     // Nothing is held for an in-process binding, so releasing one always succeeds.
                     if ("unbindService".equals(name)) return Boolean.TRUE;
@@ -1299,9 +1310,15 @@ public class AppSpawnXInit {
                     // startService(caller, intent, ...), stopService(caller, intent, ...),
                     // stopServiceToken(component, token, startId).
                     if ("startService".equals(name) && args != null && args.length > 1) {
+                        if (adapter.activity.PlayServicesChannel.handles((android.content.Intent) args[1])) {
+                            return adapter.activity.PlayServicesChannel.start((android.content.Intent) args[1]);
+                        }
                         return adapter.activity.InProcessServiceBinder.start((android.content.Intent) args[1]);
                     }
                     if ("stopService".equals(name) && args != null && args.length > 1) {
+                        if (adapter.activity.PlayServicesChannel.handles((android.content.Intent) args[1])) {
+                            return adapter.activity.PlayServicesChannel.stop((android.content.Intent) args[1]) ? 1 : 0;
+                        }
                         android.content.ComponentName comp = adapter.activity.InProcessServiceBinder.resolveInApp(
                                 (android.content.Intent) args[1]);
                         return adapter.activity.InProcessServiceBinder.stop(comp, -1) ? 1 : 0;
