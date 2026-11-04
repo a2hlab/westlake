@@ -51,7 +51,7 @@ public final class GuestHost {
 
     /** The guest service an intent names (explicitly, or by action within a guest package), or null. */
     public static ServiceInfo resolveService(Intent intent) {
-        if (intent == null) return null;
+        if (intent == null || PlayServicesChannel.isHost()) return null;
         ComponentName comp = intent.getComponent();
         String pkg = comp != null ? comp.getPackageName() : intent.getPackage();
         if (!GuestPackages.contains(pkg)) return null;
@@ -195,6 +195,7 @@ public final class GuestHost {
      * provider of another package in this process). Null when no guest declares the authority.
      */
     public static android.app.ContentProviderHolder provider(String authority) {
+        if (PlayServicesChannel.isHost()) return null;
         ProviderInfo info = GuestPackages.resolveProvider(authority, android.content.pm.PackageManager.GET_META_DATA);
         if (info == null) return null;
         android.app.ContentProviderHolder holder = new android.app.ContentProviderHolder(info);

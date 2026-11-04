@@ -57,6 +57,8 @@ public final class PlayServicesChannel {
     private static final String RUNTIME_ROOT = "WESTLAKE_RUNTIME_ROOT";
     private static final String REAL_ROOT = "WESTLAKE_RUNTIME_REAL_ROOT";
     private static final String TAG = "[WL-PLAY] ";
+    /** Set to a number of seconds to report, that long after launch, how the channel looks from this app. */
+    private static final String CHECK = "WESTLAKE_PLAY_SERVICES_CHECK";
 
     private static final int HELLO = 1;
     private static final int PACKAGE_INFO = 2;
@@ -69,6 +71,7 @@ public final class PlayServicesChannel {
     private static final int START = 9;
     private static final int PROVIDER = 10;
     private static final int STOP = 11;
+    private static final int WHO_AM_I = 12;
 
     private static final long BIND_TIMEOUT_SECONDS = 30;
     private static final long HELLO_PACKAGE_FLAGS = PackageManager.GET_SIGNATURES
@@ -146,7 +149,43 @@ public final class PlayServicesChannel {
 
     /** Makes Play services' packages visible to this process, if it is a client. */
     public static void installClient() {
-        if (isClient()) RemotePackages.setSource(new ClientSource());
+        if (!isClient()) return;
+        RemotePackages.setSource(new ClientSource());
+        if (System.getenv(CHECK) != null) {
+            Thread thread = new Thread(PlayServicesChannel::check, "play-services-check");
+            thread.setDaemon(true);
+            thread.start();
+        }
+    }
+
+    /** For tests: the client library's own availability answer, and who the other process says this is. */
+    private static void check() {
+        try {
+            Thread.sleep(Long.parseLong(System.getenv(CHECK)) * 1000);
+            Application app = ActivityThread.currentApplication();
+            try {
+                Class<?> api = app.getClassLoader().loadClass("com.google.android.gms.common.GoogleApiAvailability");
+                Object instance = api.getMethod("getInstance").invoke(null);
+                Object answer = api.getMethod("isGooglePlayServicesAvailable", Context.class).invoke(instance, app);
+                System.err.println(TAG + "CHECK isGooglePlayServicesAvailable=" + answer + " (0 is success)");
+            } catch (ReflectiveOperationException e) {
+                System.err.println(TAG + "CHECK client library not callable by name: " + e);
+            }
+            IBinder root = root();
+            if (root == null) return;
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                root.transact(WHO_AM_I, data, reply, 0);
+                reply.readException();
+                System.err.println(TAG + "CHECK other process sees " + reply.readString());
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        } catch (InterruptedException | RemoteException | RuntimeException e) {
+            System.err.println(TAG + "CHECK failed: " + e);
+        }
     }
 
     /** The other process's root binder, connecting if there is no live channel. Null if unreachable. */
@@ -416,6 +455,11 @@ public final class PlayServicesChannel {
 
     // ---- Play services side ----
 
+    /** Whether this process is the shared Play services process. */
+    public static boolean isHost() {
+        return System.getenv(SERVE) != null;
+    }
+
     /** Starts serving if this process was asked to. Call once the Application exists. */
     public static void startHostIfAsked() {
         final String name = System.getenv(SERVE);
@@ -490,14 +534,19 @@ public final class PlayServicesChannel {
                 case RESOLVE_PROVIDER: {
                     String authority = data.readString();
                     ProviderInfo info = packages.resolveContentProvider(authority, data.readLong(), user);
-                    reply.writeTypedObject(info != null && own(info.packageName) ? info : null, 0);
+                    reply.writeTypedObject(info != null && runsHere(info.packageName) ? info : null, 0);
                     return true;
                 }
                 case QUERY_SERVICES: {
                     Intent intent = data.readTypedObject(Intent.CREATOR);
                     String type = data.readString();
                     long packageFlags = data.readLong();
-                    reply.writeTypedList(packages.queryIntentServices(intent, type, packageFlags, user).getList());
+                    List<ResolveInfo> found = new ArrayList<>();
+                    for (Object item : packages.queryIntentServices(intent, type, packageFlags, user).getList()) {
+                        ResolveInfo resolved = (ResolveInfo) item;
+                        if (resolved.serviceInfo != null && runsHere(resolved.serviceInfo.packageName)) found.add(resolved);
+                    }
+                    reply.writeTypedList(found);
                     return true;
                 }
                 case BIND: {
@@ -519,6 +568,10 @@ public final class PlayServicesChannel {
                     reply.writeStrongBinder(localProvider(data.readString()));
                     return true;
                 }
+                case WHO_AM_I: {
+                    reply.writeString(describeCaller());
+                    return true;
+                }
                 default:
                     throw new IllegalArgumentException("unknown call " + code);
             }
@@ -537,14 +590,43 @@ public final class PlayServicesChannel {
         }
     }
 
+    /** The calling app as the APIs Play services uses describe it. */
+    private static String describeCaller() throws RemoteException {
+        int uid = Binder.getCallingUid();
+        PackageManager manager = application().getPackageManager();
+        String[] names = manager.getPackagesForUid(uid);
+        String name = names == null || names.length == 0 ? null : names[0];
+        String certificate = "none";
+        if (name != null) {
+            try {
+                PackageInfo info = manager.getPackageInfo(name, PackageManager.GET_SIGNING_CERTIFICATES);
+                android.content.pm.Signature[] signers = info.signingInfo.getApkContentsSigners();
+                java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+                byte[] hash = digest.digest(signers[0].toByteArray());
+                certificate = String.format("%02x%02x%02x%02x", hash[0], hash[1], hash[2], hash[3]);
+            } catch (PackageManager.NameNotFoundException | java.security.NoSuchAlgorithmException | RuntimeException e) {
+                certificate = e.toString();
+            }
+        }
+        return "uid=" + uid + " pid=" + Binder.getCallingPid() + " package=" + name + " certificate=" + certificate;
+    }
+
     private static Application application() {
         return ActivityThread.currentApplication();
     }
 
-    /** This process's package, or one it runs as a guest (Play Store). */
+    /**
+     * This process's package, or one known to it as a guest. In this process a guest (Play Store) is
+     * package details only, for the availability check: its code doesn't run here, because a failure
+     * in it would end the process every app depends on (GuestHost).
+     */
     private static boolean own(String packageName) {
         return application().getPackageName().equals(packageName)
                 || adapter.packagemanager.GuestPackages.contains(packageName);
+    }
+
+    private static boolean runsHere(String packageName) {
+        return application().getPackageName().equals(packageName);
     }
 
     /** Resolved to a component in this process, as the activity manager adapter requires. */
@@ -557,6 +639,7 @@ public final class PlayServicesChannel {
             throw new IllegalArgumentException("no service for " + intent);
         }
         ServiceInfo info = found.get(0).serviceInfo;
+        if (!runsHere(info.packageName)) throw new IllegalArgumentException("not run here: " + intent);
         resolved.setComponent(new ComponentName(info.packageName, info.name));
         return resolved;
     }
@@ -564,6 +647,9 @@ public final class PlayServicesChannel {
     /** Binds a service of this process for a client and waits for the binder its onBind gave. */
     private static IBinder bindLocally(Intent intent, int flags) throws RemoteException {
         final Intent target = explicit(intent);
+        if (!runsHere(target.getComponent().getPackageName())) {
+            throw new IllegalArgumentException("not run here: " + intent);
+        }
         final CountDownLatch connected = new CountDownLatch(1);
         final IBinder[] service = new IBinder[1];
         ServiceConnection connection = new ServiceConnection() {
@@ -602,7 +688,7 @@ public final class PlayServicesChannel {
 
     private static IBinder localProvider(String authority) throws RemoteException {
         ProviderInfo info = ActivityThread.getPackageManager().resolveContentProvider(authority, 0, UserHandle.myUserId());
-        if (info == null || !own(info.packageName)) return null;
+        if (info == null || !runsHere(info.packageName)) return null;
         IContentProvider provider = ActivityThread.currentActivityThread().acquireProvider(
                 application(), authority, UserHandle.myUserId(), true);
         return provider == null ? null : provider.asBinder();
