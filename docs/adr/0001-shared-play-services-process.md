@@ -31,7 +31,7 @@ no container, no VM and no second Android system.
 | | GrapheneOS | Westlake |
 |---|---|---|
 | Android framework services | Real system_server | In-process adapters |
-| Calls between apps and Play services | Kernel binder and the real activity manager | Local `Binder` only, inside one process |
+| Calls between apps and Play services | Kernel binder and the real activity manager | Local `Binder` in practice: AOSP's binder library is linked (`libwestlake_binder`) and `/dev/binder` is mapped, but no first handle exists between Westlake processes |
 | Who is calling | A separate uid for each app | One OH uid for every app |
 | Starting apps and processes | Real activity manager | appspawn-x direct launch |
 
@@ -76,8 +76,10 @@ and a single place to fix Play services behaviour.
 
 **Costs and risks:**
 - The binder is the largest new component, and every Play services call will depend on it.
-- Its Parcel handling needs checking: this ADR assumes binder objects and file descriptors can be
-  read out of Westlake's Parcel, which has not been tested across processes.
+- Its Parcel handling needs checking. `Parcel` in `libwestlake_binder` exposes its object table
+  (`ipcObjects`), so binder objects and file descriptors should be readable from it, but this has
+  not been tried across processes. `framework/android-runtime` also holds an older binder stub whose
+  comments say no binder library exists, and those comments are out of date.
 - `gmsd` needs a process that outlives apps. The board image can allow that. A commercial device may
   freeze or refuse it, as the microG design notes.
 - All apps share one OH uid and one file sandbox until appspawn-x has per-app mounts, so `gmsd`'s
@@ -103,7 +105,9 @@ work until a switch is decided.
   `transfer` between `normal_hap` processes, but not `set_context_mgr`. OH already owns the driver's
   context manager, and there is no `binderfs`. So two processes have no way to exchange a first
   handle except through OH's own IPC, and Android's and OH's binder use would share a driver. This is
-  the fallback if sockets prove too slow, and it needs its own experiment first.
+  the fallback if sockets prove too slow, and it needs its own experiment first. Its appeal is that
+  `libwestlake_binder` is AOSP's full binder library, so Parcels, binder objects, file descriptors
+  and death notices would work with little new code, if a first handle can be exchanged.
 - **microG in the shared process, behind the same binder.** It avoids the question of Google's APKs
   and is a valid first test of the binder. It stays available if the legal answer is no.
 
