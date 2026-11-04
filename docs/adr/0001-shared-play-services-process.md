@@ -76,10 +76,8 @@ and a single place to fix Play services behaviour.
 
 **Costs and risks:**
 - The binder is the largest new component, and every Play services call will depend on it.
-- Its Parcel handling needs checking. `Parcel` in `libwestlake_binder` exposes its object table
-  (`ipcObjects`), so binder objects and file descriptors should be readable from it, but this has
-  not been tried across processes. `framework/android-runtime` also holds an older binder stub whose
-  comments say no binder library exists, and those comments are out of date.
+- `framework/android-runtime` holds an older binder stub whose comments say no binder library exists.
+  Those comments are out of date.
 - `gmsd` needs a process that outlives apps. The board image can allow that. A commercial device may
   freeze or refuse it, as the microG design notes.
 - All apps share one OH uid and one file sandbox until appspawn-x has per-app mounts, so `gmsd`'s
@@ -136,6 +134,23 @@ work until a switch is decided.
 
 Stop and re-decide if milestone 2 shows that binder objects can't cross reliably, or if milestone 5
 fails for a reason that honest device answers can't fix.
+
+## Results
+
+**Milestone 2 passed on the test board (2026-11-04).** `SocketBinder` ran between two Westlake
+processes spawned by one appspawn-x under enforcing SELinux. All checks in `tests/socketbinder`
+passed: binder objects and their identity and release, callbacks on the waiting thread, file
+descriptors both ways, a binder and a descriptor inside a `Bundle`, exceptions, 2,000 ordered oneway
+calls, the size limit and death notices. A small call took 258 microseconds, with no kernel binder
+figure to compare yet.
+
+That test is narrower than the target design:
+- Both processes were the same test app, not an app and Play services, so no real client has used it.
+- They found each other through an abstract socket name the test chose. Any process with the same
+  network view could connect, so the channels appspawn-x creates must replace it before real use.
+- It has no caller identity yet (milestone 4). `Binder.getCallingUid` still answers for the local
+  process, and only `SocketBinder.callingPeer()` knows the peer.
+- Nothing routes binds to it yet, so no app behaves differently.
 
 ## Sources
 

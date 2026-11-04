@@ -1,3 +1,5 @@
+package org.westlake.socketbinderprobe;
+
 import adapter.core.SocketBinder;
 import android.os.Binder;
 import android.os.Bundle;

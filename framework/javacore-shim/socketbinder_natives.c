@@ -286,3 +286,31 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_close(JNIEnv* env, j
     (void)c;
     close(fd);
 }
+
+#define NATIVE(name, signature) {#name, signature, (void*)Java_adapter_core_SocketBinderNative_##name}
+
+/* Binds onto the boot class from JNI_OnLoad; a framework without the class just skips it. */
+int wl_register_socket_binder(JNIEnv* env)
+{
+    static const JNINativeMethod methods[] = {
+        NATIVE(parcelBytes, "(Landroid/os/Parcel;)[B"),
+        NATIVE(parcelObjects, "(Landroid/os/Parcel;)[I"),
+        NATIVE(socketPair, "()[I"),
+        NATIVE(listen, "(Ljava/lang/String;)I"),
+        NATIVE(accept, "(I)I"),
+        NATIVE(connect, "(Ljava/lang/String;)I"),
+        NATIVE(send, "(I[BII[I)I"),
+        NATIVE(recv, "(I[BII[I)I"),
+        NATIVE(shutdown, "(I)V"),
+        NATIVE(close, "(I)V"),
+    };
+    jclass c = (*env)->FindClass(env, "adapter/core/SocketBinderNative");
+    if (c == NULL) {
+        (*env)->ExceptionClear(env);
+        return 0;
+    }
+    int rc = (*env)->RegisterNatives(env, c, methods, sizeof(methods) / sizeof(methods[0]));
+    if (rc != 0) (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, c);
+    return rc == 0;
+}
