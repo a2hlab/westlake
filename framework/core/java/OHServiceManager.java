@@ -195,6 +195,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "statusbar":
             // Adobe Reader casts RestrictionsManager non-null in Application.onCreate.
             case "restrictions":
+            // androidx.slice's provider and Calendar's Application.onCreate; see LocalServiceBinders.
+            case "slice":
+            case "crossprofileapps":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
