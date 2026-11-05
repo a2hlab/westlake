@@ -74,6 +74,8 @@ public final class PlayServicesChannel {
     private static final int WHO_AM_I = 12;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
+    /** From the host to a client's callback: send one of that app's own PendingIntents. */
+    private static final int SEND_SENDER = 2;
 
     private static final long BIND_TIMEOUT_SECONDS = 30;
     private static final long BOOT_ANNOUNCE_DELAY_MS = 5000;
@@ -261,6 +263,14 @@ public final class PlayServicesChannel {
     private static final class ClientCallback extends Binder {
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            if (code == SEND_SENDER) {
+                IBinder sender = data.readStrongBinder();
+                int resultCode = data.readInt();
+                Intent fillIn = data.readTypedObject(Intent.CREATOR);
+                String type = data.readString();
+                LocalIntentSenders.send(android.content.IIntentSender.Stub.asInterface(sender), resultCode, fillIn, type, null);
+                return true;
+            }
             if (code != DELIVER_BROADCAST) return super.onTransact(code, data, reply, flags);
             Intent intent = data.readTypedObject(Intent.CREATOR);
             String type = data.readString();
@@ -513,6 +523,39 @@ public final class PlayServicesChannel {
             return true;
         } catch (RemoteException | RuntimeException e) {
             System.err.println(TAG + "delivery of " + intent.getAction() + " to " + target + " failed: " + e);
+            return false;
+        } finally {
+            data.recycle();
+        }
+    }
+
+    /**
+     * What the activity manager knows of a PendingIntent an app handed to this process: Play services
+     * asks who made it, and that is how it knows which app it is working for. The channel it arrived on
+     * says. Whether it is immutable stays with the app, so this answers as a mutable broadcast sender.
+     */
+    public static android.app.ActivityManager.PendingIntentInfo remoteSenderInfo(android.content.IIntentSender sender) {
+        int uid = sender == null ? 0 : SocketBinder.ownerUid(sender.asBinder());
+        String name = uid == 0 ? null : RemotePackages.packageForUid(uid);
+        return name == null ? null : new android.app.ActivityManager.PendingIntentInfo(
+                name, uid, false, android.app.ActivityManager.INTENT_SENDER_BROADCAST);
+    }
+
+    /** Sends an app's PendingIntent in that app. False if it isn't a connected app's. */
+    public static boolean sendRemoteSender(android.content.IIntentSender sender, int code, Intent fillIn, String type) {
+        int uid = sender == null ? 0 : SocketBinder.ownerUid(sender.asBinder());
+        String name = uid == 0 ? null : RemotePackages.packageForUid(uid);
+        IBinder callback = name == null ? null : sClientCallbacks.get(name);
+        if (callback == null) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeStrongBinder(sender.asBinder());
+            data.writeInt(code);
+            data.writeTypedObject(fillIn, 0);
+            data.writeString(type);
+            callback.transact(SEND_SENDER, data, null, IBinder.FLAG_ONEWAY);
+            return true;
+        } catch (RemoteException | RuntimeException e) {
             return false;
         } finally {
             data.recycle();

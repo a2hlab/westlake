@@ -35,9 +35,11 @@ public final class OHUserManager {
                     if (name.equals("equals")) return proxy == arguments[0];
                     if (name.equals("isUserUnlocked") || name.equals("isUserUnlockingOrUnlocked")
                             || name.equals("isUserRunning")) {
-                        if (((Integer) arguments[0]) != androidUser) {
-                            throw new SecurityException("OH account query is not for the current process user");
-                        }
+                        // Android answers for any user and never throws here. User 0 is this device's one
+                        // user seen as the system user, which is what isUserOfType says it is: Play
+                        // services asks about it before it opens its push connection.
+                        int asked = (Integer) arguments[0];
+                        if (asked != androidUser && asked != UserHandle.USER_SYSTEM) return Boolean.FALSE;
                         int[] state = nativeState();
                         // OH sets verified after successfully unlocking the account's
                         // storage key. Query it live; no Android cache is used here.

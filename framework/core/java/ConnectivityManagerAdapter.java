@@ -198,6 +198,10 @@ public final class ConnectivityManagerAdapter {
         caps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED);
         caps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING);
         caps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED);
+        // Default capabilities of a NetworkRequest: without them every request built the ordinary way
+        // stayed unanswered, and Play services' push connection saw no network at all.
+        caps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VCN_MANAGED);
+        caps.addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED);
         if (state.upKbps > 0) caps.setLinkUpstreamBandwidthKbps(state.upKbps);
         if (state.downKbps > 0) caps.setLinkDownstreamBandwidthKbps(state.downKbps);
         return caps;

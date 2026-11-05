@@ -211,6 +211,11 @@ public final class SocketBinder {
         SocketBinderNative.installCallingIdentity();
     }
 
+    /** The uid setCaller gave the peer that owns this object, or 0 if it isn't a remote object. */
+    public static int ownerUid(IBinder binder) {
+        return binder instanceof Proxy ? ((Proxy) binder).channel.mCallerUid : 0;
+    }
+
     /** The process id of a connected socket's peer, as the kernel reports it. */
     public static int peerPid(int fd) throws IOException {
         return SocketBinderNative.peerPid(fd);

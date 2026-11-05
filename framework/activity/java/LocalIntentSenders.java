@@ -146,7 +146,7 @@ public final class LocalIntentSenders {
     /** IActivityManager.getInfoForIntentSender. */
     public static synchronized ActivityManager.PendingIntentInfo info(IIntentSender sender) {
         Record record = find(sender);
-        if (record == null) return null;
+        if (record == null) return PlayServicesChannel.remoteSenderInfo(sender);
         return new ActivityManager.PendingIntentInfo(record.key.packageName,
                 android.os.Process.myUid(), record.immutable, record.key.type);
     }
@@ -169,6 +169,9 @@ public final class LocalIntentSenders {
         Intent[] intents;
         synchronized (LocalIntentSenders.class) {
             record = find(sender);
+            if (record == null && PlayServicesChannel.sendRemoteSender(sender, code, fillIn, resolvedType)) {
+                return 0;
+            }
             if (record == null || record.cancelled) {
                 System.err.println(TAG + " send refused: the sender was cancelled");
                 return ActivityManager.START_CANCELED;
