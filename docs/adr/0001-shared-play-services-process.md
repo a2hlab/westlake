@@ -157,6 +157,15 @@ token service, through the channel, and received an account token. An OAuth scop
 registered one. Text reached the page through a test-only path, because the on-screen keyboard does
 not appear in Westlake yet.
 
+**Push reaches a running app (2026-11-05), half of milestone 6.** Play services held its connection to
+`mtalk.google.com:5228`, a test app got a token from a test Firebase project, and a message sent through
+Google's FCM API arrived in that app's manifest receiver through the channel. A closed app can't be
+started yet, so the milestone isn't passed.
+
+**What push needed:** `NOT_VCN_MANAGED` and `NOT_BANDWIDTH_CONSTRAINED` in the network capabilities, which
+requests built the ordinary way ask for by default, so those requests never matched in any app; an answer
+for who made a `PendingIntent` an app hands over; and broadcasts passed to the app they target.
+
 **What sign-in needed:** an account store (`LocalAccounts`), a store for check-in's Gservices values
 (`LocalGservices`), content change notifications within the process (`LocalContentObservers`, which
 apps elsewhere don't get yet), `startActivityIntentSender` starting the sender's own intent, and answers
@@ -180,7 +189,7 @@ for the `safety_center` and `grammatical_inflection` services.
   real credentials are used.
 - Each process is launched separately with its own appspawn-x, not by one appspawn-x as decision 5
   describes.
-- Delivering a push message to an app is written but not run, and starting a closed app is not built.
+- Starting a closed app for a push message is not built.
 - Play services used a full core until it had the `com.android.location.provider` library (built from
   AOSP and staged like other `<uses-library>` jars). With it, the process was about idle at the sampled
   points.
