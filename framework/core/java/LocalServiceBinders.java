@@ -47,6 +47,14 @@ public final class LocalServiceBinders {
     private LocalServiceBinders() {}
 
     /** The binder for {@code name}, or null when this class does not answer that service. */
+    /** PowerManager reads a field of this answer without a null check: Play services died on it. */
+    private static Object power(String method, Object[] args) {
+        if ("getPowerSaveState".equals(method)) {
+            return new android.os.PowerSaveState.Builder().build();
+        }
+        return DEFAULT;
+    }
+
     public static synchronized IBinder get(String name) {
         IBinder binder = sBinders.get(name);
         if (binder != null) return binder;
@@ -56,7 +64,7 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.app.IUiModeManager", LocalServiceBinders::uiMode);
                     break;
                 case "power":
-                    binder = proxy(name, "android.os.IPowerManager", (method, args) -> DEFAULT);
+                    binder = proxy(name, "android.os.IPowerManager", LocalServiceBinders::power);
                     break;
                 case "thermalservice": {
                     // PowerManager's fetcher also requires the thermal service.
