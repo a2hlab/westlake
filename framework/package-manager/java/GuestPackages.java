@@ -51,6 +51,20 @@ public final class GuestPackages {
 
     private static Map<String, Guest> sGuests;
 
+    /**
+     * Beside a shared Play services process, a guest answers only for the Play Store's licensing
+     * service, which that process doesn't host. Package details and every other service stay
+     * Play services', whose Google certificates the availability check reads.
+     */
+    private static final boolean BESIDE_PLAY_SERVICES = System.getenv("WESTLAKE_PLAY_SERVICES_CONNECT") != null;
+    private static final String LICENSING_ACTION = "com.android.vending.licensing.ILicensingService";
+
+    /** Whether a guest should answer this bind beside a shared Play services process. */
+    public static boolean answersLicensing(Intent intent) {
+        return BESIDE_PLAY_SERVICES && intent != null && LICENSING_ACTION.equals(intent.getAction())
+                && VENDING.equals(intent.getPackage()) && guests().containsKey(VENDING);
+    }
+
     private GuestPackages() {}
 
     private static synchronized Map<String, Guest> guests() {
@@ -74,7 +88,7 @@ public final class GuestPackages {
     }
 
     public static boolean contains(String packageName) {
-        return packageName != null && guests().containsKey(packageName);
+        return !BESIDE_PLAY_SERVICES && packageName != null && guests().containsKey(packageName);
     }
 
     /**
@@ -192,6 +206,7 @@ public final class GuestPackages {
     public static synchronized List<ResolveInfo> queryServices(Intent intent, String resolvedType, long flags) {
         List<ResolveInfo> out = new ArrayList<>();
         if (intent == null) return out;
+        if (BESIDE_PLAY_SERVICES && !answersLicensing(intent)) return out;
         ComponentName component = intent.getComponent();
         String target = component != null ? component.getPackageName() : intent.getPackage();
         String type = resolvedType != null ? resolvedType : intent.getType();
@@ -248,6 +263,8 @@ public final class GuestPackages {
     /** The guest provider that declares an authority, or null. */
     public static ProviderInfo resolveProvider(String authority, long flags) {
         if (authority == null) return null;
+        // Companion reads its licensing switch from microG's settings provider.
+        if (BESIDE_PLAY_SERVICES && !authority.contains(".microg.")) return null;
         for (String packageName : new ArrayList<>(guests().keySet())) {
             PackageInfo info = packageInfo(packageName, flags | PackageManager.GET_PROVIDERS);
             if (info == null || info.providers == null) continue;
