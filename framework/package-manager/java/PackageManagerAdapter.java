@@ -820,7 +820,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             return GuestPackages.applicationInfo(packageName, flags);
         }
         if (RemotePackages.contains(packageName)) {
-            return RemotePackages.applicationInfo(packageName, flags);
+            return GuestPackages.besideDefaults(packageName, RemotePackages.applicationInfo(packageName, flags));
         }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
