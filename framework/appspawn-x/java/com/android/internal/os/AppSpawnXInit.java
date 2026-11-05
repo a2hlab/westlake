@@ -2004,6 +2004,23 @@ public class AppSpawnXInit {
                     if ("asBinder".equals(name)) {
                         return binderHolder[0];
                     }
+                    if (adapter.core.LocalContentObservers.active() && args != null) {
+                        if ("registerContentObserver".equals(name)) {
+                            adapter.core.LocalContentObservers.register((android.net.Uri) args[0], (Boolean) args[1],
+                                    (android.database.IContentObserver) args[2]);
+                            return null;
+                        }
+                        if ("unregisterContentObserver".equals(name)) {
+                            adapter.core.LocalContentObservers.unregister((android.database.IContentObserver) args[0]);
+                            return null;
+                        }
+                        if ("notifyChange".equals(name)) {
+                            adapter.core.LocalContentObservers.notifyChange((android.net.Uri[]) args[0],
+                                    (android.database.IContentObserver) args[1], (Boolean) args[2], (Integer) args[3],
+                                    (Integer) args[4]);
+                            return null;
+                        }
+                    }
 
                     Class<?> ret = method.getReturnType();
                     if (ret == void.class) return null;

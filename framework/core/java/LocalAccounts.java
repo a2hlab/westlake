@@ -331,6 +331,7 @@ final class LocalAccounts {
 
             @Override
             public void onError(int code, String message) throws RemoteException {
+                Log.w(TAG, "authenticator error " + code + ": " + message);
                 if (caller != null) caller.onError(code, message);
             }
         };
@@ -341,6 +342,7 @@ final class LocalAccounts {
             public void onServiceConnected(ComponentName name, IBinder binder) {
                 REQUESTS.execute(() -> {
                     try {
+                        Log.i(TAG, "authenticator bound: " + binder);
                         request.with(IAccountAuthenticator.Stub.asInterface(binder)).on(response);
                     } catch (RemoteException | RuntimeException e) {
                         Log.w(TAG, "authenticator request failed: " + e.getClass().getName());

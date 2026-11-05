@@ -451,6 +451,7 @@ public final class PlayServicesChannel {
 
     /** getContentProvider for an authority in the other process, or null. */
     public static ContentProviderHolder provider(String authority) {
+        if (isHost() && LocalGservices.AUTHORITY.equals(authority)) return LocalGservices.holder();
         if (!isClient() || authority == null) return null;
         ProviderInfo info = RemotePackages.resolveProvider(authority, PackageManager.GET_META_DATA);
         if (info == null) return null;

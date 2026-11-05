@@ -373,8 +373,10 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             IIntentSender target, IBinder whitelistToken, Intent fillInIntent,
             String resolvedType, IBinder resultTo, String resultWho, int requestCode,
             int flagsMask, int flagsValues, Bundle options) throws RemoteException {
-        logBridged("startActivityIntentSender", "-> OH IAbilityManager.StartAbility");
-        return bridgeStartAbility(fillInIntent);
+        logBridged("startActivityIntentSender", "-> the sender's own intent");
+        // The sender holds what to start. The fill-in only adds to it, and alone starts nothing useful:
+        // Play services' sign-in moves between its screens this way.
+        return LocalIntentSenders.send(target, 0, fillInIntent, resolvedType, null);
     }
 
     /** [BRIDGED] startActivityAndWait -> OH IAbilityManager.StartAbility (sync wait) */

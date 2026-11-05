@@ -305,16 +305,19 @@ static jint calling_pid(void)
 }
 
 /*
- * The token's layout is libbinder's: uid in the high half, pid in the low, and the top bit of the low
+ * The token's layout is libbinder's: uid in the high half, pid in the low, and bit 30 of the low
  * half set once an identity has been cleared. Looper compares tokens across messages and reports any
  * change, and its first token came from libbinder, so this must match bit for bit.
  */
-#define EXPLICIT_IDENTITY 0x80000000u
+#define EXPLICIT_IDENTITY 0x40000000u
 static __thread uint32_t t_explicit;
 
 static jlong identity_token(void)
 {
-    return (jlong)(((uint64_t)(uint32_t)calling_uid() << 32) | ((uint32_t)calling_pid() | t_explicit));
+    /* A thread that answers for itself counts as cleared: its Looper took its first token from
+     * libbinder before these natives replaced it, cleared, and this must compare equal to that. */
+    uint32_t flag = t_calling_uid != 0 ? t_explicit : EXPLICIT_IDENTITY;
+    return (jlong)(((uint64_t)(uint32_t)calling_uid() << 32) | ((uint32_t)calling_pid() | flag));
 }
 
 static void set_identity(jlong token)
