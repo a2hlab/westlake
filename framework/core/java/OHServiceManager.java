@@ -157,6 +157,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "role":
             // Play services casts SafetyCenterManager non-null and asks whether it is enabled; it is not.
             case "safety_center":
+            // Settings.System.getConfiguration reads the user's grammatical gender from this manager
+            // (Google's sign-in screens ask); none is set.
+            case "grammatical_inflection":
             // WallpaperManager's globals dereference the service (Retro Music); Kotlin casts the
             // WifiManager non-null (openHAB).
             case "wallpaper":

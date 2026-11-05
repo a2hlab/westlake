@@ -167,6 +167,9 @@ public final class LocalServiceBinders {
                 // getServiceOrThrow, so without a binder they are null: androidx.slice's provider
                 // asks for pinned slices while the app binds (Todoist, Compass), and Calendar asks
                 // for its target profiles in Application.onCreate.
+                case "grammatical_inflection":
+                    binder = proxy(name, "android.app.IGrammaticalInflectionManager", (method, args) -> DEFAULT);
+                    break;
                 case "safety_center":
                     binder = proxy(name, "android.safetycenter.ISafetyCenterManager", (method, args) -> DEFAULT);
                     break;
