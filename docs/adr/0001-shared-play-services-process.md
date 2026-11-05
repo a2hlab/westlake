@@ -150,6 +150,18 @@ process, and a real app ran beside it. Google's client library inside that app r
 `isGooglePlayServicesAvailable` = 0. Real binders then served Phenotype, measurement, push
 registration and wearable calls, and the app received a push token from Google.
 
+**Milestone 5 passed on the test board (2026-11-05).** A test account signed in through Google's own
+screens in Play services, with no device check spoofed. A separate test app then asked Play services'
+token service, through the channel, and received an account token. An OAuth scope answered
+`UnregisteredOnApiConsole` for that unregistered app, so an OAuth token is still to be shown with a
+registered one. Text reached the page through a test-only path, because the on-screen keyboard does
+not appear in Westlake yet.
+
+**What sign-in needed:** an account store (`LocalAccounts`), a store for check-in's Gservices values
+(`LocalGservices`), content change notifications within the process (`LocalContentObservers`, which
+apps elsewhere don't get yet), `startActivityIntentSender` starting the sender's own intent, and answers
+for the `safety_center` and `grammatical_inflection` services.
+
 **Also measured:**
 - Play services' check-in with `android.googleapis.com` succeeds, with no spoofed answers. It starts
   from the boot broadcasts, which the host now sends to its own package.
@@ -168,9 +180,12 @@ registration and wearable calls, and the app received a push token from Google.
   real credentials are used.
 - Each process is launched separately with its own appspawn-x, not by one appspawn-x as decision 5
   describes.
-- Delivering a push message to an app, and starting a closed app, are not built.
-- Play services uses about one CPU core during its first minutes on the board. Whether that settles
-  has not been measured.
+- Delivering a push message to an app is written but not run, and starting a closed app is not built.
+- Play services used a full core until it had the `com.android.location.provider` library (built from
+  AOSP and staged like other `<uses-library>` jars). With it, the process was about idle at the sampled
+  points.
+- `LocalAccounts` stores tokens unencrypted, like Android's accounts database, in a sandbox shared with
+  every app. Each launch's new stage replaces it, so accounts don't yet survive a restart of the process.
 
 ## Sources
 

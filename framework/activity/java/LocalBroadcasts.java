@@ -87,6 +87,9 @@ public final class LocalBroadcasts {
     public static int broadcast(Intent intent, String resolvedType, IIntentReceiver resultTo, int resultCode,
             String resultData, Bundle map, boolean ordered, int userId) {
         if (intent == null) return 0;
+        if (PlayServicesChannel.deliverToClient(intent, resolvedType, resultTo, resultCode, resultData, map, ordered)) {
+            return 0;
+        }
         Application app = ActivityThread.currentApplication();
         String own = app != null ? app.getPackageName() : null;
         boolean forUs = intent.getPackage() == null || intent.getPackage().equals(own);
