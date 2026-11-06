@@ -227,6 +227,119 @@ public final class SocketBinder {
         return inbound == null ? null : inbound.channel.mPeerName;
     }
 
+    /** Reports which remote interfaces were called and how they answered; off unless asked for. */
+    private static final boolean TRACE = System.getenv("WESTLAKE_PLAY_TRACE") != null;
+    private static final int PARCEL_HEADER = 0x53595354; // 'SYST', written by writeInterfaceToken.
+    private static final java.util.Map<String, Integer> sTraceCounts = new java.util.HashMap<>();
+    /** The API most recently asked for. Approximate when two threads connect at the same moment. */
+    private static volatile int sLastService = -1;
+    private static final AtomicLong sRawShown = new AtomicLong();
+
+    private static String tokenOf(Parcel data) {
+        int position = data.dataPosition();
+        try {
+            data.setDataPosition(0);
+            data.readInt();
+            data.readInt();
+            return data.readInt() == PARCEL_HEADER ? data.readString() : null;
+        } catch (RuntimeException e) {
+            return null;
+        } finally {
+            data.setDataPosition(position);
+        }
+    }
+
+    /** GetServiceRequest is a SafeParcelable: field 1 is its version, field 2 the API's service id. */
+    private static int serviceIdOf(Parcel data) {
+        int position = data.dataPosition();
+        try {
+            data.setDataPosition(0);
+            int previous = 0;
+            while (data.dataAvail() >= 8) {
+                int word = data.readInt();
+                if (word == 0x00040002 && previous != 0) return data.readInt();
+                if (word == 0x00040001) {
+                    data.readInt();
+                    previous = 1;
+                } else {
+                    previous = 0;
+                }
+            }
+            return -1;
+        } catch (RuntimeException e) {
+            return -1;
+        } finally {
+            data.setDataPosition(position);
+        }
+    }
+
+    private static String firstInt(Parcel reply) {
+        if (reply == null) return "oneway";
+        if (reply.dataSize() < 4) return "empty";
+        int position = reply.dataPosition();
+        try {
+            reply.setDataPosition(0);
+            return Integer.toString(reply.readInt());
+        } catch (RuntimeException e) {
+            return "unreadable";
+        } finally {
+            reply.setDataPosition(position);
+        }
+    }
+
+    /** IGmsCallbacks' connection replies (codes 1, 3): the first int after any token is the status. */
+    private static void traceInbound(IBinder target, int code, Parcel data) {
+        String descriptor;
+        try {
+            descriptor = target.getInterfaceDescriptor();
+        } catch (RemoteException | RuntimeException e) {
+            descriptor = null;
+        }
+        String result = "";
+        if ("com.google.android.gms.common.internal.IGmsCallbacks".equals(descriptor) && (code == 1 || code == 3)) {
+            int position = data.dataPosition();
+            try {
+                result = "status=" + statusAfterToken(data, descriptor) + " afterService=" + sLastService;
+                if (sRawShown.getAndIncrement() < 3) System.err.println("[WL-PLAY-TRACE] raw " + rawWords(data));
+            } catch (RuntimeException e) {
+                result = "unreadable";
+            } finally {
+                data.setDataPosition(position);
+            }
+        }
+        trace("in", descriptor, code, -1, result);
+    }
+
+    /** Finds the token by its name's length, a String16 count, whatever words come before it. */
+    private static String statusAfterToken(Parcel data, String descriptor) {
+        for (int at = 0; at <= 16; at += 4) {
+            data.setDataPosition(at);
+            if (data.readInt() == descriptor.length()) {
+                data.setDataPosition(at + 4 + (((descriptor.length() + 1) * 2 + 3) & ~3));
+                return Integer.toString(data.readInt());
+            }
+        }
+        return "no-token";
+    }
+
+    private static String rawWords(Parcel data) {
+        StringBuilder words = new StringBuilder();
+        data.setDataPosition(0);
+        for (int i = 0; i < 6 && data.dataAvail() >= 4; i++) words.append(Integer.toHexString(data.readInt())).append(' ');
+        return words.append("size=").append(data.dataSize()).toString();
+    }
+
+    /** One line for the 1st, 2nd, 4th, 8th... of a kind, so a chatty interface can't flood the log. */
+    private static void trace(String way, String descriptor, int code, int service, String result) {
+                String key = way + " " + descriptor + " code=" + code + (service >= 0 ? " service=" + service : "")
+                + " " + result;
+        int count;
+        synchronized (sTraceCounts) {
+            count = sTraceCounts.merge(key, 1, Integer::sum);
+        }
+        if ((count & (count - 1)) == 0) System.err.println("[WL-PLAY-TRACE] " + key + " x" + count);
+    }
+
     /** Stands in for an object in the peer. A Binder, so that Parcel can hold it. */
     private static final class Proxy extends Binder {
         final SocketBinder channel;
@@ -245,7 +358,29 @@ public final class SocketBinder {
 
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
-            return channel.call(id, code, data, reply, flags);
+            if (!TRACE || code == INTERFACE_TRANSACTION) return channel.call(id, code, data, reply, flags);
+            if (code == 46) sLastService = serviceIdOf(data);
+            try {
+                boolean known = channel.call(id, code, data, reply, flags);
+                traceOutbound(code, data, known ? firstInt(reply) : "unknown-code");
+                return known;
+            } catch (RemoteException | RuntimeException e) {
+                traceOutbound(code, data, e.getClass().getSimpleName());
+                throw e;
+            }
+        }
+
+        /** Asked after the call, so that the question can't change what the call found. */
+        private void traceOutbound(int code, Parcel data, String result) {
+            String descriptor;
+            try {
+                descriptor = getInterfaceDescriptor();
+            } catch (RuntimeException e) {
+                descriptor = null;
+            }
+            int service = "com.google.android.gms.common.internal.IGmsServiceBroker".equals(descriptor)
+                    ? serviceIdOf(data) : -1;
+            trace("out", descriptor, code, service, result);
         }
 
         @Override
@@ -475,6 +610,7 @@ public final class SocketBinder {
     /** As Binder.execTransact would: a failure the Parcel can carry goes back to the caller. */
     private static boolean invoke(IBinder target, Frame call, Parcel data, Parcel reply, boolean oneway, Frame answer) {
         try {
+            if (TRACE) traceInbound(target, call.code, data);
             return target.transact(call.code, data, reply, call.flags);
         } catch (RemoteException | RuntimeException e) {
             if (oneway) {

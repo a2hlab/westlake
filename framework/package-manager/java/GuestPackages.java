@@ -51,6 +51,36 @@ public final class GuestPackages {
 
     private static Map<String, Guest> sGuests;
 
+    /**
+     * Beside a shared Play services process, a guest answers only for the Play Store's licensing
+     * service, which that process doesn't host. Package details and every other service stay
+     * Play services', whose Google certificates the availability check reads.
+     */
+    private static final boolean BESIDE_PLAY_SERVICES = System.getenv("WESTLAKE_PLAY_SERVICES_CONNECT") != null;
+    private static final String LICENSING_ACTION = "com.android.vending.licensing.ILicensingService";
+
+    /**
+     * Beside shared Play services, the Play Store's details are Google's, without microG's
+     * meta-data: Companion's settings then live in its own provider (its package's authority)
+     * and read the licensing default from this copy.
+     */
+    public static ApplicationInfo besideDefaults(String packageName, ApplicationInfo info) {
+        if (!BESIDE_PLAY_SERVICES || info == null || !VENDING.equals(packageName)
+                || !guests().containsKey(VENDING)) {
+            return info;
+        }
+        ApplicationInfo copy = new ApplicationInfo(info);
+        copy.metaData = info.metaData == null ? new android.os.Bundle() : new android.os.Bundle(info.metaData);
+        copy.metaData.putBoolean("org.microg.gms.settings.vending_licensing", true);
+        return copy;
+    }
+
+    /** Whether a guest should answer this bind beside a shared Play services process. */
+    public static boolean answersLicensing(Intent intent) {
+        return BESIDE_PLAY_SERVICES && intent != null && LICENSING_ACTION.equals(intent.getAction())
+                && VENDING.equals(intent.getPackage()) && guests().containsKey(VENDING);
+    }
+
     private GuestPackages() {}
 
     private static synchronized Map<String, Guest> guests() {
@@ -74,7 +104,7 @@ public final class GuestPackages {
     }
 
     public static boolean contains(String packageName) {
-        return packageName != null && guests().containsKey(packageName);
+        return !BESIDE_PLAY_SERVICES && packageName != null && guests().containsKey(packageName);
     }
 
     /**
@@ -192,6 +222,7 @@ public final class GuestPackages {
     public static synchronized List<ResolveInfo> queryServices(Intent intent, String resolvedType, long flags) {
         List<ResolveInfo> out = new ArrayList<>();
         if (intent == null) return out;
+        if (BESIDE_PLAY_SERVICES && !answersLicensing(intent)) return out;
         ComponentName component = intent.getComponent();
         String target = component != null ? component.getPackageName() : intent.getPackage();
         String type = resolvedType != null ? resolvedType : intent.getType();
@@ -248,13 +279,27 @@ public final class GuestPackages {
     /** The guest provider that declares an authority, or null. */
     public static ProviderInfo resolveProvider(String authority, long flags) {
         if (authority == null) return null;
+        // Companion reads its licensing switch from microG's settings provider.
+        if (BESIDE_PLAY_SERVICES && !authority.contains(".microg.")) return null;
+        // microG's own settings provider belongs to GmsCore, which isn't staged beside shared
+        // Play services: Companion's copy of the same provider answers in its place.
+        if (BESIDE_PLAY_SERVICES && authority.startsWith(GMS + ".microg.")) {
+            authority = VENDING + authority.substring(GMS.length());
+        }
         for (String packageName : new ArrayList<>(guests().keySet())) {
+            if (BESIDE_PLAY_SERVICES && !VENDING.equals(packageName)) continue;
             PackageInfo info = packageInfo(packageName, flags | PackageManager.GET_PROVIDERS);
             if (info == null || info.providers == null) continue;
             for (ProviderInfo provider : info.providers) {
                 if (provider.authority == null) continue;
                 for (String declared : provider.authority.split(";")) {
-                    if (authority.equals(declared.trim())) return provider;
+                    if (!authority.equals(declared.trim())) continue;
+                    if (!BESIDE_PLAY_SERVICES) return provider;
+                    // One instance serves both names, whichever is asked first: the provider
+                    // checks each call's authority against the ones it was made with.
+                    ProviderInfo both = new ProviderInfo(provider);
+                    both.authority = provider.authority + ";" + GMS + authority.substring(VENDING.length());
+                    return both;
                 }
             }
         }

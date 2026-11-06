@@ -498,35 +498,103 @@ public final class PlayServicesChannel {
 
     private static final java.util.Map<String, IBinder> sClientCallbacks = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** A broadcast waiting for its app to connect. */
+    private static final class Held {
+        final Intent intent;
+        final String type;
+        final android.content.IIntentReceiver result;
+        final int resultCode;
+        final String resultData;
+        final android.os.Bundle map;
+        final boolean ordered;
+
+        Held(Intent intent, String type, android.content.IIntentReceiver result, int resultCode, String resultData,
+                android.os.Bundle map, boolean ordered) {
+            this.intent = intent;
+            this.type = type;
+            this.result = result;
+            this.resultCode = resultCode;
+            this.resultData = resultData;
+            this.map = map;
+            this.ordered = ordered;
+        }
+    }
+
+    private static final int MAX_HELD_PER_APP = 32;
+    private static final java.util.Map<String, java.util.ArrayDeque<Held>> sHeld = new java.util.HashMap<>();
+
     /**
-     * In the host, hands a broadcast aimed at a connected app to that app. False if it isn't for one,
-     * and the caller goes on as usual. An app with no process can't be reached yet: starting it needs
-     * a way for this process to ask for a spawn.
+     * In the host, hands a broadcast aimed at an app that has connected to that app. False if it isn't
+     * for one, and the caller goes on as usual. If that app has no process now, the broadcast waits and
+     * this asks for the app to be started. Answering "not delivered" would be wrong: Play services
+     * unregisters an app it can't deliver to.
      */
     public static boolean deliverToClient(Intent intent, String type, android.content.IIntentReceiver result,
             int resultCode, String resultData, android.os.Bundle map, boolean ordered) {
         if (!isHost() || intent == null) return false;
         String target = targetPackage(intent);
-        IBinder callback = target == null ? null : sClientCallbacks.get(target);
-        if (callback == null || !callback.isBinderAlive()) return false;
+        if (target == null || RemotePackages.uidOf(target) < 0) return false;
+        IBinder callback = sClientCallbacks.get(target);
+        Held held = new Held(new Intent(intent), type, result, resultCode, resultData, map, ordered);
+        if (callback != null && callback.isBinderAlive() && send(target, callback, held)) return true;
+        hold(target, held);
+        return true;
+    }
+
+    private static boolean send(String target, IBinder callback, Held held) {
         Parcel data = Parcel.obtain();
         try {
-            data.writeTypedObject(intent, 0);
-            data.writeString(type);
-            data.writeStrongBinder(result != null ? result.asBinder() : null);
-            data.writeInt(resultCode);
-            data.writeString(resultData);
-            data.writeBundle(map);
-            data.writeBoolean(ordered);
+            data.writeTypedObject(held.intent, 0);
+            data.writeString(held.type);
+            data.writeStrongBinder(held.result != null ? held.result.asBinder() : null);
+            data.writeInt(held.resultCode);
+            data.writeString(held.resultData);
+            data.writeBundle(held.map);
+            data.writeBoolean(held.ordered);
             callback.transact(DELIVER_BROADCAST, data, null, IBinder.FLAG_ONEWAY);
-            System.err.println(TAG + "delivered " + intent.getAction() + " to " + target);
+            System.err.println(TAG + "delivered " + held.intent.getAction() + " to " + target);
             return true;
         } catch (RemoteException | RuntimeException e) {
-            System.err.println(TAG + "delivery of " + intent.getAction() + " to " + target + " failed: " + e);
+            System.err.println(TAG + "delivery of " + held.intent.getAction() + " to " + target + " failed: " + e);
             return false;
         } finally {
             data.recycle();
         }
+    }
+
+    private static void hold(String target, Held held) {
+        synchronized (sHeld) {
+            java.util.ArrayDeque<Held> queue = sHeld.computeIfAbsent(target, k -> new java.util.ArrayDeque<>());
+            if (queue.size() == MAX_HELD_PER_APP) queue.removeFirst();
+            queue.addLast(held);
+        }
+        System.err.println(TAG + "holding " + held.intent.getAction() + " for closed app " + target);
+        requestStart(target);
+    }
+
+    /**
+     * Asks for an app to be started, as a file in this process's data directory. A Westlake process can't
+     * start another app (OH refuses the call), so whatever launches apps on this device watches for it.
+     */
+    private static void requestStart(String target) {
+        try {
+            java.io.File dir = new java.io.File(adapter.packagemanager.SourcePackageRegistry.dataDir(), "westlake-start-requests");
+            dir.mkdirs();
+            if (!new java.io.File(dir, target).createNewFile()) return;
+            System.err.println(TAG + "requested a start of " + target);
+        } catch (IOException | RuntimeException e) {
+            System.err.println(TAG + "cannot request a start of " + target + ": " + e);
+        }
+    }
+
+    /** Sends what waited for an app, oldest first, now that it has connected. */
+    private static void releaseHeld(String target, IBinder callback) {
+        java.util.ArrayDeque<Held> queue;
+        synchronized (sHeld) {
+            queue = sHeld.remove(target);
+        }
+        if (queue == null) return;
+        for (Held held : queue) send(target, callback, held);
     }
 
     /**
@@ -703,7 +771,11 @@ public final class PlayServicesChannel {
             }
             int uid = RemotePackages.registerClient(info, Process.myUid());
             mChannel.setCaller(uid, mPeerPid);
-            if (callback != null) sClientCallbacks.put(claimed, callback);
+            if (callback != null) {
+                sClientCallbacks.put(claimed, callback);
+                // After this call returns, so that the app has its channel when these arrive.
+                new Handler(Looper.getMainLooper()).post(() -> releaseHeld(claimed, callback));
+            }
             mIdentified = true;
             System.err.println(TAG + "client " + claimed + " pid=" + mPeerPid + " uid=" + uid);
         }
