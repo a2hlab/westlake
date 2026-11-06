@@ -196,6 +196,49 @@ for the `safety_center` and `grammatical_inflection` services.
 - `LocalAccounts` stores tokens unencrypted, like Android's accounts database, in a sandbox shared with
   every app. Each launch's new stage replaces it, so accounts don't yet survive a restart of the process.
 
+## Next: the Play Store as a second shared process (plan, not built)
+
+GrapheneOS installs Play services and the Play Store as two ordinary apps. Here the Play Store's code
+must not run inside the Play services process: binding billing there ended the process every app
+depends on (above). So the Play Store gets its own shared process, launched like Play services with no
+activity, which apps connect to as they connect to Play services. What it would answer, from its
+manifest (53.5.48, 117 services in five processes, run here as one): Play Integrity and express
+integrity, licensing, in-app billing, in-app updates, split install and asset delivery, install
+referrer, in-app review. In the HK top-1000 round, 45 of the first 160 apps asked for integrity, 10 for
+in-app updates and 5 for split install, and got no service.
+
+**Already in place:** the genuine, unmodified Play Store APK is staged beside Play services as package
+details. Each connecting app gets its own virtual uid, so a second host sees its caller through
+`getCallingUid` / `getPackagesForUid` / `getPackageInfo` exactly as Play services does. The account's
+authenticator and Gservices answer from the Play services process.
+
+**What has to change:**
+1. **Routing by package.** `WESTLAKE_PLAY_SERVICES_CONNECT` names one socket and `PLAY_PACKAGES` routes
+   Play services, Services Framework and Play Store to it. A client needs a socket per package
+   (`com.android.vending` to the Play Store host, the rest to Play services).
+2. **A host that is also a client.** The Play Store process serves apps and is itself a client of Play
+   services (accounts, DroidGuard, Gservices, check-in). Today a process is one or the other, and
+   `ClientSource` would claim the host's own package as remote; it must skip it. `isHost()` means
+   "the Play services host" in `GuestHost`, `provider()` and boot announcement, which must stay so.
+3. **Accounts across processes.** The account manager is `LocalAccounts` in any process with
+   `WESTLAKE_PLAY_SERVICES_SERVE`, a store of its own with Play services' authenticator class. The Play
+   Store host would get an empty store and no authenticator. Its account manager must be a proxy to
+   the Play services host's `LocalAccounts`: accounts by type, user data, `getAuthToken` through the
+   Google authenticator.
+4. **Licensing moves.** Companion's stand-in for the licensing service (`GuestPackages.answersLicensing`)
+   is removed once the real one answers.
+
+**What it will honestly answer:** integrity verdicts come signed from Google. Device integrity will
+fail (the board is not a certified device, and nothing will claim it is). App recognition is by binary
+and certificate. Licensing and `appLicensingVerdict` depend on the account's entitlement: an app placed
+by the launcher has no installer (`getInstallSourceInfo` reports none), so a free app the account has
+never acquired is unlicensed, which is the truth. Installing apps through the Play Store (phase B, needs
+Westlake to accept installs into its package system) is what makes that entitlement real.
+
+**Order:** routing by package and the dual-role host, then the account proxy, then start the Play Store
+host with no activity and watch it, then point integrity, licensing and billing binds at it, then
+remove Companion's stand-in. Needs the test account signed in on the board.
+
 ## Sources
 
 - GrapheneOS usage guide, sandboxed Google Play: https://grapheneos.org/usage
