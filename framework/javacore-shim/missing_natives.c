@@ -84,6 +84,7 @@
 #define _GNU_SOURCE
 #define _GNU_SOURCE /* dladdr */
 #include <dlfcn.h>
+#include <signal.h>
 #include <errno.h>
 #include <jni.h>
 #include <math.h>
@@ -975,12 +976,42 @@ static void wl_readProcLines(JNIEnv* env, jclass c, jstring file, jobjectArray r
     (*env)->ReleaseLongArrayElements(env, outFields, sizes, 0);
 }
 
+/*
+ * Process.sendSignal and sendSignalQuiet, as AOSP's android_os_Process: kill(pid, sig) for a pid
+ * above 0. A signal the process sends itself (Process.killProcess(myPid()) is SIGKILL) first logs
+ * the Java stack that sent it: an app that ends itself that way left no trace at all, neither a
+ * crash dump nor an exit (Microsoft 365, WeChat, Zoom and others in the Level 2 run).
+ */
+static void wl_send_signal(JNIEnv* env, jclass c, jint pid, jint sig)
+{
+    (void) c;
+    if (pid <= 0) return;
+    if (pid == getpid()) {
+        char line[96];
+        jclass t = (*env)->FindClass(env, "java/lang/Throwable");
+        jmethodID ctor = t != NULL ? (*env)->GetMethodID(env, t, "<init>", "(Ljava/lang/String;)V") : NULL;
+        jmethodID print = t != NULL ? (*env)->GetMethodID(env, t, "printStackTrace", "()V") : NULL;
+        snprintf(line, sizeof(line), "[WESTLAKE-KILL] the process sends itself signal %d", (int) sig);
+        if (ctor != NULL && print != NULL) {
+            jstring msg = (*env)->NewStringUTF(env, line);
+            jobject e = msg != NULL ? (*env)->NewObject(env, t, ctor, msg) : NULL;
+            if (e != NULL) (*env)->CallVoidMethod(env, e, print);
+        }
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        if (t == NULL) fprintf(stderr, "%s\n", line);
+        fflush(stderr);
+    }
+    kill(pid, sig);
+}
+
 static const JNINativeMethod kProcess[] = {
     { "getGidForName", "(Ljava/lang/String;)I", (void*) wl_getGidForName },
     { "readProcFile", "(Ljava/lang/String;[I[Ljava/lang/String;[J[F)Z", (void*) wl_readProcFile },
     { "parseProcLine", "([BII[I[Ljava/lang/String;[J[F)Z", (void*) wl_parseProcLine },
     { "readProcLines", "(Ljava/lang/String;[Ljava/lang/String;[J)V", (void*) wl_readProcLines },
     { "setArgV0Native", "(Ljava/lang/String;)V", (void*) wl_setArgV0Native },
+    { "sendSignal", "(II)V", (void*) wl_send_signal },
+    { "sendSignalQuiet", "(II)V", (void*) wl_send_signal },
 };
 
 /*

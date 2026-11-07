@@ -245,6 +245,7 @@ public class AppSchedulerBridge {
 
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
+            MainThreadGuards.install(at);
             ensureBindApplication(at, pkg, null);
             System.err.println("[DIRECT-LAUNCH] bind done sBindAppDone=" + sBindAppDone);
             if (!sBindAppDone) {
