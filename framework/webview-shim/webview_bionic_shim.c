@@ -1518,6 +1518,13 @@ static void *westlake_open_lib_by_name(void *(*open)(void *context, const char *
     const char *name = westlake_unambiguous_lib_name(path, first_on_path);
     if (name == NULL) return NULL;
     void *handle = open(context, name, flags);
+    if (handle == NULL) {
+        /* Not "another library": the open failed, and its reason is the one the path open will hit. */
+        const char *error = dlerror();
+        fprintf(stderr, "[WESTLAKE-LOADER] %s by name failed (%s); opening the path\n", name,
+                error != NULL ? error : "no reason given");
+        return NULL;
+    }
     if (westlake_handle_is(open, context, handle, path, flags)) return handle;
     fprintf(stderr, "[WESTLAKE-LOADER] %s by name gave another library; opening the path\n", name);
     return NULL;
@@ -2577,6 +2584,23 @@ int __system_property_get(const char *name, char *value)
     snprintf(value, 92, "%s", found);                /* bionic's PROP_VALUE_MAX */
     fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s=%s\n", name, value);
     return (int)strlen(value);
+}
+
+/*
+ * Bionic's __system_property_set, answered as a phone answers an app: the property service checks the
+ * caller's SELinux permission for the property and refuses an app, and bionic logs the refusal and
+ * returns -1 (system_property_set.cpp, PROP_ERROR_PERMISSION_DENIED). OH's parameters are not touched.
+ * OnSpace's libdpsdk.so and Amap's libamaptbt.so import it: with no definition neither library
+ * relocated, and Amap's navigation natives were never registered (UnsatisfiedLinkError later).
+ */
+int __system_property_set(const char *key, const char *value)
+{
+    if (key == NULL) {
+        return -1;
+    }
+    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] Unable to set property \"%s\" to \"%s\": permission denied (0x18)\n",
+            key, value != NULL ? value : "");
+    return -1;
 }
 
 /*
