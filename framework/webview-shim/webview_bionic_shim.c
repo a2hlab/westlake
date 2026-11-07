@@ -2652,6 +2652,22 @@ const struct prop_info *__system_property_find(const char *name)
     return entry;
 }
 
+/*
+ * Bionic's __system_property_serial: the serial of a property found above, which changes only when
+ * the entry is read again. Arknights: Endfield's libMFRCLayer_eco.so imports it, and a library with
+ * an import nothing defines does not relocate.
+ */
+uint32_t __system_property_serial(const struct prop_info *property)
+{
+    if (property == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&g_property_mutex);
+    uint32_t serial = property->serial;
+    pthread_mutex_unlock(&g_property_mutex);
+    return serial;
+}
+
 void __system_property_read_callback(
         const struct prop_info *property,
         void (*callback)(void *, const char *, const char *, uint32_t),
@@ -3749,6 +3765,90 @@ int AMediaCodec_signalEndOfInputStream(void *codec)
 {
     (void) codec;
     return WL_AMEDIA_ERROR_INVALID_OPERATION;
+}
+
+/*
+ * Bionic's default floating-point environment, the object FE_DFL_ENV points at
+ * (libm/arm64/fenv.c: control 0, status 0). musl has no such object, since its FE_DFL_ENV is
+ * (const fenv_t *) -1. Both lay out arm64's fenv_t as FPCR then FPSR, so musl's fesetenv given this
+ * address restores FPCR 0 and FPSR 0, the default. Bilibili's player library libijkffext.so imports
+ * it, as do libraries in iQIYI, JOOX and three Office apps; without it they do not relocate.
+ */
+#include <fenv.h>
+extern const fenv_t __fe_dfl_env;
+const fenv_t __fe_dfl_env = { 0, 0 };
+
+/*
+ * libandroid's thermal API (API 30), answered as Android answers when there is no thermal service:
+ * AThermal_acquireManager returns null (frameworks/base/native/android/thermal.cpp,
+ * createAThermalManager), and the caller goes on without thermal status. OH's thermal service is not
+ * bridged. Unity's Adaptive Performance library (libAdaptivePerformanceThermalHeadroom.so) and
+ * miHoYo's libmiHoYoAndroidADPF.so import these, in 12 apps; without them those libraries do not
+ * relocate. Given a null manager, which Android would dereference, the other calls answer with the
+ * API's own failure values: ATHERMAL_STATUS_ERROR, EPIPE for a listener the service cannot take,
+ * EINVAL for one never added.
+ */
+typedef struct AThermalManager AThermalManager;
+typedef void (*WlAThermalStatusCallback)(void *data, int status);
+enum { WL_ATHERMAL_STATUS_ERROR = -1 };
+
+AThermalManager *AThermal_acquireManager(void)
+{
+    return NULL;
+}
+
+void AThermal_releaseManager(AThermalManager *manager)
+{
+    (void) manager;
+}
+
+int AThermal_getCurrentThermalStatus(AThermalManager *manager)
+{
+    (void) manager;
+    return WL_ATHERMAL_STATUS_ERROR;
+}
+
+int AThermal_registerThermalStatusListener(AThermalManager *manager, WlAThermalStatusCallback callback, void *data)
+{
+    (void) manager;
+    (void) data;
+    return callback == NULL ? EINVAL : EPIPE;
+}
+
+int AThermal_unregisterThermalStatusListener(AThermalManager *manager, WlAThermalStatusCallback callback, void *data)
+{
+    (void) manager;
+    (void) callback;
+    (void) data;
+    return EINVAL;
+}
+
+/*
+ * The family's later members (API 31 and 35). Code built with a newer NDK calls these after an
+ * API-level check alone, through weak imports that stay null when nothing defines them. Once the
+ * calls above let Unity's Adaptive Performance library load, it called AThermal_getThermalHeadroom
+ * through a null PLT slot on API 34, and four games ended at startup. So once any member of a family
+ * exists, every member up to the API level Westlake reports has to exist too. With no thermal service
+ * the headroom is unknown, which the API reports as NaN. The thresholds call makes thermal.cpp's
+ * argument checks, then answers as a service that cannot be reached does (EPIPE).
+ */
+float AThermal_getThermalHeadroom(AThermalManager *manager, int forecastSeconds)
+{
+    (void) manager;
+    (void) forecastSeconds;
+    return __builtin_nanf("");
+}
+
+typedef struct AThermalHeadroomThreshold AThermalHeadroomThreshold;
+
+int AThermal_getThermalHeadroomThresholds(AThermalManager *manager, const AThermalHeadroomThreshold **outThresholds,
+                                          size_t *size)
+{
+    (void) manager;
+    if (outThresholds == NULL || *outThresholds != NULL || size == NULL) {
+        return EINVAL;
+    }
+    return EPIPE;
 }
 
 /*
