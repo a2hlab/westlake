@@ -546,9 +546,15 @@ int sigaction(int signal_number, const struct sigaction *action,
                              __builtin_return_address(0));
         if (westlake_claimable_signal(signal_number) &&
             (__atomic_load_n(&westlake_android_signal_claims, __ATOMIC_RELAXED) & (1u << signal_number)) != 0) {
-            /* The app's handler stays; the caller is told what is installed. */
-            fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied: the app's handler stays\n",
-                    signal_number);
+            /* The app's handler stays; the caller is told what is installed. Logged a few times per
+             * signal: a handler that restores its predecessor and returns makes a trap repeat, and
+             * Naver's Whale repeated this 567,000 times before the dump. */
+            static unsigned int refused[64];
+            unsigned int count = __atomic_add_fetch(&refused[signal_number & 63], 1, __ATOMIC_RELAXED);
+            if (count <= 4 || (count & (count - 1)) == 0) {
+                fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied (%u times): the app's handler stays\n",
+                        signal_number, count);
+            }
             return old_action != NULL ? real_sigaction(signal_number, NULL, old_action) : 0;
         }
     }
