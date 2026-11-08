@@ -358,9 +358,130 @@ static int wl_resolve_ifuncs(int fd, unsigned char *data, Elf64_Rela **relocs, s
 }
 
 /*
+ * Section headers OH's loader reads. bionic and upstream musl load a library from its program headers
+ * and dynamic section alone; OH's musl refuses one without section headers ("Invalid argument") and
+ * takes the dynamic string table through the dynamic symbol section's link. Baidu's location SDK
+ * (liblocSDK8b.so, in Haochang) ships its section headers scrambled on purpose: section 0 marked
+ * DYNAMIC, and the symbol section with no size or entry size, linked to it. On the board its load
+ * faulted inside the loader (strlen of a DT_NEEDED name at 0x125c, the table's base unset); a copy
+ * whose section 0 is null and whose symbol section is the one DT_SYMTAB names, linked to the string
+ * table DT_STRTAB names, loaded.
+ */
+
+/* Whether the image's section headers are there but not the consistent set OH's loader follows. */
+static int wl_bad_section_headers(const unsigned char *data, size_t size)
+{
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
+    if (size < sizeof(*eh) || memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0 || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_machine != EM_AARCH64 || eh->e_shnum < 3 || eh->e_shentsize != sizeof(Elf64_Shdr) ||
+        eh->e_shoff == 0 || eh->e_shoff + (uint64_t) eh->e_shnum * sizeof(Elf64_Shdr) > size) {
+        return 0;
+    }
+    const Elf64_Shdr *sh = (const Elf64_Shdr *) (data + eh->e_shoff);
+    if (sh[0].sh_type != SHT_NULL) return 1;
+    for (int i = 1; i < eh->e_shnum; ++i) {
+        if (sh[i].sh_type != SHT_DYNSYM) continue;
+        if (sh[i].sh_link == 0 || sh[i].sh_link >= eh->e_shnum || sh[sh[i].sh_link].sh_type != SHT_STRTAB ||
+            sh[i].sh_entsize != sizeof(Elf64_Sym)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The number of dynamic symbols, from DT_HASH, else DT_GNU_HASH; 0 when neither can tell. */
+static uint64_t wl_dynamic_symbol_count(const unsigned char *data, size_t size, uint64_t hash, uint64_t gnu_hash)
+{
+    uint64_t at = hash != 0 ? wl_file_offset(data, size, hash) : 0;
+    if (at != 0 && at + 8 <= size) return *(const uint32_t *) (data + at + 4);   /* nchain */
+    at = gnu_hash != 0 ? wl_file_offset(data, size, gnu_hash) : 0;
+    if (at == 0 || at + 16 > size) return 0;
+    const uint32_t *header = (const uint32_t *) (data + at);
+    uint32_t buckets = header[0], offset = header[1], bloom = header[2];
+    uint64_t bucket_at = at + 16 + (uint64_t) bloom * 8, chain_at = bucket_at + (uint64_t) buckets * 4;
+    if (chain_at > size) return 0;
+    uint32_t last = 0;
+    for (uint32_t b = 0; b < buckets; ++b) {
+        uint32_t index = *(const uint32_t *) (data + bucket_at + 4 * (uint64_t) b);
+        if (index > last) last = index;
+    }
+    if (last < offset) return offset;
+    while (chain_at + 4 * (uint64_t) (last - offset) + 4 <= size &&
+           !(*(const uint32_t *) (data + chain_at + 4 * (uint64_t) (last - offset)) & 1)) {
+        ++last;
+    }
+    return (uint64_t) last + 1;
+}
+
+/* Rewrites scrambled section headers in their own slots: section 0 null, then the dynamic symbol table
+ * and its string table where the dynamic section puts them, the section-name table left in its slot,
+ * and every other slot null. */
+static void wl_repair_section_headers(unsigned char *data, size_t size)
+{
+    Elf64_Ehdr *eh = (Elf64_Ehdr *) data;
+    const Elf64_Phdr *ph = (const Elf64_Phdr *) (data + eh->e_phoff);
+    const Elf64_Dyn *dyn = NULL;
+    size_t count = 0;
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type == PT_DYNAMIC && ph[i].p_offset + ph[i].p_filesz <= size) {
+            dyn = (const Elf64_Dyn *) (data + ph[i].p_offset);
+            count = ph[i].p_filesz / sizeof(Elf64_Dyn);
+        }
+    }
+    uint64_t symtab = 0, strtab = 0, strsz = 0, hash = 0, gnu_hash = 0;
+    for (size_t k = 0; dyn != NULL && k < count && dyn[k].d_tag != DT_NULL; ++k) {
+        switch (dyn[k].d_tag) {
+        case DT_SYMTAB: symtab = dyn[k].d_un.d_ptr; break;
+        case DT_STRTAB: strtab = dyn[k].d_un.d_ptr; break;
+        case DT_STRSZ: strsz = dyn[k].d_un.d_val; break;
+        case DT_HASH: hash = dyn[k].d_un.d_ptr; break;
+        case DT_GNU_HASH: gnu_hash = dyn[k].d_un.d_ptr; break;
+        default: break;
+        }
+    }
+    uint64_t symbols = wl_dynamic_symbol_count(data, size, hash, gnu_hash);
+    if (symbols == 0 && strtab > symtab) symbols = (strtab - symtab) / sizeof(Elf64_Sym);
+    uint64_t sym_at = symtab != 0 ? wl_file_offset(data, size, symtab) : 0;
+    uint64_t str_at = strtab != 0 ? wl_file_offset(data, size, strtab) : 0;
+    if (sym_at == 0 || str_at == 0 || symbols == 0 || str_at + strsz > size) return;
+    Elf64_Shdr *sh = (Elf64_Shdr *) (data + eh->e_shoff);
+    int names = eh->e_shstrndx < eh->e_shnum ? eh->e_shstrndx : -1;
+    int sym_slot = -1, str_slot = -1;
+    for (int i = 1; i < eh->e_shnum; ++i) {
+        if (i == names) continue;
+        if (sym_slot < 0) sym_slot = i;
+        else if (str_slot < 0) str_slot = i;
+    }
+    if (sym_slot < 0 || str_slot < 0) return;
+    Elf64_Word sym_name = sh[sym_slot].sh_name, str_name = sh[str_slot].sh_name;
+    for (int i = 0; i < eh->e_shnum; ++i) {
+        if (i != names) memset(&sh[i], 0, sizeof(sh[i]));
+    }
+    sh[sym_slot] = (Elf64_Shdr) {sym_name, SHT_DYNSYM, SHF_ALLOC, symtab, sym_at, symbols * sizeof(Elf64_Sym),
+                                 (Elf64_Word) str_slot, 1, 8, sizeof(Elf64_Sym)};
+    sh[str_slot] = (Elf64_Shdr) {str_name, SHT_STRTAB, SHF_ALLOC, strtab, str_at, strsz, 0, 0, 1, 0};
+    if (names < 0) eh->e_shstrndx = SHN_UNDEF;
+}
+
+/* 1 when the library at path has scrambled section headers, which OH's loader trips on. */
+__attribute__((visibility("hidden"))) int wl_needs_section_repair(const char *path)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    struct stat st;
+    void *data = fstat(fd, &st) == 0 && st.st_size > 0
+                     ? mmap(NULL, (size_t) st.st_size, PROT_READ, MAP_PRIVATE, fd, 0) : MAP_FAILED;
+    close(fd);
+    if (data == MAP_FAILED) return 0;
+    int bad = wl_bad_section_headers((const unsigned char *) data, (size_t) st.st_size);
+    munmap(data, (size_t) st.st_size);
+    return bad;
+}
+
+/*
  * Writes path's copy into target, with the Android RELR tags renumbered to the standard ones when
- * retag is set, null init and fini entries dropped, and IFUNC relocations resolved. An existing copy
- * as large and as new as path is kept.
+ * retag is set, null init and fini entries dropped, IFUNC relocations resolved and scrambled section
+ * headers repaired. An existing copy as large and as new as path is kept.
  */
 __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *path, const char *target, int retag)
 {
@@ -397,6 +518,10 @@ __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *pat
         }
     }
     wl_sanitize_init_arrays(data, (size_t) src.st_size);
+    if (wl_bad_section_headers(data, (size_t) src.st_size)) {
+        wl_repair_section_headers(data, (size_t) src.st_size);
+        wl_relocs_log("[WESTLAKE-RELOCS] %s: scrambled section headers rewritten for the loader\n", path);
+    }
     char tmp[800];
     snprintf(tmp, sizeof(tmp), "%s.tmp%d", target, (int) getpid());
     int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0700);
