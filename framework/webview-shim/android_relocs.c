@@ -15,6 +15,7 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <errno.h>
 #include <elf.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -22,8 +23,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/auxv.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define WL_DT_ANDROID_RELR 0x6fffe000
@@ -167,9 +170,197 @@ static void wl_sanitize_init_arrays(unsigned char *data, size_t size)
 }
 
 /*
+ * IFUNC relocations (R_AARCH64_IRELATIVE). The relocated word is the answer of a resolver function in
+ * the library, which bionic calls at load with the CPU's features (hwcap | _IFUNC_ARG_HWCAP, and
+ * __ifunc_arg_t). OH's musl applies no such relocation: the load fails with "unsupported relocation
+ * type 1032". Edge's libtelclient.so and Yandex Browser's libyandexbrowser.so carry them, in the
+ * PLT's table: resolvers that choose a memory-tagging variant of a function when the CPU has MTE.
+ *
+ * A copy of such a library carries each one as an ordinary RELATIVE relocation to the function its
+ * resolver chooses on this CPU, which musl applies. The resolvers run in a child process, with the
+ * library's segments mapped at a base of their own and unrelocated: a resolver reads its arguments
+ * and the features it derives from them, and a resolver that does more takes only the child down.
+ * The copy is written only when every resolver answered inside the library.
+ */
+#define WL_R_AARCH64_RELATIVE 1027
+#define WL_R_AARCH64_IRELATIVE 1032
+#define WL_IFUNC_ARG_HWCAP (1ULL << 62)
+#define WL_MAX_IFUNCS 256
+
+typedef struct { unsigned long size, hwcap, hwcap2; } wl_ifunc_arg_t;   /* bionic's __ifunc_arg_t */
+
+/* The image's RELA tables, DT_RELA and DT_JMPREL when DT_PLTREL is RELA, as file offsets and sizes. */
+static int wl_rela_tables(const unsigned char *data, size_t size, uint64_t offset[2], uint64_t length[2])
+{
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
+    if (size < sizeof(*eh) || memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0 || eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh->e_machine != EM_AARCH64 || eh->e_phoff + (uint64_t) eh->e_phnum * sizeof(Elf64_Phdr) > size) {
+        return 0;
+    }
+    const Elf64_Phdr *ph = (const Elf64_Phdr *) (data + eh->e_phoff);
+    const Elf64_Dyn *dyn = NULL;
+    size_t count = 0;
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type == PT_DYNAMIC && ph[i].p_offset + ph[i].p_filesz <= size) {
+            dyn = (const Elf64_Dyn *) (data + ph[i].p_offset);
+            count = ph[i].p_filesz / sizeof(Elf64_Dyn);
+        }
+    }
+    uint64_t rela = 0, rela_size = 0, jmprel = 0, plt_size = 0, plt_kind = DT_RELA;
+    for (size_t k = 0; dyn != NULL && k < count && dyn[k].d_tag != DT_NULL; ++k) {
+        switch (dyn[k].d_tag) {
+        case DT_RELA: rela = dyn[k].d_un.d_ptr; break;
+        case DT_RELASZ: rela_size = dyn[k].d_un.d_val; break;
+        case DT_JMPREL: jmprel = dyn[k].d_un.d_ptr; break;
+        case DT_PLTRELSZ: plt_size = dyn[k].d_un.d_val; break;
+        case DT_PLTREL: plt_kind = dyn[k].d_un.d_val; break;
+        default: break;
+        }
+    }
+    int tables = 0;
+    uint64_t start = rela != 0 ? wl_file_offset(data, size, rela) : 0;
+    if (start != 0 && start + rela_size <= size) {
+        offset[tables] = start;
+        length[tables++] = rela_size;
+    }
+    start = jmprel != 0 && plt_kind == DT_RELA ? wl_file_offset(data, size, jmprel) : 0;
+    if (start != 0 && start + plt_size <= size) {
+        offset[tables] = start;
+        length[tables++] = plt_size;
+    }
+    return tables;
+}
+
+/* The image's IRELATIVE relocations, at most max of them, into found; returns how many there are. */
+static size_t wl_ifunc_relocations(unsigned char *data, size_t size, Elf64_Rela **found, size_t max)
+{
+    uint64_t offset[2], length[2];
+    size_t n = 0;
+    int tables = wl_rela_tables(data, size, offset, length);
+    for (int t = 0; t < tables; ++t) {
+        for (uint64_t at = 0; at + sizeof(Elf64_Rela) <= length[t]; at += sizeof(Elf64_Rela)) {
+            Elf64_Rela *r = (Elf64_Rela *) (data + offset[t] + at);
+            if (ELF64_R_TYPE(r->r_info) != WL_R_AARCH64_IRELATIVE) continue;
+            if (n < max && found != NULL) found[n] = r;
+            ++n;
+        }
+    }
+    return n;
+}
+
+/* 1 when the library at path has IFUNC relocations, which musl rejects. */
+__attribute__((visibility("hidden"))) int wl_needs_ifunc_resolution(const char *path)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    struct stat st;
+    void *data = fstat(fd, &st) == 0 && st.st_size > 0
+                     ? mmap(NULL, (size_t) st.st_size, PROT_READ, MAP_PRIVATE, fd, 0) : MAP_FAILED;
+    close(fd);
+    if (data == MAP_FAILED) return 0;
+    size_t n = wl_ifunc_relocations((unsigned char *) data, (size_t) st.st_size, NULL, 0);
+    munmap(data, (size_t) st.st_size);
+    return n != 0;
+}
+
+/* The child's work: the image mapped from fd, each resolver called, each answer written to out as an
+ * offset into the image (0 for an answer outside it). Exits; never returns. */
+static void wl_run_resolvers(int fd, const unsigned char *data, const uint64_t *resolvers, size_t n, int out)
+{
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
+    const Elf64_Phdr *ph = (const Elf64_Phdr *) (data + eh->e_phoff);
+    uint64_t page = (uint64_t) sysconf(_SC_PAGESIZE), low = UINT64_MAX, high = 0;
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        if ((ph[i].p_vaddr & ~(page - 1)) < low) low = ph[i].p_vaddr & ~(page - 1);
+        if (ph[i].p_vaddr + ph[i].p_memsz > high) high = ph[i].p_vaddr + ph[i].p_memsz;
+    }
+    if (low == UINT64_MAX) _exit(2);
+    high = (high + page - 1) & ~(page - 1);
+    unsigned char *base = mmap(NULL, high - low, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (base == MAP_FAILED) _exit(3);
+    unsigned char *image = base - low;   /* where vaddr 0 lies */
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        int prot = ((ph[i].p_flags & PF_R) ? PROT_READ : 0) | ((ph[i].p_flags & PF_W) ? PROT_WRITE : 0) |
+                   ((ph[i].p_flags & PF_X) ? PROT_EXEC : 0);
+        uint64_t start = ph[i].p_vaddr & ~(page - 1), file_end = ph[i].p_vaddr + ph[i].p_filesz;
+        if (file_end > start && mmap(image + start, file_end - start, prot, MAP_PRIVATE | MAP_FIXED, fd,
+                                     (off_t) (ph[i].p_offset & ~(page - 1))) == MAP_FAILED) {
+            _exit(4);
+        }
+        uint64_t page_end = (file_end + page - 1) & ~(page - 1), mem_end = ph[i].p_vaddr + ph[i].p_memsz;
+        if (mem_end > file_end && (prot & PROT_WRITE) && page_end > file_end) {
+            memset(image + file_end, 0, page_end - file_end);
+        }
+        if (mem_end > page_end && mmap(image + page_end, ((mem_end + page - 1) & ~(page - 1)) - page_end, prot,
+                                       MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) {
+            _exit(5);
+        }
+    }
+    wl_ifunc_arg_t arg = {sizeof(arg), getauxval(AT_HWCAP), getauxval(AT_HWCAP2)};
+    for (size_t i = 0; i < n; ++i) {
+        uint64_t (*resolver)(uint64_t, wl_ifunc_arg_t *) =
+            (uint64_t (*)(uint64_t, wl_ifunc_arg_t *)) (uintptr_t) (image + resolvers[i]);
+        uint64_t answer = resolver(arg.hwcap | WL_IFUNC_ARG_HWCAP, &arg);
+        uint64_t offset = answer >= (uint64_t) (uintptr_t) base && answer < (uint64_t) (uintptr_t) (base + (high - low))
+                              ? answer - (uint64_t) (uintptr_t) image : 0;
+        if (write(out, &offset, sizeof(offset)) != (ssize_t) sizeof(offset)) _exit(6);
+    }
+    _exit(0);
+}
+
+/* Resolves the n IFUNC relocations of the image data (whose file is fd) into RELATIVE ones. 0 on success. */
+static int wl_resolve_ifuncs(int fd, unsigned char *data, Elf64_Rela **relocs, size_t n, const char *path)
+{
+    uint64_t resolvers[WL_MAX_IFUNCS], answers[WL_MAX_IFUNCS];
+    for (size_t i = 0; i < n; ++i) resolvers[i] = (uint64_t) relocs[i]->r_addend;
+    int channel[2];
+    if (pipe2(channel, O_CLOEXEC) != 0) return -1;
+    pid_t child = fork();
+    if (child < 0) {
+        close(channel[0]);
+        close(channel[1]);
+        return -1;
+    }
+    if (child == 0) {
+        close(channel[0]);
+        wl_run_resolvers(fd, data, resolvers, n, channel[1]);
+    }
+    close(channel[1]);
+    size_t got = 0;
+    while (got < n * sizeof(uint64_t)) {
+        ssize_t r = read(channel[0], (unsigned char *) answers + got, n * sizeof(uint64_t) - got);
+        if (r > 0) got += (size_t) r;
+        else if (r < 0 && errno == EINTR) continue;
+        else break;
+    }
+    close(channel[0]);
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {}
+    if (got != n * sizeof(uint64_t) || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        wl_relocs_log("[WESTLAKE-RELOCS] %s: its IFUNC resolvers did not all answer (status 0x%x)\n", path, status);
+        return -1;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        if (answers[i] == 0) {
+            wl_relocs_log("[WESTLAKE-RELOCS] %s: IFUNC resolver at 0x%llx answered outside the library\n", path,
+                          (unsigned long long) resolvers[i]);
+            return -1;
+        }
+    }
+    for (size_t i = 0; i < n; ++i) {
+        relocs[i]->r_info = ELF64_R_INFO(0, WL_R_AARCH64_RELATIVE);
+        relocs[i]->r_addend = (Elf64_Sxword) answers[i];
+    }
+    wl_relocs_log("[WESTLAKE-RELOCS] %s: %zu IFUNC relocations resolved for this CPU\n", path, n);
+    return 0;
+}
+
+/*
  * Writes path's copy into target, with the Android RELR tags renumbered to the standard ones when
- * retag is set, and null init and fini entries dropped. An existing copy as large and as new as
- * path is kept.
+ * retag is set, null init and fini entries dropped, and IFUNC relocations resolved. An existing copy
+ * as large and as new as path is kept.
  */
 __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *path, const char *target, int retag)
 {
@@ -181,8 +372,19 @@ __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *pat
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return -1;
     unsigned char *data = mmap(NULL, (size_t) src.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    if (data == MAP_FAILED) {
+        close(fd);
+        return -1;
+    }
+    Elf64_Rela *ifuncs[WL_MAX_IFUNCS];
+    size_t ifunc_count = wl_ifunc_relocations(data, (size_t) src.st_size, ifuncs, WL_MAX_IFUNCS);
+    int resolved = ifunc_count == 0 ? 0
+                   : ifunc_count > WL_MAX_IFUNCS ? -1 : wl_resolve_ifuncs(fd, data, ifuncs, ifunc_count, path);
     close(fd);
-    if (data == MAP_FAILED) return -1;
+    if (resolved != 0) {
+        munmap(data, (size_t) src.st_size);
+        return -1;
+    }
     Elf64_Ehdr *eh = (Elf64_Ehdr *) data;
     Elf64_Phdr *ph = (Elf64_Phdr *) (data + eh->e_phoff);
     for (int i = 0; retag && i < eh->e_phnum; ++i) {
