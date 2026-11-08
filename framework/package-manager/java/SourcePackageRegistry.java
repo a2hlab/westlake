@@ -44,12 +44,12 @@ public final class SourcePackageRegistry {
     /**
      * The split APKs' own manifests, parsed into the package as Android's cluster parse does: every
      * split in order, and each component a split declares takes that split's name, which gives its
-     * activity the split's class loader and resources. Chrome and Brave declare ChromeTabbedActivity
-     * and 56 more activities in their "chrome" split. Parsed from the base APK alone, the launch met
-     * that activity with no theme and no split, its context had none of the split's resources, and
-     * SemanticColorUtils found its theme attribute unset. The splits are staged as loose files, not
-     * in a package directory, so the parser's directory parse cannot find them; its split parse is
-     * called for each one, with the split list the launch resolves (SplitApkResolver).
+     * activity the split's class loader and resources. Chrome declares ChromeTabbedActivity and 48
+     * more activities in its "chrome" split (Brave 71 more). Parsed from the base APK alone, the
+     * launch met that activity with no theme and no split, its context had none of the split's
+     * resources, and SemanticColorUtils found its theme attribute unset. The splits are staged as
+     * loose files, not in a package directory, so the parser's directory parse cannot find them; its
+     * split parse is called for each one, with the split list the launch resolves (SplitApkResolver).
      */
     private static void parseSplits(PackageParser parser, PackageParser.Package pkg, ApplicationInfo runtime) {
         ApplicationInfo resolved = new ApplicationInfo(runtime);
