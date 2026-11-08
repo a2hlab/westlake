@@ -2998,6 +2998,38 @@ static bool westlake_runtime_code(uint64_t pc)
     return false;
 }
 
+/*
+ * The return addresses up the frame-pointer chain that starts at fp, each as " #n <path>+<offset>":
+ * the callers past x30. A fault inside a library function names its caller only this way: Haochang's
+ * SIGSEGV was in musl's strlen inside create_loadtask, so dlopen had been handed a file name at 0x125c,
+ * and x30 could not say whose call that was. A record is read only when its memory is mapped readable,
+ * and the chain must climb the stack; at most ten frames.
+ */
+static char *westlake_frames(char *out, char *limit, uint64_t fp)
+{
+    for (uint64_t depth = 1; depth <= 10 && fp != 0 && (fp & 15) == 0 && out + 48 < limit; ++depth) {
+        int readable = 0, readable_high = 0;
+        westlake_place(out, out, fp, &readable);
+        westlake_place(out, out, fp + 8, &readable_high);
+        if (!readable || !readable_high) break;
+        const volatile uint64_t *record = (const volatile uint64_t *) (uintptr_t) fp;
+        uint64_t next = record[0], ret = record[1] & 0x00ffffffffffffffULL;
+        if (ret == 0) break;
+        out = westlake_text(out, " #", 2);
+        out = westlake_hex(out, depth);
+        char *placed = westlake_place(out, limit, ret, NULL);
+        if (placed == out) {
+            *out++ = ' ';
+            out = westlake_hex(out, ret);
+        } else {
+            out = placed;
+        }
+        if (next <= fp) break;
+        fp = next;
+    }
+    return out;
+}
+
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
 {
     static int witnessed;
@@ -3086,6 +3118,15 @@ static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *co
     *out++ = '\n';
     ssize_t written = write(2, line, (size_t) (out - line));
     (void) written;
+    if (uc != NULL) {
+        char frames[1600];
+        char *end = westlake_text(frames, "[WESTLAKE-SIGNAL-FRAMES] tid=", 40);
+        end = westlake_hex(end, (uint64_t) gettid());
+        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29]);
+        *end++ = '\n';
+        written = write(2, frames, (size_t) (end - frames));
+        (void) written;
+    }
     return false;
 }
 
