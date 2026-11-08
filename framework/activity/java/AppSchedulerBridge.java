@@ -547,6 +547,22 @@ public class AppSchedulerBridge {
             } catch (Throwable t) {
                 System.err.println("[B43-BIND] settings provider append failed: " + t);
             }
+            // The in-process MediaStore (see WlMediaProvider), after the settings provider and before
+            // the app's own, as Android's is up before any app provider: Prime Video's
+            // Application.onCreate inserts into MediaStore.Files.
+            try {
+                android.content.pm.ProviderInfo mpi = new android.content.pm.ProviderInfo();
+                mpi.name = "adapter.activity.WlMediaProvider";
+                mpi.packageName = bundleName;
+                mpi.processName = appInfo.processName != null ? appInfo.processName : bundleName;
+                mpi.authority = "media";
+                mpi.exported = false;
+                mpi.enabled = true;
+                mpi.applicationInfo = appInfo;
+                realProviders.add(Math.min(1, realProviders.size()), mpi);
+            } catch (Throwable t) {
+                System.err.println("[B43-BIND] media provider append failed: " + t);
+            }
             setField(data, "providers", realProviders);
             System.err.println("[B43-BIND] providers populated: " + realProviders.size());
 
