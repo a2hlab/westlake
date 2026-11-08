@@ -5809,3 +5809,14 @@ int __fpclassifyd(double x)
     default: return 0x10;
     }
 }
+
+/*
+ * Bionic's floating-point trap controls. Bionic, like glibc, exports feenableexcept, fedisableexcept
+ * and fegetexcept; musl has none of them. arm64 traps no floating-point exception, and Bionic answers
+ * accordingly: enabling one fails, disabling one succeeds, and none is enabled. WeChat's libXNet.so
+ * imports fegetexcept; its load failed on the missing symbol, and OH's loader then faulted in the
+ * clean-up after the failed load.
+ */
+int feenableexcept(int mask) { (void) mask; return -1; }
+int fedisableexcept(int mask) { (void) mask; return 0; }
+int fegetexcept(void) { return 0; }
