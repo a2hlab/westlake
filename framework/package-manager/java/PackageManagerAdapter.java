@@ -845,11 +845,33 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     /**
      * [BRIDGED] getInstalledPackages -> BMS.GetBundleInfos
      */
+    /** Play's packages, listed when this process reaches them (RemotePackages answers for them). */
+    private static final String[] PLAY_PACKAGES = {
+            "com.google.android.gms", "com.android.vending", "com.google.android.gsf"};
+
     @Override
     public ParceledListSlice<PackageInfo> getInstalledPackages(long flags, int userId) {
         logBridged("getInstalledPackages", "flags=" + flags);
-        String json = nativeGetAllBundleInfos((int) flags);
         List<PackageInfo> result = new ArrayList<>();
+        java.util.Set<String> listed = new java.util.HashSet<>();
+        // The packages this process answers for come first: the app itself, which Android always
+        // lists to its caller, then the guests and Play packages it hosts or reaches. OH's bundle
+        // manager lists the host's bundles, never the APK this process runs. Prime Video's MAP
+        // library finds its own MapInfoProvider by listing installed packages and reading their
+        // providers: it found none, could not make a device serial, DeviceProperties never
+        // initialized, and the app's start-up waited on it with a black splash screen.
+        List<String> answered = new ArrayList<>();
+        String self = SourcePackageRegistry.packageName();
+        if (self != null) answered.add(self);
+        answered.addAll(GuestPackages.names());
+        for (String play : PLAY_PACKAGES) {
+            if (RemotePackages.contains(play)) answered.add(play);
+        }
+        for (String name : answered) {
+            PackageInfo info = getPackageInfo(name, flags, userId);
+            if (info != null && listed.add(info.packageName)) result.add(info);
+        }
+        String json = nativeGetAllBundleInfos((int) flags);
         if (json == null || json.isEmpty()) {
             return new ParceledListSlice<>(result);
         }
@@ -859,7 +881,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             for (int i = 0; i < array.length(); i++) {
                 String bundleJson = array.getString(i);
                 PackageInfo pi = PackageInfoBuilder.fromBundleInfo(bundleJson);
-                if (pi != null) {
+                if (pi != null && listed.add(pi.packageName)) {
                     result.add(pi);
                 }
             }

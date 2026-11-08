@@ -52,6 +52,11 @@ public final class SourcePackageRegistry {
         return parsed != null && parsed.packageName.equals(packageName);
     }
 
+    /** The registered package's name, or null before the launch registers it. */
+    public static synchronized String packageName() {
+        return parsed != null ? parsed.packageName : null;
+    }
+
     /** The app's data directory, which also holds the guest packages' (GuestPackages). */
     public static synchronized String dataDir() {
         return location != null ? location.dataDir : null;

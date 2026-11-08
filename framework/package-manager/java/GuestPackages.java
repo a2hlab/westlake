@@ -107,6 +107,11 @@ public final class GuestPackages {
         return !BESIDE_PLAY_SERVICES && packageName != null && guests().containsKey(packageName);
     }
 
+    /** The guest packages answered here, in their ASX_GUEST_APKS order (none beside Play services). */
+    public static synchronized java.util.List<String> names() {
+        return BESIDE_PLAY_SERVICES ? new java.util.ArrayList<>() : new java.util.ArrayList<>(guests().keySet());
+    }
+
     /**
      * Westlake's defaults for microG, as the meta-data microG's settings provider falls back to
      * (MetaDataPreferences, prefix org.microg.gms.settings.). Upstream ships licensing off; on, it
