@@ -50,6 +50,30 @@ public class InProcessServiceBinder implements Runnable {
     // Services bound in process. A bound service outlives stopService and stopSelf, as in AOSP;
     // nothing tracks an unbind here, so one stays bound for the life of the process.
     private static final Set<String> sBound = ConcurrentHashMap.newKeySet();
+    // className -> why it cannot be created here: a class that does not load or link (a library the
+    // platform has and this runtime does not) fails the same way every time. Play services started
+    // its GoogleLocationManagerService about 68 times a second, each start failing on
+    // com.android.location.provider.GeofenceProvider with a 25-line stack trace in the log: its main
+    // thread spent 70% of a core on it and hilogd 40%, for the whole of a round. Such a service is
+    // answered at once as no such service, with one line the first time.
+    private static final ConcurrentHashMap<String, String> sUnloadable = new ConcurrentHashMap<>();
+
+    /** Whether t, or a cause of it, is a class that cannot be found or linked. */
+    private static boolean unloadable(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof LinkageError || c instanceof ClassNotFoundException) return true;
+        }
+        return false;
+    }
+
+    private static void noteUnloadable(String cls, Throwable t) {
+        if (!unloadable(t)) return;
+        Throwable root = t;
+        while (root.getCause() != null) root = root.getCause();
+        if (sUnloadable.putIfAbsent(cls, String.valueOf(root)) == null) {
+            Log.e(TAG, cls + " cannot be created here (" + root + "); later starts and binds answer at once");
+        }
+    }
 
     private final Intent mService;
     private final ComponentName mComp;
@@ -76,17 +100,24 @@ public class InProcessServiceBinder implements Runnable {
         String cls = comp.getClassName();
         Service svc = sServices.get(cls);
         if (svc != null) return svc;
+        String reason = sUnloadable.get(cls);
+        if (reason != null) throw new IllegalStateException(cls + " cannot be created here: " + reason);
         Application app = ActivityThread.currentApplication();
         ActivityThread thread = ActivityThread.currentActivityThread();
-        Class<?> svcClass = app.getClassLoader().loadClass(cls);
-        svc = (Service) svcClass.newInstance();
-        // The last argument is the IActivityManager the service reports to. Null made
-        // Service.startForeground NPE on setServiceForeground -- every foreground service
-        // (Termux's session service, media players, downloaders) died in onCreate. Hand it
-        // the process's own manager, as ActivityThread.handleCreateService does.
-        svc.attach(app, thread, cls, new Binder(), app,
-                android.app.ActivityManager.getService());
-        svc.onCreate();
+        try {
+            Class<?> svcClass = app.getClassLoader().loadClass(cls);
+            svc = (Service) svcClass.newInstance();
+            // The last argument is the IActivityManager the service reports to. Null made
+            // Service.startForeground NPE on setServiceForeground -- every foreground service
+            // (Termux's session service, media players, downloaders) died in onCreate. Hand it
+            // the process's own manager, as ActivityThread.handleCreateService does.
+            svc.attach(app, thread, cls, new Binder(), app,
+                    android.app.ActivityManager.getService());
+            svc.onCreate();
+        } catch (Throwable t) {
+            noteUnloadable(cls, t);
+            throw t;
+        }
         sServices.put(cls, svc);
         Log.i(TAG, "created in-process service " + cls);
         return svc;
@@ -94,6 +125,8 @@ public class InProcessServiceBinder implements Runnable {
 
     @Override
     public void run() {
+        // Known not to be creatable here: no connection, as after the first failure, without the work.
+        if (sUnloadable.containsKey(mComp.getClassName())) return;
         try {
             Service svc = serviceFor(mComp, mService);
             sBound.add(mComp.getClassName());
@@ -150,6 +183,7 @@ public class InProcessServiceBinder implements Runnable {
     public static ComponentName start(final Intent intent) {
         final ComponentName comp = resolveInApp(intent);
         if (comp == null) return null;
+        if (sUnloadable.containsKey(comp.getClassName())) return null;   // as for no such service
         final Intent args = new Intent(intent);
         args.setComponent(comp);
         new Handler(Looper.getMainLooper()).post(new Runnable() {
