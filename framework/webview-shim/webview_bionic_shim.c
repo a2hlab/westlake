@@ -14,6 +14,7 @@
 #include <netpacket/packet.h>
 #include <net/if.h>
 #include <pthread.h>
+#include <threads.h>
 #include <pwd.h>
 #include <sched.h>
 #include <signal.h>
@@ -638,6 +639,21 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
     westlake_adopt_bionic_mutex_type(mutex);
     int result = pthread_mutex_timedlock(mutex, &past);
     return result == ETIMEDOUT || result == EDEADLK ? EBUSY : result;
+}
+
+/*
+ * A null pthread_t. Bionic looks a thread up in its list before acting on it and answers ESRCH for
+ * one it does not know; for a null one, "a common mistake" in its source's words, it adds only a log
+ * warning. musl takes the pthread_t for its thread structure. Insta360's SysInfo.nativeInit stores
+ * what pthread_create returned over the handle it was just given and detaches that, which is thread 0
+ * whenever the create succeeded, and musl faulted at address 0x34. musl's thrd_detach is its
+ * pthread_detach under the C11 name (one function, two names), so no dlsym is needed (see
+ * pthread_mutex_trylock).
+ */
+int pthread_detach(pthread_t thread)
+{
+    if (thread == 0) return ESRCH;
+    return thrd_detach((thrd_t) thread);
 }
 
 /*
