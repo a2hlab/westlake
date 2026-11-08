@@ -563,6 +563,21 @@ public class AppSchedulerBridge {
             } catch (Throwable t) {
                 System.err.println("[B43-BIND] media provider append failed: " + t);
             }
+            // The in-process calendar provider (see WlCalendarProvider), with the others Android has before
+            // any app provider: Shortplay's reminder switch removes events through it.
+            try {
+                android.content.pm.ProviderInfo cpi = new android.content.pm.ProviderInfo();
+                cpi.name = "adapter.activity.WlCalendarProvider";
+                cpi.packageName = bundleName;
+                cpi.processName = appInfo.processName != null ? appInfo.processName : bundleName;
+                cpi.authority = "com.android.calendar";
+                cpi.exported = false;
+                cpi.enabled = true;
+                cpi.applicationInfo = appInfo;
+                realProviders.add(Math.min(2, realProviders.size()), cpi);
+            } catch (Throwable t) {
+                System.err.println("[B43-BIND] calendar provider append failed: " + t);
+            }
             setField(data, "providers", realProviders);
             System.err.println("[B43-BIND] providers populated: " + realProviders.size());
 
