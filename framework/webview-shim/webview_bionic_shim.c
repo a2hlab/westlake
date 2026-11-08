@@ -3111,6 +3111,23 @@ __attribute__((constructor)) static void westlake_install_signal_witness(void)
     if (segv != NULL && strcmp(segv, "1") == 0) add(SIGSEGV, &action);
 }
 
+/*
+ * The character type of bionic's default locale. bionic starts every process in C.UTF-8: MB_CUR_MAX is
+ * 4, and mbrtowc, wcrtomb and the rest convert UTF-8. musl starts in its byte-based C locale: MB_CUR_MAX
+ * is 1, wcrtomb has no multibyte form for a character past U+00FF (on the board, wcrtomb(U+4E2D) is -1),
+ * and mbrtowc reads each byte of UTF-8 as a character of its own (U+DF80 + byte). Office's runtime
+ * (libplat) converts its strings through these, with '?' for a character that has no multibyte form,
+ * and its MultiByte sizes follow MB_CUR_MAX: its file names reached Java cut short ("en-US/msointl30_andro"
+ * for en-US/msointl30_android.dll) and its text with '???'. LC_CTYPE alone is set; bionic's other
+ * categories are C anyway.
+ */
+__attribute__((constructor)) static void westlake_bionic_ctype_locale(void)
+{
+    if (setlocale(LC_CTYPE, "C.UTF-8") == NULL) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] LC_CTYPE C.UTF-8 refused; multibyte conversions stay byte-based\n");
+    }
+}
+
 __attribute__((constructor)) static void initialize_bionic_ctype(void)
 {
     enum {
