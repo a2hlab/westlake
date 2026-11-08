@@ -1819,6 +1819,21 @@ void *dlopen(const char *filename, int flags)
      * WebView's.  Opens actual_filename, so a WebView redirect decided above is what gets tried;
      * the .z.so spelling is only ever derived from a bare name the caller passed.
      */
+    /*
+     * A library the launcher routes to the Android namespace, asked for by bare name: opened there
+     * before the probe below, which opens the plain name in the default namespace first. There the
+     * library's libc++_shared.so is OH's (another C++ ABI), so that load fails, and OH's loader can
+     * fault in the clean-up after a failed load. Zoom's libmcm_neon, libzlt, libzNet and libzData each
+     * failed there before the redirect further down opened them; the clean-up after the fourth
+     * faulted in dlopen_impl, holding the loader lock, and OH's dumper timed out.
+     */
+    if (basename != NULL && basename == filename && actual_filename == filename &&
+        !(flags & RTLD_NOLOAD) && caller_is_android_dso(caller, NULL)) {
+        void *routed = westlake_open_routed_lib(filename, flags);
+        if (routed != NULL) {
+            return routed;
+        }
+    }
     static char suffixed[512];
     if (basename != NULL && basename == filename) {
         size_t length = strlen(filename);
