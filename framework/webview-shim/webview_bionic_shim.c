@@ -2949,11 +2949,36 @@ static char *westlake_place(char *out, char *limit, uint64_t address, int *reada
     return out;
 }
 
+/*
+ * Whether pc is in code ART generated or runs itself: an oat, odex, vdex or image file, the JIT code
+ * cache or other anonymous code, or libart. ART takes SIGSEGV there on purpose (implicit null,
+ * stack and suspend checks) and handles it; a fault anywhere else is a crash.
+ */
+static bool westlake_runtime_code(uint64_t pc)
+{
+    char where[320];
+    char *end = westlake_place(where, where + sizeof(where) - 1, pc, NULL);
+    *end = '\0';
+    if (end == where) return true;
+    static const char *const runtime[] = {".oat+", ".odex+", ".vdex+", ".art+", "jit-cache", "dalvik", "/libart.so+"};
+    for (size_t i = 0; i < sizeof(runtime) / sizeof(runtime[0]); ++i) {
+        if (strstr(where, runtime[i]) != NULL) return true;
+    }
+    return false;
+}
+
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
 {
     static int witnessed;
-    if (__atomic_add_fetch(&witnessed, 1, __ATOMIC_RELAXED) > 16) return false;
     const ucontext_t *uc = (const ucontext_t *) context;
+    if (signal_number == SIGSEGV) {
+        /* Witnessed before ART's own handling of the faults it takes on purpose, so those are left out
+         * first, and at most eight others are told (a protector may fault on purpose too). */
+        static int segv_witnessed;
+        if (westlake_runtime_code((uint64_t) uc->uc_mcontext.pc)) return false;
+        if (__atomic_add_fetch(&segv_witnessed, 1, __ATOMIC_RELAXED) > 8) return false;
+    }
+    if (__atomic_add_fetch(&witnessed, 1, __ATOMIC_RELAXED) > 16) return false;
     char thread[17] = "";
     prctl(PR_GET_NAME, thread, 0, 0, 0);
     char line[1800];
@@ -3045,6 +3070,14 @@ __attribute__((constructor)) static void westlake_install_signal_witness(void)
     add(SIGILL, &action);
     add(SIGTRAP, &action);
     add(SIGBUS, &action);
+    /*
+     * SIGSEGV on request (WESTLAKE_SEGV_WITNESS=1, a launcher --runtime-env): when OH's dumper times out
+     * (WeChat on wc_srvinit, Zoom on its main thread, 1688 on launcher-0), no crash site is left
+     * anywhere, and this line names it. Off by default: every fault ART takes on purpose then also
+     * reads /proc/self/maps here before ART handles it.
+     */
+    const char *segv = getenv("WESTLAKE_SEGV_WITNESS");
+    if (segv != NULL && strcmp(segv, "1") == 0) add(SIGSEGV, &action);
 }
 
 __attribute__((constructor)) static void initialize_bionic_ctype(void)
