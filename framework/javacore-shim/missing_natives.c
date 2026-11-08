@@ -729,7 +729,87 @@ static jlong wl_getSpace0(JNIEnv* env, jobject self, jobject file, jint which)
     }
 }
 
+/*
+ * java.io.UnixFileSystem.list0 -- File.list and File.listFiles. The runtime's copy reads a directory
+ * twice: it counts the entries, rewinds, and fills an array of that count. A directory that shrinks in
+ * between leaves null entries at the end, and one that grows loses its new entries. JOOX's memory
+ * monitor listed a /proc directory as a thread went away, and File.listFiles threw a
+ * NullPointerException in new File(null, parent). This is libcore's own logic (UnixFileSystem_md.c):
+ * the path from File's path field, the directory read once, "." and ".." skipped, the array grown as
+ * needed and copied to its exact length, null on failure with any exception pending. Strings cross as
+ * Android's platform strings do, through GetStringUTFChars and NewStringUTF (jni_util_md.c).
+ */
+#include <dirent.h>
+
+static jfieldID g_file_path;
+
+/* A copy of the first len elements of array into a new array of capacity, or null with an exception. */
+static jobjectArray wl_copy_strings(JNIEnv* env, jclass string_class, jobjectArray array, jsize len, jsize capacity)
+{
+    jobjectArray copy = (*env)->NewObjectArray(env, capacity, string_class, NULL);
+    for (jsize i = 0; copy != NULL && i < len; i++) {
+        jobject element = (*env)->GetObjectArrayElement(env, array, i);
+        (*env)->SetObjectArrayElement(env, copy, i, element);
+        (*env)->DeleteLocalRef(env, element);
+    }
+    return copy;
+}
+
+static jobjectArray wl_list0(JNIEnv* env, jobject self, jobject file)
+{
+    (void) self;
+    jclass string_class = (*env)->FindClass(env, "java/lang/String");
+    if (string_class == NULL) return NULL;
+    if (g_file_path == NULL) {
+        jclass file_class = (*env)->FindClass(env, "java/io/File");
+        if (file_class == NULL) return NULL;
+        g_file_path = (*env)->GetFieldID(env, file_class, "path", "Ljava/lang/String;");
+        (*env)->DeleteLocalRef(env, file_class);
+        if (g_file_path == NULL) return NULL;
+    }
+    jstring path = file != NULL ? (jstring) (*env)->GetObjectField(env, file, g_file_path) : NULL;
+    if (path == NULL) {
+        jclass npe = (*env)->FindClass(env, "java/lang/NullPointerException");
+        if (npe != NULL) (*env)->ThrowNew(env, npe, NULL);
+        return NULL;
+    }
+    const char* chars = (*env)->GetStringUTFChars(env, path, NULL);
+    DIR* dir = chars != NULL ? opendir(chars) : NULL;
+    if (chars != NULL) (*env)->ReleaseStringUTFChars(env, path, chars);
+    (*env)->DeleteLocalRef(env, path);
+    if (dir == NULL) return NULL;
+
+    jsize len = 0;
+    jsize maxlen = 16;
+    jobjectArray rv = (*env)->NewObjectArray(env, maxlen, string_class, NULL);
+    struct dirent* entry;
+    while (rv != NULL && (entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        if (len == maxlen) {
+            jobjectArray old = rv;
+            maxlen <<= 1;
+            rv = wl_copy_strings(env, string_class, old, len, maxlen);
+            (*env)->DeleteLocalRef(env, old);
+            if (rv == NULL) break;
+        }
+        jstring name = (*env)->NewStringUTF(env, entry->d_name);
+        if (name == NULL) {
+            (*env)->DeleteLocalRef(env, rv);
+            rv = NULL;
+            break;
+        }
+        (*env)->SetObjectArrayElement(env, rv, len++, name);
+        (*env)->DeleteLocalRef(env, name);
+    }
+    closedir(dir);
+    if (rv == NULL) return NULL;
+    jobjectArray exact = wl_copy_strings(env, string_class, rv, len, len);
+    (*env)->DeleteLocalRef(env, rv);
+    return exact;
+}
+
 static const JNINativeMethod kUnixFileSystem[] = {
+    { "list0", "(Ljava/io/File;)[Ljava/lang/String;", (void*) wl_list0 },
     { "setPermission0", "(Ljava/io/File;IZZ)Z", (void*) wl_setPermission0 },
     { "setReadOnly0", "(Ljava/io/File;)Z", (void*) wl_setReadOnly0 },
     { "setLastModifiedTime0", "(Ljava/io/File;J)Z", (void*) wl_setLastModifiedTime0 },
