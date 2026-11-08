@@ -192,6 +192,11 @@ public class WlMediaProvider extends ContentProvider {
                     name.substring(dot + 1).toLowerCase(Locale.ROOT)) : null;
             mime = guess != null ? guess : "application/octet-stream";
         }
+        // A name without an extension gets the type's, as MediaProvider gives it ("photo" as image/jpeg is photo.jpg).
+        if (name.lastIndexOf('.') <= 0 && !"application/octet-stream".equals(mime)) {
+            String extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
+            if (extension != null && !extension.isEmpty()) name = name + "." + extension;
+        }
         String relative = row.getAsString("relative_path");
         if (relative == null || relative.isEmpty()) relative = defaultDirectory(target, mime);
         if (!relative.endsWith("/")) relative += "/";
