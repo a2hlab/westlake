@@ -556,9 +556,15 @@ int sigaction(int signal_number, const struct sigaction *action,
                              __builtin_return_address(0));
         if (westlake_claimable_signal(signal_number) &&
             (__atomic_load_n(&westlake_android_signal_claims, __ATOMIC_RELAXED) & (1u << signal_number)) != 0) {
-            /* The app's handler stays; the caller is told what is installed. */
-            fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied: the app's handler stays\n",
-                    signal_number);
+            /* The app's handler stays; the caller is told what is installed. Logged a few times per
+             * signal: a handler that restores its predecessor and returns makes a trap repeat, and
+             * Naver's Whale repeated this 567,000 times before the dump. */
+            static unsigned int refused[64];
+            unsigned int count = __atomic_add_fetch(&refused[signal_number & 63], 1, __ATOMIC_RELAXED);
+            if (count <= 4 || (count & (count - 1)) == 0) {
+                fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied (%u times): the app's handler stays\n",
+                        signal_number, count);
+            }
             return old_action != NULL ? real_sigaction(signal_number, NULL, old_action) : 0;
         }
     }
@@ -3686,12 +3692,19 @@ uid_t AIBinder_getCallingUid(void)
 /*
  * The NDK's ASharedMemory (libandroid.so, API 26), which neither OH nor the runtime's or the
  * WebView's libandroid.so provides: Instagram's and Messenger's libstartup.so failed to relocate on
- * ASharedMemory_create. Android backs it with ashmem; a sealable memfd gives the same fd-passing,
- * mmap-able region. setProt narrows nothing: ashmem enforces a narrowed protection on later
- * mappings, a memfd seal would fail while a writable mapping exists, and callers use it as a
- * safety net rather than for behaviour. ASharedMemory_dupFromJava is not provided (this library has
- * no JNI headers).
+ * ASharedMemory_create. A memfd, as Android's memfd-backed ashmem (libcutils) makes it: the size is
+ * sealed once set (F_SEAL_GROW | F_SEAL_SHRINK), and setProt to read-only adds F_SEAL_FUTURE_WRITE,
+ * which, like ashmem's protection mask, narrows later mappings without failing on writable ones
+ * already made. Those seals are also how code tells such a region from an ashmem device fd:
+ * Chromium's ashmem helpers read the protection from the seals of a memfd that has both size seals,
+ * and otherwise ask the ashmem device, which starts with an fstat that OH's policy refuses an app
+ * on a memfd (EACCES). Yandex Browser's shared memory failed that way, and Chromium CHECKed the
+ * region's protection. ASharedMemory_dupFromJava is not provided (this library has no JNI headers).
  */
+#ifndef F_SEAL_FUTURE_WRITE
+#define F_SEAL_FUTURE_WRITE 0x0010
+#endif
+
 int ASharedMemory_create(const char *name, size_t size)
 {
     int fd = memfd_create(name != NULL && name[0] != '\0' ? name : "ashmem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -3703,6 +3716,15 @@ int ASharedMemory_create(const char *name, size_t size)
         close(fd);
         errno = saved;
         return -1;
+    }
+    /* libcutils fails the creation when the seals are refused; Android never refuses them. Should OH's
+     * policy, the region is still usable, unsealed, and that is said once. */
+    if (fcntl(fd, F_ADD_SEALS, F_SEAL_GROW | F_SEAL_SHRINK) != 0) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            fprintf(stderr, "[WESTLAKE-BIONIC] ASharedMemory_create: size seals refused (errno %d); region unsealed\n",
+                    errno);
+        }
     }
     return fd;
 }
@@ -3718,13 +3740,26 @@ size_t ASharedMemory_getSize(int fd)
     return end > 0 ? (size_t)end : 0;
 }
 
+/* As libcutils' memfd_set_prot_region: read-only seals future writes; asking for write back after
+ * that is EINVAL, as ashmem refuses to widen a narrowed mask. */
 int ASharedMemory_setProt(int fd, int prot)
 {
     if (fcntl(fd, F_GETFD) < 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
         errno = EINVAL;
         return -1;
     }
-    return 0;
+    int seals = fcntl(fd, F_GET_SEALS);
+    if (seals < 0) {
+        return 0;   /* not one of these memfds: nothing to narrow */
+    }
+    if (prot & PROT_WRITE) {
+        if (seals & F_SEAL_FUTURE_WRITE) {
+            errno = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    return fcntl(fd, F_ADD_SEALS, F_SEAL_FUTURE_WRITE | F_SEAL_SEAL) == 0 ? 0 : -1;
 }
 
 /*
@@ -3800,18 +3835,25 @@ WESTLAKE_ALOOPER_FORWARD(int, ALooper_addFd,
 WESTLAKE_ALOOPER_FORWARD(int, ALooper_removeFd, (ALooper *looper, int fd), (looper, fd))
 
 /*
- * libandroid's ASurfaceControl and ASurfaceTransaction (API 29), which neither the runtime's
- * libandroid.so nor the native bridge has: YouTube's libgoogle3.so imports eleven of them and, being
- * BIND_NOW, did not load at all. OH has no child-surface API this runtime can hand an app, so a
- * surface control cannot be created and the create calls answer NULL, which is Android's own answer
- * when the compositor refuses one; callers check it and keep drawing into their window. A
- * transaction is a real object, so the code that builds one before it has a control works, and
- * apply runs its completion callback with no stats, as the WebView's libandroid does for Chromium.
+ * libandroid's ASurfaceControl and ASurfaceTransaction, which neither the runtime's libandroid.so
+ * nor the native bridge has: YouTube's libgoogle3.so imports eleven of them and, being BIND_NOW, did
+ * not load at all; Edge's libchrome.so imports 27. OH has no child-surface API this runtime can hand
+ * an app, so a surface control cannot be created and the create calls answer NULL, which is
+ * Android's own answer when the compositor refuses one; callers check it and keep drawing into their
+ * window (Chromium then presents through its GL surface). A transaction is a real object, so the
+ * code that builds one before it has a control works, and apply runs its commit and completion
+ * callbacks with no stats, as the WebView's libandroid does for Chromium.
+ *
+ * The whole API is here, up to the level this runtime reports (34): code gated on that level calls
+ * the newer entry points through weak imports without a null check, and Chromium CHECKs that every
+ * API 29 one is present before it decides whether to use them.
  */
 typedef void (*WlTransactionCallback)(void *context, void *stats);
 typedef struct {
     void *context;
     WlTransactionCallback callback;
+    void *commit_context;
+    WlTransactionCallback commit_callback;
 } WlSurfaceTransaction;
 
 void *ASurfaceControl_create(void *parent, const char *debug_name)
@@ -3848,13 +3890,39 @@ void ASurfaceTransaction_setOnComplete(void *transaction, void *context, WlTrans
     t->callback = callback;
 }
 
+/* API 31. Android calls it when the transaction is committed, before the completion callback. */
+void ASurfaceTransaction_setOnCommit(void *transaction, void *context, WlTransactionCallback callback)
+{
+    WlSurfaceTransaction *t = (WlSurfaceTransaction *) transaction;
+    if (t == NULL) return;
+    t->commit_context = context;
+    t->commit_callback = callback;
+}
+
 void ASurfaceTransaction_apply(void *transaction)
 {
     WlSurfaceTransaction *t = (WlSurfaceTransaction *) transaction;
-    if (t == NULL || t->callback == NULL) return;
-    WlTransactionCallback callback = t->callback;
+    if (t == NULL) return;
+    WlTransactionCallback commit = t->commit_callback;
+    WlTransactionCallback complete = t->callback;
+    t->commit_callback = NULL;
     t->callback = NULL;
-    callback(t->context, NULL);
+    if (commit != NULL) commit(t->commit_context, NULL);
+    if (complete != NULL) complete(t->context, NULL);
+}
+
+/* ASurfaceControl_fromJava and ASurfaceTransaction_fromJava (API 34): the framework's Java
+ * SurfaceControl objects have no native control this API can hand out either. */
+void *ASurfaceControl_fromJava(void *env, void *surface_control_object)
+{
+    (void) env; (void) surface_control_object;
+    return NULL;
+}
+
+void *ASurfaceTransaction_fromJava(void *env, void *transaction_object)
+{
+    (void) env; (void) transaction_object;
+    return NULL;
 }
 
 /* Every setter names a surface control, and none can exist, so there is nothing to change. */
@@ -3891,10 +3959,136 @@ void ASurfaceTransaction_setZOrder(void *transaction, void *surface_control, int
     (void) transaction; (void) surface_control; (void) z_order;
 }
 
+void ASurfaceTransaction_setBufferTransparency(void *transaction, void *surface_control, int8_t transparency)
+{
+    (void) transaction; (void) surface_control; (void) transparency;
+}
+
+void ASurfaceTransaction_setDamageRegion(void *transaction, void *surface_control, const void *rects,
+                                         uint32_t count)
+{
+    (void) transaction; (void) surface_control; (void) rects; (void) count;
+}
+
+void ASurfaceTransaction_setBufferAlpha(void *transaction, void *surface_control, float alpha)
+{
+    (void) transaction; (void) surface_control; (void) alpha;
+}
+
+void ASurfaceTransaction_setColor(void *transaction, void *surface_control, float r, float g, float b,
+                                  float alpha, int32_t data_space)
+{
+    (void) transaction; (void) surface_control; (void) r; (void) g; (void) b; (void) alpha; (void) data_space;
+}
+
+void ASurfaceTransaction_setHdrMetadata_smpte2086(void *transaction, void *surface_control, const void *metadata)
+{
+    (void) transaction; (void) surface_control; (void) metadata;
+}
+
+void ASurfaceTransaction_setHdrMetadata_cta861_3(void *transaction, void *surface_control, const void *metadata)
+{
+    (void) transaction; (void) surface_control; (void) metadata;
+}
+
+void ASurfaceTransaction_setFrameRate(void *transaction, void *surface_control, float frame_rate,
+                                      int8_t compatibility)
+{
+    (void) transaction; (void) surface_control; (void) frame_rate; (void) compatibility;
+}
+
+void ASurfaceTransaction_setFrameRateWithChangeStrategy(void *transaction, void *surface_control, float frame_rate,
+                                                        int8_t compatibility, int8_t change_frame_rate_strategy)
+{
+    (void) transaction; (void) surface_control; (void) frame_rate; (void) compatibility;
+    (void) change_frame_rate_strategy;
+}
+
+void ASurfaceTransaction_clearFrameRate(void *transaction, void *surface_control)
+{
+    (void) transaction; (void) surface_control;
+}
+
+void ASurfaceTransaction_setEnableBackPressure(void *transaction, void *surface_control, bool enable)
+{
+    (void) transaction; (void) surface_control; (void) enable;
+}
+
+void ASurfaceTransaction_setPosition(void *transaction, void *surface_control, int32_t x, int32_t y)
+{
+    (void) transaction; (void) surface_control; (void) x; (void) y;
+}
+
+void ASurfaceTransaction_setCrop(void *transaction, void *surface_control, const void *crop)
+{
+    (void) transaction; (void) surface_control; (void) crop;
+}
+
+void ASurfaceTransaction_setBufferTransform(void *transaction, void *surface_control, int32_t transform)
+{
+    (void) transaction; (void) surface_control; (void) transform;
+}
+
+void ASurfaceTransaction_setScale(void *transaction, void *surface_control, float x_scale, float y_scale)
+{
+    (void) transaction; (void) surface_control; (void) x_scale; (void) y_scale;
+}
+
+void ASurfaceTransaction_setExtendedRangeBrightness(void *transaction, void *surface_control,
+                                                    float current_buffer_ratio, float desired_ratio)
+{
+    (void) transaction; (void) surface_control; (void) current_buffer_ratio; (void) desired_ratio;
+}
+
+/* Settings of the transaction itself, which nothing presents. */
+void ASurfaceTransaction_setDesiredPresentTime(void *transaction, int64_t desired_present_time)
+{
+    (void) transaction; (void) desired_present_time;
+}
+
+void ASurfaceTransaction_setFrameTimeline(void *transaction, int64_t vsync_id)
+{
+    (void) transaction; (void) vsync_id;
+}
+
+/*
+ * The stats a callback receives. apply passes none (NULL), and with no surface control no stats
+ * name one: no controls, and no fences or times to report.
+ */
 int ASurfaceTransactionStats_getPreviousReleaseFenceFd(void *stats, void *surface_control)
 {
     (void) stats; (void) surface_control;
     return -1;
+}
+
+int ASurfaceTransactionStats_getPresentFenceFd(void *stats)
+{
+    (void) stats;
+    return -1;
+}
+
+int64_t ASurfaceTransactionStats_getLatchTime(void *stats)
+{
+    (void) stats;
+    return -1;
+}
+
+int64_t ASurfaceTransactionStats_getAcquireTime(void *stats, void *surface_control)
+{
+    (void) stats; (void) surface_control;
+    return -1;
+}
+
+void ASurfaceTransactionStats_getASurfaceControls(void *stats, void ***out_controls, size_t *out_count)
+{
+    (void) stats;
+    if (out_controls != NULL) *out_controls = NULL;
+    if (out_count != NULL) *out_count = 0;
+}
+
+void ASurfaceTransactionStats_releaseASurfaceControls(void **controls)
+{
+    free(controls);
 }
 
 /*
@@ -5238,6 +5432,46 @@ static void *westlake_egl_get_proc_address(const char *name)
     return next != NULL ? next(name) : NULL;
 }
 
+/*
+ * A name of the NDK's libandroid.so, asked of a handle whose search reaches the runtime's
+ * libandroid.so (the library the handle names, or one of its dependencies). That copy holds part of
+ * the NDK library (assets, ALooper, multinetwork); the rest (ASharedMemory, ASurfaceControl and
+ * ASurfaceTransaction, sensors, ...) is defined in this library, where imports find it in the
+ * global scope. A lookup by handle searches only the handle's library and its dependencies, so it
+ * missed them: Yandex Browser's dlsym(dlopen("libandroid.so"), "ASharedMemory_create") came back
+ * NULL and the browser called it (SIGSEGV at pc 0), and Naver's Whale CHECKed that its
+ * ASurfaceControl entry points had loaded (SIGTRAP). Android's libandroid.so answers such a lookup,
+ * so this library's definition does. Only the runtime's copy is completed this way: the WebView's
+ * libandroid.so has its own transactions, which must not be mixed with this library's.
+ */
+static int westlake_ndk_android_name(const char *name)
+{
+    return (name[0] == 'A' && name[1] >= 'A' && name[1] <= 'Z') || strncmp(name, "android_", 8) == 0;
+}
+
+static void *westlake_libandroid_by_handle(WestlakeDlsymFn real, void *handle, const char *name)
+{
+    static void *runtime_probe;   /* AAssetManager_fromJava, as the runtime's libandroid.so defines it */
+    void *expected = __atomic_load_n(&runtime_probe, __ATOMIC_ACQUIRE);
+    if (expected == NULL) {
+        expected = westlake_runtime_android_symbol("AAssetManager_fromJava");
+        if (expected == NULL) return NULL;
+        __atomic_store_n(&runtime_probe, expected, __ATOMIC_RELEASE);
+    }
+    if (real(handle, "AAssetManager_fromJava") != expected) return NULL;
+    void *found = real(RTLD_DEFAULT, name);
+    Dl_info definition, self;
+    if (found == NULL || dladdr(found, &definition) == 0 ||
+        dladdr((void *) &westlake_libandroid_by_handle, &self) == 0 || definition.dli_fbase != self.dli_fbase) {
+        return NULL;
+    }
+    static int logged;
+    if (__atomic_fetch_add(&logged, 1, __ATOMIC_RELAXED) < 32) {
+        wl_relocs_log("[WESTLAKE-LOADER] libandroid.so by handle: %s from the bionic shim\n", name);
+    }
+    return found;
+}
+
 void *dlsym(void *handle, const char *name)
 {
     WestlakeDlsymFn real = __atomic_load_n(&westlake_musl_dlsym, __ATOMIC_ACQUIRE);
@@ -5294,6 +5528,16 @@ void *dlsym(void *handle, const char *name)
             }
             return own;
         }
+    }
+    /* By a handle the caller's address plays no part in the lookup, so this call need not be the
+     * tail call that keeps it. */
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && westlake_ndk_android_name(name)) {
+        void *found = real(handle, name);
+        if (found == NULL && caller_is_android_dso(__builtin_return_address(0), NULL)) {
+            found = westlake_libandroid_by_handle(real, handle, name);
+            if (found != NULL) (void) dlerror();   /* the failed lookup's error does not stand */
+        }
+        return found;
     }
     __attribute__((musttail)) return real(handle, name);
 }
