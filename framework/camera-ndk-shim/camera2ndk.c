@@ -13,6 +13,9 @@
  * ACAMERA_ERROR_INVALID_PARAMETER, which is what Android answers for an id that matches no
  * connected camera. The containers, outputs and targets an app may build before it opens a
  * camera are real allocations, as on Android, so building them and freeing them works.
+ *
+ * Every symbol AOSP's libcamera2ndk.so exports is here (libcamera2ndk.map.txt): a library that
+ * names one that is missing does not load at all.
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -120,6 +123,18 @@ EXPORT void ACameraMetadata_free(ACameraMetadata* metadata) {
     (void)metadata;   /* never one of ours */
 }
 
+/* A Java CameraMetadata exists only for a camera, and there is none. */
+EXPORT ACameraMetadata* ACameraMetadata_fromCameraMetadata(void* env, void* cameraMetadata) {
+    (void)env; (void)cameraMetadata;
+    return NULL;
+}
+
+EXPORT camera_status_t ACameraMetadata_getTagFromName(const ACameraMetadata* metadata, const char* name,
+                                                      uint32_t* tag) {
+    (void)metadata; (void)name; (void)tag;
+    return ACAMERA_ERROR_INVALID_PARAMETER;
+}
+
 EXPORT bool ACameraMetadata_isLogicalMultiCamera(const ACameraMetadata* staticMetadata, size_t* numPhysicalCameras,
                                                  const char* const** physicalCameraIds) {
     (void)staticMetadata; (void)numPhysicalCameras; (void)physicalCameraIds;
@@ -187,6 +202,47 @@ EXPORT ACaptureRequest* ACaptureRequest_copy(const ACaptureRequest* src) {
     return NULL;
 }
 
+/* The rest of NdkCameraDevice.h, NdkCaptureRequest.h and NdkCameraCaptureSession.h (API 24 to 35):
+ * each needs a device, request or session, and none exists. */
+NO_REQUEST(ACaptureRequest_getConstEntry_physicalCamera, const ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, ACameraMetadata_const_entry* entry)
+NO_REQUEST(ACaptureRequest_setEntry_physicalCamera_u8, ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, uint32_t count, const uint8_t* data)
+NO_REQUEST(ACaptureRequest_setEntry_physicalCamera_i32, ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, uint32_t count, const int32_t* data)
+NO_REQUEST(ACaptureRequest_setEntry_physicalCamera_float, ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, uint32_t count, const float* data)
+NO_REQUEST(ACaptureRequest_setEntry_physicalCamera_i64, ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, uint32_t count, const int64_t* data)
+NO_REQUEST(ACaptureRequest_setEntry_physicalCamera_double, ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, uint32_t count, const double* data)
+NO_REQUEST(ACaptureRequest_setEntry_physicalCamera_rational, ACaptureRequest* request, const char* physicalId,
+           uint32_t tag, uint32_t count, const void* data)
+NO_REQUEST(ACameraDevice_createCaptureRequest_withPhysicalIds, const ACameraDevice* device, int templateId,
+           const ACameraIdList* physicalIdList, ACaptureRequest** request)
+NO_REQUEST(ACameraDevice_createCaptureSessionWithSessionParameters, ACameraDevice* device,
+           const ACaptureSessionOutputContainer* outputs, const ACaptureRequest* sessionParameters,
+           const void* callbacks, ACameraCaptureSession** session)
+NO_REQUEST(ACameraDevice_isSessionConfigurationSupported, const ACameraDevice* device,
+           const ACaptureSessionOutputContainer* sessionOutputContainer)
+NO_REQUEST(ACameraCaptureSession_getDevice, ACameraCaptureSession* session, ACameraDevice** device)
+NO_REQUEST(ACameraCaptureSession_updateSharedOutput, ACameraCaptureSession* session, ACaptureSessionOutput* output)
+NO_REQUEST(ACameraCaptureSession_captureV2, ACameraCaptureSession* session, const void* callbacks, int numRequests,
+           ACaptureRequest** requests, int* captureSequenceId)
+NO_REQUEST(ACameraCaptureSession_setRepeatingRequestV2, ACameraCaptureSession* session, const void* callbacks,
+           int numRequests, ACaptureRequest** requests, int* captureSequenceId)
+NO_REQUEST(ACameraCaptureSession_logicalCamera_capture, ACameraCaptureSession* session, const void* callbacks,
+           int numRequests, ACaptureRequest** requests, int* captureSequenceId)
+NO_REQUEST(ACameraCaptureSession_logicalCamera_captureV2, ACameraCaptureSession* session, const void* callbacks,
+           int numRequests, ACaptureRequest** requests, int* captureSequenceId)
+NO_REQUEST(ACameraCaptureSession_logicalCamera_setRepeatingRequest, ACameraCaptureSession* session,
+           const void* callbacks, int numRequests, ACaptureRequest** requests, int* captureSequenceId)
+NO_REQUEST(ACameraCaptureSession_logicalCamera_setRepeatingRequestV2, ACameraCaptureSession* session,
+           const void* callbacks, int numRequests, ACaptureRequest** requests, int* captureSequenceId)
+NO_REQUEST(ACameraCaptureSession_prepareWindow, ACameraCaptureSession* session, void* window)
+NO_REQUEST(ACameraCaptureSession_setWindowPreparedCallback, ACameraCaptureSession* session, void* context,
+           void* callback)
+
 EXPORT void ACameraCaptureSession_close(ACameraCaptureSession* session) {
     (void)session;
 }
@@ -247,6 +303,20 @@ EXPORT camera_status_t ACaptureSessionOutput_create(void* window, ACaptureSessio
 
 EXPORT camera_status_t ACaptureSessionSharedOutput_create(void* window, ACaptureSessionOutput** output) {
     return ACaptureSessionOutput_create(window, output);
+}
+
+EXPORT camera_status_t ACaptureSessionPhysicalOutput_create(void* window, const char* physicalId,
+                                                            ACaptureSessionOutput** output) {
+    if (physicalId == NULL) return ACAMERA_ERROR_INVALID_PARAMETER;
+    return ACaptureSessionOutput_create(window, output);
+}
+
+EXPORT camera_status_t ACaptureSessionSharedOutput_add(ACaptureSessionOutput* output, void* window) {
+    return output == NULL || window == NULL ? ACAMERA_ERROR_INVALID_PARAMETER : ACAMERA_OK;
+}
+
+EXPORT camera_status_t ACaptureSessionSharedOutput_remove(ACaptureSessionOutput* output, void* window) {
+    return output == NULL || window == NULL ? ACAMERA_ERROR_INVALID_PARAMETER : ACAMERA_OK;
 }
 
 EXPORT void ACaptureSessionOutput_free(ACaptureSessionOutput* output) {
