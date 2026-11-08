@@ -223,8 +223,11 @@ public final class SplitApkResolver {
         // One class loader name per split, null where the split's manifest names none (Chrome's and
         // Brave's name none). LoadedApk reads it by split index when isolated split loading makes a
         // split's class loader, and with no array Chrome's SplitChromeApplication failed there:
-        // "Attempt to read from null array" in SplitDependencyLoaderImpl.constructSplit.
-        info.splitClassLoaderNames = new String[count];
+        // "Attempt to read from null array" in SplitDependencyLoaderImpl.constructSplit. Names the
+        // split manifests gave (SourcePackageRegistry parses them in this same order) are kept.
+        if (info.splitClassLoaderNames == null || info.splitClassLoaderNames.length != count) {
+            info.splitClassLoaderNames = new String[count];
+        }
         if (packageInfo != null) {
             packageInfo.splitNames = names.clone();
             packageInfo.splitRevisionCodes = new int[count];
