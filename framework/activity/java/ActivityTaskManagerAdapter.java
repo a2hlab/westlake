@@ -204,6 +204,10 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
                 Log.i(TAG, "startActivity: an Android screen this device does not have, nothing opens: " + intent);
                 return ActivityManager.START_SUCCESS;
             }
+            if (WebLinkDialog.opensWebLink(intent) && WebLinkDialog.show(intent.getData(), resultTo)) {
+                Log.i(TAG, "startActivity: a web link, opened in the app as no browser handles it: " + intent);
+                return ActivityManager.START_SUCCESS;
+            }
             Log.i(TAG, "startActivity: nothing handles " + intent);
             return notFound(intent);
         }
@@ -245,13 +249,15 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
 
     /**
      * A screen that every Android device has: one of Settings' by its action
-     * (android.provider.Settings.ACTION_*), a document or photo picker, or a screen of Android's own
+     * (android.provider.Settings.ACTION_*), a document or photo picker, the home screen (OnSpace sent
+     * the user there with MAIN and HOME, and died when the start threw), or a screen of Android's own
      * applications by name, as VpnService.prepare names VPN consent.
      */
     private static boolean alwaysOnAndroid(Intent intent) {
         String target = intent.getComponent() != null ? intent.getComponent().getPackageName() : intent.getPackage();
         if (target != null) return ANDROID_PACKAGES.contains(target);
         String action = intent.getAction();
+        if (Intent.ACTION_MAIN.equals(action) && intent.hasCategory(Intent.CATEGORY_HOME)) return true;
         return action != null && (action.startsWith("android.settings.") || PICKER_ACTIONS.contains(action));
     }
 
