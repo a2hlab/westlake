@@ -244,6 +244,7 @@ public class AppSchedulerBridge {
             PlayServicesChannel.installClient();
 
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
+            sLaunchProcessName = declaredProcess(pkg, activityFqn);
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
             MainThreadGuards.install(at);
             ensureBindApplication(at, pkg, null);
@@ -343,6 +344,37 @@ public class AppSchedulerBridge {
         } catch (Throwable t) {
             System.err.println("[WL-METHOD-TRACE] not started: " + t);
         }
+    }
+
+    /**
+     * The process the launch activity declares (android:process), or null when it runs in the
+     * app's own. Android starts such an activity in that process, and the Application created
+     * there sees that name: the Google app's launcher, GoogleAppActivity, is declared in
+     * ":googleapp", its Application builds the component for the process it finds itself in, and
+     * bound as the main process it built the main process's ("Missing entry point" in onCreate).
+     * Direct launch has one process, so it takes the launched activity's name and providers, as
+     * that process has them on Android.
+     */
+    private static volatile String sLaunchProcessName;
+
+    private static String declaredProcess(String pkg, String activity) {
+        if (activity == null || activity.isEmpty()) return null;
+        try {
+            android.content.pm.PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
+                    pkg, android.content.pm.PackageManager.GET_ACTIVITIES);
+            if (info == null || info.activities == null) return null;
+            for (android.content.pm.ActivityInfo candidate : info.activities) {
+                if (activity.equals(candidate.name)) {
+                    String process = candidate.processName;
+                    if (process == null || process.isEmpty() || process.equals(pkg)) return null;
+                    System.err.println("[DIRECT-LAUNCH] " + activity + " runs in process " + process);
+                    return process;
+                }
+            }
+        } catch (Throwable t) {
+            System.err.println("[DIRECT-LAUNCH] launch activity's process unknown: " + t);
+        }
+        return null;
     }
 
     private static synchronized void ensureBindApplication(
@@ -500,8 +532,10 @@ public class AppSchedulerBridge {
             Object data = abdCtor.newInstance();
 
             // 4. Populate AppBindData fields per §1.1.4 strategy table.
-            setField(data, "processName",
-                    appInfo.processName != null ? appInfo.processName : bundleName);
+            // The process is the launched component's: its own android:process when it declares one.
+            final String boundProcess = sLaunchProcessName != null ? sLaunchProcessName
+                    : appInfo.processName != null ? appInfo.processName : bundleName;
+            setField(data, "processName", boundProcess);
             setField(data, "appInfo", appInfo);
             // P2-B v2 (2026-04-30): real providers + manifest enrichment via local
             // native methods (alias to PackageManagerAdapter native impls in bridge.so).
@@ -519,7 +553,7 @@ public class AppSchedulerBridge {
                     sourcePackage ? adapter.packagemanager.PackageManagerAdapter.getProvidersForPackage(bundleName)
                     : buildProvidersFromManifest(bundleName, manifestJson);
             if (sourcePackage) {
-                final String appProcess = appInfo.processName;
+                final String appProcess = boundProcess;
                 realProviders.removeIf(provider -> !appProcess.equals(provider.processName));
             }
             // Install in descending initOrder, as PackageManager hands them to ActivityThread
