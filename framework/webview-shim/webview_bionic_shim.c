@@ -1109,6 +1109,7 @@ static int westlake_library_is_refused(const char *basename)
 }
 
 int wl_needs_android_relocs(const char *path);
+int wl_needs_ifunc_resolution(const char *path);
 int wl_write_loadable_copy(const char *path, const char *target, int retag);
 void wl_copy_needed_siblings(const char *path, const char *dir, int depth);
 void wl_copy_apk_needed(const char *path, const char *apk_lib_dir, const char *dir, int (*shared)(const char *name));
@@ -1634,6 +1635,23 @@ void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
     char staged[512];
     const char *redirected = westlake_staged_apk_member(file, staged, sizeof(staged));
     const char *path = redirected != NULL ? redirected : file;
+    /* A library with IFUNC relocations (android_relocs.c), as ART loads Edge's libtelclient.so and
+     * Yandex Browser's main library: its copy with them resolved, opened in this namespace. The
+     * original is never opened: musl rejects it, and a failed load can fault in musl's clean-up. */
+    char dir[512], target[768];
+    const char *base = path != NULL ? strrchr(path, '/') : NULL;
+    if (base != NULL && path[0] == '/' && !(mode & RTLD_NOLOAD) && wl_needs_ifunc_resolution(path)) {
+        if (westlake_exec_copy_dir(path, dir, sizeof(dir)) == 0 &&
+            snprintf(target, sizeof(target), "%s%s", dir, base) < (int) sizeof(target) &&
+            wl_write_loadable_copy(path, target, 1) == 0) {
+            void *handle = real_dlopen_ns(ns, target, mode);
+            wl_relocs_log("[WESTLAKE-LOADER] %s: %s its copy with IFUNCs resolved, %s\n", path,
+                          handle != NULL ? "loaded" : "failed to load", target);
+            return handle;
+        }
+        wl_relocs_log("[WESTLAKE-LOADER] %s: no copy with its IFUNCs resolved; not loaded\n", path);
+        return NULL;
+    }
     void *by_name = westlake_open_lib_by_name(westlake_real_dlopen_ns_fn, ns, path, mode,
                                               westlake_searches_staged_first(ns));
     return by_name != NULL ? by_name : real_dlopen_ns(ns, path, mode);
@@ -1903,8 +1921,9 @@ void *dlopen(const char *filename, int flags)
         }
     }
     if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
-        wl_needs_android_relocs(actual_filename)) {
-        /* Never the original: musl would leave its RELR pointers unrelocated (SIGSEGV). */
+        (wl_needs_android_relocs(actual_filename) || wl_needs_ifunc_resolution(actual_filename))) {
+        /* Never the original: musl would leave its RELR pointers unrelocated (SIGSEGV), or reject
+         * its IFUNC relocations, and a failed load can fault in musl's clean-up. */
         return westlake_load_android_relocs(real_dlopen, actual_filename, flags);
     }
     if (actual_filename != NULL && !(flags & RTLD_NOLOAD) && caller_is_android_dso(caller, NULL)) {
