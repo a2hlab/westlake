@@ -71,6 +71,17 @@ LIBNATIVEWINDOW {
         ANativeWindow_setBuffersDataSpace;
 };
 
+/*
+ * libbinder_ndk.so's version (API 29), for the calls the runtime's libbinder_ndk.so does not define:
+ * Edge's libchrome.so imports AIBinder_getCallingPid@LIBBINDER_NDK and did not load without it. The
+ * runtime's library has no versions, so it still answers the other LIBBINDER_NDK imports.
+ */
+LIBBINDER_NDK {
+    global:
+        AIBinder_getCallingPid;
+        AIBinder_getCallingUid;
+};
+
 LIBC {
     global:
         *;

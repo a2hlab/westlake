@@ -3654,6 +3654,22 @@ int isnanf(float value)
 }
 
 /*
+ * libbinder_ndk's AIBinder_getCallingPid and AIBinder_getCallingUid (API 29), which the runtime's
+ * libbinder_ndk.so does not define: Edge's libchrome.so imports the first and failed to relocate
+ * on it. Binder calls in this runtime stay in the process, and Android answers a caller outside an
+ * incoming transaction with its own pid and uid, so those are the answers.
+ */
+pid_t AIBinder_getCallingPid(void)
+{
+    return getpid();
+}
+
+uid_t AIBinder_getCallingUid(void)
+{
+    return getuid();
+}
+
+/*
  * The NDK's ASharedMemory (libandroid.so, API 26), which neither OH nor the runtime's or the
  * WebView's libandroid.so provides: Instagram's and Messenger's libstartup.so failed to relocate on
  * ASharedMemory_create. Android backs it with ashmem; a sealable memfd gives the same fd-passing,
