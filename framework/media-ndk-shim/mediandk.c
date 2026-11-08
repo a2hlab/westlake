@@ -12,7 +12,11 @@
  * usual signal to fall back to software decoding.
  *
  * AMediaFormat is the exception. It is a plain key/value container in AOSP too, with no service
- * behind it, so it is implemented in full: values set are read back.
+ * behind it, so it is implemented in full: values set are read back. So are the other plain-data
+ * objects, codec crypto info and an app's data source callbacks.
+ *
+ * Every symbol AOSP's libmediandk.so exports is here (libmediandk.map.txt): a library that names
+ * one that is missing does not load at all.
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -31,6 +35,7 @@ typedef int media_status_t;
 #define AMEDIA_ERROR_INVALID_OBJECT (-10003)
 #define AMEDIA_ERROR_INVALID_PARAMETER (-10004)
 #define AMEDIA_ERROR_INVALID_OPERATION (-10005)
+#define AMEDIA_ERROR_END_OF_STREAM (-10006)
 
 /* --- AMediaFormat keys: AOSP's values (NdkMediaFormat.cpp) --------------------------------- */
 
@@ -79,6 +84,108 @@ EXPORT const char* AMEDIAFORMAT_KEY_STRIDE = "stride";
 EXPORT const char* AMEDIAFORMAT_KEY_TIME_US = "timeUs";
 EXPORT const char* AMEDIAFORMAT_KEY_TRACK_ID = "track-id";
 EXPORT const char* AMEDIAFORMAT_KEY_WIDTH = "width";
+
+/* The rest of the keys AOSP's libmediandk.so exports, with its values (NdkMediaFormat.cpp,
+ * NdkMediaCodec.cpp). A key is a data symbol: a library that names one this library lacked failed
+ * to load, as Yandex Browser's did for AMEDIAFORMAT_KEY_TEMPORAL_LAYERING. */
+EXPORT const char* AMEDIACODEC_KEY_HDR10_PLUS_INFO = "hdr10-plus-info";
+EXPORT const char* AMEDIACODEC_KEY_LOW_LATENCY = "low-latency";
+EXPORT const char* AMEDIACODEC_KEY_OFFSET_TIME = "time-offset-us";
+EXPORT const char* AMEDIACODEC_KEY_REQUEST_SYNC_FRAME = "request-sync";
+EXPORT const char* AMEDIACODEC_KEY_SUSPEND = "drop-input-frames";
+EXPORT const char* AMEDIACODEC_KEY_SUSPEND_TIME = "drop-start-time-us";
+EXPORT const char* AMEDIACODEC_KEY_VIDEO_BITRATE = "video-bitrate";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_DRC_ATTENUATION_FACTOR = "aac-drc-cut-level";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_DRC_BOOST_FACTOR = "aac-drc-boost-level";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_DRC_HEAVY_COMPRESSION = "aac-drc-heavy-compression";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_DRC_TARGET_REFERENCE_LEVEL = "aac-target-ref-level";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_ENCODED_TARGET_LEVEL = "aac-encoded-target-level";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_MAX_OUTPUT_CHANNEL_COUNT = "aac-max-output-channel_count";
+EXPORT const char* AMEDIAFORMAT_KEY_AAC_SBR_MODE = "aac-sbr-mode";
+EXPORT const char* AMEDIAFORMAT_KEY_ALBUM = "album";
+EXPORT const char* AMEDIAFORMAT_KEY_ALBUMART = "albumart";
+EXPORT const char* AMEDIAFORMAT_KEY_ALBUMARTIST = "albumartist";
+EXPORT const char* AMEDIAFORMAT_KEY_ALLOW_FRAME_DROP = "allow-frame-drop";
+EXPORT const char* AMEDIAFORMAT_KEY_ARTIST = "artist";
+EXPORT const char* AMEDIAFORMAT_KEY_AUDIO_PRESENTATION_INFO = "audio-presentation-info";
+EXPORT const char* AMEDIAFORMAT_KEY_AUDIO_SESSION_ID = "audio-session-id";
+EXPORT const char* AMEDIAFORMAT_KEY_AUTHOR = "author";
+EXPORT const char* AMEDIAFORMAT_KEY_BITS_PER_SAMPLE = "bits-per-sample";
+EXPORT const char* AMEDIAFORMAT_KEY_CDTRACKNUMBER = "cdtracknum";
+EXPORT const char* AMEDIAFORMAT_KEY_COMPILATION = "compilation";
+EXPORT const char* AMEDIAFORMAT_KEY_COMPLEXITY = "complexity";
+EXPORT const char* AMEDIAFORMAT_KEY_COMPOSER = "composer";
+EXPORT const char* AMEDIAFORMAT_KEY_CREATE_INPUT_SURFACE_SUSPENDED = "create-input-buffers-suspended";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_DEFAULT_IV_SIZE = "crypto-default-iv-size";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_ENCRYPTED_BYTE_BLOCK = "crypto-encrypted-byte-block";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_ENCRYPTED_SIZES = "crypto-encrypted-sizes";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_IV = "crypto-iv";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_KEY = "crypto-key";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_MODE = "crypto-mode";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_PLAIN_SIZES = "crypto-plain-sizes";
+EXPORT const char* AMEDIAFORMAT_KEY_CRYPTO_SKIP_BYTE_BLOCK = "crypto-skip-byte-block";
+EXPORT const char* AMEDIAFORMAT_KEY_CSD = "csd";
+EXPORT const char* AMEDIAFORMAT_KEY_CSD_AVC = "csd-avc";
+EXPORT const char* AMEDIAFORMAT_KEY_CSD_HEVC = "csd-hevc";
+EXPORT const char* AMEDIAFORMAT_KEY_D263 = "d263";
+EXPORT const char* AMEDIAFORMAT_KEY_DATE = "date";
+EXPORT const char* AMEDIAFORMAT_KEY_DISCNUMBER = "discnum";
+EXPORT const char* AMEDIAFORMAT_KEY_DISPLAY_CROP = "crop";
+EXPORT const char* AMEDIAFORMAT_KEY_ESDS = "esds";
+EXPORT const char* AMEDIAFORMAT_KEY_EXIF_OFFSET = "exif-offset";
+EXPORT const char* AMEDIAFORMAT_KEY_EXIF_SIZE = "exif-size";
+EXPORT const char* AMEDIAFORMAT_KEY_FLAC_COMPRESSION_LEVEL = "flac-compression-level";
+EXPORT const char* AMEDIAFORMAT_KEY_FRAME_COUNT = "frame-count";
+EXPORT const char* AMEDIAFORMAT_KEY_GENRE = "genre";
+EXPORT const char* AMEDIAFORMAT_KEY_GRID_COLUMNS = "grid-cols";
+EXPORT const char* AMEDIAFORMAT_KEY_GRID_ROWS = "grid-rows";
+EXPORT const char* AMEDIAFORMAT_KEY_HAPTIC_CHANNEL_COUNT = "haptic-channel-count";
+EXPORT const char* AMEDIAFORMAT_KEY_HDR10_PLUS_INFO = "hdr10-plus-info";
+EXPORT const char* AMEDIAFORMAT_KEY_HDR_STATIC_INFO = "hdr-static-info";
+EXPORT const char* AMEDIAFORMAT_KEY_ICC_PROFILE = "icc-profile";
+EXPORT const char* AMEDIAFORMAT_KEY_IS_AUTOSELECT = "is-autoselect";
+EXPORT const char* AMEDIAFORMAT_KEY_IS_DEFAULT = "is-default";
+EXPORT const char* AMEDIAFORMAT_KEY_IS_FORCED_SUBTITLE = "is-forced-subtitle";
+EXPORT const char* AMEDIAFORMAT_KEY_LAST_SAMPLE_INDEX_IN_CHUNK = "last-sample-index-in-chunk";
+EXPORT const char* AMEDIAFORMAT_KEY_LOCATION = "location";
+EXPORT const char* AMEDIAFORMAT_KEY_LOOP = "loop";
+EXPORT const char* AMEDIAFORMAT_KEY_LYRICIST = "lyricist";
+EXPORT const char* AMEDIAFORMAT_KEY_MANUFACTURER = "manufacturer";
+EXPORT const char* AMEDIAFORMAT_KEY_MAX_BIT_RATE = "max-bitrate";
+EXPORT const char* AMEDIAFORMAT_KEY_MAX_B_FRAMES = "max-bframes";
+EXPORT const char* AMEDIAFORMAT_KEY_MAX_FPS_TO_ENCODER = "max-fps-to-encoder";
+EXPORT const char* AMEDIAFORMAT_KEY_MAX_PTS_GAP_TO_ENCODER = "max-pts-gap-to-encoder";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEG2_STREAM_HEADER = "mpeg2-stream-header";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEGH_COMPATIBLE_SETS = "mpegh-compatible-sets";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEGH_PROFILE_LEVEL_INDICATION = "mpegh-profile-level-indication";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEGH_REFERENCE_CHANNEL_LAYOUT = "mpegh-reference-channel-layout";
+EXPORT const char* AMEDIAFORMAT_KEY_MPEG_USER_DATA = "mpeg-user-data";
+EXPORT const char* AMEDIAFORMAT_KEY_PCM_BIG_ENDIAN = "pcm-big-endian";
+EXPORT const char* AMEDIAFORMAT_KEY_PSSH = "pssh";
+EXPORT const char* AMEDIAFORMAT_KEY_SAMPLE_FILE_OFFSET = "sample-file-offset";
+EXPORT const char* AMEDIAFORMAT_KEY_SAMPLE_TIME_BEFORE_APPEND = "sample-time-before-append";
+EXPORT const char* AMEDIAFORMAT_KEY_SAR_HEIGHT = "sar-height";
+EXPORT const char* AMEDIAFORMAT_KEY_SAR_WIDTH = "sar-width";
+EXPORT const char* AMEDIAFORMAT_KEY_SEI = "sei";
+EXPORT const char* AMEDIAFORMAT_KEY_SLOW_MOTION_MARKERS = "slow-motion-markers";
+EXPORT const char* AMEDIAFORMAT_KEY_TARGET_TIME = "target-time";
+EXPORT const char* AMEDIAFORMAT_KEY_TEMPORAL_LAYERING = "ts-schema";
+EXPORT const char* AMEDIAFORMAT_KEY_TEMPORAL_LAYER_COUNT = "temporal-layer-count";
+EXPORT const char* AMEDIAFORMAT_KEY_TEMPORAL_LAYER_ID = "temporal-layer-id";
+EXPORT const char* AMEDIAFORMAT_KEY_TEXT_FORMAT_DATA = "text-format-data";
+EXPORT const char* AMEDIAFORMAT_KEY_THUMBNAIL_CSD_AV1C = "thumbnail-csd-av1c";
+EXPORT const char* AMEDIAFORMAT_KEY_THUMBNAIL_CSD_HEVC = "thumbnail-csd-hevc";
+EXPORT const char* AMEDIAFORMAT_KEY_THUMBNAIL_HEIGHT = "thumbnail-height";
+EXPORT const char* AMEDIAFORMAT_KEY_THUMBNAIL_TIME = "thumbnail-time";
+EXPORT const char* AMEDIAFORMAT_KEY_THUMBNAIL_WIDTH = "thumbnail-width";
+EXPORT const char* AMEDIAFORMAT_KEY_TILE_HEIGHT = "tile-height";
+EXPORT const char* AMEDIAFORMAT_KEY_TILE_WIDTH = "tile-width";
+EXPORT const char* AMEDIAFORMAT_KEY_TITLE = "title";
+EXPORT const char* AMEDIAFORMAT_KEY_TRACK_INDEX = "track-index";
+EXPORT const char* AMEDIAFORMAT_KEY_VALID_SAMPLES = "valid-samples";
+EXPORT const char* AMEDIAFORMAT_KEY_XMP_OFFSET = "xmp-offset";
+EXPORT const char* AMEDIAFORMAT_KEY_XMP_SIZE = "xmp-size";
+EXPORT const char* AMEDIAFORMAT_KEY_YEAR = "year";
 
 /* --- AMediaFormat: a key/value store --------------------------------------------------------- */
 
@@ -357,14 +464,134 @@ EXPORT media_status_t AMediaCodec_setParameters(AMediaCodec* codec, const AMedia
     return AMEDIA_ERROR_INVALID_OBJECT;
 }
 
-/* Crypto info is plain data on Android too; it only matters once a codec exists. */
-typedef struct AMediaCodecCryptoInfo { int subsamples; } AMediaCodecCryptoInfo;
+/* The rest of NdkMediaCodec.h. Chromium's media code (Yandex Browser, Edge, Brave) imports the
+ * API 28 calls; with one of them missing the browser's main library failed to load and Yandex
+ * showed "Installation error. Please delete app and reinstall it". With no codec, each answers as
+ * for a codec that does not exist. */
+
+typedef struct ANativeWindow ANativeWindow;
+
+/* Passed by value, as in AOSP: the type fixes how the arguments after it are passed. */
+typedef struct AMediaCodecOnAsyncNotifyCallback {
+    void (*onAsyncInputAvailable)(AMediaCodec* codec, void* userdata, int32_t index);
+    void (*onAsyncOutputAvailable)(AMediaCodec* codec, void* userdata, int32_t index, void* bufferInfo);
+    void (*onAsyncFormatChanged)(AMediaCodec* codec, void* userdata, AMediaFormat* format);
+    void (*onAsyncError)(AMediaCodec* codec, void* userdata, media_status_t error, int32_t actionCode,
+                         const char* detail);
+} AMediaCodecOnAsyncNotifyCallback;
+
+typedef void (*AMediaCodecOnFrameRendered)(AMediaCodec* codec, void* userdata, int64_t mediaTimeUs,
+                                           int64_t systemNano);
+
+EXPORT AMediaCodec* AMediaCodec_createCodecByNameForClient(const char* name, pid_t pid, uid_t uid) {
+    (void)name; (void)pid; (void)uid;
+    return NULL;
+}
+
+EXPORT AMediaCodec* AMediaCodec_createDecoderByTypeForClient(const char* mime, pid_t pid, uid_t uid) {
+    (void)mime; (void)pid; (void)uid;
+    return NULL;
+}
+
+EXPORT AMediaCodec* AMediaCodec_createEncoderByTypeForClient(const char* mime, pid_t pid, uid_t uid) {
+    (void)mime; (void)pid; (void)uid;
+    return NULL;
+}
+
+EXPORT media_status_t AMediaCodec_setOutputSurface(AMediaCodec* codec, ANativeWindow* surface) {
+    (void)codec; (void)surface;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+EXPORT media_status_t AMediaCodec_createInputSurface(AMediaCodec* codec, ANativeWindow** surface) {
+    (void)codec;
+    if (surface != NULL) *surface = NULL;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+/* A persistent input surface needs no codec in AOSP, but it is a codec's input surface all the same. */
+EXPORT media_status_t AMediaCodec_createPersistentInputSurface(ANativeWindow** surface) {
+    if (surface != NULL) *surface = NULL;
+    return AMEDIA_ERROR_UNSUPPORTED;
+}
+
+EXPORT media_status_t AMediaCodec_setInputSurface(AMediaCodec* codec, ANativeWindow* surface) {
+    (void)codec; (void)surface;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+EXPORT media_status_t AMediaCodec_signalEndOfInputStream(AMediaCodec* codec) {
+    (void)codec;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+EXPORT AMediaFormat* AMediaCodec_getBufferFormat(AMediaCodec* codec, size_t index) {
+    (void)codec; (void)index;
+    return NULL;
+}
+
+EXPORT media_status_t AMediaCodec_getName(AMediaCodec* codec, char** outName) {
+    (void)codec;
+    if (outName != NULL) *outName = NULL;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+/* AOSP frees the name getName allocated. */
+EXPORT void AMediaCodec_releaseName(AMediaCodec* codec, char* name) {
+    (void)codec;
+    free(name);
+}
+
+EXPORT media_status_t AMediaCodec_releaseCrypto(AMediaCodec* codec) {
+    (void)codec;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+EXPORT media_status_t AMediaCodec_setAsyncNotifyCallback(AMediaCodec* codec, AMediaCodecOnAsyncNotifyCallback callback,
+                                                         void* userdata) {
+    (void)codec; (void)callback; (void)userdata;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+EXPORT media_status_t AMediaCodec_setOnFrameRenderedCallback(AMediaCodec* codec, AMediaCodecOnFrameRendered callback,
+                                                             void* userdata) {
+    (void)codec; (void)callback; (void)userdata;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+/* AOSP's action codes (MediaErrors.h): fatal 0, transient 1, recoverable 2. */
+EXPORT bool AMediaCodecActionCode_isRecoverable(int32_t actionCode) { return actionCode == 2; }
+EXPORT bool AMediaCodecActionCode_isTransient(int32_t actionCode) { return actionCode == 1; }
+
+/* Crypto info is plain data on Android too, kept as given and read back as in AOSP; it only matters
+ * once a codec exists. */
+typedef struct AMediaCodecCryptoInfo {
+    int subsamples;
+    uint8_t key[16];
+    uint8_t iv[16];
+    int mode;
+    size_t* clearBytes;       /* subsamples entries each, stored after the struct */
+    size_t* encryptedBytes;
+} AMediaCodecCryptoInfo;
 
 EXPORT AMediaCodecCryptoInfo* AMediaCodecCryptoInfo_new(int subsamples, uint8_t key[16], uint8_t iv[16], int mode,
                                                          size_t* clearBytes, size_t* encryptedBytes) {
-    (void)key; (void)iv; (void)mode; (void)clearBytes; (void)encryptedBytes;
-    AMediaCodecCryptoInfo* info = calloc(1, sizeof(AMediaCodecCryptoInfo));
-    if (info != NULL) info->subsamples = subsamples;
+    size_t count = subsamples > 0 ? (size_t)subsamples : 0;
+    size_t size;
+    if (__builtin_mul_overflow(sizeof(size_t) * 2, count, &size) ||
+        __builtin_add_overflow(size, sizeof(AMediaCodecCryptoInfo), &size)) {
+        return NULL;
+    }
+    AMediaCodecCryptoInfo* info = calloc(1, size);
+    if (info == NULL) return NULL;
+    info->subsamples = subsamples;
+    if (key != NULL) memcpy(info->key, key, 16);
+    if (iv != NULL) memcpy(info->iv, iv, 16);
+    info->mode = mode;
+    info->clearBytes = (size_t*)(info + 1);
+    info->encryptedBytes = info->clearBytes + count;
+    if (clearBytes != NULL) memcpy(info->clearBytes, clearBytes, count * sizeof(size_t));
+    if (encryptedBytes != NULL) memcpy(info->encryptedBytes, encryptedBytes, count * sizeof(size_t));
     return info;
 }
 
@@ -375,6 +602,39 @@ EXPORT media_status_t AMediaCodecCryptoInfo_delete(AMediaCodecCryptoInfo* info) 
 
 EXPORT void AMediaCodecCryptoInfo_setPattern(AMediaCodecCryptoInfo* info, void* pattern) {
     (void)info; (void)pattern;
+}
+
+EXPORT size_t AMediaCodecCryptoInfo_getNumSubSamples(AMediaCodecCryptoInfo* info) {
+    return info == NULL || info->subsamples < 0 ? 0 : (size_t)info->subsamples;
+}
+
+EXPORT int AMediaCodecCryptoInfo_getMode(AMediaCodecCryptoInfo* info) {
+    return info == NULL ? AMEDIA_ERROR_INVALID_OBJECT : info->mode;
+}
+
+static media_status_t copy_out(AMediaCodecCryptoInfo* info, void* dst, const void* src, size_t size) {
+    if (info == NULL) return AMEDIA_ERROR_INVALID_OBJECT;
+    if (dst == NULL) return AMEDIA_ERROR_INVALID_PARAMETER;
+    memcpy(dst, src, size);
+    return AMEDIA_OK;
+}
+
+EXPORT media_status_t AMediaCodecCryptoInfo_getKey(AMediaCodecCryptoInfo* info, uint8_t* dst) {
+    return copy_out(info, dst, info == NULL ? NULL : info->key, 16);
+}
+
+EXPORT media_status_t AMediaCodecCryptoInfo_getIV(AMediaCodecCryptoInfo* info, uint8_t* dst) {
+    return copy_out(info, dst, info == NULL ? NULL : info->iv, 16);
+}
+
+EXPORT media_status_t AMediaCodecCryptoInfo_getClearBytes(AMediaCodecCryptoInfo* info, size_t* dst) {
+    return copy_out(info, dst, info == NULL ? NULL : info->clearBytes,
+                    AMediaCodecCryptoInfo_getNumSubSamples(info) * sizeof(size_t));
+}
+
+EXPORT media_status_t AMediaCodecCryptoInfo_getEncryptedBytes(AMediaCodecCryptoInfo* info, size_t* dst) {
+    return copy_out(info, dst, info == NULL ? NULL : info->encryptedBytes,
+                    AMediaCodecCryptoInfo_getNumSubSamples(info) * sizeof(size_t));
 }
 
 /* --- AMediaCrypto and AMediaDrm: no DRM scheme is supported ------------------------------------ */
@@ -492,6 +752,88 @@ EXPORT media_status_t AMediaExtractor_seekTo(AMediaExtractor* extractor, int64_t
     return AMEDIA_ERROR_INVALID_OPERATION;
 }
 
+/* The rest of NdkMediaExtractor.h, answered as for an extractor with no data source: no sample,
+ * no cached data, no DRM information. */
+
+typedef struct AMediaDataSource AMediaDataSource;
+
+EXPORT media_status_t AMediaExtractor_setDataSourceCustom(AMediaExtractor* extractor, AMediaDataSource* src) {
+    (void)src;
+    return extractor == NULL ? AMEDIA_ERROR_INVALID_OBJECT : AMEDIA_ERROR_UNSUPPORTED;
+}
+
+/* An empty format the caller deletes, as for getTrackFormat. */
+EXPORT AMediaFormat* AMediaExtractor_getFileFormat(AMediaExtractor* extractor) {
+    (void)extractor;
+    return AMediaFormat_new();
+}
+
+EXPORT media_status_t AMediaExtractor_getSampleFormat(AMediaExtractor* extractor, AMediaFormat* format) {
+    (void)extractor;
+    return format == NULL ? AMEDIA_ERROR_INVALID_PARAMETER : AMEDIA_ERROR_END_OF_STREAM;
+}
+
+EXPORT ssize_t AMediaExtractor_getSampleSize(AMediaExtractor* extractor) { (void)extractor; return -1; }
+EXPORT int64_t AMediaExtractor_getCachedDuration(AMediaExtractor* extractor) { (void)extractor; return -1; }
+EXPORT void* AMediaExtractor_getPsshInfo(AMediaExtractor* extractor) { (void)extractor; return NULL; }
+
+EXPORT AMediaCodecCryptoInfo* AMediaExtractor_getSampleCryptoInfo(AMediaExtractor* extractor) {
+    (void)extractor;
+    return NULL;
+}
+
+/* --- AMediaDataSource: the app's own callbacks, kept as in AOSP ------------------------------- */
+/* Only an extractor or player reads from a data source, and neither accepts one here; the
+ * object itself is the app's: callbacks and user data set are kept, and close calls the app's close.
+ * A data source for a URI needs AOSP's media HTTP service, so that one cannot be created. */
+
+typedef ssize_t (*AMediaDataSourceReadAt)(void* userdata, int64_t offset, void* buffer, size_t size);
+typedef ssize_t (*AMediaDataSourceGetSize)(void* userdata);
+typedef void (*AMediaDataSourceClose)(void* userdata);
+typedef ssize_t (*AMediaDataSourceGetAvailableSize)(void* userdata, int64_t offset);
+
+struct AMediaDataSource {
+    void* userdata;
+    AMediaDataSourceReadAt readAt;
+    AMediaDataSourceGetSize getSize;
+    AMediaDataSourceClose close;
+    AMediaDataSourceGetAvailableSize getAvailableSize;
+};
+
+EXPORT AMediaDataSource* AMediaDataSource_new(void) { return calloc(1, sizeof(AMediaDataSource)); }
+
+EXPORT AMediaDataSource* AMediaDataSource_newUri(const char* uri, int numHeaders, const char* const* keyValues) {
+    (void)uri; (void)numHeaders; (void)keyValues;
+    return NULL;
+}
+
+EXPORT void AMediaDataSource_delete(AMediaDataSource* source) { free(source); }
+
+EXPORT void AMediaDataSource_setUserdata(AMediaDataSource* source, void* userdata) {
+    if (source != NULL) source->userdata = userdata;
+}
+
+EXPORT void AMediaDataSource_setReadAt(AMediaDataSource* source, AMediaDataSourceReadAt readAt) {
+    if (source != NULL) source->readAt = readAt;
+}
+
+EXPORT void AMediaDataSource_setGetSize(AMediaDataSource* source, AMediaDataSourceGetSize getSize) {
+    if (source != NULL) source->getSize = getSize;
+}
+
+EXPORT void AMediaDataSource_setClose(AMediaDataSource* source, AMediaDataSourceClose close) {
+    if (source != NULL) source->close = close;
+}
+
+EXPORT void AMediaDataSource_setGetAvailableSize(AMediaDataSource* source,
+                                                 AMediaDataSourceGetAvailableSize getAvailableSize) {
+    if (source != NULL) source->getAvailableSize = getAvailableSize;
+}
+
+EXPORT void AMediaDataSource_close(AMediaDataSource* source) {
+    if (source != NULL && source->close != NULL) source->close(source->userdata);
+}
+
 /* --- AMediaMuxer: no muxer can be created ------------------------------------------------------ */
 
 typedef struct AMediaMuxer AMediaMuxer;
@@ -523,6 +865,18 @@ EXPORT media_status_t AMediaMuxer_writeSampleData(AMediaMuxer* muxer, size_t tra
     return AMEDIA_ERROR_INVALID_OBJECT;
 }
 
+EXPORT AMediaMuxer* AMediaMuxer_append(int fd, int mode) { (void)fd; (void)mode; return NULL; }
+
+EXPORT ssize_t AMediaMuxer_getTrackCount(AMediaMuxer* muxer) {
+    (void)muxer;
+    return AMEDIA_ERROR_INVALID_OBJECT;
+}
+
+EXPORT AMediaFormat* AMediaMuxer_getTrackFormat(AMediaMuxer* muxer, size_t index) {
+    (void)muxer; (void)index;
+    return NULL;
+}
+
 /* --- AImageReader: not supported --------------------------------------------------------------- */
 
 typedef struct AImageReader AImageReader;
@@ -539,6 +893,13 @@ EXPORT media_status_t AImageReader_newWithUsage(int32_t width, int32_t height, i
                                                 int32_t maxImages, AImageReader** reader) {
     (void)usage;
     return AImageReader_new(width, height, format, maxImages, reader);
+}
+
+EXPORT media_status_t AImageReader_newWithDataSpace(int32_t width, int32_t height, uint64_t usage, int32_t maxImages,
+                                                    uint32_t hardwareBufferFormat, int32_t dataSpace,
+                                                    AImageReader** reader) {
+    (void)usage; (void)dataSpace;
+    return AImageReader_new(width, height, (int32_t)hardwareBufferFormat, maxImages, reader);
 }
 
 EXPORT void AImageReader_delete(AImageReader* reader) { (void)reader; }
@@ -567,6 +928,8 @@ NO_READER(AImage_getPlanePixelStride, const AImage* image, int planeIndex, int32
 NO_READER(AImage_getPlaneRowStride, const AImage* image, int planeIndex, int32_t* rowStride)
 NO_READER(AImage_getPlaneData, const AImage* image, int planeIndex, uint8_t** data, int* dataLength)
 NO_READER(AImage_getHardwareBuffer, const AImage* image, void** buffer)
+NO_READER(AImage_getDataSpace, const AImage* image, int32_t* dataSpace)
+NO_READER(AImageReader_getWindowNativeHandle, AImageReader* reader, void** handle)
 
 EXPORT void AImage_delete(AImage* image) { (void)image; }
 EXPORT void AImage_deleteAsync(AImage* image, int releaseFenceFd) { (void)image; (void)releaseFenceFd; }
