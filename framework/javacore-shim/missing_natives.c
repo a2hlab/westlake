@@ -1307,7 +1307,9 @@ static jfieldID wl_GetStaticFieldID(JNIEnv* env, jclass c, const char* name, con
  * substrings in WESTLAKE_JNI_TRACE_STRINGS (a launcher --runtime-env): the length and the code units
  * in hex, with the calling library. A name that arrives garbled is then seen as its library built it:
  * Office asked its Java asset manager for "en-US/msointlandroid." followed by characters the log
- * could not print, and "officeandroid.odf" was cut at a different length in each run.
+ * could not print, and "officeandroid.odf" was cut at a different length in each run. A token that
+ * starts with '=' matches only the whole text (of a NewString, its first 64 characters): Hermes threw
+ * "Invalid subtag: i" for Midland's Intl.NumberFormat, and a lone "i" contains no substring worth tracing.
  */
 static jstring (*g_new_string)(JNIEnv*, const jchar*, jsize);
 static jstring (*g_new_string_utf)(JNIEnv*, const char*);
@@ -1319,7 +1321,7 @@ static int traced_text(const char* text)
     char wanted[256];
     snprintf(wanted, sizeof(wanted), "%s", g_trace_strings);
     for (char* save = NULL, *token = strtok_r(wanted, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save)) {
-        if (*token != '\0' && strstr(text, token) != NULL) return 1;
+        if (*token == '=' ? strcmp(text, token + 1) == 0 : *token != '\0' && strstr(text, token) != NULL) return 1;
     }
     return 0;
 }
