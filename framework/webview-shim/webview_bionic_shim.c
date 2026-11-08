@@ -14,6 +14,7 @@
 #include <netpacket/packet.h>
 #include <net/if.h>
 #include <pthread.h>
+#include <threads.h>
 #include <pwd.h>
 #include <sched.h>
 #include <signal.h>
@@ -638,6 +639,21 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
     westlake_adopt_bionic_mutex_type(mutex);
     int result = pthread_mutex_timedlock(mutex, &past);
     return result == ETIMEDOUT || result == EDEADLK ? EBUSY : result;
+}
+
+/*
+ * A null pthread_t. Bionic looks a thread up in its list before acting on it and answers ESRCH for
+ * one it does not know; for a null one, "a common mistake" in its source's words, it adds only a log
+ * warning. musl takes the pthread_t for its thread structure. Insta360's SysInfo.nativeInit stores
+ * what pthread_create returned over the handle it was just given and detaches that, which is thread 0
+ * whenever the create succeeded, and musl faulted at address 0x34. musl's thrd_detach is its
+ * pthread_detach under the C11 name (one function, two names), so no dlsym is needed (see
+ * pthread_mutex_trylock).
+ */
+int pthread_detach(pthread_t thread)
+{
+    if (thread == 0) return ESRCH;
+    return thrd_detach((thrd_t) thread);
 }
 
 /*
@@ -1819,6 +1835,21 @@ void *dlopen(const char *filename, int flags)
      * WebView's.  Opens actual_filename, so a WebView redirect decided above is what gets tried;
      * the .z.so spelling is only ever derived from a bare name the caller passed.
      */
+    /*
+     * A library the launcher routes to the Android namespace, asked for by bare name: opened there
+     * before the probe below, which opens the plain name in the default namespace first. There the
+     * library's libc++_shared.so is OH's (another C++ ABI), so that load fails, and OH's loader can
+     * fault in the clean-up after a failed load. Zoom's libmcm_neon, libzlt, libzNet and libzData each
+     * failed there before the redirect further down opened them; the clean-up after the fourth
+     * faulted in dlopen_impl, holding the loader lock, and OH's dumper timed out.
+     */
+    if (basename != NULL && basename == filename && actual_filename == filename &&
+        !(flags & RTLD_NOLOAD) && caller_is_android_dso(caller, NULL)) {
+        void *routed = westlake_open_routed_lib(filename, flags);
+        if (routed != NULL) {
+            return routed;
+        }
+    }
     static char suffixed[512];
     if (basename != NULL && basename == filename) {
         size_t length = strlen(filename);
@@ -5794,3 +5825,14 @@ int __fpclassifyd(double x)
     default: return 0x10;
     }
 }
+
+/*
+ * Bionic's floating-point trap controls. Bionic, like glibc, exports feenableexcept, fedisableexcept
+ * and fegetexcept; musl has none of them. arm64 traps no floating-point exception, and Bionic answers
+ * accordingly: enabling one fails, disabling one succeeds, and none is enabled. WeChat's libXNet.so
+ * imports fegetexcept; its load failed on the missing symbol, and OH's loader then faulted in the
+ * clean-up after the failed load.
+ */
+int feenableexcept(int mask) { (void) mask; return -1; }
+int fedisableexcept(int mask) { (void) mask; return 0; }
+int fegetexcept(void) { return 0; }
