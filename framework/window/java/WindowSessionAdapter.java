@@ -1019,6 +1019,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         synchronized (mWindowAttrs) {
             mWindowAttrs.remove(window.asBinder());
         }
+        WindowIdStandIn.removed(window.asBinder());
         OhWindowPolicy.remove(window);
         OhInsetsBridge.remove(window);
         logBridged("remove", "-> OH ISession.Disconnect");
@@ -1714,12 +1715,15 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     }
 
     /**
-     * [STUB] getWindowId - OH accessibility window ID
+     * [STAND-IN] getWindowId -> the window's id (WindowIdStandIn) while the window is added, as WMS
+     * answers with WindowState.mWindowId; null for a window not added, as WMS answers.
      */
     @Override
     public IWindowId getWindowId(IBinder window) throws RemoteException {
-        logStub("getWindowId", "OH accessibility window ID not mapped");
-        return null;
+        synchronized (mWindowAttrs) {
+            if (window == null || !mWindowAttrs.containsKey(window)) return null;
+        }
+        return WindowIdStandIn.of(window);
     }
 
     /**
