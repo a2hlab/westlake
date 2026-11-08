@@ -1369,6 +1369,48 @@ static jstring wl_NewStringUTF(JNIEnv* env, const char* bytes)
     return g_new_string_utf(env, bytes);
 }
 
+/*
+ * Java exceptions a native library takes off the stack, printed first when the library's file name
+ * holds one of the comma-separated substrings in WESTLAKE_JNI_TRACE_EXCEPTIONS (a launcher
+ * --runtime-env). fbjni turns a pending Java exception into a C++ JniException this way, and when
+ * React Native's JS thread does not catch it the process ends on "terminating with uncaught exception
+ * of type facebook::jni::JniException" with the Java exception printed nowhere (Midland's property
+ * app, at start, in every round). ExceptionDescribe prints it with its stack and clears it, which is
+ * what the caller asked for. At most 20.
+ */
+static void (*g_exception_clear)(JNIEnv*);
+static void (*g_exception_describe)(JNIEnv*);
+static jboolean (*g_exception_check)(JNIEnv*);
+static char g_trace_exceptions[256];
+static int g_traced_exceptions;
+
+static const char* traced_exception_library(const void* caller)
+{
+    Dl_info info;
+    if (dladdr(caller, &info) == 0 || info.dli_fname == NULL) return NULL;
+    const char* base = strrchr(info.dli_fname, '/');
+    base = base != NULL ? base + 1 : info.dli_fname;
+    char wanted[256];
+    snprintf(wanted, sizeof(wanted), "%s", g_trace_exceptions);
+    for (char* save = NULL, *token = strtok_r(wanted, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save)) {
+        if (*token != '\0' && strstr(base, token) != NULL) return base;
+    }
+    return NULL;
+}
+
+static void wl_ExceptionClear(JNIEnv* env)
+{
+    const char* library = g_exception_check(env) ? traced_exception_library(__builtin_return_address(0)) : NULL;
+    if (library != NULL && __atomic_fetch_add(&g_traced_exceptions, 1, __ATOMIC_RELAXED) < 20) {
+        char line[256];
+        snprintf(line, sizeof(line), "[WL-JNI-EXCEPTION] %s clears a pending Java exception:\n", library);
+        note(line);
+        g_exception_describe(env);
+        return;
+    }
+    g_exception_clear(env);
+}
+
 static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
 {
     typedef void (*SetTableOverrideFn)(const struct JNINativeInterface*);
@@ -1397,6 +1439,14 @@ static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
         g_new_string_utf = g_lookup_table.NewStringUTF;
         g_lookup_table.NewString = wl_NewString;
         g_lookup_table.NewStringUTF = wl_NewStringUTF;
+    }
+    const char* exceptions = getenv("WESTLAKE_JNI_TRACE_EXCEPTIONS");
+    if (exceptions != NULL && *exceptions != '\0') {
+        snprintf(g_trace_exceptions, sizeof(g_trace_exceptions), "%s", exceptions);
+        g_exception_clear = g_lookup_table.ExceptionClear;
+        g_exception_describe = g_lookup_table.ExceptionDescribe;
+        g_exception_check = g_lookup_table.ExceptionCheck;
+        g_lookup_table.ExceptionClear = wl_ExceptionClear;
     }
     set_override(&g_lookup_table);
     return 1;
