@@ -1302,6 +1302,73 @@ static jfieldID wl_GetStaticFieldID(JNIEnv* env, jclass c, const char* name, con
     return id;
 }
 
+/*
+ * Strings a native library hands to Java, logged when their text has one of the comma-separated
+ * substrings in WESTLAKE_JNI_TRACE_STRINGS (a launcher --runtime-env): the length and the code units
+ * in hex, with the calling library. A name that arrives garbled is then seen as its library built it:
+ * Office asked its Java asset manager for "en-US/msointlandroid." followed by characters the log
+ * could not print, and "officeandroid.odf" was cut at a different length in each run.
+ */
+static jstring (*g_new_string)(JNIEnv*, const jchar*, jsize);
+static jstring (*g_new_string_utf)(JNIEnv*, const char*);
+static char g_trace_strings[256];
+static int g_traced_strings;
+
+static int traced_text(const char* text)
+{
+    char wanted[256];
+    snprintf(wanted, sizeof(wanted), "%s", g_trace_strings);
+    for (char* save = NULL, *token = strtok_r(wanted, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save)) {
+        if (*token != '\0' && strstr(text, token) != NULL) return 1;
+    }
+    return 0;
+}
+
+static void log_traced_string(const char* kind, const void* caller, const char* text, const char* hex, int length)
+{
+    char line[1024];
+    Dl_info info;
+    const char* library = dladdr(caller, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?";
+    const char* base = strrchr(library, '/');
+    if (__atomic_fetch_add(&g_traced_strings, 1, __ATOMIC_RELAXED) >= 200) return;
+    snprintf(line, sizeof(line), "[WL-JNI-STRING] %s from %s+0x%lx len=%d text=\"%s\" units=%s\n", kind,
+             base != NULL ? base + 1 : library,
+             (unsigned long) ((const char*) caller - (const char*) (info.dli_fbase != NULL ? info.dli_fbase : 0)),
+             length, text, hex);
+    note(line);
+}
+
+static jstring wl_NewString(JNIEnv* env, const jchar* units, jsize length)
+{
+    if (units != NULL && length > 0) {
+        char text[160], hex[400];
+        int n = length < 64 ? length : 64, t = 0, h = 0;
+        for (int i = 0; i < n; i++) {
+            text[t++] = units[i] >= 0x20 && units[i] < 0x7f && units[i] != '"' ? (char) units[i] : '.';
+            h += snprintf(hex + h, sizeof(hex) - (size_t) h, "%s%04x", i ? " " : "", units[i]);
+        }
+        text[t] = '\0';
+        if (traced_text(text)) log_traced_string("NewString", __builtin_return_address(0), text, hex, length);
+    }
+    return g_new_string(env, units, length);
+}
+
+static jstring wl_NewStringUTF(JNIEnv* env, const char* bytes)
+{
+    if (bytes != NULL && traced_text(bytes)) {
+        char text[160], hex[400];
+        int length = (int) strlen(bytes), n = length < 64 ? length : 64, t = 0, h = 0;
+        for (int i = 0; i < n; i++) {
+            unsigned char c = (unsigned char) bytes[i];
+            text[t++] = c >= 0x20 && c < 0x7f && c != '"' ? (char) c : '.';
+            h += snprintf(hex + h, sizeof(hex) - (size_t) h, "%s%02x", i ? " " : "", c);
+        }
+        text[t] = '\0';
+        log_traced_string("NewStringUTF", __builtin_return_address(0), text, hex, length);
+    }
+    return g_new_string_utf(env, bytes);
+}
+
 static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
 {
     typedef void (*SetTableOverrideFn)(const struct JNINativeInterface*);
@@ -1323,6 +1390,14 @@ static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
     g_lookup_table.GetStaticMethodID = wl_GetStaticMethodID;
     g_lookup_table.GetFieldID = wl_GetFieldID;
     g_lookup_table.GetStaticFieldID = wl_GetStaticFieldID;
+    const char* traced = getenv("WESTLAKE_JNI_TRACE_STRINGS");
+    if (traced != NULL && *traced != '\0') {
+        snprintf(g_trace_strings, sizeof(g_trace_strings), "%s", traced);
+        g_new_string = g_lookup_table.NewString;
+        g_new_string_utf = g_lookup_table.NewStringUTF;
+        g_lookup_table.NewString = wl_NewString;
+        g_lookup_table.NewStringUTF = wl_NewStringUTF;
+    }
     set_override(&g_lookup_table);
     return 1;
 }
