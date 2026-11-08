@@ -493,8 +493,17 @@ static void westlake_log_install(const char *kind, int signal_number, const void
  * instruction for Breakpad's handler to catch, and FFRT's handler took the trap instead and the
  * process died. Trap hooks and CPU-feature probes use these two signals; SIGSEGV and the rest stay
  * as OH sets them.
+ *
+ * The claim ends when the app hands the signal back: it installs SIG_DFL or SIG_IGN, or puts back
+ * the handler OH's code had installed before it (westlake_oh_handlers, the last one OH applied). A
+ * crash reporter does the latter when it has handled a trap: it restores the handler it displaced
+ * and returns, so the trap reaches that handler next. Naver's Whale did so after a CHECK, which put
+ * FFRT's handler back; FFRT then restores its own predecessor and returns in the same way, and with
+ * the claim still standing that was refused, so FFRT's handler took the same trap 567,000 times
+ * before the dump.
  */
 static volatile unsigned int westlake_android_signal_claims;
+static void *volatile westlake_oh_handlers[32];
 
 static int westlake_claimable_signal(int signal_number)
 {
@@ -513,7 +522,8 @@ static int westlake_android_sigaction(int signal_number, const struct westlake_w
     if (result == 0 && action != NULL && westlake_claimable_signal(signal_number)) {
         void (*handler)(int) = action->callback.handler;
         unsigned int bit = 1u << signal_number;
-        if (handler == SIG_DFL || handler == SIG_IGN) {
+        void *oh_handler = __atomic_load_n(&westlake_oh_handlers[signal_number], __ATOMIC_RELAXED);
+        if (handler == SIG_DFL || handler == SIG_IGN || (oh_handler != NULL && (void *) handler == oh_handler)) {
             __atomic_fetch_and(&westlake_android_signal_claims, ~bit, __ATOMIC_RELAXED);
         } else {
             __atomic_fetch_or(&westlake_android_signal_claims, bit, __ATOMIC_RELAXED);
@@ -552,7 +562,11 @@ int sigaction(int signal_number, const struct sigaction *action,
             return old_action != NULL ? real_sigaction(signal_number, NULL, old_action) : 0;
         }
     }
-    return real_sigaction(signal_number, action, old_action);
+    int result = real_sigaction(signal_number, action, old_action);
+    if (result == 0 && action != NULL && westlake_claimable_signal(signal_number)) {
+        __atomic_store_n(&westlake_oh_handlers[signal_number], (void *) action->sa_handler, __ATOMIC_RELAXED);
+    }
+    return result;
 }
 
 /*
