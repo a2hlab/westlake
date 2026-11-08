@@ -149,7 +149,7 @@ public class WindowCallbackBridge {
     private static void deliver(Object viewRootImpl, Object surface, boolean focused, String note) throws Exception {
         Boolean deliver = updateFocusGroup(viewRootImpl, surface, focused);
         if (deliver == null) return;   // the group's focus did not change
-        viewRootImpl.getClass().getMethod("windowFocusChanged", boolean.class).invoke(viewRootImpl, deliver);
+        latch(viewRootImpl, deliver);
         Log.d(TAG, "windowFocusChanged latched on ViewRootImpl(focused=" + deliver + note
                    + ") — main looper will dispatch after setView completes");
     }
@@ -217,7 +217,31 @@ public class WindowCallbackBridge {
         }
     }
 
-    private static Object viewRootOf(Object window) throws ReflectiveOperationException {
+    /**
+     * Latches window focus on the ViewRootImpl, and tells the observers of its window's id (WindowIdStandIn),
+     * as WMS reports a focus change to both.
+     */
+    private static void latch(Object viewRootImpl, boolean focused) throws ReflectiveOperationException {
+        viewRootImpl.getClass().getMethod("windowFocusChanged", boolean.class).invoke(viewRootImpl, focused);
+        WindowIdStandIn.focusChanged(viewRootImpl, focused);
+    }
+
+    /** The window focus last latched on the window's ViewRootImpl, false before any: its id's isFocused. */
+    static boolean latchedFocus(Object window) {
+        Object root;
+        try {
+            root = viewRootOf(window);
+        } catch (ReflectiveOperationException e) {
+            return false;
+        }
+        if (root == null) return false;
+        synchronized (sFocusGroups) {
+            FocusGroup group = sFocusGroups.get(root);
+            return group != null && Boolean.TRUE.equals(group.delivered);
+        }
+    }
+
+    static Object viewRootOf(Object window) throws ReflectiveOperationException {
         java.lang.reflect.Field viewAncestorField;
         try {
             viewAncestorField = window.getClass().getDeclaredField("mViewAncestor");
@@ -291,7 +315,7 @@ public class WindowCallbackBridge {
         Boolean deliver = updateFocusGroup(next, null, true);
         if (deliver == null) return;
         try {
-            next.getClass().getMethod("windowFocusChanged", boolean.class).invoke(next, deliver);
+            latch(next, deliver);
             Log.d(TAG, "window focus handed to the window under the removed one");
         } catch (Exception e) {
             Log.e(TAG, "Failed to hand window focus on", e);
@@ -332,7 +356,7 @@ public class WindowCallbackBridge {
         Boolean deliver = updateFocusGroup(viewRootImpl, window, false);
         if (deliver == null) return;
         try {
-            viewRootImpl.getClass().getMethod("windowFocusChanged", boolean.class).invoke(viewRootImpl, deliver);
+            latch(viewRootImpl, deliver);
         } catch (Exception e) {
             Log.e(TAG, "Failed to dispatch window focus changed", e);
         }
