@@ -106,6 +106,33 @@ static int westlake_network_trace_callsite(void *return_address) {
            westlake_network_callsite_selected(return_address);
 }
 
+/*
+ * How much of the trace is written. Each line is a write and a flush on the calling thread, and a
+ * busy app polls its sockets constantly: in one run Facebook's epoll loop and socket checks wrote
+ * about 1,300 lines, its DNS code asked about lookaside.facebook.com as a numeric address 1,051
+ * times, and the trace was a quarter of its log. A call site writes its first lines in full (256 for
+ * the calls that set up a connection, 16 for the polling ones), then only at each power of two,
+ * after a line with the count.
+ */
+enum {
+    WL_NET_GETADDRINFO, WL_NET_SOCKET, WL_NET_CONNECT, WL_NET_SETSOCKOPT, WL_NET_GETSOCKOPT,
+    WL_NET_EPOLL_CREATE, WL_NET_EPOLL_CTL, WL_NET_EPOLL_WAIT, WL_NET_POLL, WL_NET_SITES
+};
+static const char *const westlake_trace_sites[WL_NET_SITES] = {
+    "getaddrinfo", "socket", "connect", "setsockopt", "getsockopt",
+    "epoll_create", "epoll_ctl", "epoll_wait", "poll",
+};
+static unsigned int westlake_trace_counts[WL_NET_SITES];
+
+static int westlake_trace_quota(int site, unsigned int first) {
+    const unsigned int count = __atomic_add_fetch(&westlake_trace_counts[site], 1, __ATOMIC_RELAXED);
+    if (count <= first) return 1;
+    if ((count & (count - 1)) != 0) return 0;
+    fprintf(stderr, "[WESTLAKE-NATIVENET] %s: call %u (after the first %u, each power of two)\n",
+            westlake_trace_sites[site], count, first);
+    return 1;
+}
+
 /* Android/Bionic and OH/musl expose the same sizeof(struct addrinfo), but the
  * two pointer members are reversed.  Bionic places ai_canonname before
  * ai_addr; OH musl places ai_addr before ai_canonname. */
@@ -275,7 +302,7 @@ int getaddrinfo(const char *node, const char *service,
     const void *return_address = __builtin_return_address(0);
     const int selected = westlake_network_callsite_selected(
             (void *)return_address);
-    const int trace = westlake_network_trace_enabled() && selected;
+    int trace = westlake_network_trace_enabled() && selected;
     struct addrinfo oh_hints;
     const struct addrinfo *real_hints = hints;
     struct addrinfo *oh_result = NULL;
@@ -292,6 +319,9 @@ int getaddrinfo(const char *node, const char *service,
         real_result = &oh_result;
     }
     int rc = real(node, service, real_hints, real_result);
+    /* AI_NUMERICHOST only asks whether the name is an address literal; failing, it looked nothing up. */
+    if (trace && rc != 0 && hints != NULL && (hints->ai_flags & AI_NUMERICHOST) != 0) trace = 0;
+    if (trace) trace = westlake_trace_quota(WL_NET_GETADDRINFO, 256);
     if (trace) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-767] getaddrinfo node=%s service=%s"
@@ -378,7 +408,7 @@ int socket(int domain, int type, int protocol) {
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int fd = real(domain, type, protocol);
     int saved_errno = errno;
-    if (trace) {
+    if (trace && westlake_trace_quota(WL_NET_SOCKET, 256)) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-767] socket domain=%d type=0x%x"
                 " protocol=%d result=%d errno=%d\n",
@@ -401,7 +431,7 @@ int connect(int fd, const struct sockaddr *address,
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(fd, address, address_length);
     int saved_errno = errno;
-    if (trace) {
+    if (trace && westlake_trace_quota(WL_NET_CONNECT, 256)) {
         char text[INET6_ADDRSTRLEN];
         unsigned int port;
         westlake_format_sockaddr(address, address_length, text, sizeof(text),
@@ -431,7 +461,7 @@ int setsockopt(int fd, int level, int option, const void *value,
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(fd, level, option, value, value_length);
     int saved_errno = errno;
-    if (trace) {
+    if (trace && westlake_trace_quota(WL_NET_SETSOCKOPT, 256)) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-767] setsockopt fd=%d level=%d"
                 " option=%d len=%u result=%d errno=%d\n",
@@ -455,7 +485,7 @@ int getsockopt(int fd, int level, int option, void *value,
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(fd, level, option, value, value_length);
     int saved_errno = errno;
-    if (trace) {
+    if (trace && westlake_trace_quota(WL_NET_GETSOCKOPT, 16)) {
         int int_value = 0;
         if (rc == 0 && value != NULL && value_length != NULL &&
             *value_length >= (socklen_t)sizeof(int)) {
@@ -484,7 +514,7 @@ int epoll_create(int size) {
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(size);
     int saved_errno = errno;
-    if (trace) {
+    if (trace && westlake_trace_quota(WL_NET_EPOLL_CREATE, 16)) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-807] epoll_create size=%d result=%d"
                 " errno=%d\n",
@@ -507,7 +537,7 @@ int epoll_ctl(int epoll_fd, int operation, int fd,
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(epoll_fd, operation, fd, event);
     int saved_errno = errno;
-    if (trace) {
+    if (trace && westlake_trace_quota(WL_NET_EPOLL_CTL, 16)) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-807] epoll_ctl epfd=%d op=%d fd=%d"
                 " events=0x%x data_fd=%d result=%d errno=%d\n",
@@ -532,7 +562,7 @@ int epoll_wait(int epoll_fd, struct epoll_event *events, int max_events,
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(epoll_fd, events, max_events, timeout);
     int saved_errno = errno;
-    if (trace && (rc != 0 || saved_errno != 0)) {
+    if (trace && (rc != 0 || saved_errno != 0) && westlake_trace_quota(WL_NET_EPOLL_WAIT, 16)) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-807] epoll_wait epfd=%d max=%d"
                 " timeout=%d result=%d errno=%d\n",
@@ -563,7 +593,7 @@ int poll(struct pollfd *fds, nfds_t count, int timeout) {
     int trace = westlake_network_trace_callsite(__builtin_return_address(0));
     int rc = real(fds, count, timeout);
     int saved_errno = errno;
-    if (trace && (rc != 0 || saved_errno != 0)) {
+    if (trace && (rc != 0 || saved_errno != 0) && westlake_trace_quota(WL_NET_POLL, 16)) {
         fprintf(stderr,
                 "[WESTLAKE-NATIVENET-807] poll count=%llu timeout=%d"
                 " result=%d errno=%d\n",
