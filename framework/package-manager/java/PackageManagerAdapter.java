@@ -1441,9 +1441,15 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
 
     @Override
-    public android.content.pm.ParceledListSlice getInstalledApplications(long arg0, int arg1) throws android.os.RemoteException {
-        logStub("getInstalledApplications", "");
-        return null;
+    public android.content.pm.ParceledListSlice getInstalledApplications(long flags, int userId) throws android.os.RemoteException {
+        // The applications of the packages getInstalledPackages lists, the app itself first: Android
+        // lists the caller here too, and 352 of the HK top 1000 call this.
+        logBridged("getInstalledApplications", "flags=" + flags);
+        List<ApplicationInfo> result = new ArrayList<>();
+        for (PackageInfo info : getInstalledPackages(flags, userId).getList()) {
+            if (info.applicationInfo != null) result.add(info.applicationInfo);
+        }
+        return new ParceledListSlice<>(result);
     }
 
 
@@ -1518,6 +1524,32 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         logBridged("queryContentProviders",
                 "process=" + processName + " uid=" + uid + " flags=" + flags);
         java.util.List<android.content.pm.ProviderInfo> result = new java.util.ArrayList<>();
+        // The app's own uid is the host's, so the walk below would answer for the host's OH bundle;
+        // the app's providers come from its manifest, filtered as Android filters them. With no
+        // process name Android ignores the uid and answers every provider the caller can see, which
+        // here are the app's own.
+        String self = SourcePackageRegistry.packageName();
+        if (self != null && (processName == null || uid == android.os.Process.myUid())) {
+            long asked = (metaDataKey != null ? flags | android.content.pm.PackageManager.GET_META_DATA : flags)
+                    | android.content.pm.PackageManager.GET_PROVIDERS;
+            List<PackageInfo> packages = new ArrayList<>();
+            packages.add(SourcePackageRegistry.packageInfo(self, asked));
+            if (processName == null) {
+                for (String guest : GuestPackages.names()) packages.add(GuestPackages.packageInfo(guest, asked));
+            }
+            for (PackageInfo info : packages) {
+                if (info == null || info.providers == null) continue;
+                for (ProviderInfo provider : info.providers) {
+                    if (processName != null && !processName.equals(provider.processName)) continue;
+                    if (metaDataKey != null
+                            && (provider.metaData == null || !provider.metaData.containsKey(metaDataKey))) {
+                        continue;
+                    }
+                    result.add(provider);
+                }
+            }
+            return new android.content.pm.ParceledListSlice<>(result);
+        }
         try {
             // Resolve packageName from UID. The caller may pass uid or processName;
             // we walk all installed packages and pick by uid match.
