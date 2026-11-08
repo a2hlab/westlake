@@ -43,6 +43,12 @@ public final class OHTouchInjector {
             lastEx = "null arg";
             return;
         }
+        if (AccessibilityTreeDump.isRequest(event)) {   // the explorer asking for the node dump, not a touch
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                AccessibilityTreeDump.post();
+            }
+            return;
+        }
         Task task = new Task(view, event);
         // WESTLAKE §698: surface-only windows can be laid out and rendered while the
         // DecorView's attach-info run queue is never drained.  View.post() then returns true but
