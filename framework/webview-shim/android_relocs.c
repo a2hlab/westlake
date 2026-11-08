@@ -366,9 +366,16 @@ static int wl_resolve_ifuncs(int fd, unsigned char *data, Elf64_Rela **relocs, s
  * faulted inside the loader (strlen of a DT_NEEDED name at 0x125c, the table's base unset); a copy
  * whose section 0 is null and whose symbol section is the one DT_SYMTAB names, linked to the string
  * table DT_STRTAB names, loaded.
+ *
+ * A section 0 that is not null is not itself the fault. Packers commonly leave a minimal table whose
+ * section 0 is the symbol section, linked to the string table after it (17 libraries in 8 of 982
+ * apps, among them Edge's, iQIYI's and Hang Seng's security libraries and Wizardry's il2cpp): OH's
+ * loader follows that, and three of those apps draw. What selects a library for repair is a symbol
+ * section not linked to a string table: Baidu's, and an obfuscated libloader.so in two other apps
+ * whose symbol section is linked to the hash table, both of which crash on the main thread at start.
  */
 
-/* Whether the image's section headers are there but not the consistent set OH's loader follows. */
+/* Whether a dynamic symbol section is not linked to a string table as OH's loader expects. */
 static int wl_bad_section_headers(const unsigned char *data, size_t size)
 {
     const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
@@ -378,10 +385,9 @@ static int wl_bad_section_headers(const unsigned char *data, size_t size)
         return 0;
     }
     const Elf64_Shdr *sh = (const Elf64_Shdr *) (data + eh->e_shoff);
-    if (sh[0].sh_type != SHT_NULL) return 1;
-    for (int i = 1; i < eh->e_shnum; ++i) {
+    for (int i = 0; i < eh->e_shnum; ++i) {
         if (sh[i].sh_type != SHT_DYNSYM) continue;
-        if (sh[i].sh_link == 0 || sh[i].sh_link >= eh->e_shnum || sh[sh[i].sh_link].sh_type != SHT_STRTAB ||
+        if (sh[i].sh_link >= eh->e_shnum || sh[sh[i].sh_link].sh_type != SHT_STRTAB ||
             sh[i].sh_entsize != sizeof(Elf64_Sym)) {
             return 1;
         }
