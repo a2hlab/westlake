@@ -467,6 +467,87 @@ typedef struct AAssetManager AAssetManager;
 typedef struct AAssetDir AAssetDir;
 typedef struct AAsset AAsset;
 
+/*
+ * Asset trace, on request: WESTLAKE_ASSET_TRACE=<substring>[,<substring>...]. Each NDK call on an
+ * asset whose name holds one of the substrings is logged with its answer, and a buffer or a read
+ * with its length and FNV-1a hash, to compare with the asset's real bytes. Office's libplat reads
+ * its 7z resources through AAsset_getBuffer, and a resource name it later builds from them reaches
+ * Java garbled ("en-US/msointl???\x07"). At most 400 lines.
+ */
+#define WL_ASSET_TRACE_SLOTS 64
+static struct { void *asset; char name[96]; } wl_traced_assets[WL_ASSET_TRACE_SLOTS];
+static pthread_mutex_t wl_asset_trace_lock = PTHREAD_MUTEX_INITIALIZER;
+static int wl_asset_trace_lines;
+
+static int wl_asset_trace_wanted(const char *name)
+{
+    const char *filter = getenv("WESTLAKE_ASSET_TRACE");
+    if (filter == NULL || filter[0] == '\0' || name == NULL) return 0;
+    char copy[256];
+    snprintf(copy, sizeof(copy), "%s", filter);
+    char *save = NULL;
+    for (char *item = strtok_r(copy, ",", &save); item != NULL; item = strtok_r(NULL, ",", &save)) {
+        if (item[0] != '\0' && strstr(name, item) != NULL) return 1;
+    }
+    return 0;
+}
+
+static void wl_asset_trace_add(void *asset, const char *name)
+{
+    pthread_mutex_lock(&wl_asset_trace_lock);
+    for (int i = 0; i < WL_ASSET_TRACE_SLOTS; ++i) {
+        if (wl_traced_assets[i].asset == NULL) {
+            wl_traced_assets[i].asset = asset;
+            snprintf(wl_traced_assets[i].name, sizeof(wl_traced_assets[i].name), "%s", name);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wl_asset_trace_lock);
+}
+
+/* The traced asset's name into out, or 0 when the asset is not traced. */
+static int wl_asset_traced(void *asset, char *out, size_t size)
+{
+    int found = 0;
+    if (asset == NULL || getenv("WESTLAKE_ASSET_TRACE") == NULL) return 0;
+    pthread_mutex_lock(&wl_asset_trace_lock);
+    for (int i = 0; i < WL_ASSET_TRACE_SLOTS && !found; ++i) {
+        if (wl_traced_assets[i].asset == asset) {
+            snprintf(out, size, "%s", wl_traced_assets[i].name);
+            found = 1;
+        }
+    }
+    pthread_mutex_unlock(&wl_asset_trace_lock);
+    return found;
+}
+
+static void wl_asset_trace_remove(void *asset)
+{
+    pthread_mutex_lock(&wl_asset_trace_lock);
+    for (int i = 0; i < WL_ASSET_TRACE_SLOTS; ++i) {
+        if (wl_traced_assets[i].asset == asset) wl_traced_assets[i].asset = NULL;
+    }
+    pthread_mutex_unlock(&wl_asset_trace_lock);
+}
+
+static uint64_t wl_fnv1a(const void *data, size_t length)
+{
+    const unsigned char *bytes = (const unsigned char *)data;
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    for (size_t i = 0; i < length; ++i) {
+        hash ^= bytes[i];
+        hash *= 0x100000001b3ULL;
+    }
+    return hash;
+}
+
+static int wl_asset_trace_line(void)
+{
+    return __atomic_add_fetch(&wl_asset_trace_lines, 1, __ATOMIC_RELAXED) <= 400;
+}
+
+int64_t AAsset_getLength64(AAsset *asset);
+
 AAssetManager *AAssetManager_fromJava(JNIEnv *env, jobject asset_manager)
 {
     typedef void *(*Fn)(JNIEnv *, jobject);
@@ -480,7 +561,15 @@ AAsset *AAssetManager_open(AAssetManager *manager, const char *filename, int mod
     typedef void *(*Fn)(void *, const char *, int);
     static Fn fn;
     if (fn == NULL) fn = (Fn)bridge_symbol("wl_AAssetManager_open");
-    return fn != NULL ? (AAsset *)fn(manager, filename, mode) : NULL;
+    AAsset *asset = fn != NULL ? (AAsset *)fn(manager, filename, mode) : NULL;
+    if (wl_asset_trace_wanted(filename)) {
+        if (asset != NULL) wl_asset_trace_add(asset, filename);
+        if (wl_asset_trace_line()) {
+            fprintf(stderr, "[WL-ASSET] open %s mode=%d -> %p length=%lld\n", filename, mode, (void *)asset,
+                    asset != NULL ? (long long)AAsset_getLength64(asset) : -1LL);
+        }
+    }
+    return asset;
 }
 
 AAssetDir *AAssetManager_openDir(AAssetManager *manager, const char *directory_name)
@@ -520,7 +609,13 @@ int AAsset_read(AAsset *asset, void *buffer, size_t count)
     typedef int (*Fn)(void *, void *, size_t);
     static Fn fn;
     if (fn == NULL) fn = (Fn)bridge_symbol("wl_AAsset_read");
-    return fn != NULL ? fn(asset, buffer, count) : -1;
+    int result = fn != NULL ? fn(asset, buffer, count) : -1;
+    char name[96];
+    if (wl_asset_traced(asset, name, sizeof(name)) && wl_asset_trace_line()) {
+        fprintf(stderr, "[WL-ASSET] read %s count=%zu -> %d fnv=%016llx\n", name, count, result,
+                result > 0 ? (unsigned long long)wl_fnv1a(buffer, (size_t)result) : 0ULL);
+    }
+    return result;
 }
 
 int64_t AAsset_seek64(AAsset *asset, int64_t offset, int whence)
@@ -528,7 +623,13 @@ int64_t AAsset_seek64(AAsset *asset, int64_t offset, int whence)
     typedef int64_t (*Fn)(void *, int64_t, int);
     static Fn fn;
     if (fn == NULL) fn = (Fn)bridge_symbol("wl_AAsset_seek64");
-    return fn != NULL ? fn(asset, offset, whence) : (int64_t)-1;
+    int64_t result = fn != NULL ? fn(asset, offset, whence) : (int64_t)-1;
+    char name[96];
+    if (wl_asset_traced(asset, name, sizeof(name)) && wl_asset_trace_line()) {
+        fprintf(stderr, "[WL-ASSET] seek %s offset=%lld whence=%d -> %lld\n", name, (long long)offset, whence,
+                (long long)result);
+    }
+    return result;
 }
 
 off_t AAsset_seek(AAsset *asset, off_t offset, int whence)
@@ -541,6 +642,11 @@ void AAsset_close(AAsset *asset)
     typedef void (*Fn)(void *);
     static Fn fn;
     if (fn == NULL) fn = (Fn)bridge_symbol("wl_AAsset_close");
+    char name[96];
+    if (wl_asset_traced(asset, name, sizeof(name))) {
+        if (wl_asset_trace_line()) fprintf(stderr, "[WL-ASSET] close %s\n", name);
+        wl_asset_trace_remove(asset);
+    }
     if (fn != NULL) fn(asset);
 }
 
@@ -549,7 +655,20 @@ const void *AAsset_getBuffer(AAsset *asset)
     typedef const void *(*Fn)(void *);
     static Fn fn;
     if (fn == NULL) fn = (Fn)bridge_symbol("wl_AAsset_getBuffer");
-    return fn != NULL ? fn(asset) : NULL;
+    const void *buffer = fn != NULL ? fn(asset) : NULL;
+    char name[96];
+    if (wl_asset_traced(asset, name, sizeof(name)) && wl_asset_trace_line()) {
+        int64_t length = AAsset_getLength64(asset);
+        const unsigned char *bytes = (const unsigned char *)buffer;
+        char head[3 * 16 + 1] = "";
+        for (int i = 0; buffer != NULL && i < 16 && i < length; ++i) {
+            snprintf(head + 3 * i, sizeof(head) - 3 * i, "%02x ", bytes[i]);
+        }
+        fprintf(stderr, "[WL-ASSET] getBuffer %s -> %p length=%lld fnv=%016llx head=%s\n", name, buffer,
+                (long long)length,
+                buffer != NULL && length > 0 ? (unsigned long long)wl_fnv1a(buffer, (size_t)length) : 0ULL, head);
+    }
+    return buffer;
 }
 
 int64_t AAsset_getLength64(AAsset *asset)
