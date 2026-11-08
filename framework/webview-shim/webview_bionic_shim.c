@@ -3626,12 +3626,19 @@ int isnanf(float value)
 /*
  * The NDK's ASharedMemory (libandroid.so, API 26), which neither OH nor the runtime's or the
  * WebView's libandroid.so provides: Instagram's and Messenger's libstartup.so failed to relocate on
- * ASharedMemory_create. Android backs it with ashmem; a sealable memfd gives the same fd-passing,
- * mmap-able region. setProt narrows nothing: ashmem enforces a narrowed protection on later
- * mappings, a memfd seal would fail while a writable mapping exists, and callers use it as a
- * safety net rather than for behaviour. ASharedMemory_dupFromJava is not provided (this library has
- * no JNI headers).
+ * ASharedMemory_create. A memfd, as Android's memfd-backed ashmem (libcutils) makes it: the size is
+ * sealed once set (F_SEAL_GROW | F_SEAL_SHRINK), and setProt to read-only adds F_SEAL_FUTURE_WRITE,
+ * which, like ashmem's protection mask, narrows later mappings without failing on writable ones
+ * already made. Those seals are also how code tells such a region from an ashmem device fd:
+ * Chromium's ashmem helpers read the protection from the seals of a memfd that has both size seals,
+ * and otherwise ask the ashmem device, which starts with an fstat that OH's policy refuses an app
+ * on a memfd (EACCES). Yandex Browser's shared memory failed that way, and Chromium CHECKed the
+ * region's protection. ASharedMemory_dupFromJava is not provided (this library has no JNI headers).
  */
+#ifndef F_SEAL_FUTURE_WRITE
+#define F_SEAL_FUTURE_WRITE 0x0010
+#endif
+
 int ASharedMemory_create(const char *name, size_t size)
 {
     int fd = memfd_create(name != NULL && name[0] != '\0' ? name : "ashmem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -3643,6 +3650,15 @@ int ASharedMemory_create(const char *name, size_t size)
         close(fd);
         errno = saved;
         return -1;
+    }
+    /* libcutils fails the creation when the seals are refused; Android never refuses them. Should OH's
+     * policy, the region is still usable, unsealed, and that is said once. */
+    if (fcntl(fd, F_ADD_SEALS, F_SEAL_GROW | F_SEAL_SHRINK) != 0) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            fprintf(stderr, "[WESTLAKE-BIONIC] ASharedMemory_create: size seals refused (errno %d); region unsealed\n",
+                    errno);
+        }
     }
     return fd;
 }
@@ -3658,13 +3674,26 @@ size_t ASharedMemory_getSize(int fd)
     return end > 0 ? (size_t)end : 0;
 }
 
+/* As libcutils' memfd_set_prot_region: read-only seals future writes; asking for write back after
+ * that is EINVAL, as ashmem refuses to widen a narrowed mask. */
 int ASharedMemory_setProt(int fd, int prot)
 {
     if (fcntl(fd, F_GETFD) < 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
         errno = EINVAL;
         return -1;
     }
-    return 0;
+    int seals = fcntl(fd, F_GET_SEALS);
+    if (seals < 0) {
+        return 0;   /* not one of these memfds: nothing to narrow */
+    }
+    if (prot & PROT_WRITE) {
+        if (seals & F_SEAL_FUTURE_WRITE) {
+            errno = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    return fcntl(fd, F_ADD_SEALS, F_SEAL_FUTURE_WRITE | F_SEAL_SEAL) == 0 ? 0 : -1;
 }
 
 /*
