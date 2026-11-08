@@ -28,6 +28,7 @@ import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
@@ -182,12 +183,18 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
             ArrayList<X509Certificate> pathCertificates = new ArrayList<>();
             Collections.addAll(pathCertificates, chain);
 
-            // A PKIX CertPath excludes its TrustAnchor.  Servers occasionally
-            // include the root, so remove it when it exactly matches one of ours.
-            if (!pathCertificates.isEmpty()
-                    && findMatchingAnchor(pathCertificates.get(pathCertificates.size() - 1))
-                    != null) {
-                pathCertificates.remove(pathCertificates.size() - 1);
+            // A PKIX CertPath excludes its TrustAnchor, so the path ends below the first
+            // certificate that is one of our roots: the root itself, which servers occasionally
+            // include, or the same CA (subject and key) cross-signed by an older root, as Conscrypt
+            // reads it. CloudFront sends DigiCert Global Root G2 cross-signed by VeriSign Class 3
+            // G5, which this store does not hold. Validated as sent, the path needed G5: Prime
+            // Video's and Audible's images failed validation, and Prime Video showed its service
+            // as unreachable.
+            for (int i = 0; i < pathCertificates.size(); i++) {
+                if (findMatchingAnchor(pathCertificates.get(i)) != null) {
+                    pathCertificates.subList(i, pathCertificates.size()).clear();
+                    break;
+                }
             }
             if (pathCertificates.isEmpty()) {
                 chain[0].checkValidity();
@@ -215,11 +222,19 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
         }
     }
 
+    /** Our root a certificate stands for: the same certificate, or the same CA (subject and key). */
     private TrustAnchor findMatchingAnchor(X509Certificate certificate) {
+        byte[] key = null;
         for (TrustAnchor anchor : trustAnchors) {
             X509Certificate trusted = anchor.getTrustedCert();
             if (certificate.equals(trusted)) {
                 return anchor;
+            }
+            if (certificate.getSubjectX500Principal().equals(trusted.getSubjectX500Principal())) {
+                if (key == null) key = certificate.getPublicKey().getEncoded();
+                if (Arrays.equals(key, trusted.getPublicKey().getEncoded())) {
+                    return anchor;
+                }
             }
         }
         return null;
