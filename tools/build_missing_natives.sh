@@ -4,7 +4,7 @@
 # audioports_natives.c, localsocket_natives.c, canvas_natives.c, sqlite_natives.c, notification_natives.c, socketbinder_natives.c and
 # imagereader_natives.c (ImageReader over an OH consumer surface),
 # plus expat_natives.cpp (AOSP's SAX parser natives over a static, hidden expat) and
-# videocodec_natives.cpp (MediaCodec video over OH's decoder): platform natives
+# videocodec_natives.cpp (MediaCodec video and audio over OH's decoders): platform natives
 # the staged runtime declares but never registers, bound onto the boot classes from JNI_OnLoad.
 set -e
 SRC=$1; SDK=$2; OUT=$3
@@ -16,7 +16,7 @@ for f in xmlparse xmlrole xmltok; do
   $CC -fvisibility=hidden -fno-strict-aliasing -Wall -Werror -DHAVE_EXPAT_CONFIG_H -DHAVE_SYSCALL_GETRANDOM -include stdio.h -I$SRC/expat \
     -c $SRC/expat/expat/lib/$f.c -o $OBJ/$f.o
 done
-# MediaCodec video decoding over OH's decoder, wrapping the bridge's audio-only natives.
+# MediaCodec video and audio decoding over OH's decoders, wrapping the bridge's MP3-only natives.
 ${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni \
   -c $HERE/framework/javacore-shim/videocodec_natives.cpp -o $OBJ/videocodec_natives.o
 ${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Werror -I$HERE/framework/javacore-shim/expat-compat \
