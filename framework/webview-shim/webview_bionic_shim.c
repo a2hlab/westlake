@@ -2625,6 +2625,12 @@ static int read_oh_property(const char *name, char *value, size_t value_size)
  * The heap size is a hint Chromium clamps into a sane range rather than a number it trusts; it is
  * reported as a plain Android default instead of a measurement, because this runtime's ART heap
  * ceiling is not the app's to know.
+ *
+ * All of that table's build, version and ABI entries are here (its non-empty ones), so native code
+ * reads what Java reads: ro.build.fingerprint, ro.build.tags and ro.build.type came back empty
+ * natively. Its identity entries (ro.product.brand and the rest, ro.hardware, ro.board.platform,
+ * ro.boot.hardware) are not: natively the board's own OH values answer those names (the aliases
+ * below), and which identity both sides report is a decision of its own.
  */
 static const struct {
     const char *name;
@@ -2636,6 +2642,25 @@ static const struct {
     { "ro.build.id",               "oh-adapter" },
     { "ro.arch",                   "arm64" },
     { "dalvik.vm.heapsize",        "512m" },
+    { "ro.product.cpu.abilist",    "arm64-v8a" },
+    { "ro.product.cpu.abilist64",  "arm64-v8a" },
+    { "ro.product.cpu.abi",        "arm64-v8a" },
+    { "ro.build.version.release_or_codename", "14" },
+    { "ro.build.version.codename_or_preview", "REL" },
+    { "ro.build.version.all_codenames", "REL" },
+    { "ro.build.version.known_codenames", "REL" },
+    { "ro.build.version.preview_sdk", "0" },
+    { "ro.build.version.preview_sdk_fingerprint", "REL" },
+    { "ro.build.version.release_or_preview_display", "14" },
+    { "ro.product.first_api_level", "34" },
+    { "ro.build.version.incremental", "oh-adapter" },
+    { "ro.build.version.security_patch", "2024-01-01" },
+    { "ro.build.fingerprint",      "OpenHarmony/rk3568/rk3568:14/oh-adapter:user/release-keys" },
+    { "ro.build.tags",             "release-keys" },
+    { "ro.build.type",             "user" },
+    { "ro.build.user",             "oh-adapter" },
+    { "ro.build.host",             "oh-adapter" },
+    { "ro.build.display.id",       "oh-adapter" },
 };
 
 /*
@@ -2754,11 +2779,13 @@ const struct prop_info *__system_property_find(const char *name)
     }
     char value[WEBVIEW_PROP_VALUE_MAX];
     /*
-     * Not the table: Chromium reads the API level by find + read_callback, and finding
-     * ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*, which the
-     * WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43 apps).
+     * Not the table for the WebView: Chromium reads the API level by find + read_callback, and
+     * finding ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*,
+     * which the WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43
+     * apps). An app's own libraries find what __system_property_get and enumeration answer: their
+     * libandroid has ASharedMemory_* (this library's).
      */
-    if (read_android_property(name, value, 0) == 0) {
+    if (read_android_property(name, value, !caller_is_webview(__builtin_return_address(0), NULL)) == 0) {
         const char *caller = NULL;
         if (caller_is_android_dso(__builtin_return_address(0), &caller) &&
             westlake_first_ask(&g_absent_properties, name)) {
@@ -3514,43 +3541,95 @@ void __pthread_cleanup_pop(WebviewBionicCleanup *c, int execute)
 }
 
 /*
- * Deprecated property enumeration. bionic keeps both for old NDK code;
- * both are expressed over the cache this shim already maintains, so a
- * property is only enumerable once something has looked it up.
+ * Property enumeration (bionic keeps both calls for old NDK code). Bionic lists every property the
+ * process may read, hundreds on a phone. This shim listed only the properties looked up so far,
+ * none at first: the protection libraries of Authenticator, Netflix and PayPal, and PairIP in
+ * Grindr and ShopBack, enumerated and got 0, and Authenticator's then called atoi on a null
+ * pointer, a value it had expected to find. The list is every name __system_property_get answers
+ * here under an Android name -- the table and the identity names above, with the values a lookup
+ * returns -- then any other property looked up since. Each entry stays at its address for the life
+ * of the process, as a prop_info does in bionic's property area.
  */
+#define WEBVIEW_PROP_ENUM_SIZE 64
+static struct prop_info g_property_enum[WEBVIEW_PROP_ENUM_SIZE];
+static size_t g_property_enum_count;
+static pthread_once_t g_property_enum_once = PTHREAD_ONCE_INIT;
+
+static void westlake_property_enum_add(const char *name)
+{
+    char value[WEBVIEW_PROP_VALUE_MAX];
+    if (g_property_enum_count >= WEBVIEW_PROP_ENUM_SIZE || read_android_property(name, value, 1) == 0) return;
+    for (size_t i = 0; i < g_property_enum_count; ++i) {
+        if (strcmp(g_property_enum[i].name, name) == 0) return;
+    }
+    struct prop_info *entry = &g_property_enum[g_property_enum_count++];
+    snprintf(entry->name, sizeof(entry->name), "%s", name);
+    snprintf(entry->value, sizeof(entry->value), "%s", value);
+    entry->serial = 1;
+}
+
+static void westlake_property_enum_build(void)
+{
+    for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+        westlake_property_enum_add(g_android_properties[i].name);
+    }
+    for (size_t i = 0; i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
+        westlake_property_enum_add(g_oh_property_aliases[i].name);
+    }
+}
+
+/* The n-th property of the enumeration: the list above, then the looked-up ones it does not hold. */
+static const struct prop_info *westlake_property_nth(size_t n, size_t *total)
+{
+    pthread_once(&g_property_enum_once, westlake_property_enum_build);
+    const struct prop_info *found = n < g_property_enum_count ? &g_property_enum[n] : NULL;
+    size_t count = g_property_enum_count;
+    pthread_mutex_lock(&g_property_mutex);
+    for (size_t i = 0; i < g_property_count; ++i) {
+        int listed = 0;
+        for (size_t k = 0; k < g_property_enum_count && !listed; ++k) {
+            listed = strcmp(g_property_enum[k].name, g_property_cache[i].name) == 0;
+        }
+        if (listed) continue;
+        if (count == n) found = &g_property_cache[i];
+        ++count;
+    }
+    pthread_mutex_unlock(&g_property_mutex);
+    if (total != NULL) *total = count;
+    return found;
+}
+
 int __system_property_foreach(void (*callback)(const struct prop_info *, void *), void *cookie)
 {
     if (callback == NULL) {
         return -1;
     }
-    pthread_mutex_lock(&g_property_mutex);
-    size_t count = g_property_count;
-    pthread_mutex_unlock(&g_property_mutex);
+    size_t count = 0;
+    westlake_property_nth((size_t) -1, &count);
     static int told;
     if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
         const char *caller = NULL;
         caller_is_android_dso(__builtin_return_address(0), &caller);
-        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (foreach) by %s: %zu properties, "
-                "the ones looked up so far\n", caller != NULL ? caller : "?", count);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (foreach) by %s: %zu properties\n",
+                caller != NULL ? caller : "?", count);
     }
     for (size_t i = 0; i < count; ++i) {
-        callback(&g_property_cache[i], cookie);
+        const struct prop_info *entry = westlake_property_nth(i, NULL);
+        if (entry != NULL) callback(entry, cookie);
     }
     return 0;
 }
 
 const struct prop_info *__system_property_find_nth(unsigned n)
 {
-    pthread_mutex_lock(&g_property_mutex);
-    const struct prop_info *entry = n < g_property_count ? &g_property_cache[n] : NULL;
-    size_t count = g_property_count;
-    pthread_mutex_unlock(&g_property_mutex);
+    size_t count = 0;
+    const struct prop_info *entry = westlake_property_nth(n, &count);
     static int told;
     if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
         const char *caller = NULL;
         caller_is_android_dso(__builtin_return_address(0), &caller);
-        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (find_nth) by %s: %zu properties, "
-                "the ones looked up so far\n", caller != NULL ? caller : "?", count);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (find_nth) by %s: %zu properties\n",
+                caller != NULL ? caller : "?", count);
     }
     return entry;
 }
