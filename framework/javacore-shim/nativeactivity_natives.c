@@ -17,8 +17,11 @@
  * AOSP's mainWorkRead pipe does: ANativeActivity_finish and the window and soft-input requests an
  * app makes from its own threads (the bionic shim forwards them here), and the finish of input events.
  *
- * Input: no native input queue exists yet, so each event the window's InputQueue sends is finished
- * unhandled from the main thread, and the window's input pipeline goes on to its views.
+ * Input: the window's InputQueue hands each event here, and it is copied into the native queue the
+ * bionic shim keeps (wl_input_queue_*), where the app reads it with AInputQueue_getEvent; the app's
+ * AInputQueue_finishEvent comes back through the shim and is reported to the window from the main
+ * thread. With a shim from before that queue, each event is finished unhandled at once, so the
+ * window's input pipeline goes on to its views.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -118,7 +121,34 @@ typedef struct WlNativeCode {
 typedef struct WlInputQueue {
     jobject weak;               /* global reference to the WeakReference<InputQueue> */
     int64_t next_id;
+    void* native;               /* the shim's AInputQueue, which the app is given; NULL with an older shim */
 } WlInputQueue;
+
+/* The bionic shim's input queue (android_ndk_config.c). */
+typedef void (*InputFinishedFn)(void*, int64_t, int);
+typedef void* (*QueueCreateFn)(InputFinishedFn, void*);
+typedef void* (*QueueOwnerFn)(void*);
+typedef void (*QueueDestroyFn)(void*);
+typedef int (*PushKeyFn)(void*, int64_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                         int64_t, int64_t);
+typedef int (*PushMotionFn)(void*, int64_t, const int32_t*, float, float, int64_t, int64_t, size_t, const int32_t*,
+                            const float*);
+static QueueCreateFn g_queue_create;
+static QueueOwnerFn g_queue_owner;
+static QueueDestroyFn g_queue_destroy;
+static PushKeyFn g_push_key;
+static PushMotionFn g_push_motion;
+
+/* KeyEvent's and MotionEvent's getters, read for each event copied into the native queue. */
+static struct {
+    jmethodID device_id, source, action, flags, key_code, scan_code, meta_state, repeat_count, down_time, event_time;
+} g_key;
+static struct {
+    jmethodID device_id, source, action, flags, edge_flags, meta_state, button_state, action_button;
+    jmethodID x_precision, y_precision, down_time, event_time, pointer_count;
+    jmethodID pointer_id, tool_type, x, y, raw_x, raw_y, pressure, size, touch_major, touch_minor, tool_major,
+              tool_minor, orientation;
+} g_motion;
 
 /* ---- Main-thread work ------------------------------------------------------------------------ */
 
@@ -611,6 +641,12 @@ static const JNINativeMethod kNativeActivity[] = {
 
 /* ---- InputQueue -------------------------------------------------------------------------------- */
 
+/* The app's finish of an event, from the app's thread, reported to the window from the main thread. */
+static void input_finished(void* owner, int64_t id, int handled)
+{
+    post_work(WORK_FINISH_EVENT, 0, owner, id, handled ? 1 : 0);
+}
+
 static jlong nativeInit(JNIEnv* env, jclass clazz, jobject weak_queue, jobject message_queue)
 {
     WlInputQueue* queue = calloc(1, sizeof(*queue));
@@ -621,44 +657,113 @@ static jlong nativeInit(JNIEnv* env, jclass clazz, jobject weak_queue, jobject m
     queue->next_id = 1;
     if (!main_work_ready()) nalog("[WL-NATIVEACTIVITY] input events cannot be finished: no main looper");
     live_set(queue, true);
-    return (jlong) (intptr_t) queue;
+    if (g_queue_create != NULL && g_push_key != NULL && g_push_motion != NULL && g_queue_owner != NULL &&
+        g_queue_destroy != NULL) {
+        queue->native = g_queue_create(input_finished, queue);
+    }
+    nalog("[WL-NATIVEACTIVITY] input queue %s", queue->native != NULL ? "with the shim's native queue"
+                                                                      : "without a native queue: events finish unhandled");
+    return (jlong) (intptr_t) (queue->native != NULL ? queue->native : (void*) queue);
+}
+
+/* The queue a pointer InputQueue holds names: the shim's queue's owner, or the queue itself. */
+static WlInputQueue* input_queue(jlong ptr)
+{
+    void* pointer = (void*) (intptr_t) ptr;
+    if (pointer == NULL) return NULL;
+    if (g_queue_owner != NULL && !live_has(pointer)) return (WlInputQueue*) g_queue_owner(pointer);
+    return (WlInputQueue*) pointer;
 }
 
 static void nativeDispose(JNIEnv* env, jclass clazz, jlong ptr)
 {
-    WlInputQueue* queue = (WlInputQueue*) (intptr_t) ptr;
+    WlInputQueue* queue = input_queue(ptr);
     (void) clazz;
     if (queue == NULL) return;
     live_set(queue, false);
+    if (queue->native != NULL) g_queue_destroy(queue->native);   /* the shim keeps the queue itself */
     if (queue->weak != NULL) (*env)->DeleteGlobalRef(env, queue->weak);
     free(queue);
 }
 
-/* The event's id, finished unhandled from the main thread once sendInputEvent has recorded it. */
-static jlong send_event(WlInputQueue* queue)
+static jlong next_event_id(WlInputQueue* queue)
 {
-    jlong id;
-    if (queue == NULL) return 0;
-    id = (jlong) queue->next_id++;
-    post_work(WORK_FINISH_EVENT, 0, queue, id, 0);
-    return id;
+    return (jlong) queue->next_id++;
 }
 
 static jlong nativeSendKeyEvent(JNIEnv* env, jclass clazz, jlong ptr, jobject event, jboolean predispatch)
 {
-    (void) env;
+    WlInputQueue* queue = input_queue(ptr);
+    jlong id;
     (void) clazz;
-    (void) event;
     (void) predispatch;
-    return send_event((WlInputQueue*) (intptr_t) ptr);
+    if (queue == NULL) return 0;
+    id = next_event_id(queue);
+    if (queue->native == NULL || event == NULL ||
+        g_push_key(queue->native, id, (*env)->CallIntMethod(env, event, g_key.device_id),
+                   (*env)->CallIntMethod(env, event, g_key.source), (*env)->CallIntMethod(env, event, g_key.action),
+                   (*env)->CallIntMethod(env, event, g_key.flags), (*env)->CallIntMethod(env, event, g_key.key_code),
+                   (*env)->CallIntMethod(env, event, g_key.scan_code),
+                   (*env)->CallIntMethod(env, event, g_key.meta_state),
+                   (*env)->CallIntMethod(env, event, g_key.repeat_count),
+                   (int64_t) (*env)->CallLongMethod(env, event, g_key.down_time) * 1000000,
+                   (int64_t) (*env)->CallLongMethod(env, event, g_key.event_time) * 1000000) != 0) {
+        clear_exception(env, "KeyEvent");
+        post_work(WORK_FINISH_EVENT, 0, queue, id, 0);
+    }
+    return id;
 }
 
 static jlong nativeSendMotionEvent(JNIEnv* env, jclass clazz, jlong ptr, jobject event)
 {
-    (void) env;
+    WlInputQueue* queue = input_queue(ptr);
+    jlong id;
     (void) clazz;
-    (void) event;
-    return send_event((WlInputQueue*) (intptr_t) ptr);
+    if (queue == NULL) return 0;
+    id = next_event_id(queue);
+    if (queue->native != NULL && event != NULL) {
+        int32_t ints[8];
+        int32_t pointer_ints[2 * 16];
+        float pointer_floats[11 * 16];
+        jint count = (*env)->CallIntMethod(env, event, g_motion.pointer_count);
+        jint i;
+        if (count > 16) count = 16;
+        ints[0] = (*env)->CallIntMethod(env, event, g_motion.device_id);
+        ints[1] = (*env)->CallIntMethod(env, event, g_motion.source);
+        ints[2] = (*env)->CallIntMethod(env, event, g_motion.action);
+        ints[3] = (*env)->CallIntMethod(env, event, g_motion.flags);
+        ints[4] = (*env)->CallIntMethod(env, event, g_motion.edge_flags);
+        ints[5] = (*env)->CallIntMethod(env, event, g_motion.meta_state);
+        ints[6] = (*env)->CallIntMethod(env, event, g_motion.button_state);
+        ints[7] = (*env)->CallIntMethod(env, event, g_motion.action_button);
+        for (i = 0; i < count; i++) {
+            float* f = &pointer_floats[i * 11];
+            pointer_ints[i * 2] = (*env)->CallIntMethod(env, event, g_motion.pointer_id, i);
+            pointer_ints[i * 2 + 1] = (*env)->CallIntMethod(env, event, g_motion.tool_type, i);
+            f[0] = (*env)->CallFloatMethod(env, event, g_motion.x, i);
+            f[1] = (*env)->CallFloatMethod(env, event, g_motion.y, i);
+            f[2] = (*env)->CallFloatMethod(env, event, g_motion.raw_x, i);
+            f[3] = (*env)->CallFloatMethod(env, event, g_motion.raw_y, i);
+            f[4] = (*env)->CallFloatMethod(env, event, g_motion.pressure, i);
+            f[5] = (*env)->CallFloatMethod(env, event, g_motion.size, i);
+            f[6] = (*env)->CallFloatMethod(env, event, g_motion.touch_major, i);
+            f[7] = (*env)->CallFloatMethod(env, event, g_motion.touch_minor, i);
+            f[8] = (*env)->CallFloatMethod(env, event, g_motion.tool_major, i);
+            f[9] = (*env)->CallFloatMethod(env, event, g_motion.tool_minor, i);
+            f[10] = (*env)->CallFloatMethod(env, event, g_motion.orientation, i);
+        }
+        if (!(*env)->ExceptionCheck(env) &&
+            g_push_motion(queue->native, id, ints, (*env)->CallFloatMethod(env, event, g_motion.x_precision),
+                          (*env)->CallFloatMethod(env, event, g_motion.y_precision),
+                          (int64_t) (*env)->CallLongMethod(env, event, g_motion.down_time) * 1000000,
+                          (int64_t) (*env)->CallLongMethod(env, event, g_motion.event_time) * 1000000,
+                          (size_t) count, pointer_ints, pointer_floats) == 0) {
+            return id;
+        }
+        clear_exception(env, "MotionEvent");
+    }
+    post_work(WORK_FINISH_EVENT, 0, queue, id, 0);
+    return id;
 }
 
 static const JNINativeMethod kInputQueue[] = {
@@ -698,6 +803,58 @@ int wl_register_native_activity(JNIEnv* env)
         n += COUNT(kInputQueue);
     }
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    {
+        jclass key = (*env)->FindClass(env, "android/view/KeyEvent");
+        jclass motion = (*env)->FindClass(env, "android/view/MotionEvent");
+        if (key != NULL && motion != NULL) {
+            g_key.device_id = (*env)->GetMethodID(env, key, "getDeviceId", "()I");
+            g_key.source = (*env)->GetMethodID(env, key, "getSource", "()I");
+            g_key.action = (*env)->GetMethodID(env, key, "getAction", "()I");
+            g_key.flags = (*env)->GetMethodID(env, key, "getFlags", "()I");
+            g_key.key_code = (*env)->GetMethodID(env, key, "getKeyCode", "()I");
+            g_key.scan_code = (*env)->GetMethodID(env, key, "getScanCode", "()I");
+            g_key.meta_state = (*env)->GetMethodID(env, key, "getMetaState", "()I");
+            g_key.repeat_count = (*env)->GetMethodID(env, key, "getRepeatCount", "()I");
+            g_key.down_time = (*env)->GetMethodID(env, key, "getDownTime", "()J");
+            g_key.event_time = (*env)->GetMethodID(env, key, "getEventTime", "()J");
+            g_motion.device_id = (*env)->GetMethodID(env, motion, "getDeviceId", "()I");
+            g_motion.source = (*env)->GetMethodID(env, motion, "getSource", "()I");
+            g_motion.action = (*env)->GetMethodID(env, motion, "getAction", "()I");
+            g_motion.flags = (*env)->GetMethodID(env, motion, "getFlags", "()I");
+            g_motion.edge_flags = (*env)->GetMethodID(env, motion, "getEdgeFlags", "()I");
+            g_motion.meta_state = (*env)->GetMethodID(env, motion, "getMetaState", "()I");
+            g_motion.button_state = (*env)->GetMethodID(env, motion, "getButtonState", "()I");
+            g_motion.action_button = (*env)->GetMethodID(env, motion, "getActionButton", "()I");
+            g_motion.x_precision = (*env)->GetMethodID(env, motion, "getXPrecision", "()F");
+            g_motion.y_precision = (*env)->GetMethodID(env, motion, "getYPrecision", "()F");
+            g_motion.down_time = (*env)->GetMethodID(env, motion, "getDownTime", "()J");
+            g_motion.event_time = (*env)->GetMethodID(env, motion, "getEventTime", "()J");
+            g_motion.pointer_count = (*env)->GetMethodID(env, motion, "getPointerCount", "()I");
+            g_motion.pointer_id = (*env)->GetMethodID(env, motion, "getPointerId", "(I)I");
+            g_motion.tool_type = (*env)->GetMethodID(env, motion, "getToolType", "(I)I");
+            g_motion.x = (*env)->GetMethodID(env, motion, "getX", "(I)F");
+            g_motion.y = (*env)->GetMethodID(env, motion, "getY", "(I)F");
+            g_motion.raw_x = (*env)->GetMethodID(env, motion, "getRawX", "(I)F");
+            g_motion.raw_y = (*env)->GetMethodID(env, motion, "getRawY", "(I)F");
+            g_motion.pressure = (*env)->GetMethodID(env, motion, "getPressure", "(I)F");
+            g_motion.size = (*env)->GetMethodID(env, motion, "getSize", "(I)F");
+            g_motion.touch_major = (*env)->GetMethodID(env, motion, "getTouchMajor", "(I)F");
+            g_motion.touch_minor = (*env)->GetMethodID(env, motion, "getTouchMinor", "(I)F");
+            g_motion.tool_major = (*env)->GetMethodID(env, motion, "getToolMajor", "(I)F");
+            g_motion.tool_minor = (*env)->GetMethodID(env, motion, "getToolMinor", "(I)F");
+            g_motion.orientation = (*env)->GetMethodID(env, motion, "getOrientation", "(I)F");
+        }
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionClear(env);
+            nalog("[WL-NATIVEACTIVITY] an event getter is missing: events finish unhandled");
+        } else if (g_motion.orientation != NULL) {
+            g_queue_create = (QueueCreateFn) dlsym(RTLD_DEFAULT, "wl_input_queue_create");
+            g_queue_owner = (QueueOwnerFn) dlsym(RTLD_DEFAULT, "wl_input_queue_owner");
+            g_queue_destroy = (QueueDestroyFn) dlsym(RTLD_DEFAULT, "wl_input_queue_destroy");
+            g_push_key = (PushKeyFn) dlsym(RTLD_DEFAULT, "wl_input_queue_push_key");
+            g_push_motion = (PushMotionFn) dlsym(RTLD_DEFAULT, "wl_input_queue_push_motion");
+        }
+    }
     surface = (*env)->FindClass(env, "android/view/Surface");
     g_surface_native_object = surface != NULL ? (*env)->GetFieldID(env, surface, "mNativeObject", "J") : NULL;
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
