@@ -341,14 +341,48 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         return null;
     }
 
+    /**
+     * Whether the package holding a uid is signed with a certificate. PackageManagerService looks
+     * the uid up and answers as hasSigningCertificate does for that package.
+     */
     @Override
     public boolean hasUidSigningCertificate(int uid, byte[] signingCertificate, int flags) {
-        return false;
+        String packageName = SourcePackageRegistry.packageForUid(uid);
+        if (packageName == null) packageName = RemotePackages.packageForUid(uid);
+        return packageName != null && hasSigningCertificate(packageName, signingCertificate, flags);
     }
 
+    /**
+     * Whether a package is signed with a certificate, given as its X.509 bytes
+     * (CERT_INPUT_RAW_X509) or their SHA-256 (CERT_INPUT_SHA256). PackageManagerService answers
+     * from the package's signing details, current signers and past ones. These are the details
+     * getPackageInfo returns with GET_SIGNING_CERTIFICATES, so both calls give one answer.
+     *
+     * It used to answer false for every package. accurate.weather's libencore checks its own
+     * package with it in JNI_OnLoad (API 28 and later, SHA-256) and returns JNI_ERR on false, so
+     * the app's process never bound. AndroidX's PackageInfoCompat.hasSignatures asks the same.
+     */
     @Override
     public boolean hasSigningCertificate(String packageName, byte[] signingCertificate, int flags) {
-        return false;
+        if (packageName == null || signingCertificate == null) return false;
+        PackageInfo info;
+        try {
+            info = getPackageInfo(packageName,
+                    android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES, 0);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "hasSigningCertificate: " + packageName + ": " + e);
+            return false;
+        }
+        if (info == null || info.signingInfo == null) return false;
+        android.content.pm.SigningDetails details = info.signingInfo.getSigningDetails();
+        switch (flags) {
+            case android.content.pm.PackageManager.CERT_INPUT_RAW_X509:
+                return details.hasCertificate(signingCertificate);
+            case android.content.pm.PackageManager.CERT_INPUT_SHA256:
+                return details.hasSha256Certificate(signingCertificate);
+            default:
+                return false;
+        }
     }
 
     @Override
