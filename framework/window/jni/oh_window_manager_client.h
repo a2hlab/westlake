@@ -231,6 +231,9 @@ public:
     // Session property path for direct SceneBoard sessions, absent from the
     // public Rosen Window cache.
     int32_t setKeepScreenOn(int32_t sessionId, bool enabled);
+    // The same path for a sub-window's z-level among its parent's sub-windows
+    // (oh_window_order.cpp). Non-virtual: the class layout is unchanged.
+    int32_t setSubWindowZLevel(int32_t sessionId, int32_t zLevel);
 
 private:
     OHWindowManagerClient() = default;

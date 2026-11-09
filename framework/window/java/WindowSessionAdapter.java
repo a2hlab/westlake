@@ -598,7 +598,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // to its session's one OH window, so a SurfaceView's producer (an engine's EGL or Vulkan
     // swapchain) and hwui drew into the same OH window: Flutter and game engines never showed.
     // A SurfaceView that fills its window gets an OH sub-window session of its own, created after
-    // the activity's (so above it: OH stacks app windows by creation order) and bound to its
+    // the activity's (so above it: OH stacks app windows by creation order, unless a z-level says
+    // otherwise, as attachSurfaceView's does for a SurfaceView below its window) and bound to its
     // BLAST SurfaceControl before its BLASTBufferQueue resolves a window. OH windows cannot be
     // placed here (updateSessionRect has no IPC on this path; every window sits at 0,0), so a
     // smaller SurfaceView gets one only where it starts at its window's origin, which a window
@@ -648,17 +649,51 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 return 0;
             }
             int sessionId = info[0];
-            nativeShowWindow(sessionId);
+            // Android stacks a SurfaceView's layer below its window (sublayer -2; -1 for a media
+            // overlay) unless the app puts it on top (setZOrderOnTop: 0 or more). The window turns
+            // translucent and hwui punches a hole where the SurfaceView shows, so the views drawn
+            // over it stay on top. OH stacked this session above the activity's (created later,
+            // raised to the app's top): in one Hong Kong round all 38 apps that stopped with such a
+            // session showed a pure black screen, YouTube Music's idle player over its whole UI
+            // among them. The SurfaceView's sublayer becomes the session's OH z-level, which orders
+            // sibling sub-windows: below the activity's window and its dialogs (z-level 0), above
+            // the host's window, their parent. WESTLAKE_SURFACEVIEW_ORDER=above keeps it on top;
+            // =hidden never shows it, to see what the window draws without it.
+            String order = System.getenv("WESTLAKE_SURFACEVIEW_ORDER");
+            int subLayer = surfaceViewSubLayer(surfaceView);
+            String placed = "on top";
+            if ("hidden".equals(order)) {
+                placed = "hidden";
+            } else if (subLayer < 0 && !"above".equals(order)) {
+                int rc = OhWindowOrder.setSubWindowZLevel(sessionId, subLayer);
+                placed = "below its window (z-level " + subLayer + ", rc=" + rc + ")";
+            }
+            if (!"hidden".equals(order)) nativeShowWindow(sessionId);
             nativeAttachSessionToSc(blast, sessionId);
             synchronized (sSurfaceViewSessions) {
                 sSurfaceViewSessions.put(surfaceView, sessionId);
                 sSurfaceViewWindows.put(surfaceView, window);
             }
             System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
-                    + " at " + at[0] + "," + at[1] + " -> own sessionId=" + sessionId);
+                    + " at " + at[0] + "," + at[1] + " -> own sessionId=" + sessionId + ", " + placed);
             return sessionId;
         } catch (Throwable t) {
             System.err.println("[OH_WSA] SurfaceView '" + name + "' own session failed: " + t);
+            return 0;
+        }
+    }
+
+    /**
+     * The SurfaceView's sublayer (SurfaceView.mSubLayer, set before its BLAST layer is built): below
+     * 0 when it sits below its window. 0, on top, when it cannot be read: the order before z-levels.
+     */
+    private static int surfaceViewSubLayer(Object surfaceView) {
+        try {
+            java.lang.reflect.Field field = android.view.SurfaceView.class.getDeclaredField("mSubLayer");
+            field.setAccessible(true);
+            return field.getInt(surfaceView);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] SurfaceView sublayer unread: " + t);
             return 0;
         }
     }
