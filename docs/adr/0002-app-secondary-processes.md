@@ -30,6 +30,7 @@ separation itself, and in the board rounds of 2026-11-08 they stop on it:
 | Samsung Internet | Chromium's child processes | Traps on its `ChildProcessMain` thread (`libterrace.so`) |
 | Google app | `GoogleAppActivity` in `:googleapp`, `AccountSyncService` in `:search` | It binds the service, which by its name syncs account data between the app's processes, over and over: 3,838 binds in the run. The main thread skips frames and the activity never draws |
 | WeChat | `CoreService` in `:push` | Ends at startup |
+| Xiaomi Wear | Its device services in `:device` | Outside `:device`, `BinderDelegate.getProxy` wraps the service in a `java.lang.reflect.Proxy` built from the interfaces of the object's own class. Across processes that object is the AIDL `Stub.Proxy`, which declares the interface. In one process it is the service's implementation, whose class declares none, so the cast to `IInterface` fails at startup |
 
 Chrome and Brave share Edge's process model. 24 scanned apps declare Chromium's
 `:sandboxed_process*` services and 36 declare a `:phoenix` restart process.
@@ -99,6 +100,13 @@ apps' own code. Making the environment transparent to these apps means giving th
 - **One process, with a workaround per app.** A release Chromium browser does not run single-process,
   and the Google app and WeChat would each need their own code paths changed. That contradicts
   running APKs unmodified and transparently.
+- **One process, with the process boundary visible to binder clients.** For a service declared in
+  another process, the in-process bind would deliver a binder whose `queryLocalInterface` answers null.
+  `asInterface` then builds the AIDL `Stub.Proxy`, and calls go through `transact` and Parcels, as
+  across processes. That is enough for Xiaomi Wear. It does nothing for code that branches on the
+  process name or needs a second process: Chromium, the Google app and WeChat. It may still be
+  worth doing first, as a step toward milestone 2, since it exercises the Parcel path those calls
+  will take.
 - **Each process started from the host, as the Play services process is today.** That fits a
   process known before launch. A secondary process is started by the app, at a time only the app
   knows, so a request path from the app is needed either way. The app's own zygote already has the
