@@ -2,7 +2,7 @@
 # build_missing_natives.sh <android-source> <oh-sdk-native> <out-dir>
 # Builds libwl_missing_natives.so from framework/javacore-shim/missing_natives.c, media_natives.c, extractor_natives.c, text_natives.c, audiorecord_natives.c,
 # audioports_natives.c, localsocket_natives.c, canvas_natives.c, sqlite_natives.c, notification_natives.c, socketbinder_natives.c and
-# imagereader_natives.c (ImageReader over an OH consumer surface),
+# imagereader_natives.c (ImageReader over an OH consumer surface), nativeactivity_natives.c (NativeActivity and InputQueue),
 # plus expat_natives.cpp (AOSP's SAX parser natives over a static, hidden expat) and
 # videocodec_natives.cpp (MediaCodec video and audio over OH's decoders): platform natives
 # the staged runtime declares but never registers, bound onto the boot classes from JNI_OnLoad.
@@ -33,11 +33,11 @@ for f in Net IOUtil SocketChannelImpl ServerSocketChannelImpl DatagramChannelImp
     -I$SRC/libnativehelper/include -I$SRC/libnativehelper/include_jni -I$SRC/libnativehelper/header_only_include \
     -c $OJ/$f.c -o $OBJ/oj_$f.o
 done
-for f in missing_natives media_natives extractor_natives text_natives audiorecord_natives audioports_natives ojluni_nio_natives localsocket_natives canvas_natives sqlite_natives notification_natives socketbinder_natives imagereader_natives; do
+for f in missing_natives media_natives extractor_natives text_natives audiorecord_natives audioports_natives ojluni_nio_natives localsocket_natives canvas_natives sqlite_natives notification_natives socketbinder_natives imagereader_natives nativeactivity_natives; do
   $CC -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni -c $HERE/framework/javacore-shim/$f.c -o $OBJ/$f.o
 done
 ${CC/clang /clang++ } -shared -fuse-ld=lld -Wl,-soname,libwl_missing_natives.so -Wl,-z,defs \
   $OBJ/missing_natives.o $OBJ/media_natives.o $OBJ/extractor_natives.o $OBJ/text_natives.o $OBJ/audiorecord_natives.o $OBJ/audioports_natives.o $OBJ/ojluni_nio_natives.o \
   $OBJ/localsocket_natives.o $OBJ/canvas_natives.o $OBJ/sqlite_natives.o $OBJ/notification_natives.o $OBJ/socketbinder_natives.o $OBJ/oj_*.o \
-  $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
+  $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
 echo "built $OUT/libwl_missing_natives.so"

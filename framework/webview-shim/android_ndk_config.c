@@ -189,13 +189,49 @@ int westlake_thread_has_java_looper(void)
     return current != NULL;
 }
 
-/* ANativeActivity_setWindowFormat, which the runtime's libandroid lacks (Unreal Engine 4's libUE4.so
- * imports it and failed to load). OH's window takes the format of the buffers drawn into it, so the
- * request has nothing to set. */
+/*
+ * ANativeActivity's requests: finish, window format and flags, soft input. The runtime's libandroid
+ * lacks them (Unreal Engine 4's libUE4.so imports ANativeActivity_setWindowFormat and failed to load).
+ * AOSP's libandroid hands each to libandroid_runtime, which writes it to the activity's main-thread
+ * pipe; here the runtime's NativeActivity natives (libwl_missing_natives) register that step as a
+ * hook, and drop a request for an activity that is not theirs. With a runtime from before them there
+ * is no hook, and a request does nothing.
+ */
+typedef void (*WlNativeActivityCommandHook)(void *activity, int32_t command, int32_t a, int32_t b);
+static WlNativeActivityCommandHook wl_native_activity_hook;
+
+void wl_native_activity_set_command_hook(WlNativeActivityCommandHook hook)
+{
+    __atomic_store_n(&wl_native_activity_hook, hook, __ATOMIC_RELEASE);
+}
+
+static void wl_native_activity_command(void *activity, int32_t command, int32_t a, int32_t b)
+{
+    WlNativeActivityCommandHook hook = __atomic_load_n(&wl_native_activity_hook, __ATOMIC_ACQUIRE);
+    if (hook != NULL && activity != NULL) hook(activity, command, a, b);
+}
+
+/* AOSP's command numbers (android_app_NativeActivity.cpp). */
+void ANativeActivity_finish(void *activity) { wl_native_activity_command(activity, 1, 0, 0); }
+
 void ANativeActivity_setWindowFormat(void *activity, int32_t format)
 {
-    (void) activity;
-    (void) format;
+    wl_native_activity_command(activity, 2, format, 0);
+}
+
+void ANativeActivity_setWindowFlags(void *activity, uint32_t add, uint32_t remove)
+{
+    wl_native_activity_command(activity, 3, (int32_t) add, (int32_t) remove);
+}
+
+void ANativeActivity_showSoftInput(void *activity, uint32_t flags)
+{
+    wl_native_activity_command(activity, 4, (int32_t) flags, 0);
+}
+
+void ANativeActivity_hideSoftInput(void *activity, uint32_t flags)
+{
+    wl_native_activity_command(activity, 5, (int32_t) flags, 0);
 }
 
 void AConfiguration_delete(AConfiguration *config)
