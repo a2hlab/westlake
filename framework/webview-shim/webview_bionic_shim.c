@@ -1675,8 +1675,23 @@ static int westlake_names_running_libc(const char *file)
 struct westlake_dt_init {
     uintptr_t init;
     uint64_t init_array_size;
+    uintptr_t renamed_array;          /* the .init_array the launcher hid from musl, or 0 */
+    uint64_t renamed_array_size;
     const char *path;   /* the loader's own copy of the name, kept while the library is loaded */
 };
+
+/*
+ * A library with DT_INIT and an .init_array needs the first to run before the second, and musl runs
+ * the array alone. The launcher stages such a library with DT_INIT_ARRAY{,SZ} renamed to these tags
+ * (probe_source_app.py, legacy_init_staged), so that musl runs neither, and this shim calls DT_INIT
+ * and then the array, in bionic's order. iQIYI faulted inside libmsaoaidsec.so the moment it loaded:
+ * DT_INIT, then six array entries, and only the array had run. The marker below tells the launcher
+ * that this shim runs the renamed arrays; under a shim without it, their constructors would never
+ * run, so the launcher renames nothing.
+ */
+#define WESTLAKE_DT_INIT_ARRAY 0x6fffe0f0
+#define WESTLAKE_DT_INIT_ARRAYSZ 0x6fffe0f1
+__attribute__((used)) static const char westlake_runs_renamed_init_arrays[] = "WESTLAKE_RUNS_RENAMED_INIT_ARRAYS=1";
 
 struct westlake_dt_init_scan {
     struct westlake_dt_init found[WESTLAKE_DT_INIT_BATCH];
@@ -1735,11 +1750,13 @@ static int westlake_dt_init_collect(struct dl_phdr_info *info, size_t size, void
             dyn = (const ElfW(Dyn) *) (info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
         }
     }
-    uintptr_t init = 0;
-    uint64_t init_array_size = 0;
+    uintptr_t init = 0, renamed_array = 0;
+    uint64_t init_array_size = 0, renamed_array_size = 0;
     for (; dyn != NULL && dyn->d_tag != DT_NULL; ++dyn) {
         if (dyn->d_tag == DT_INIT) init = (uintptr_t) dyn->d_un.d_ptr;
         if (dyn->d_tag == DT_INIT_ARRAYSZ) init_array_size = dyn->d_un.d_val;
+        if (dyn->d_tag == WESTLAKE_DT_INIT_ARRAY) renamed_array = (uintptr_t) dyn->d_un.d_ptr;
+        if (dyn->d_tag == WESTLAKE_DT_INIT_ARRAYSZ) renamed_array_size = dyn->d_un.d_val;
     }
     if (init != 0 && scan->count == WESTLAKE_DT_INIT_BATCH) {
         scan->more = 1;   /* left unseen for the next pass */
@@ -1755,6 +1772,8 @@ static int westlake_dt_init_collect(struct dl_phdr_info *info, size_t size, void
         struct westlake_dt_init *found = &scan->found[scan->count++];
         found->init = (uintptr_t) info->dlpi_addr + init;
         found->init_array_size = init_array_size;
+        found->renamed_array = renamed_array != 0 ? (uintptr_t) info->dlpi_addr + renamed_array : 0;
+        found->renamed_array_size = renamed_array_size;
         found->path = info->dlpi_name;
     }
     return 0;
@@ -1786,9 +1805,21 @@ static void westlake_run_dt_inits(void)
                               found->path, (unsigned long long) (found->init_array_size / sizeof(void *)));
                 continue;
             }
-            wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, its only start-up (OH's loader skips DT_INIT)\n",
-                          found->path);
+            size_t entries = found->renamed_array != 0 ? (size_t) (found->renamed_array_size / sizeof(void *)) : 0;
+            if (entries != 0) {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, then its %zu .init_array constructors, which "
+                              "the launcher hid from OH's loader (bionic's order)\n", found->path, entries);
+            } else {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, its only start-up (OH's loader skips DT_INIT)\n",
+                              found->path);
+            }
             ((void (*)(void)) found->init)();
+            /* The entries are relocated: musl applies relocations by address, whatever the tags say.
+             * Null and -1 entries are skipped, as bionic's call_array skips them. */
+            const uintptr_t *array = (const uintptr_t *) found->renamed_array;
+            for (size_t k = 0; k < entries; ++k) {
+                if (array[k] != 0 && array[k] != (uintptr_t) -1) ((void (*)(void)) array[k])();
+            }
         }
     } while (more);
     /* Recorded only now: a load in another thread that finds this count waits for nothing, so the
