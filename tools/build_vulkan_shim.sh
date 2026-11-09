@@ -7,7 +7,7 @@ set -e
 SDK=$1; OHVK=$2; OUT=$3
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p $OUT
-OWN="vkCreateInstance vkEnumerateInstanceExtensionProperties vkGetInstanceProcAddr vkGetDeviceProcAddr"
+OWN="vkCreateInstance vkEnumerateInstanceExtensionProperties vkGetInstanceProcAddr vkGetDeviceProcAddr vkDestroyDevice vkDestroyInstance"
 $SDK/llvm/bin/llvm-readelf -W --dyn-syms $OHVK | awk '$4=="FUNC" && $5=="GLOBAL" && $7!="UND" {print $8}' \
   | sed 's/@.*//' | grep '^vk' | sort -u > $OUT/exports.txt
 python3 - "$OUT" $OWN <<'PY'

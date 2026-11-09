@@ -9,11 +9,13 @@
  *
  * This library sits first on the app's library path under the loader's name. Every public
  * vk* entry point forwards to OH's loader (vulkan_trampolines.S, generated from its export
- * list). Four are implemented here:
+ * list). Six are implemented here:
  *   vkEnumerateInstanceExtensionProperties  also lists VK_KHR_android_surface when OH has VK_OHOS_surface
  *   vkCreateInstance                        enables VK_OHOS_surface in place of VK_KHR_android_surface
  *   vkGetInstanceProcAddr                   returns these, and vkCreateAndroidSurfaceKHR
  *   vkGetDeviceProcAddr                     OH's, logging the names it has no function for
+ *   vkDestroyDevice, vkDestroyInstance      keep the device (and its instance): destroying one aborts the
+ *                                           board's Mali driver (see wl_vkDestroyDevice)
  * vkCreateAndroidSurfaceKHR takes the OHNativeWindow behind the app's ANativeWindow (Westlake's
  * wrapper, or the OH window itself) and calls vkCreateSurfaceOHOS. It is exported by name as well,
  * with Android's two AHardwareBuffer calls, as Android's libvulkan.so exports them.
@@ -48,6 +50,8 @@ static PFN_vkGetInstanceProcAddr real_gipa;
 static PFN_vkCreateInstance real_create_instance;
 static PFN_vkEnumerateInstanceExtensionProperties real_enumerate;
 static PFN_vkGetDeviceProcAddr real_gdpa;
+static PFN_vkDestroyDevice real_destroy_device;
+static PFN_vkDestroyInstance real_destroy_instance;
 
 __attribute__((constructor)) static void wl_vk_init(void) {
     real = dlopen(REAL_LOADER, RTLD_NOW | RTLD_LOCAL);
@@ -60,6 +64,60 @@ __attribute__((constructor)) static void wl_vk_init(void) {
     real_create_instance = (PFN_vkCreateInstance)dlsym(real, "vkCreateInstance");
     real_enumerate = (PFN_vkEnumerateInstanceExtensionProperties)dlsym(real, "vkEnumerateInstanceExtensionProperties");
     real_gdpa = (PFN_vkGetDeviceProcAddr)dlsym(real, "vkGetDeviceProcAddr");
+    real_destroy_device = (PFN_vkDestroyDevice)dlsym(real, "vkDestroyDevice");
+    real_destroy_instance = (PFN_vkDestroyInstance)dlsym(real, "vkDestroyInstance");
+}
+
+/*
+ * Devices kept rather than destroyed. On this board's Mali driver, destroying a VkDevice aborts the
+ * process: the driver's mali-cmar-backe thread, started by vkCreateDevice, fails on the context's
+ * termination (mali_base_kbase.c:361, base_jd_event_term) inside vkDestroyDevice. Flutter 3.27 and
+ * 3.29 create a throwaway Vulkan context to test for support and destroy its device ~10 ms later,
+ * and every such app died there before its first frame. With the device kept, Flutter goes on to its
+ * real context and the apps draw (EPD Green$, Sushiro, imsgchat).
+ *
+ * A kept device costs its driver threads and memory for the life of the process; apps destroy a
+ * device rarely (a probe, a renderer torn down), so the first 8 are kept and any after that is
+ * destroyed as asked. An instance whose devices may be kept is kept too: an instance may not be
+ * destroyed while a device made from it lives. Each keep is logged once.
+ */
+#define WL_VK_KEPT_MAX 8
+static int wl_vk_kept_devices;
+static pthread_mutex_t wl_vk_kept_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static VKAPI_ATTR void VKAPI_CALL wl_vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* alloc) {
+    if (device == VK_NULL_HANDLE) return;
+    pthread_mutex_lock(&wl_vk_kept_lock);
+    int keep = wl_vk_kept_devices < WL_VK_KEPT_MAX;
+    if (keep) wl_vk_kept_devices++;
+    int kept = wl_vk_kept_devices;
+    pthread_mutex_unlock(&wl_vk_kept_lock);
+    if (keep) {
+        fprintf(stderr, "[WL-VULKAN] vkDestroyDevice(%p): kept (%d of %d), as destroying a device aborts this "
+                "board's Mali driver\n", (void*)device, kept, WL_VK_KEPT_MAX);
+        return;
+    }
+    if (real_destroy_device) real_destroy_device(device, alloc);
+}
+
+static VKAPI_ATTR void VKAPI_CALL wl_vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* alloc) {
+    if (instance == VK_NULL_HANDLE) return;
+    pthread_mutex_lock(&wl_vk_kept_lock);
+    int devices_kept = wl_vk_kept_devices;
+    pthread_mutex_unlock(&wl_vk_kept_lock);
+    if (devices_kept > 0) {
+        fprintf(stderr, "[WL-VULKAN] vkDestroyInstance(%p): kept with the devices kept\n", (void*)instance);
+        return;
+    }
+    if (real_destroy_instance) real_destroy_instance(instance, alloc);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* alloc) {
+    wl_vkDestroyDevice(device, alloc);
+}
+
+VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* alloc) {
+    wl_vkDestroyInstance(instance, alloc);
 }
 
 /*
@@ -220,6 +278,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
         return instance ? (PFN_vkVoidFunction)wl_vkCreateAndroidSurfaceKHR : NULL;
     }
     if (!strcmp(name, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
+    if (!strcmp(name, "vkDestroyDevice")) return instance ? (PFN_vkVoidFunction)wl_vkDestroyDevice : NULL;
+    if (!strcmp(name, "vkDestroyInstance")) return instance ? (PFN_vkVoidFunction)wl_vkDestroyInstance : NULL;
     PFN_vkVoidFunction function = real_gipa(instance, name);
     if (!function) wl_vk_missing("vkGetInstanceProcAddr", name);
     return function;
@@ -228,6 +288,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* name) {
     if (!real_gdpa || !name) return NULL;
     if (!strcmp(name, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
+    if (!strcmp(name, "vkDestroyDevice")) return (PFN_vkVoidFunction)wl_vkDestroyDevice;
     PFN_vkVoidFunction function = real_gdpa(device, name);
     if (!function) wl_vk_missing("vkGetDeviceProcAddr", name);
     return function;
