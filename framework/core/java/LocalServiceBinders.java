@@ -518,10 +518,50 @@ public final class LocalServiceBinders {
         return DEFAULT;
     }
 
+    /**
+     * Network statistics with nothing counted. TrafficStats' counters (getUidStats, getIfaceStats,
+     * getTotalStats, all long) answer TrafficStats.UNSUPPORTED. A usage session (NetworkStatsManager's
+     * querySummary and queryDetails open one) answers empty statistics. The counters used to be
+     * matched by the name's "Stats" ending, which caught openSessionForUsageStats too: its Long
+     * answer could not be an INetworkStatsSession, and Stella's querySummary died on a
+     * ClassCastException in a background thread.
+     */
     private static Object netStats(String method, Object[] args) {
-        // getUidStats / getIfaceStats / getTotalStats return long: TrafficStats.UNSUPPORTED.
-        if (method.endsWith("Stats")) return Long.valueOf(-1L);
-        return DEFAULT;
+        switch (method) {
+            case "getUidStats":
+            case "getIfaceStats":
+            case "getTotalStats":
+                return Long.valueOf(-1L);
+            case "openSession":
+            case "openSessionForUsageStats":
+                return emptyNetworkStatsSession();
+            default:
+                return DEFAULT;
+        }
+    }
+
+    /** An INetworkStatsSession whose every query finds nothing: empty NetworkStats and history. */
+    private static Object emptyNetworkStatsSession() {
+        try {
+            Class<?> iface = Class.forName("android.net.INetworkStatsSession");
+            Binder binder = new Binder();
+            return Proxy.newProxyInstance(LocalServiceBinders.class.getClassLoader(), new Class<?>[] {iface},
+                    (self, method, args) -> {
+                        Class<?> type = method.getReturnType();
+                        if ("asBinder".equals(method.getName())) return binder;
+                        if (type == android.net.NetworkStats.class) {
+                            return new android.net.NetworkStats(android.os.SystemClock.elapsedRealtime(), 0);
+                        }
+                        if (type == android.net.NetworkStatsHistory.class) {
+                            return new android.net.NetworkStatsHistory(android.text.format.DateUtils.HOUR_IN_MILLIS);
+                        }
+                        if (type == int[].class) return new int[0];
+                        return defaultValue(type);
+                    });
+        } catch (Throwable t) {
+            System.err.println("[" + TAG + "] no network stats session: " + t);
+            return null;
+        }
     }
 
     private static Object telephonyRegistry(String method, Object[] args) {
