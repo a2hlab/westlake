@@ -1342,8 +1342,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // the frame as its window's position. Inside its own size a centred dialog came out at
         // (0,0): the app was told its dialog sat at the top left (getLocationOnScreen) while it was
         // drawn centred, and a popup anchored in that dialog would open in the wrong place.
-        int[] display = getDefaultDisplaySize();
-        Configuration config = sizedConfiguration(display[0], display[1]);
+        int[] display = getDefaultDisplayMetrics();
+        Configuration config = sizedConfiguration(display[0], display[1], display[2]);
         outMergedConfiguration.setOverrideConfiguration(config);
         // The global side is the display's, as WMS reports it for every window. ViewRootImpl hands
         // it to ActivityThread's config callback, which applies it to the process's resources, and
@@ -1351,7 +1351,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // window bounds. Set from this window, a smaller window shrank the app's whole idea of the
         // screen: Draw Anywhere's 180x180 overlay button made the display 180 px wide, and placing
         // its 640 px toolbar threw "Cannot coerce value to an empty range: maximum -460".
-        Configuration globalConfig = sizedConfiguration(display[0], display[1]);
+        Configuration globalConfig = sizedConfiguration(display[0], display[1], display[2]);
         outMergedConfiguration.setGlobalConfiguration(globalConfig);
         System.err.println("[OH_WSA-relayout] outMergedConfiguration set: window=" + width + "x" + height
                 + " winConfig.mBounds=" + config.windowConfiguration.getBounds()
@@ -1360,12 +1360,19 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 + " global=" + globalConfig.screenWidthDp + "x" + globalConfig.screenHeightDp);
     }
 
-    /** A configuration whose screen and window bounds are width x height pixels. */
-    private static Configuration sizedConfiguration(int width, int height) {
+    /**
+     * A configuration whose screen and window bounds are width x height pixels, at the display's
+     * density. It reaches the process's resources (ActivityThread applies the global side), so it
+     * must say what the first configuration said: a fixed 320 turned the board's 360 dpi into 320
+     * at every app's first relayout, 533 dp of screen width into 600 with the smallest width left
+     * at 533, which no portrait Android display reports.
+     */
+    private static Configuration sizedConfiguration(int width, int height, int densityDpi) {
         Configuration config = new Configuration();
-        config.screenWidthDp = width * 160 / 320; // approximate dp conversion
-        config.screenHeightDp = height * 160 / 320;
-        config.densityDpi = 320;
+        config.screenWidthDp = width * 160 / densityDpi;
+        config.screenHeightDp = height * 160 / densityDpi;
+        config.smallestScreenWidthDp = Math.min(config.screenWidthDp, config.screenHeightDp);
+        config.densityDpi = densityDpi;
         Rect bounds = new Rect(0, 0, width, height);
         config.windowConfiguration.setBounds(bounds);
         config.windowConfiguration.setAppBounds(bounds);
@@ -1809,6 +1816,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      * Buttons to render outside the HWC-composited 720×1280 visible region.
      */
     static int[] getDefaultDisplaySize() {
+        int[] metrics = getDefaultDisplayMetrics();
+        return new int[]{metrics[0], metrics[1]};
+    }
+
+    /**
+     * The default display's width, height and density, {width, height, densityDpi}, as
+     * DisplayManagerGlobal reports them: the same display the process's first configuration is
+     * built from (AppSchedulerBridge, from OhDisplayProvider).
+     */
+    static int[] getDefaultDisplayMetrics() {
         try {
             android.view.Display d = android.hardware.display.DisplayManagerGlobal
                     .getInstance()
@@ -1817,15 +1834,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
                 d.getRealMetrics(dm);
                 if (dm.widthPixels > 0 && dm.heightPixels > 0) {
-                    return new int[]{dm.widthPixels, dm.heightPixels};
+                    return new int[]{dm.widthPixels, dm.heightPixels,
+                            dm.densityDpi > 0 ? dm.densityDpi : 320};
                 }
             }
         } catch (Throwable t) {
-            Log.w(TAG, "getDefaultDisplaySize: DisplayManagerGlobal lookup failed,"
+            Log.w(TAG, "getDefaultDisplayMetrics: DisplayManagerGlobal lookup failed,"
                     + " using DAYU200 baseline 720x1280", t);
         }
         // DAYU200 native resolution (per CLAUDE.md target hardware).
-        return new int[]{720, 1280};
+        return new int[]{720, 1280, 320};
     }
 
     static int resolveRelayoutDimension(int layoutDimension, int requestedDimension,
