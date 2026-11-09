@@ -2402,6 +2402,44 @@ static const char *westlake_android_root(void)
     return root[0] != '\0' ? root : NULL;
 }
 
+/*
+ * What an app's own libraries asked this runtime for and did not get, each name told once: an
+ * environment variable the process does not have, a property nothing answers. A phone answers some
+ * of these and not others, so a line is not a fault; it is what the app expected of Android, written
+ * where it asks, for the gap map and for reading a crash that follows (Authenticator's protection
+ * library called atoi on a null pointer, with nothing in the log to say which answer was missing).
+ * The first 64 names of each kind; a name is skipped rather than waited for when another thread
+ * holds the table, so a forked child can never block here.
+ */
+#define WESTLAKE_ASKED_MAX 64
+
+struct westlake_asked {
+    pthread_mutex_t lock;
+    unsigned count;
+    char names[WESTLAKE_ASKED_MAX][64];
+};
+
+static struct westlake_asked g_unset_environment = { PTHREAD_MUTEX_INITIALIZER, 0, {{0}} };
+static struct westlake_asked g_absent_properties = { PTHREAD_MUTEX_INITIALIZER, 0, {{0}} };
+
+/* 1 the first time name is seen in asked, 0 after (and once the table is full or busy). */
+static int westlake_first_ask(struct westlake_asked *asked, const char *name)
+{
+    if (pthread_mutex_trylock(&asked->lock) != 0) {
+        return 0;
+    }
+    unsigned i = 0;
+    while (i < asked->count && strncmp(asked->names[i], name, sizeof(asked->names[i]) - 1) != 0) {
+        ++i;
+    }
+    int first = i == asked->count && asked->count < WESTLAKE_ASKED_MAX;
+    if (first) {
+        snprintf(asked->names[asked->count++], sizeof(asked->names[0]), "%s", name);
+    }
+    pthread_mutex_unlock(&asked->lock);
+    return first;
+}
+
 char *getenv(const char *name)
 {
     typedef char *(*GetenvFn)(const char *);
@@ -2424,6 +2462,11 @@ char *getenv(const char *name)
             }
             return (char *) android_root;
         }
+    }
+    const char *caller = NULL;
+    if (value == NULL && name != NULL && caller_is_android_dso(__builtin_return_address(0), &caller) &&
+        westlake_first_ask(&g_unset_environment, name)) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] getenv %s: unset, asked by %s\n", name, caller);
     }
     return value;
 }
@@ -2701,6 +2744,11 @@ const struct prop_info *__system_property_find(const char *name)
      * WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43 apps).
      */
     if (read_android_property(name, value, 0) == 0) {
+        const char *caller = NULL;
+        if (caller_is_android_dso(__builtin_return_address(0), &caller) &&
+            westlake_first_ask(&g_absent_properties, name)) {
+            fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s: absent, asked by %s\n", name, caller);
+        }
         return NULL;
     }
 
@@ -3463,6 +3511,13 @@ int __system_property_foreach(void (*callback)(const struct prop_info *, void *)
     pthread_mutex_lock(&g_property_mutex);
     size_t count = g_property_count;
     pthread_mutex_unlock(&g_property_mutex);
+    static int told;
+    if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
+        const char *caller = NULL;
+        caller_is_android_dso(__builtin_return_address(0), &caller);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (foreach) by %s: %zu properties, "
+                "the ones looked up so far\n", caller != NULL ? caller : "?", count);
+    }
     for (size_t i = 0; i < count; ++i) {
         callback(&g_property_cache[i], cookie);
     }
@@ -3473,7 +3528,15 @@ const struct prop_info *__system_property_find_nth(unsigned n)
 {
     pthread_mutex_lock(&g_property_mutex);
     const struct prop_info *entry = n < g_property_count ? &g_property_cache[n] : NULL;
+    size_t count = g_property_count;
     pthread_mutex_unlock(&g_property_mutex);
+    static int told;
+    if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
+        const char *caller = NULL;
+        caller_is_android_dso(__builtin_return_address(0), &caller);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (find_nth) by %s: %zu properties, "
+                "the ones looked up so far\n", caller != NULL ? caller : "?", count);
+    }
     return entry;
 }
 
