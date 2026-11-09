@@ -2,12 +2,12 @@
 # build_vulkan_shim.sh <oh-sdk-native> <oh-libvulkan.so> <out-dir>
 # Builds libvulkan.so from framework/vulkan-shim: OH's Vulkan loader plus VK_KHR_android_surface.
 # Every public vk* export of the given OH loader forwards to it through a generated trampoline,
-# except the three vulkan_shim.c implements.
+# except the four vulkan_shim.c implements.
 set -e
 SDK=$1; OHVK=$2; OUT=$3
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p $OUT
-OWN="vkCreateInstance vkEnumerateInstanceExtensionProperties vkGetInstanceProcAddr"
+OWN="vkCreateInstance vkEnumerateInstanceExtensionProperties vkGetInstanceProcAddr vkGetDeviceProcAddr"
 $SDK/llvm/bin/llvm-readelf -W --dyn-syms $OHVK | awk '$4=="FUNC" && $5=="GLOBAL" && $7!="UND" {print $8}' \
   | sed 's/@.*//' | grep '^vk' | sort -u > $OUT/exports.txt
 python3 - "$OUT" $OWN <<'PY'
