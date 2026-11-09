@@ -32,6 +32,9 @@
 #include <wchar.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/eventfd.h>
+#include <sys/syscall.h>
+#include <time.h>
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -4690,28 +4693,417 @@ WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nresult, (int fd, int *rcode, uint8_t *answer, size_t length),
                          (fd, rcode, answer, length))
 
-/* AChoreographer, for the same reason (Duolingo's packaged libraries import it); the runtime's
- * definitions live in liboh_hwui_shim.so, which libandroid.so's dependencies reach. */
+/*
+ * AChoreographer, for the same reason (Duolingo's packaged libraries import it). The runtime's
+ * definitions live in liboh_hwui_shim.so, which libandroid.so's dependencies reach, and libhwui keeps
+ * using them through these names: a caller that is not app code is forwarded there.
+ *
+ * App code gets AChoreographer as Android delivers it. A choreographer belongs to the thread that got
+ * it, and its callbacks run on that thread, from its looper, at the first vsync at or after the time
+ * asked for; when the thread and its looper are gone, nothing runs. The runtime's implementation runs
+ * every callback on OH's vsync thread instead. Unity's frame pacing (Swappy) tears its choreographer
+ * thread down and deletes the object a callback was posted for, and the callback then ran on the vsync
+ * thread into the deleted object: "Pure virtual function called" (Adventure Party, Cat Hole). Here a
+ * vsync from OH (OH_NativeVSync, on its own thread) only marks the due callbacks and wakes an eventfd
+ * that the owner's looper polls; the looper calls them.
+ */
 typedef struct AChoreographer AChoreographer;
 typedef void (*westlake_frame_callback)(long time, void *data);
 typedef void (*westlake_frame_callback64)(int64_t time, void *data);
 typedef void (*westlake_refresh_rate_callback)(int64_t period, void *data);
+typedef void (*westlake_vsync_callback)(const void *frame_data, void *data);
 
-WESTLAKE_ALOOPER_FORWARD(AChoreographer *, AChoreographer_getInstance, (void), ())
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback,
-                         (AChoreographer *c, westlake_frame_callback callback, void *data), (c, callback, data))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed,
-                         (AChoreographer *c, westlake_frame_callback callback, void *data, long delay),
-                         (c, callback, data, delay))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback64,
-                         (AChoreographer *c, westlake_frame_callback64 callback, void *data), (c, callback, data))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed64,
-                         (AChoreographer *c, westlake_frame_callback64 callback, void *data, uint32_t delay),
-                         (c, callback, data, delay))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_registerRefreshRateCallback,
-                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_unregisterRefreshRateCallback,
-                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
+enum { WL_CHOREO_LONG, WL_CHOREO_64, WL_CHOREO_VSYNC };
+
+typedef struct WlChoreoCallback {
+    struct WlChoreoCallback *next;
+    int kind;
+    void *callback, *data;
+    int64_t due;                         /* CLOCK_MONOTONIC, as OH's vsync timestamps are */
+} WlChoreoCallback;
+
+typedef struct {
+    westlake_refresh_rate_callback callback;
+    void *data;
+} WlRefreshCallback;
+
+typedef struct {
+    pthread_mutex_t lock;
+    int fd;                              /* eventfd the owner's looper polls */
+    void *vsync;                         /* OH_NativeVSync */
+    int requested;                       /* a vsync request is outstanding */
+    int refresh_owed;                    /* the refresh-rate callbacks are to be called */
+    int64_t frame_time, vsync_id;
+    WlChoreoCallback *pending, *ready;   /* each in posting order */
+    WlRefreshCallback refresh[8];
+} WlChoreographer;
+
+/* AChoreographerFrameCallbackData, as this implementation hands it to a vsync callback: one timeline. */
+typedef struct {
+    int64_t frame_time, vsync_id, expected_presentation, deadline;
+} WlChoreoFrameData;
+
+static struct {
+    void *(*create)(const char *name, unsigned int length);
+    int (*request)(void *vsync, void (*callback)(long long timestamp, void *data), void *data);
+    int (*period)(void *vsync, long long *period);
+} wl_vsync_api;
+static pthread_once_t wl_vsync_once = PTHREAD_ONCE_INIT;
+static __thread WlChoreographer *wl_thread_choreographer;
+
+static void wl_vsync_load(void)
+{
+    void *library = dlopen("libnative_vsync.so", RTLD_NOW | RTLD_LOCAL);
+    if (library == NULL) return;
+    wl_vsync_api.create = (void *(*)(const char *, unsigned int)) dlsym(library, "OH_NativeVSync_Create");
+    wl_vsync_api.request = (int (*)(void *, void (*)(long long, void *), void *))
+            dlsym(library, "OH_NativeVSync_RequestFrame");
+    wl_vsync_api.period = (int (*)(void *, long long *)) dlsym(library, "OH_NativeVSync_GetPeriod");
+}
+
+static int64_t wl_choreo_period(WlChoreographer *c)
+{
+    long long period = 0;
+    if (wl_vsync_api.period != NULL && c->vsync != NULL && wl_vsync_api.period(c->vsync, &period) == 0 &&
+        period > 0) {
+        return (int64_t) period;
+    }
+    return INT64_C(16666666);
+}
+
+static void wl_choreo_vsync(long long timestamp, void *data);
+
+/* Called with the lock held. */
+static void wl_choreo_request(WlChoreographer *c)
+{
+    if (!c->requested && c->vsync != NULL && wl_vsync_api.request(c->vsync, wl_choreo_vsync, c) == 0) {
+        c->requested = 1;
+    }
+}
+
+static void wl_choreo_wake(WlChoreographer *c)
+{
+    uint64_t one = 1;
+    ssize_t written = write(c->fd, &one, sizeof(one));
+    (void) written;
+}
+
+/* OH's vsync thread: the due callbacks become ready, and the owner's looper is woken for them. */
+static void wl_choreo_vsync(long long timestamp, void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) data;
+    WlChoreoCallback **from, **to;
+    int wake;
+    pthread_mutex_lock(&c->lock);
+    c->requested = 0;
+    c->frame_time = (int64_t) timestamp;
+    c->vsync_id++;
+    for (to = &c->ready; *to != NULL; to = &(*to)->next) {}
+    for (from = &c->pending; *from != NULL;) {
+        WlChoreoCallback *item = *from;
+        if (item->due > c->frame_time) {
+            from = &item->next;
+            continue;
+        }
+        *from = item->next;
+        item->next = NULL;
+        *to = item;
+        to = &item->next;
+    }
+    wake = c->ready != NULL;
+    if (c->pending != NULL) wl_choreo_request(c);
+    pthread_mutex_unlock(&c->lock);
+    if (wake) wl_choreo_wake(c);
+}
+
+/* The owner's looper: the ready callbacks, then the refresh-rate callbacks if they are owed. */
+static int wl_choreo_dispatch(int fd, int events, void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) data;
+    WlRefreshCallback refresh[sizeof(c->refresh) / sizeof(c->refresh[0])];
+    WlChoreoCallback *ready;
+    int64_t frame_time, vsync_id, period;
+    uint64_t count;
+    int refresh_owed;
+    (void) events;
+    while (read(fd, &count, sizeof(count)) > 0) {}
+    pthread_mutex_lock(&c->lock);
+    ready = c->ready;
+    c->ready = NULL;
+    refresh_owed = c->refresh_owed;
+    c->refresh_owed = 0;
+    memcpy(refresh, c->refresh, sizeof(refresh));
+    frame_time = c->frame_time;
+    vsync_id = c->vsync_id;
+    pthread_mutex_unlock(&c->lock);
+    period = wl_choreo_period(c);
+    while (ready != NULL) {
+        WlChoreoCallback *item = ready;
+        ready = item->next;
+        if (item->kind == WL_CHOREO_LONG) {
+            ((westlake_frame_callback) item->callback)((long) frame_time, item->data);
+        } else if (item->kind == WL_CHOREO_64) {
+            ((westlake_frame_callback64) item->callback)(frame_time, item->data);
+        } else {
+            WlChoreoFrameData frame = {frame_time, vsync_id, frame_time + period, frame_time + period};
+            ((westlake_vsync_callback) item->callback)(&frame, item->data);
+        }
+        free(item);
+    }
+    if (refresh_owed) {
+        for (size_t i = 0; i < sizeof(refresh) / sizeof(refresh[0]); i++) {
+            if (refresh[i].callback != NULL) refresh[i].callback(period, refresh[i].data);
+        }
+    }
+    return 1;
+}
+
+/* This thread's choreographer, made on first use; none for a thread without a looper, as on Android. */
+static WlChoreographer *wl_choreographer_for_thread(void)
+{
+    WlChoreographer *c = wl_thread_choreographer;
+    if (c != NULL) return c;
+    pthread_once(&wl_vsync_once, wl_vsync_load);
+    ALooper *looper = ALooper_forThread();
+    if (looper == NULL || wl_vsync_api.create == NULL || wl_vsync_api.request == NULL) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-CHOREO] AChoreographer_getInstance on a thread with %s: none\n",
+                          looper == NULL ? "no looper" : "no OH vsync");
+        }
+        return NULL;
+    }
+    c = (WlChoreographer *) calloc(1, sizeof(*c));
+    if (c == NULL) return NULL;
+    pthread_mutex_init(&c->lock, NULL);
+    c->fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    char name[40];
+    int length = snprintf(name, sizeof(name), "westlake_app_choreo_%ld", (long) syscall(SYS_gettid));
+    c->vsync = c->fd >= 0 ? wl_vsync_api.create(name, length > 0 ? (unsigned int) length : 0) : NULL;
+    if (c->vsync == NULL || ALooper_addFd(looper, c->fd, -2 /* ALOOPER_POLL_CALLBACK */,
+                                          1 /* ALOOPER_EVENT_INPUT */, wl_choreo_dispatch, c) != 1) {
+        /* The OH vsync object, if made, is kept: it may not be destroyed while a request is pending. */
+        if (c->fd >= 0) close(c->fd);
+        pthread_mutex_destroy(&c->lock);
+        if (c->vsync == NULL) free(c);
+        return NULL;
+    }
+    /* Kept for the life of the process: OH's vsync thread may still call into it after the thread ends. */
+    wl_thread_choreographer = c;
+    return c;
+}
+
+static void wl_choreo_post(AChoreographer *choreographer, int kind, void *callback, void *data, int64_t delay_ns)
+{
+    WlChoreographer *c = (WlChoreographer *) choreographer;
+    WlChoreoCallback *item, **tail;
+    struct timespec now;
+    if (c == NULL || callback == NULL) return;
+    item = (WlChoreoCallback *) calloc(1, sizeof(*item));
+    if (item == NULL) return;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    item->kind = kind;
+    item->callback = callback;
+    item->data = data;
+    item->due = (int64_t) now.tv_sec * 1000000000 + now.tv_nsec + (delay_ns > 0 ? delay_ns : 0);
+    pthread_mutex_lock(&c->lock);
+    for (tail = &c->pending; *tail != NULL; tail = &(*tail)->next) {}
+    *tail = item;
+    wl_choreo_request(c);
+    pthread_mutex_unlock(&c->lock);
+}
+
+/* The runtime's definition of an AChoreographer call, for a caller that is not app code. */
+static void *wl_runtime_choreographer(const char *name)
+{
+    return westlake_runtime_android_symbol(name);
+}
+
+#define WL_FROM_APP() caller_is_android_dso(__builtin_return_address(0), NULL)
+
+AChoreographer *AChoreographer_getInstance(void)
+{
+    if (!WL_FROM_APP()) {
+        AChoreographer *(*real)(void) = (AChoreographer *(*)(void)) wl_runtime_choreographer("AChoreographer_getInstance");
+        return real != NULL ? real() : NULL;
+    }
+    return (AChoreographer *) wl_choreographer_for_thread();
+}
+
+void AChoreographer_postFrameCallback(AChoreographer *c, westlake_frame_callback callback, void *data)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback, void *) =
+                (void (*)(AChoreographer *, westlake_frame_callback, void *)) wl_runtime_choreographer("AChoreographer_postFrameCallback");
+        if (real != NULL) real(c, callback, data);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_LONG, (void *) callback, data, 0);
+}
+
+void AChoreographer_postFrameCallbackDelayed(AChoreographer *c, westlake_frame_callback callback, void *data, long delay)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback, void *, long) =
+                (void (*)(AChoreographer *, westlake_frame_callback, void *, long))
+                wl_runtime_choreographer("AChoreographer_postFrameCallbackDelayed");
+        if (real != NULL) real(c, callback, data, delay);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_LONG, (void *) callback, data, (int64_t) delay * 1000000);
+}
+
+void AChoreographer_postFrameCallback64(AChoreographer *c, westlake_frame_callback64 callback, void *data)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback64, void *) =
+                (void (*)(AChoreographer *, westlake_frame_callback64, void *))
+                wl_runtime_choreographer("AChoreographer_postFrameCallback64");
+        if (real != NULL) real(c, callback, data);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_64, (void *) callback, data, 0);
+}
+
+void AChoreographer_postFrameCallbackDelayed64(AChoreographer *c, westlake_frame_callback64 callback, void *data,
+                                               uint32_t delay)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback64, void *, uint32_t) =
+                (void (*)(AChoreographer *, westlake_frame_callback64, void *, uint32_t))
+                wl_runtime_choreographer("AChoreographer_postFrameCallbackDelayed64");
+        if (real != NULL) real(c, callback, data, delay);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_64, (void *) callback, data, (int64_t) delay * 1000000);
+}
+
+void AChoreographer_postVsyncCallback(AChoreographer *c, westlake_vsync_callback callback, void *data)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_vsync_callback, void *) =
+                (void (*)(AChoreographer *, westlake_vsync_callback, void *))
+                wl_runtime_choreographer("AChoreographer_postVsyncCallback");
+        if (real != NULL) real(c, callback, data);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_VSYNC, (void *) callback, data, 0);
+}
+
+/* Android calls a newly registered refresh-rate callback once the display's mode is known, on the
+ * choreographer's looper; here at once, from the looper. A callback already registered is not added
+ * twice. */
+void AChoreographer_registerRefreshRateCallback(AChoreographer *choreographer, westlake_refresh_rate_callback callback,
+                                                void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) choreographer;
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_refresh_rate_callback, void *) =
+                (void (*)(AChoreographer *, westlake_refresh_rate_callback, void *))
+                wl_runtime_choreographer("AChoreographer_registerRefreshRateCallback");
+        if (real != NULL) real(choreographer, callback, data);
+        return;
+    }
+    if (c == NULL || callback == NULL) return;
+    pthread_mutex_lock(&c->lock);
+    size_t free_slot = sizeof(c->refresh) / sizeof(c->refresh[0]);
+    int present = 0;
+    for (size_t i = 0; i < sizeof(c->refresh) / sizeof(c->refresh[0]); i++) {
+        if (c->refresh[i].callback == callback && c->refresh[i].data == data) present = 1;
+        else if (c->refresh[i].callback == NULL && free_slot == sizeof(c->refresh) / sizeof(c->refresh[0])) free_slot = i;
+    }
+    if (!present && free_slot < sizeof(c->refresh) / sizeof(c->refresh[0])) {
+        c->refresh[free_slot].callback = callback;
+        c->refresh[free_slot].data = data;
+    }
+    c->refresh_owed = 1;
+    pthread_mutex_unlock(&c->lock);
+    wl_choreo_wake(c);
+}
+
+void AChoreographer_unregisterRefreshRateCallback(AChoreographer *choreographer, westlake_refresh_rate_callback callback,
+                                                  void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) choreographer;
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_refresh_rate_callback, void *) =
+                (void (*)(AChoreographer *, westlake_refresh_rate_callback, void *))
+                wl_runtime_choreographer("AChoreographer_unregisterRefreshRateCallback");
+        if (real != NULL) real(choreographer, callback, data);
+        return;
+    }
+    if (c == NULL) return;
+    pthread_mutex_lock(&c->lock);
+    for (size_t i = 0; i < sizeof(c->refresh) / sizeof(c->refresh[0]); i++) {
+        if (c->refresh[i].callback == callback && c->refresh[i].data == data) {
+            c->refresh[i].callback = NULL;
+            c->refresh[i].data = NULL;
+        }
+    }
+    pthread_mutex_unlock(&c->lock);
+}
+
+/* The frame data a vsync callback gets: one timeline, the frame's own. */
+int64_t AChoreographerFrameCallbackData_getFrameTimeNanos(const void *data)
+{
+    return data != NULL ? ((const WlChoreoFrameData *) data)->frame_time : 0;
+}
+
+size_t AChoreographerFrameCallbackData_getFrameTimelinesLength(const void *data)
+{
+    return data != NULL ? 1 : 0;
+}
+
+size_t AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex(const void *data)
+{
+    (void) data;
+    return 0;
+}
+
+int64_t AChoreographerFrameCallbackData_getFrameTimelineVsyncId(const void *data, size_t index)
+{
+    return data != NULL && index == 0 ? ((const WlChoreoFrameData *) data)->vsync_id : 0;
+}
+
+int64_t AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos(const void *data, size_t index)
+{
+    return data != NULL && index == 0 ? ((const WlChoreoFrameData *) data)->expected_presentation : 0;
+}
+
+int64_t AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos(const void *data, size_t index)
+{
+    return data != NULL && index == 0 ? ((const WlChoreoFrameData *) data)->deadline : 0;
+}
+
+/* This library's AChoreographer entry point of that name, for a lookup by name from app code. */
+static void *wl_choreographer_symbol(const char *name)
+{
+    static const struct { const char *name; void *address; } kChoreographer[] = {
+        { "AChoreographer_getInstance", (void *) &AChoreographer_getInstance },
+        { "AChoreographer_postFrameCallback", (void *) &AChoreographer_postFrameCallback },
+        { "AChoreographer_postFrameCallbackDelayed", (void *) &AChoreographer_postFrameCallbackDelayed },
+        { "AChoreographer_postFrameCallback64", (void *) &AChoreographer_postFrameCallback64 },
+        { "AChoreographer_postFrameCallbackDelayed64", (void *) &AChoreographer_postFrameCallbackDelayed64 },
+        { "AChoreographer_postVsyncCallback", (void *) &AChoreographer_postVsyncCallback },
+        { "AChoreographer_registerRefreshRateCallback", (void *) &AChoreographer_registerRefreshRateCallback },
+        { "AChoreographer_unregisterRefreshRateCallback", (void *) &AChoreographer_unregisterRefreshRateCallback },
+        { "AChoreographerFrameCallbackData_getFrameTimeNanos", (void *) &AChoreographerFrameCallbackData_getFrameTimeNanos },
+        { "AChoreographerFrameCallbackData_getFrameTimelinesLength",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelinesLength },
+        { "AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex",
+          (void *) &AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex },
+        { "AChoreographerFrameCallbackData_getFrameTimelineVsyncId",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelineVsyncId },
+        { "AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos },
+        { "AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos },
+    };
+    for (size_t i = 0; i < sizeof(kChoreographer) / sizeof(kChoreographer[0]); i++) {
+        if (strcmp(name, kChoreographer[i].name) == 0) return kChoreographer[i].address;
+    }
+    return NULL;
+}
 
 /*
  * Importing an AHardwareBuffer into EGL. Westlake's AHardwareBuffer is an OH_NativeBuffer, but
@@ -5561,6 +5953,17 @@ void *dlsym(void *handle, const char *name)
                 wl_relocs_log("[WESTLAKE-EGL] %s by handle from an Android library: this library's\n", name);
             }
             return own;
+        }
+    }
+    /* AChoreographer by handle, from app code: this library's, which calls back on the caller's looper
+     * (see AChoreographer_getInstance). Only where the handle's own lookup finds one: the WebView's
+     * libandroid.so has none, and the WebView keeps going without. */
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && name[0] == 'A' &&
+        strncmp(name, "AChoreographer", 14) == 0) {
+        void *caller = __builtin_return_address(0);
+        if (caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+            void *own = wl_choreographer_symbol(name);
+            if (own != NULL && real(handle, name) != NULL) return own;
         }
     }
     /* By a handle the caller's address plays no part in the lookup, so this call need not be the
