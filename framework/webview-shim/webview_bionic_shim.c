@@ -4750,6 +4750,7 @@ typedef struct {
     unsigned (*destroy_image)(WlEglDisplay, WlEglImage);
     int (*dup_fence)(WlEglDisplay, void *);
     void *(*create_window_surface)(WlEglDisplay, void *, void *, const WlEglInt *);
+    const char *(*query_string)(WlEglDisplay, WlEglInt);
 } WlEglImplementation;
 static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
 static int wl_egl_implementation_count;
@@ -4790,6 +4791,7 @@ static void wl_egl_add_implementation(void *library)
     e->dup_fence = (int (*)(WlEglDisplay, void *)) wl_egl_entry(library, "eglDupNativeFenceFDANDROID");
     e->create_window_surface = (void *(*)(WlEglDisplay, void *, void *, const WlEglInt *))
             wl_egl_entry(library, "eglCreateWindowSurface");
+    e->query_string = (const char *(*)(WlEglDisplay, WlEglInt)) wl_egl_entry(library, "eglQueryString");
     Dl_info info;
     wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
                   dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
@@ -5327,6 +5329,29 @@ int eglDupNativeFenceFDANDROID(WlEglDisplay display, void *sync)
 }
 
 /*
+ * eglQueryString. With EGL_NO_DISPLAY and EGL_EXTENSIONS it is EGL_EXT_client_extensions' query for
+ * the client extensions, which Android's loader always answers. OH's libEGL.so answers EGL_BAD_DISPLAY
+ * and NULL ("invalid display pointer"), as the extension allows only where it is absent, and Asphalt
+ * 8's GL thread passed that NULL to strlen. The answer here is EGL_EXT_client_extensions alone: none
+ * of Android's platform extensions, whose eglGetPlatformDisplay(EGL_PLATFORM_ANDROID_KHR) OH's EGL
+ * does not take. Every other query goes to the implementation that owns the display.
+ */
+#define WL_EGL_EXTENSIONS 0x3055
+const char *eglQueryString(WlEglDisplay display, WlEglInt name)
+{
+    if (display == NULL && name == WL_EGL_EXTENSIONS) return "EGL_EXT_client_extensions";
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    const char *answer = NULL;
+    for (int k = 0; k < count && answer == NULL; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->query_string == NULL) continue;
+        answer = e->query_string(display, name);
+        if (answer == NULL && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    return answer;
+}
+
+/*
  * eglTerminate. hwui renders the whole process through the default display and keeps it
  * initialized for the life of the process; Android's EGL loader counts initializations, so an app's
  * own eglTerminate (GLSurfaceView, a renderer through EGL14) never tears that display down there.
@@ -5411,6 +5436,7 @@ static void *westlake_egl_by_handle(const char *name)
 {
     if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
     if (strcmp(name, "eglTerminate") == 0) return (void *) &eglTerminate;
+    if (strcmp(name, "eglQueryString") == 0) return (void *) &eglQueryString;
     return NULL;
 }
 
