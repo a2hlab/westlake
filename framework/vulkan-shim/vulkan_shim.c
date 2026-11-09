@@ -9,14 +9,16 @@
  *
  * This library sits first on the app's library path under the loader's name. Every public
  * vk* entry point forwards to OH's loader (vulkan_trampolines.S, generated from its export
- * list). Three are implemented here:
+ * list). Four are implemented here:
  *   vkEnumerateInstanceExtensionProperties  also lists VK_KHR_android_surface when OH has VK_OHOS_surface
  *   vkCreateInstance                        enables VK_OHOS_surface in place of VK_KHR_android_surface
  *   vkGetInstanceProcAddr                   returns these, and vkCreateAndroidSurfaceKHR
+ *   vkGetDeviceProcAddr                     OH's, logging the names it has no function for
  * vkCreateAndroidSurfaceKHR takes the OHNativeWindow behind the app's ANativeWindow (Westlake's
  * wrapper, or the OH window itself) and calls vkCreateSurfaceOHOS.
  */
 #include <dlfcn.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +46,7 @@ static void* real;
 static PFN_vkGetInstanceProcAddr real_gipa;
 static PFN_vkCreateInstance real_create_instance;
 static PFN_vkEnumerateInstanceExtensionProperties real_enumerate;
+static PFN_vkGetDeviceProcAddr real_gdpa;
 
 __attribute__((constructor)) static void wl_vk_init(void) {
     real = dlopen(REAL_LOADER, RTLD_NOW | RTLD_LOCAL);
@@ -55,6 +58,31 @@ __attribute__((constructor)) static void wl_vk_init(void) {
     real_gipa = (PFN_vkGetInstanceProcAddr)dlsym(real, "vkGetInstanceProcAddr");
     real_create_instance = (PFN_vkCreateInstance)dlsym(real, "vkCreateInstance");
     real_enumerate = (PFN_vkEnumerateInstanceExtensionProperties)dlsym(real, "vkEnumerateInstanceExtensionProperties");
+    real_gdpa = (PFN_vkGetDeviceProcAddr)dlsym(real, "vkGetDeviceProcAddr");
+}
+
+/*
+ * A name OH's loader has no function for. The app gets null, as from Android's loader for a name it
+ * lacks, and some call it unchecked: NBA 2K's render thread called through a null pointer right after
+ * the Mali driver logged a run of "vk_icdGetInstanceProcAddr can not find <private>", the names
+ * hidden. Each such name is logged once, the first 64 in all.
+ */
+#define WL_VK_MISSING_MAX 64
+static char wl_vk_missing_names[WL_VK_MISSING_MAX][64];
+static unsigned wl_vk_missing_count;
+static pthread_mutex_t wl_vk_missing_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void wl_vk_missing(const char* lookup, const char* name) {
+    pthread_mutex_lock(&wl_vk_missing_lock);
+    int seen = 0;
+    for (unsigned i = 0; i < wl_vk_missing_count && !seen; i++) {
+        seen = !strncmp(wl_vk_missing_names[i], name, sizeof wl_vk_missing_names[i] - 1);
+    }
+    if (!seen && wl_vk_missing_count < WL_VK_MISSING_MAX) {
+        snprintf(wl_vk_missing_names[wl_vk_missing_count++], sizeof wl_vk_missing_names[0], "%s", name);
+        fprintf(stderr, "[WL-VULKAN] %s(%s): no function\n", lookup, name);
+    }
+    pthread_mutex_unlock(&wl_vk_missing_lock);
 }
 
 static int real_has_ohos_surface(void) {
@@ -157,5 +185,16 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
     if (!strcmp(name, "vkCreateAndroidSurfaceKHR")) {
         return instance ? (PFN_vkVoidFunction)wl_vkCreateAndroidSurfaceKHR : NULL;
     }
-    return real_gipa(instance, name);
+    if (!strcmp(name, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
+    PFN_vkVoidFunction function = real_gipa(instance, name);
+    if (!function) wl_vk_missing("vkGetInstanceProcAddr", name);
+    return function;
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* name) {
+    if (!real_gdpa || !name) return NULL;
+    if (!strcmp(name, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
+    PFN_vkVoidFunction function = real_gdpa(device, name);
+    if (!function) wl_vk_missing("vkGetDeviceProcAddr", name);
+    return function;
 }
