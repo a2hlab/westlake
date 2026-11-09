@@ -15,7 +15,8 @@
  *   vkGetInstanceProcAddr                   returns these, and vkCreateAndroidSurfaceKHR
  *   vkGetDeviceProcAddr                     OH's, logging the names it has no function for
  * vkCreateAndroidSurfaceKHR takes the OHNativeWindow behind the app's ANativeWindow (Westlake's
- * wrapper, or the OH window itself) and calls vkCreateSurfaceOHOS.
+ * wrapper, or the OH window itself) and calls vkCreateSurfaceOHOS. It is exported by name as well,
+ * with Android's two AHardwareBuffer calls, as Android's libvulkan.so exports them.
  */
 #include <dlfcn.h>
 #include <pthread.h>
@@ -173,6 +174,39 @@ static VKAPI_ATTR VkResult VKAPI_CALL wl_vkCreateAndroidSurfaceKHR(
     fprintf(stderr, "[WL-VULKAN] vkCreateAndroidSurfaceKHR window=%p oh=%p -> %d\n",
             info->window, (void*)window, result);
     return result;
+}
+
+/*
+ * Names Android's libvulkan.so exports and OH's loader does not (libvulkan.map.txt). An app may look
+ * them up in the library itself rather than through vkGetInstanceProcAddr: NBA 2K's libnba2km.so
+ * dlsyms vkCreateAndroidSurfaceKHR from libvulkan.so, got null here, and called it on its render
+ * thread right after creating its instance (SIGSEGV, "a null function pointer called").
+ * The AHardwareBuffer calls belong to VK_ANDROID_external_memory_android_hardware_buffer, which this
+ * device does not offer; Android exports them all the same, and here they fail as a call for a
+ * buffer the device cannot import does.
+ */
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateAndroidSurfaceKHR(
+        VkInstance instance, const AndroidSurfaceCreateInfo* info,
+        const VkAllocationCallbacks* alloc, VkSurfaceKHR* surface) {
+    return wl_vkCreateAndroidSurfaceKHR(instance, info, alloc, surface);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetAndroidHardwareBufferPropertiesANDROID(
+        VkDevice device, const void* buffer, void* properties) {
+    (void)device;
+    (void)buffer;
+    (void)properties;
+    wl_vk_missing("export", "vkGetAndroidHardwareBufferPropertiesANDROID");
+    return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetMemoryAndroidHardwareBufferANDROID(
+        VkDevice device, const void* info, void** buffer) {
+    (void)device;
+    (void)info;
+    if (buffer) *buffer = NULL;
+    wl_vk_missing("export", "vkGetMemoryAndroidHardwareBufferANDROID");
+    return VK_ERROR_OUT_OF_HOST_MEMORY;
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* name) {
