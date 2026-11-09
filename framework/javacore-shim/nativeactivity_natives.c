@@ -328,6 +328,49 @@ static void set_dl_error(const char* message)
     g_dl_error = message != NULL ? strdup(message) : NULL;
 }
 
+/* libart's OpenNativeLibrary, which System.loadLibrary uses. libart is not global, so it is looked up
+ * through libart's own handle when the global scope does not have it. */
+static OpenNativeLibraryFn runtime_loader(void)
+{
+    OpenNativeLibraryFn found = (OpenNativeLibraryFn) dlsym(RTLD_DEFAULT, "OpenNativeLibrary");
+    if (found == NULL) {
+        void* art = dlopen("libart.so", RTLD_NOW | RTLD_NOLOAD);
+        found = art != NULL ? (OpenNativeLibraryFn) dlsym(art, "OpenNativeLibrary") : NULL;
+    }
+    (void) dlerror();
+    return found;
+}
+
+/*
+ * The library, when the app has loaded it already: Unreal's GameActivity and NetEase's engines call
+ * System.loadLibrary on it before the activity starts. Android's loader answers a second open with the
+ * library it has; opening the path again here made a second copy, and its relocation failed where the
+ * first had succeeded (eFootball's racer libUE4.so and Eggy Party's libclient.so: an NDK libc++ name
+ * "not found"). Looked for by path and by name, in the namespaces app libraries go to, without loading.
+ */
+static void* loaded_library(const char* path)
+{
+    typedef struct { char name[256]; } WlNamespace;   /* <dlfcn.h>'s Dl_namespace */
+    typedef int (*DlnsGetFn)(const char*, WlNamespace*);
+    typedef void* (*DlopenNsFn)(WlNamespace*, const char*, int);
+    static const char* const kNamespaces[] = { "westlake_android_app", "westlake_app_libs" };
+    DlnsGetFn get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    DlopenNsFn open_ns = (DlopenNsFn) dlsym(RTLD_DEFAULT, "dlopen_ns");
+    const char* base = strrchr(path, '/');
+    const char* names[2] = { path, base != NULL ? base + 1 : path };
+    size_t i, j;
+    void* handle = NULL;
+    for (i = 0; i < COUNT(kNamespaces) && handle == NULL && get != NULL && open_ns != NULL; i++) {
+        WlNamespace ns;
+        memset(&ns, 0, sizeof(ns));
+        if (get(kNamespaces[i], &ns) != 0) continue;
+        for (j = 0; j < 2 && handle == NULL; j++) handle = open_ns(&ns, names[j], RTLD_NOW | RTLD_NOLOAD);
+    }
+    for (j = 0; j < 2 && handle == NULL; j++) handle = dlopen(names[j], RTLD_NOW | RTLD_NOLOAD);
+    (void) dlerror();   /* a library that is not loaded yet leaves an error that is not this load's */
+    return handle;
+}
+
 static jlong loadNativeCode(JNIEnv* env, jobject thiz, jstring path, jstring function, jobject message_queue,
                             jstring internal_dir, jstring obb_dir, jstring external_dir, jint sdk_version,
                             jobject assets, jbyteArray saved_state, jobject class_loader, jstring library_path)
@@ -335,16 +378,21 @@ static jlong loadNativeCode(JNIEnv* env, jobject thiz, jstring path, jstring fun
     (void) message_queue;
     char* library_name = dup_string(env, path);
     char* function_name = dup_string(env, function);
-    OpenNativeLibraryFn open_library = (OpenNativeLibraryFn) dlsym(RTLD_DEFAULT, "OpenNativeLibrary");
+    OpenNativeLibraryFn open_library = runtime_loader();
     bool needs_bridge = false;
     char* error = NULL;
     void* library = NULL;
     CreateFn create;
     WlNativeCode* code;
     if (library_name == NULL || function_name == NULL) goto fail;
-    library = open_library != NULL
-            ? open_library(env, sdk_version, library_name, class_loader, NULL, library_path, &needs_bridge, &error)
-            : dlopen(library_name, RTLD_NOW);
+    library = loaded_library(library_name);
+    if (library != NULL) {
+        nalog("[WL-NATIVEACTIVITY] %s: the app's loaded copy", library_name);
+    } else {
+        library = open_library != NULL
+                ? open_library(env, sdk_version, library_name, class_loader, NULL, library_path, &needs_bridge, &error)
+                : dlopen(library_name, RTLD_NOW);
+    }
     if (library == NULL) {
         set_dl_error(error != NULL ? error : dlerror());
         nalog("[WL-NATIVEACTIVITY] %s did not load: %s", library_name, g_dl_error != NULL ? g_dl_error : "?");
