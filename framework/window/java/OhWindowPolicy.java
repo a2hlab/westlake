@@ -13,8 +13,15 @@ public final class OhWindowPolicy {
     private static final Map<IBinder,State> states=new HashMap<>();
     private static Field sessions;
     private static final class State { int session; boolean requested, applied; }
+    // nativeSetKeepScreenOn is in liboh_adapter_bridge.so, which OHEnvironment loads into the boot
+    // class loader. WESTLAKE_WINDOW_POLICY_PATH names an overlay library for a bridge built without
+    // it. The launcher does not set the variable, so loading it unconditionally threw in every app
+    // that asked for FLAG_KEEP_SCREEN_ON (233 of 960 Hong Kong apps), and the flag did nothing.
     private static final class Native {
-        static { System.load(System.getenv("WESTLAKE_WINDOW_POLICY_PATH")); }
+        static {
+            String overlay = System.getenv("WESTLAKE_WINDOW_POLICY_PATH");
+            if (overlay != null && !overlay.isEmpty()) System.load(overlay);
+        }
         static void load() {}
     }
     private static native int nativeSetKeepScreenOn(int session, boolean value);
