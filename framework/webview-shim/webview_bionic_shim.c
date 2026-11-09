@@ -4916,13 +4916,47 @@ void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, c
  */
 enum { WL_WINDOW_SET_GEOMETRY = 0, WL_WINDOW_GET_GEOMETRY = 1, WL_WINDOW_SET_FORMAT = 3 };
 
+static void *wl_native_buffer_symbol(const char *name);
+
+/*
+ * The host format for Android's RGB_565. This board's allocator has no RGB_565 buffer a GPU can
+ * render to: OH_NativeBuffer_Alloc refuses it with or without CPU access, while RGBA_8888,
+ * RGBX_8888, RGB_888 and RGBA_1010102 succeed. A window set to it failed every buffer request
+ * (NATIVE_ERROR_UNKNOWN), so Unity games that render to a 16-bit display buffer drew nothing
+ * (Pikmin Bloom, Just Dance, Lightning Link). Where the allocator refuses RGB_565, such a window
+ * gets RGBX_8888, the nearest opaque format, and ANativeWindow_lock reports that format to a
+ * caller that locks the window, as an Android window may.
+ */
+static int32_t wl_rgb565_host_format(void)
+{
+    static int32_t chosen;   /* 0 until probed */
+    int32_t format = __atomic_load_n(&chosen, __ATOMIC_ACQUIRE);
+    if (format != 0) return format;
+    typedef struct { int32_t width, height, format, usage, stride; } WlBufferConfig;   /* OH_NativeBuffer_Config */
+    typedef void *(*Alloc)(const WlBufferConfig *);
+    typedef int32_t (*Unreference)(void *);
+    Alloc alloc = (Alloc) wl_native_buffer_symbol("OH_NativeBuffer_Alloc");
+    Unreference unreference = (Unreference) wl_native_buffer_symbol("OH_NativeBuffer_Unreference");
+    format = 3;   /* RGB_565 */
+    if (alloc != NULL && unreference != NULL) {
+        WlBufferConfig config = {64, 64, 3, (1 << 3) | (1 << 8) | (1 << 9), 0};   /* DMA, GPU render and texture */
+        void *buffer = alloc(&config);
+        if (buffer != NULL) unreference(buffer);
+        else format = 11;   /* RGBX_8888 */
+    }
+    __atomic_store_n(&chosen, format, __ATOMIC_RELEASE);
+    wl_relocs_log("[WESTLAKE-WINDOW] RGB_565 windows use OH format %d%s\n", format,
+                  format == 3 ? "" : ": the allocator has no RGB_565 for rendering");
+    return format;
+}
+
 static int32_t wl_host_window_format(int32_t android)
 {
     switch (android) {
         case 1: return 12;     /* RGBA_8888 */
         case 2: return 11;     /* RGBX_8888 */
         case 3: return 13;     /* RGB_888 */
-        case 4: return 3;      /* RGB_565 */
+        case 4: return wl_rgb565_host_format();   /* RGB_565, where the board can render to it */
         case 5: return 20;     /* BGRA_8888 */
         case 0x16: return 39;  /* RGBA_FP16 */
         case 0x2b: return 34;  /* RGBA_1010102 */
