@@ -41,6 +41,7 @@ import javax.net.ssl.X509ExtendedTrustManager;
 /** A PKIX trust manager whose default anchors are the host platform roots. */
 public final class OhSystemTrustManager extends X509ExtendedTrustManager {
     private static final String OH_CA_BUNDLE = "/etc/ssl/certs/cacert.pem";
+    private static final String ANDROID_CA_STORE = "AndroidCAStore";
 
     private final Set<TrustAnchor> trustAnchors;
     private final X509Certificate[] acceptedIssuers;
@@ -48,7 +49,10 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
     public OhSystemTrustManager(KeyStore suppliedStore)
             throws GeneralSecurityException, IOException {
         LinkedHashSet<X509Certificate> roots = new LinkedHashSet<>();
-        if (suppliedStore != null) {
+        // As Conscrypt's TrustManagerImpl: an AndroidCAStore stands for the platform's roots, which
+        // it reads itself rather than through the store the caller passed.
+        boolean platform = suppliedStore == null || ANDROID_CA_STORE.equals(suppliedStore.getType());
+        if (!platform) {
             loadKeyStore(suppliedStore, roots);
         } else {
             loadAndroidSystemDirectory(roots);
@@ -56,7 +60,7 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
                 loadPemBundle(new File(OH_CA_BUNDLE), roots);
             }
         }
-        if (roots.isEmpty() && suppliedStore == null) {
+        if (roots.isEmpty() && platform) {
             throw new KeyStoreException("No platform CA certificates are available");
         }
 
@@ -68,14 +72,24 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
         acceptedIssuers = roots.toArray(new X509Certificate[0]);
     }
 
-    private static void loadKeyStore(KeyStore store, Set<X509Certificate> roots)
-            throws KeyStoreException {
-        Enumeration<String> aliases = store.aliases();
-        while (aliases.hasMoreElements()) {
-            Certificate cert = store.getCertificate(aliases.nextElement());
-            if (cert instanceof X509Certificate) {
-                roots.add((X509Certificate) cert);
+    /*
+     * The certificates a supplied store holds, as Conscrypt's TrustManagerImpl collects its accepted
+     * issuers: a store that cannot be read, such as one that was never loaded, holds none, and the
+     * manager is still made (it trusts nothing). Microsoft Authenticator initializes a trust manager
+     * factory with an AndroidKeyStore it never loads; KeyStore.aliases threw "Uninitialized keystore",
+     * TrustManagerFactory.init failed, and so did Application.onCreate.
+     */
+    private static void loadKeyStore(KeyStore store, Set<X509Certificate> roots) {
+        try {
+            Enumeration<String> aliases = store.aliases();
+            while (aliases.hasMoreElements()) {
+                Certificate cert = store.getCertificate(aliases.nextElement());
+                if (cert instanceof X509Certificate) {
+                    roots.add((X509Certificate) cert);
+                }
             }
+        } catch (KeyStoreException unreadable) {
+            roots.clear();
         }
     }
 
