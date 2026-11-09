@@ -6781,6 +6781,40 @@ static void *westlake_thread_start(void *data)
     return routine(argument);
 }
 
+/*
+ * Bionic's default thread stack, 1 MiB less its signal stack and guard (PTHREAD_STACK_SIZE_DEFAULT in
+ * bionic's pthread_internal.h): what an Android thread gets when it is created without attributes, or
+ * with attributes from pthread_attr_init that set no size. musl's default is 128 KiB, an eighth of it.
+ * Unreal Engine's FileThread (eFootball), made that way, ran off the end of its stack inside this
+ * library's dlopen, deep in a file call. An Android caller's attributes start at Bionic's size, and a
+ * thread it creates without attributes gets that size; a size the caller sets is kept.
+ */
+#define WESTLAKE_BIONIC_STACK_DEFAULT ((1024 * 1024) - (16 * 1024) - 4096)
+
+typedef int (*WestlakeAttrInitFn)(pthread_attr_t *);
+static WestlakeAttrInitFn westlake_musl_attr_init;
+
+static WestlakeAttrInitFn westlake_attr_init_fn(void)
+{
+    WestlakeAttrInitFn real = __atomic_load_n(&westlake_musl_attr_init, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakeAttrInitFn) westlake_find_musl_symbol("pthread_attr_init");
+        if (real == NULL) real = (WestlakeAttrInitFn) dlsym(RTLD_NEXT, "pthread_attr_init");
+        __atomic_store_n(&westlake_musl_attr_init, real, __ATOMIC_RELEASE);
+    }
+    return real;
+}
+
+int pthread_attr_init(pthread_attr_t *attr)
+{
+    WestlakeAttrInitFn real = westlake_attr_init_fn();
+    int result = real != NULL ? real(attr) : ENOSYS;
+    if (result == 0 && caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        (void) pthread_attr_setstacksize(attr, WESTLAKE_BIONIC_STACK_DEFAULT);
+    }
+    return result;
+}
+
 int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restrict attr,
                    void *(*routine)(void *), void *__restrict argument)
 {
@@ -6799,7 +6833,15 @@ int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restric
     start->routine = routine;
     start->argument = argument;
     start->state = 0;
-    int result = real(thread, attr, westlake_thread_start, start);
+    pthread_attr_t bionic;
+    const pthread_attr_t *used = attr;
+    WestlakeAttrInitFn attr_init = attr == NULL ? westlake_attr_init_fn() : NULL;
+    if (attr_init != NULL && attr_init(&bionic) == 0) {
+        (void) pthread_attr_setstacksize(&bionic, WESTLAKE_BIONIC_STACK_DEFAULT);
+        used = &bionic;
+    }
+    int result = real(thread, used, westlake_thread_start, start);
+    if (used == &bionic) pthread_attr_destroy(&bionic);
     if (result != 0) {
         free(start); /* no thread was started */
         return result;
