@@ -1850,8 +1850,44 @@ static void westlake_run_dt_inits(void)
 
 static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode);
 
+/*
+ * ART's loader opens each library the launcher routes to the Android namespace RTLD_GLOBAL
+ * (OpenInAndroidNamespace, art-build stubs/link_stubs_arm64.cc); Android's native loader opens an
+ * app's libraries with RTLD_NOW alone, local. Under musl a global library comes first for every
+ * library relocated after it, ahead of that library's own definitions, so the first routed library
+ * that defined a name answered it for all the others, even a library's references to its own copy.
+ * FNF's liblime.so carries its own libc++: its throw helper reached std::invalid_argument's type info
+ * through a GOT slot, which the APK's libc++_shared.so (opened before it, global) answered, while its
+ * catch clause compared with its own copy. The two no longer matched, the std::stoll exception went
+ * through noexcept alcCreateContext uncaught, and terminate() ended the app. ART's opens there are
+ * local here, as on Android. The bionic boundary ART preloads in that namespace stays global, as does
+ * the bootstrap anchor that installs one (appspawn-x android_native_namespace_bootstrap.c), and an
+ * app's own dlopen keeps the flags it asked for (it does not come from libart).
+ */
+static int westlake_art_opens_app_library(const Dl_namespace *ns, const char *file, void *caller)
+{
+    if (ns == NULL || file == NULL || strcmp(ns->name, "westlake_android_app") != 0) return 0;
+    static const char *const kGlobal[] = { "WESTLAKE_ANDROID_NATIVE_PRELOAD", "WESTLAKE_ANDROID_NATIVE_ANCHOR" };
+    for (size_t i = 0; i < sizeof(kGlobal) / sizeof(kGlobal[0]); i++) {
+        const char *value = getenv(kGlobal[i]);
+        if (value != NULL && strcmp(file, value) == 0) return 0;
+    }
+    Dl_info info;
+    if (dladdr(caller, &info) == 0 || info.dli_fname == NULL) return 0;
+    const char *base = strrchr(info.dli_fname, '/');
+    return strcmp(base != NULL ? base + 1 : info.dli_fname, "libart.so") == 0;
+}
+
 void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
 {
+    if ((mode & RTLD_GLOBAL) && westlake_art_opens_app_library(ns, file, __builtin_return_address(0))) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-LOADER] ART's loads in the Android namespace are local, as on Android (%s)\n",
+                          file);
+        }
+        mode &= ~RTLD_GLOBAL;
+    }
     void *handle = westlake_dlopen_ns(ns, file, mode);
     if (handle != NULL) westlake_run_dt_inits();
     return handle;
@@ -6362,9 +6398,27 @@ static void *westlake_find_musl_symbol(const char *name)
     return query.address;
 }
 
+/*
+ * musl's __dlsym(handle, name, return address): its aarch64 dlsym is only "mov x2, x30; b __dlsym"
+ * (src/ldso/aarch64/dlsym.s), and the return address is what RTLD_DEFAULT and RTLD_NEXT are resolved
+ * against (the caller's namespace, the library after the caller). Calling it with the caller's return
+ * address is the tail call to dlsym, with the answer coming back here. NULL when the entry is not that
+ * pair of instructions.
+ */
+typedef void *(*WestlakeDlsymRaFn)(void *, const char *, void *);
+static WestlakeDlsymRaFn westlake_musl_dlsym_ra;
+
 static WestlakeDlsymFn westlake_find_musl_dlsym(void)
 {
     WestlakeDlsymFn found = (WestlakeDlsymFn) westlake_find_musl_symbol("dlsym");
+    if (found != NULL) {
+        const uint32_t *code = (const uint32_t *) (uintptr_t) found;
+        if (code[0] == 0xaa1e03e2u && (code[1] & 0xfc000000u) == 0x14000000u) {   /* mov x2, x30; b */
+            int64_t offset = (int64_t) ((int32_t) (code[1] << 6) >> 6) * 4;
+            __atomic_store_n(&westlake_musl_dlsym_ra, (WestlakeDlsymRaFn) ((uintptr_t) &code[1] + offset),
+                             __ATOMIC_RELEASE);
+        }
+    }
     __atomic_store_n(&westlake_musl_dlsym, found, __ATOMIC_RELEASE);
     return found;
 }
@@ -6374,6 +6428,78 @@ __attribute__((constructor)) static void westlake_dlsym_init(void)
     if (westlake_find_musl_dlsym() == NULL) {
         fprintf(stderr, "[WESTLAKE-LOADER] musl's dlsym not found; EGL lookups by handle are not redirected\n");
     }
+}
+
+/*
+ * The handle of a library already loaded, by its path: in the Android namespace, the namespace of
+ * the libraries an app writes, or the default one, wherever it was opened. Nothing is loaded.
+ */
+static void *westlake_loaded_handle(const char *path)
+{
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    static DlnsGetFn get;
+    if (get == NULL) get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    static const char *const kNamespaces[] = { "westlake_android_app", "westlake_app_libs" };
+    for (size_t i = 0; get != NULL && i < sizeof(kNamespaces) / sizeof(kNamespaces[0]); i++) {
+        Dl_namespace ns;
+        memset(&ns, 0, sizeof(ns));
+        if (get(kNamespaces[i], &ns) != 0) continue;
+        void *handle = westlake_real_dlopen_ns_fn(&ns, path, RTLD_NOW | RTLD_NOLOAD);
+        if (handle != NULL) return handle;
+    }
+    return westlake_real_dlopen_fn(NULL, path, RTLD_NOW | RTLD_NOLOAD);
+}
+
+/*
+ * dlsym(RTLD_DEFAULT) from an app's library, not found among the global libraries: Bionic then
+ * searches the caller's own local group, the library and what it needs (dlsym_linear_lookup in
+ * linker.cpp); musl stops there. An app library's lookups of names in its own libraries had reached
+ * them only while ART opened those libraries global (see westlake_art_opens_app_library). Searched
+ * here as Bionic does; the error the failed global lookup left is cleared when this one answers.
+ */
+static void *westlake_dlsym_caller_group(WestlakeDlsymRaFn by_ra, const char *name, void *caller)
+{
+    const char *path = NULL;
+    Dl_info info;
+    if (!caller_is_android_dso(caller, &path) || path == NULL || caller_is_webview(caller, NULL) ||
+        dladdr(caller, &info) == 0 || info.dli_fbase == NULL) {
+        return NULL;
+    }
+    /* Each library's handle is looked for once (a failed look leaves lines in OH's log). */
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static struct { void *base; void *handle; } known[32];
+    void *self = NULL;
+    int seen = 0;
+    pthread_mutex_lock(&lock);
+    for (size_t i = 0; i < sizeof(known) / sizeof(known[0]) && known[i].base != NULL && !seen; i++) {
+        if (known[i].base == info.dli_fbase) {
+            self = known[i].handle;
+            seen = 1;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    if (!seen) {
+        self = westlake_loaded_handle(path);
+        pthread_mutex_lock(&lock);
+        for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+            if (known[i].base == NULL || known[i].base == info.dli_fbase) {
+                known[i].base = info.dli_fbase;
+                known[i].handle = self;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&lock);
+    }
+    void *found = self != NULL ? by_ra(self, name, caller) : NULL;
+    if (found != NULL) {
+        (void) dlerror();
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-LOADER] dlsym(RTLD_DEFAULT, %s) from %s: found in its own libraries, as Bionic "
+                          "searches them\n", name, path);
+        }
+    }
+    return found;
 }
 
 /*
@@ -6547,6 +6673,14 @@ void *dlsym(void *handle, const char *name)
             if (found != NULL) (void) dlerror();   /* the failed lookup's error does not stand */
         }
         return found;
+    }
+    /* RTLD_DEFAULT through __dlsym with the caller's return address: the same lookup, then Bionic's
+     * second place to look when it fails. */
+    WestlakeDlsymRaFn by_ra = __atomic_load_n(&westlake_musl_dlsym_ra, __ATOMIC_ACQUIRE);
+    if (handle == RTLD_DEFAULT && name != NULL && by_ra != NULL) {
+        void *caller = __builtin_return_address(0);
+        void *found = by_ra(RTLD_DEFAULT, name, caller);
+        return found != NULL ? found : westlake_dlsym_caller_group(by_ra, name, caller);
     }
     __attribute__((musttail)) return real(handle, name);
 }
