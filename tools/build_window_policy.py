@@ -16,6 +16,9 @@ def main():
     parser.add_argument('--sdk', type=Path, required=True)
     parser.add_argument('--clang', type=Path, required=True, help='Pinned platform clang15 root')
     parser.add_argument('--providers', type=Path, help='Optional exact board libraries; omit for compile-only')
+    parser.add_argument('--providers-lock', type=Path,
+                        default=ROOT / 'tests/parity/window-providers.lock.json',
+                        help='SHA-256 of each board library --providers must hold (the board the build is for)')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     output = args.out.absolute()
@@ -38,20 +41,27 @@ def main():
              '-ffile-prefix-map=' + str(clang) + '=/toolchain/clang15',
              '-I' + str(ROOT / 'third_party/jni'), '-I' + str(ROOT / 'framework/window/jni')]
     flags += ['-I' + str(headers / name) for name in inventory['include_dirs']]
-    source = ROOT / 'framework/window/jni/oh_window_policy.cpp'
-    obj = output / 'oh_window_policy.o'
-    subprocess.run([str(compiler), *flags, '-c', str(source), '-o', str(obj)], check=True)
+    # The keep-screen-on property and the sub-window z-level, both session property requests.
+    sources = [ROOT / 'framework/window/jni/oh_window_policy.cpp',
+               ROOT / 'framework/window/jni/oh_window_order.cpp']
+    objects = []
+    for source in sources:
+        obj = output / (source.stem + '.o')
+        subprocess.run([str(compiler), *flags, '-c', str(source), '-o', str(obj)], check=True)
+        objects.append(obj)
     report = dict(compile_only=not bool(args.providers), device_accepted=False,
-                  source_sha256=sha(source), header_inventory_sha256=sha(headers / 'inventory.json'),
-                  artifacts={obj.name: dict(sha256=sha(obj), bytes=obj.stat().st_size)})
+                  source_sha256=sha(sources[0]),
+                  sources={source.name: sha(source) for source in sources},
+                  header_inventory_sha256=sha(headers / 'inventory.json'),
+                  artifacts={obj.name: dict(sha256=sha(obj), bytes=obj.stat().st_size) for obj in objects})
     if args.providers:
         providers = args.providers.resolve()
-        lock = json.loads((ROOT / 'tests/parity/window-providers.lock.json').read_text())
+        lock = json.loads(args.providers_lock.read_text())
         for name, digest in lock.items():
             if not (providers / name).is_file() or sha(providers / name) != digest:
                 raise ValueError('Missing/mismatched board provider: ' + name)
         library = output / 'liboh_window_policy.so'
-        subprocess.run([str(compiler), *flags, '-shared', '-Wl,-z,defs', str(obj),
+        subprocess.run([str(compiler), *flags, '-shared', '-Wl,-z,defs', *map(str, objects),
                         '-L' + str(providers), '-ldl', '-lipc_single.z', '-lutils.z',
                         '-o', str(library)], check=True)
         report['providers'] = lock
