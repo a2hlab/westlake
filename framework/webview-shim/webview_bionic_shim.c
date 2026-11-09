@@ -675,9 +675,25 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
  * pthread_detach under the C11 name (one function, two names), so no dlsym is needed (see
  * pthread_mutex_trylock).
  */
+/*
+ * A thread detached already. Bionic answers EINVAL (its join state is no longer "not joined");
+ * musl's detach takes it for one that is exiting, joins it, and its join traps on a detached thread
+ * (a store to address 0). VivaVideo detached a thread twice from two threads at once, and both
+ * faulted in pthread_join under thrd_detach. A thread's detach state is read with
+ * pthread_getattr_np, as long as the thread is still there to read: a detached thread that has
+ * exited is gone, and Bionic, which finds it missing from its list, answers ESRCH, where this
+ * can only pass it on.
+ */
 int pthread_detach(pthread_t thread)
 {
     if (thread == 0) return ESRCH;
+    pthread_attr_t attr;
+    if (thread != pthread_self() && pthread_getattr_np(thread, &attr) == 0) {
+        int state = PTHREAD_CREATE_JOINABLE;
+        int detached = pthread_attr_getdetachstate(&attr, &state) == 0 && state == PTHREAD_CREATE_DETACHED;
+        pthread_attr_destroy(&attr);
+        if (detached) return EINVAL;
+    }
     return thrd_detach((thrd_t) thread);
 }
 
