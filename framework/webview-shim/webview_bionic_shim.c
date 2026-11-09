@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <ifaddrs.h>
+#include <limits.h>
 #include <link.h>
 #include <sys/auxv.h>
 #include <sys/syscall.h>
@@ -2687,6 +2688,111 @@ int android_get_device_api_level(void)
         return -1;
     }
     return atoi(value);
+}
+
+/*
+ * Bionic's dirname, basename and __gnu_basename (libgen.cpp), which never write to the path they are
+ * given. musl's dirname and basename, as POSIX allows, write a NUL into it, so an Android caller
+ * that passes a string literal faults (SEGV_ACCERR: NetEase's game called dirname on
+ * "/data/.bluestacks..." in its read-only data), and one that goes on using its path after asking
+ * for the directory finds it cut short. Bionic copies the answer into a thread's buffer of its own
+ * (PATH_MAX) and returns that, or "." or "/". 209 apps of the Hong Kong corpus import dirname and
+ * 451 basename (React Native and Sentry among them). Callers built for musl -- OH's and Westlake's
+ * own libraries -- keep musl's. __gnu_basename, which musl lacks, is what Bionic's <string.h>
+ * names a GNU basename call: a pointer to the path's last component, within the path itself; the
+ * libraries that import it (Kuaishou's libkwai-unwind.so, OpenVPN's libopenvpn.so) did not load.
+ */
+static __thread char westlake_dirname_buffer[PATH_MAX];
+static __thread char westlake_basename_buffer[PATH_MAX];
+
+/* Bionic's __dirname_r: the length of the answer, with it in buffer, or -1 with errno set. */
+static int westlake_dirname_r(const char *path, char *buffer, size_t size)
+{
+    const char *end = NULL;
+    int length;
+    if (path == NULL || *path == '\0') {
+        path = ".";
+        length = 1;
+    } else {
+        end = path + strlen(path) - 1;
+        while (end > path && *end == '/') end--;       /* the trailing slashes */
+        while (end > path && *end != '/') end--;       /* the last component */
+        if (end == path) {
+            path = *end == '/' ? "/" : ".";
+            length = 1;
+        } else {
+            do { end--; } while (end > path && *end == '/');
+            length = (int) (end - path + 1);
+        }
+    }
+    if (length + 1 > PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if ((size_t) length > size - 1) {
+        errno = ERANGE;
+        return -1;
+    }
+    memcpy(buffer, path, (size_t) length);
+    buffer[length] = '\0';
+    return length;
+}
+
+/* Bionic's __basename_r. */
+static int westlake_basename_r(const char *path, char *buffer, size_t size)
+{
+    const char *start, *end;
+    int length;
+    if (path == NULL || *path == '\0') {
+        start = ".";
+        length = 1;
+    } else {
+        end = path + strlen(path) - 1;
+        while (end > path && *end == '/') end--;
+        if (end == path && *end == '/') {
+            start = "/";
+            length = 1;
+        } else {
+            start = end;
+            while (start > path && start[-1] != '/') start--;
+            length = (int) (end - start + 1);
+        }
+    }
+    if ((size_t) length > size - 1) {
+        errno = ERANGE;
+        return -1;
+    }
+    memcpy(buffer, start, (size_t) length);
+    buffer[length] = '\0';
+    return length;
+}
+
+char *dirname(char *path)
+{
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static char *(*real_dirname)(char *);
+        if (real_dirname == NULL) real_dirname = (char *(*)(char *)) dlsym(RTLD_NEXT, "dirname");
+        if (real_dirname != NULL) return real_dirname(path);
+    }
+    return westlake_dirname_r(path, westlake_dirname_buffer, sizeof(westlake_dirname_buffer)) < 0
+            ? NULL : westlake_dirname_buffer;
+}
+
+char *basename(char *path)
+{
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static char *(*real_basename)(char *);
+        if (real_basename == NULL) real_basename = (char *(*)(char *)) dlsym(RTLD_NEXT, "basename");
+        if (real_basename != NULL) return real_basename(path);
+    }
+    return westlake_basename_r(path, westlake_basename_buffer, sizeof(westlake_basename_buffer)) < 0
+            ? NULL : westlake_basename_buffer;
+}
+
+const char *__gnu_basename(const char *path)
+{
+    const char *last = strrchr(path, '/');
+    return last != NULL ? last + 1 : path;
 }
 
 const struct prop_info *__system_property_find(const char *name)
