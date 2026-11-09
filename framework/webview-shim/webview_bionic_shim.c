@@ -2689,6 +2689,18 @@ int android_get_device_api_level(void)
     return atoi(value);
 }
 
+/*
+ * Bionic's timelocal (LIBC, from tzcode), which musl does not have: mktime, with tm_isdst set to -1
+ * first in case the caller left it uninitialized, as Bionic does. Meta's liboacrair_accounts.so
+ * (Stella) imports it, and failed to relocate without it.
+ */
+#include <time.h>
+time_t timelocal(struct tm *tm)
+{
+    if (tm != NULL) tm->tm_isdst = -1;
+    return mktime(tm);
+}
+
 const struct prop_info *__system_property_find(const char *name)
 {
     if (name == NULL) {
