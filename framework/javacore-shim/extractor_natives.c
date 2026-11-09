@@ -392,6 +392,52 @@ static void map_put_config(JNIEnv* env, jobject map, OH_AVFormat* format)
 }
 
 /* An OH format as the Map that MediaFormat is built from. Keys are MediaFormat's own. */
+/*
+ * A track's profile in Android's numbering (MediaCodecInfo.CodecProfileLevel), from OH's (OH_AACProfile,
+ * OH_AVCProfile, OH_HEVCProfile), which numbers the same profiles differently: AAC LC is 0 to OH and 2
+ * to Android, AVC Main is 8 to OH and High to Android. Passed through, the number named another
+ * profile, and MediaCodecList.findDecoderForFormat answered null for an AAC track, since no decoder
+ * offers profile 0. Returns -1 for a profile without an Android number, which leaves the key out, as
+ * Android's own extractors do when they do not know it.
+ */
+static int android_profile(const char* mime, int32_t oh)
+{
+    if (mime == NULL) return -1;
+    if (strcmp(mime, "audio/mp4a-latm") == 0) {
+        switch (oh) {
+        case 0: return 2;      /* AACObjectLC */
+        case 3: return 5;      /* AACObjectHE */
+        case 4: return 29;     /* AACObjectHE_PS */
+        default: return -1;
+        }
+    }
+    if (strcmp(mime, "video/avc") == 0) {
+        switch (oh) {
+        case 0: return 0x01;      /* AVCProfileBaseline */
+        case 1: return 0x10000;   /* AVCProfileConstrainedBaseline */
+        case 2: return 0x80000;   /* AVCProfileConstrainedHigh */
+        case 3: return 0x04;      /* AVCProfileExtended */
+        case 4: return 0x08;      /* AVCProfileHigh */
+        case 5: return 0x10;      /* AVCProfileHigh10 */
+        case 6: return 0x20;      /* AVCProfileHigh422 */
+        case 7: return 0x40;      /* AVCProfileHigh444 */
+        case 8: return 0x02;      /* AVCProfileMain */
+        default: return -1;
+        }
+    }
+    if (strcmp(mime, "video/hevc") == 0) {
+        switch (oh) {
+        case 0: return 0x01;      /* HEVCProfileMain */
+        case 1: return 0x02;      /* HEVCProfileMain10 */
+        case 2: return 0x04;      /* HEVCProfileMainStill */
+        case 3: return 0x1000;    /* HEVCProfileMain10HDR10 */
+        case 4: return 0x2000;    /* HEVCProfileMain10HDR10Plus */
+        default: return -1;
+        }
+    }
+    return -1;
+}
+
 static jobject format_map(JNIEnv* env, OH_AVFormat* format, int is_track)
 {
     jobject map = (*env)->NewObject(env, g_hash_map, g_hash_map_init);
@@ -400,8 +446,11 @@ static jobject format_map(JNIEnv* env, OH_AVFormat* format, int is_track)
     int64_t big = 0;
     double real = 0;
     if (map == NULL) return NULL;
-    if (ohx.keyMime != NULL && ohx.formatGetString(format, *ohx.keyMime, &text) && text != NULL)
+    char mime[64] = "";
+    if (ohx.keyMime != NULL && ohx.formatGetString(format, *ohx.keyMime, &text) && text != NULL) {
         map_put_string(env, map, "mime", text);
+        snprintf(mime, sizeof(mime), "%s", text);
+    }
     if (ohx.keyDuration != NULL && ohx.formatGetLong(format, *ohx.keyDuration, &big))
         map_put_long(env, map, "durationUs", (jlong) big);
     if (ohx.keyBitrate != NULL) {
@@ -421,8 +470,9 @@ static jobject format_map(JNIEnv* env, OH_AVFormat* format, int is_track)
         map_put_int(env, map, "rotation-degrees", (jint) number);
     if (ohx.keyMaxInput != NULL && ohx.formatGetInt(format, *ohx.keyMaxInput, &number))
         map_put_int(env, map, "max-input-size", (jint) number);
-    if (ohx.keyProfile != NULL && ohx.formatGetInt(format, *ohx.keyProfile, &number))
-        map_put_int(env, map, "profile", (jint) number);
+    if (ohx.keyProfile != NULL && ohx.formatGetInt(format, *ohx.keyProfile, &number)
+            && android_profile(mime, number) >= 0)
+        map_put_int(env, map, "profile", (jint) android_profile(mime, number));
     if (ohx.keyFrameRate != NULL) {
         if (ohx.formatGetDouble != NULL && ohx.formatGetDouble(format, *ohx.keyFrameRate, &real))
             map_put_float(env, map, "frame-rate", (jfloat) real);

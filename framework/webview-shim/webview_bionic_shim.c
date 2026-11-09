@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <ifaddrs.h>
+#include <limits.h>
 #include <link.h>
 #include <sys/auxv.h>
 #include <sys/syscall.h>
@@ -675,9 +676,25 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
  * pthread_detach under the C11 name (one function, two names), so no dlsym is needed (see
  * pthread_mutex_trylock).
  */
+/*
+ * A thread detached already. Bionic answers EINVAL (its join state is no longer "not joined");
+ * musl's detach takes it for one that is exiting, joins it, and its join traps on a detached thread
+ * (a store to address 0). VivaVideo detached a thread twice from two threads at once, and both
+ * faulted in pthread_join under thrd_detach. A thread's detach state is read with
+ * pthread_getattr_np, as long as the thread is still there to read: a detached thread that has
+ * exited is gone, and Bionic, which finds it missing from its list, answers ESRCH, where this
+ * can only pass it on.
+ */
 int pthread_detach(pthread_t thread)
 {
     if (thread == 0) return ESRCH;
+    pthread_attr_t attr;
+    if (thread != pthread_self() && pthread_getattr_np(thread, &attr) == 0) {
+        int state = PTHREAD_CREATE_JOINABLE;
+        int detached = pthread_attr_getdetachstate(&attr, &state) == 0 && state == PTHREAD_CREATE_DETACHED;
+        pthread_attr_destroy(&attr);
+        if (detached) return EINVAL;
+    }
     return thrd_detach((thrd_t) thread);
 }
 
@@ -1647,7 +1664,200 @@ static int westlake_names_running_libc(const char *file)
     return stat(file, &st) == 0 && st.st_dev == libc_dev && st.st_ino == libc_ino;
 }
 
+/*
+ * DT_INIT, which Bionic's linker runs and OH's loader does not.
+ *
+ * Bionic starts a library with its DT_INIT function and then its .init_array
+ * (soinfo::call_constructors). OH builds musl for arm64 with NO_LEGACY_INITFINI, so its loader runs
+ * the .init_array alone and never calls DT_INIT (nor DT_FINI). A library whose start-up lives in
+ * DT_INIT never starts. Unity games packed with libu8t.so keep part of libunity.so's code encrypted
+ * on disk, with an empty .init_array and a DT_INIT that is a five-instruction stub calling libu8t's
+ * xx1, which decrypts the code and runs the constructors. Not called, the games ran ciphertext:
+ * SIGILL in libunity.so in Stella Sora, Survivor.io and Zen Word, on bytes identical to the file's.
+ * Garena's libBqCCS.so has the same shape: a segment added for the unpacker, DT_INIT in it, the
+ * original .text encrypted, and libanort.so as a dependency.
+ *
+ * After each load an app asks for, every app library loaded since whose only start-up is DT_INIT
+ * (its .init_array empty) gets it called, once, dependencies before the libraries that need them,
+ * before the handle is returned: for such a library that is Bionic's order exactly. A library with
+ * both has had its .init_array run by musl already, and calling DT_INIT after it would be an order
+ * Bionic never uses, so it is only logged. 439 of the corpus's 545 DT_INIT libraries are of that
+ * kind, 243 of them libnms.so, in apps that draw without it; the 106 with DT_INIT alone are in 61
+ * apps. The calls hold a lock, as Bionic's linker holds its own while it runs constructors, so
+ * another thread's load cannot return a library whose DT_INIT has not finished.
+ */
+#define WESTLAKE_DT_INIT_SEEN_MAX 2048
+#define WESTLAKE_DT_INIT_BATCH 64
+
+struct westlake_dt_init {
+    uintptr_t init;
+    uint64_t init_array_size;
+    uintptr_t renamed_array;          /* the .init_array the launcher hid from musl, or 0 */
+    uint64_t renamed_array_size;
+    const char *path;   /* the loader's own copy of the name, kept while the library is loaded */
+};
+
+/*
+ * A library with DT_INIT and an .init_array needs the first to run before the second, and musl runs
+ * the array alone. The launcher stages such a library with DT_INIT_ARRAY{,SZ} renamed to these tags
+ * (probe_source_app.py, legacy_init_staged), so that musl runs neither, and this shim calls DT_INIT
+ * and then the array, in bionic's order. iQIYI faulted inside libmsaoaidsec.so the moment it loaded:
+ * DT_INIT, then six array entries, and only the array had run. The marker below tells the launcher
+ * that this shim runs the renamed arrays; under a shim without it, their constructors would never
+ * run, so the launcher renames nothing.
+ */
+#define WESTLAKE_DT_INIT_ARRAY 0x6fffe0f0
+#define WESTLAKE_DT_INIT_ARRAYSZ 0x6fffe0f1
+__attribute__((used)) static const char westlake_runs_renamed_init_arrays[] = "WESTLAKE_RUNS_RENAMED_INIT_ARRAYS=1";
+
+struct westlake_dt_init_scan {
+    struct westlake_dt_init found[WESTLAKE_DT_INIT_BATCH];
+    size_t count;
+    int more;
+    unsigned long long adds;
+};
+
+static pthread_mutex_t g_dt_init_lock;
+static pthread_once_t g_dt_init_once = PTHREAD_ONCE_INIT;
+/* Libraries looked at, by load address and name: an address alone can be reused after a dlclose. */
+static struct { uintptr_t base; uint64_t name; } g_dt_init_seen[WESTLAKE_DT_INIT_SEEN_MAX];
+static size_t g_dt_init_seen_count;
+static unsigned long long g_dt_init_adds;
+
+static void westlake_dt_init_lock_init(void)
+{
+    pthread_mutexattr_t attributes;
+    pthread_mutexattr_init(&attributes);
+    pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_dt_init_lock, &attributes);
+    pthread_mutexattr_destroy(&attributes);
+}
+
+/* An app's own library: from its library directory, anywhere else under /data but Westlake's
+ * runtime, or through a descriptor. The system's and the runtime's libraries are left alone. */
+static int westlake_is_app_library(const char *path)
+{
+    if (path == NULL || path[0] == '\0') return 0;
+    if (strstr(path, "/data/local/tmp/asx/lib/") != NULL) return 1;
+    if (strncmp(path, "/data/local/tmp/", 16) == 0) return 0;
+    return strncmp(path, "/data/", 6) == 0 || strncmp(path, "/proc/self/fd/", 14) == 0;
+}
+
+static int westlake_dt_init_adds(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void) size;
+    *(unsigned long long *) data = info->dlpi_adds;
+    return 1;
+}
+
+static int westlake_dt_init_collect(struct dl_phdr_info *info, size_t size, void *data)
+{
+    struct westlake_dt_init_scan *scan = data;
+    (void) size;
+    scan->adds = info->dlpi_adds;
+    if (!westlake_is_app_library(info->dlpi_name)) return 0;
+    uint64_t name = 0xcbf29ce484222325ULL;   /* FNV-1a */
+    for (const char *c = info->dlpi_name; *c != '\0'; ++c) name = (name ^ (unsigned char) *c) * 0x100000001b3ULL;
+    for (size_t i = 0; i < g_dt_init_seen_count; ++i) {
+        if (g_dt_init_seen[i].base == (uintptr_t) info->dlpi_addr && g_dt_init_seen[i].name == name) return 0;
+    }
+    const ElfW(Dyn) *dyn = NULL;
+    for (ElfW(Half) i = 0; i < info->dlpi_phnum; ++i) {
+        if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
+            dyn = (const ElfW(Dyn) *) (info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+        }
+    }
+    uintptr_t init = 0, renamed_array = 0;
+    uint64_t init_array_size = 0, renamed_array_size = 0;
+    for (; dyn != NULL && dyn->d_tag != DT_NULL; ++dyn) {
+        if (dyn->d_tag == DT_INIT) init = (uintptr_t) dyn->d_un.d_ptr;
+        if (dyn->d_tag == DT_INIT_ARRAYSZ) init_array_size = dyn->d_un.d_val;
+        if (dyn->d_tag == WESTLAKE_DT_INIT_ARRAY) renamed_array = (uintptr_t) dyn->d_un.d_ptr;
+        if (dyn->d_tag == WESTLAKE_DT_INIT_ARRAYSZ) renamed_array_size = dyn->d_un.d_val;
+    }
+    if (init != 0 && scan->count == WESTLAKE_DT_INIT_BATCH) {
+        scan->more = 1;   /* left unseen for the next pass */
+        return 0;
+    }
+    if (g_dt_init_seen_count < WESTLAKE_DT_INIT_SEEN_MAX) {
+        g_dt_init_seen[g_dt_init_seen_count].base = (uintptr_t) info->dlpi_addr;
+        g_dt_init_seen[g_dt_init_seen_count++].name = name;
+    } else {
+        return 0;   /* never reached in practice: apps load a few hundred libraries at most */
+    }
+    if (init != 0) {
+        struct westlake_dt_init *found = &scan->found[scan->count++];
+        found->init = (uintptr_t) info->dlpi_addr + init;
+        found->init_array_size = init_array_size;
+        found->renamed_array = renamed_array != 0 ? (uintptr_t) info->dlpi_addr + renamed_array : 0;
+        found->renamed_array_size = renamed_array_size;
+        found->path = info->dlpi_name;
+    }
+    return 0;
+}
+
+static void westlake_run_dt_inits(void)
+{
+    unsigned long long adds = 0;
+    dl_iterate_phdr(westlake_dt_init_adds, &adds);
+    if (adds == __atomic_load_n(&g_dt_init_adds, __ATOMIC_ACQUIRE)) return;
+    pthread_once(&g_dt_init_once, westlake_dt_init_lock_init);
+    pthread_mutex_lock(&g_dt_init_lock);
+    int more;
+    unsigned long long scanned = 0;
+    do {
+        struct westlake_dt_init_scan scan;
+        scan.count = 0;
+        scan.more = 0;
+        scan.adds = 0;
+        dl_iterate_phdr(westlake_dt_init_collect, &scan);
+        scanned = scan.adds;
+        more = scan.more;
+        /* musl lists a load's libraries in the order it opened them, each before its dependencies. */
+        for (size_t i = scan.count; i-- > 0;) {
+            const struct westlake_dt_init *found = &scan.found[i];
+            if (found->init_array_size != 0) {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT not called: OH's loader ran its %llu .init_array "
+                              "constructors, which Bionic runs after DT_INIT\n",
+                              found->path, (unsigned long long) (found->init_array_size / sizeof(void *)));
+                continue;
+            }
+            size_t entries = found->renamed_array != 0 ? (size_t) (found->renamed_array_size / sizeof(void *)) : 0;
+            if (entries != 0) {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, then its %zu .init_array constructors, which "
+                              "the launcher hid from OH's loader (bionic's order)\n", found->path, entries);
+            } else {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, its only start-up (OH's loader skips DT_INIT)\n",
+                              found->path);
+            }
+            ((void (*)(void)) found->init)();
+            /* The entries are relocated: musl applies relocations by address, whatever the tags say.
+             * Null and -1 entries are skipped, as bionic's call_array skips them. */
+            const uintptr_t *array = (const uintptr_t *) found->renamed_array;
+            for (size_t k = 0; k < entries; ++k) {
+                if (array[k] != 0 && array[k] != (uintptr_t) -1) ((void (*)(void)) array[k])();
+            }
+        }
+    } while (more);
+    /* Recorded only now: a load in another thread that finds this count waits for nothing, so the
+     * libraries counted must have finished. A DT_INIT's own loads (in this thread) may have
+     * recorded a later count already. */
+    if (scanned > __atomic_load_n(&g_dt_init_adds, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&g_dt_init_adds, scanned, __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&g_dt_init_lock);
+}
+
+static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode);
+
 void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
+{
+    void *handle = westlake_dlopen_ns(ns, file, mode);
+    if (handle != NULL) westlake_run_dt_inits();
+    return handle;
+}
+
+static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode)
 {
     typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
     static DlopenNsFn real_dlopen_ns;
@@ -1699,9 +1909,17 @@ static void *westlake_real_dlopen_fn(void *context, const char *file, int flags)
     return real != NULL ? real(file, flags) : NULL;
 }
 
+static void *westlake_dlopen(const char *filename, int flags, void *caller);
+
 void *dlopen(const char *filename, int flags)
 {
-    void *caller = __builtin_return_address(0);
+    void *handle = westlake_dlopen(filename, flags, __builtin_return_address(0));
+    if (handle != NULL) westlake_run_dt_inits();
+    return handle;
+}
+
+static void *westlake_dlopen(const char *filename, int flags, void *caller)
+{
     typedef void *(*DlopenFn)(const char *, int);
     static DlopenFn real_dlopen;
     if (real_dlopen == NULL) {
@@ -2405,6 +2623,44 @@ static const char *westlake_android_root(void)
     return root[0] != '\0' ? root : NULL;
 }
 
+/*
+ * What an app's own libraries asked this runtime for and did not get, each name told once: an
+ * environment variable the process does not have, a property nothing answers. A phone answers some
+ * of these and not others, so a line is not a fault; it is what the app expected of Android, written
+ * where it asks, for the gap map and for reading a crash that follows (Authenticator's protection
+ * library called atoi on a null pointer, with nothing in the log to say which answer was missing).
+ * The first 64 names of each kind; a name is skipped rather than waited for when another thread
+ * holds the table, so a forked child can never block here.
+ */
+#define WESTLAKE_ASKED_MAX 64
+
+struct westlake_asked {
+    pthread_mutex_t lock;
+    unsigned count;
+    char names[WESTLAKE_ASKED_MAX][64];
+};
+
+static struct westlake_asked g_unset_environment = { PTHREAD_MUTEX_INITIALIZER, 0, {{0}} };
+static struct westlake_asked g_absent_properties = { PTHREAD_MUTEX_INITIALIZER, 0, {{0}} };
+
+/* 1 the first time name is seen in asked, 0 after (and once the table is full or busy). */
+static int westlake_first_ask(struct westlake_asked *asked, const char *name)
+{
+    if (pthread_mutex_trylock(&asked->lock) != 0) {
+        return 0;
+    }
+    unsigned i = 0;
+    while (i < asked->count && strncmp(asked->names[i], name, sizeof(asked->names[i]) - 1) != 0) {
+        ++i;
+    }
+    int first = i == asked->count && asked->count < WESTLAKE_ASKED_MAX;
+    if (first) {
+        snprintf(asked->names[asked->count++], sizeof(asked->names[0]), "%s", name);
+    }
+    pthread_mutex_unlock(&asked->lock);
+    return first;
+}
+
 char *getenv(const char *name)
 {
     typedef char *(*GetenvFn)(const char *);
@@ -2427,6 +2683,11 @@ char *getenv(const char *name)
             }
             return (char *) android_root;
         }
+    }
+    const char *caller = NULL;
+    if (value == NULL && name != NULL && caller_is_android_dso(__builtin_return_address(0), &caller) &&
+        westlake_first_ask(&g_unset_environment, name)) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] getenv %s: unset, asked by %s\n", name, caller);
     }
     return value;
 }
@@ -2582,6 +2843,12 @@ static int read_oh_property(const char *name, char *value, size_t value_size)
  * The heap size is a hint Chromium clamps into a sane range rather than a number it trusts; it is
  * reported as a plain Android default instead of a measurement, because this runtime's ART heap
  * ceiling is not the app's to know.
+ *
+ * All of that table's build, version and ABI entries are here (its non-empty ones), so native code
+ * reads what Java reads: ro.build.fingerprint, ro.build.tags and ro.build.type came back empty
+ * natively. Its identity entries (ro.product.brand and the rest, ro.hardware, ro.board.platform,
+ * ro.boot.hardware) are not: natively the board's own OH values answer those names (the aliases
+ * below), and which identity both sides report is a decision of its own.
  */
 static const struct {
     const char *name;
@@ -2593,6 +2860,25 @@ static const struct {
     { "ro.build.id",               "oh-adapter" },
     { "ro.arch",                   "arm64" },
     { "dalvik.vm.heapsize",        "512m" },
+    { "ro.product.cpu.abilist",    "arm64-v8a" },
+    { "ro.product.cpu.abilist64",  "arm64-v8a" },
+    { "ro.product.cpu.abi",        "arm64-v8a" },
+    { "ro.build.version.release_or_codename", "14" },
+    { "ro.build.version.codename_or_preview", "REL" },
+    { "ro.build.version.all_codenames", "REL" },
+    { "ro.build.version.known_codenames", "REL" },
+    { "ro.build.version.preview_sdk", "0" },
+    { "ro.build.version.preview_sdk_fingerprint", "REL" },
+    { "ro.build.version.release_or_preview_display", "14" },
+    { "ro.product.first_api_level", "34" },
+    { "ro.build.version.incremental", "oh-adapter" },
+    { "ro.build.version.security_patch", "2024-01-01" },
+    { "ro.build.fingerprint",      "OpenHarmony/rk3568/rk3568:14/oh-adapter:user/release-keys" },
+    { "ro.build.tags",             "release-keys" },
+    { "ro.build.type",             "user" },
+    { "ro.build.user",             "oh-adapter" },
+    { "ro.build.host",             "oh-adapter" },
+    { "ro.build.display.id",       "oh-adapter" },
 };
 
 /*
@@ -2692,6 +2978,123 @@ int android_get_device_api_level(void)
     return atoi(value);
 }
 
+/*
+ * Bionic's timelocal (LIBC, from tzcode), which musl does not have: mktime, with tm_isdst set to -1
+ * first in case the caller left it uninitialized, as Bionic does. Meta's liboacrair_accounts.so
+ * (Stella) imports it, and failed to relocate without it.
+ */
+#include <time.h>
+time_t timelocal(struct tm *tm)
+{
+    if (tm != NULL) tm->tm_isdst = -1;
+    return mktime(tm);
+}
+
+/*
+ * Bionic's dirname, basename and __gnu_basename (libgen.cpp), which never write to the path they are
+ * given. musl's dirname and basename, as POSIX allows, write a NUL into it, so an Android caller
+ * that passes a string literal faults (SEGV_ACCERR: NetEase's game called dirname on
+ * "/data/.bluestacks..." in its read-only data), and one that goes on using its path after asking
+ * for the directory finds it cut short. Bionic copies the answer into a thread's buffer of its own
+ * (PATH_MAX) and returns that, or "." or "/". 209 apps of the Hong Kong corpus import dirname and
+ * 451 basename (React Native and Sentry among them). Callers built for musl -- OH's and Westlake's
+ * own libraries -- keep musl's. __gnu_basename, which musl lacks, is what Bionic's <string.h>
+ * names a GNU basename call: a pointer to the path's last component, within the path itself; the
+ * libraries that import it (Kuaishou's libkwai-unwind.so, OpenVPN's libopenvpn.so) did not load.
+ */
+static __thread char westlake_dirname_buffer[PATH_MAX];
+static __thread char westlake_basename_buffer[PATH_MAX];
+
+/* Bionic's __dirname_r: the length of the answer, with it in buffer, or -1 with errno set. */
+static int westlake_dirname_r(const char *path, char *buffer, size_t size)
+{
+    const char *end = NULL;
+    int length;
+    if (path == NULL || *path == '\0') {
+        path = ".";
+        length = 1;
+    } else {
+        end = path + strlen(path) - 1;
+        while (end > path && *end == '/') end--;       /* the trailing slashes */
+        while (end > path && *end != '/') end--;       /* the last component */
+        if (end == path) {
+            path = *end == '/' ? "/" : ".";
+            length = 1;
+        } else {
+            do { end--; } while (end > path && *end == '/');
+            length = (int) (end - path + 1);
+        }
+    }
+    if (length + 1 > PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if ((size_t) length > size - 1) {
+        errno = ERANGE;
+        return -1;
+    }
+    memcpy(buffer, path, (size_t) length);
+    buffer[length] = '\0';
+    return length;
+}
+
+/* Bionic's __basename_r. */
+static int westlake_basename_r(const char *path, char *buffer, size_t size)
+{
+    const char *start, *end;
+    int length;
+    if (path == NULL || *path == '\0') {
+        start = ".";
+        length = 1;
+    } else {
+        end = path + strlen(path) - 1;
+        while (end > path && *end == '/') end--;
+        if (end == path && *end == '/') {
+            start = "/";
+            length = 1;
+        } else {
+            start = end;
+            while (start > path && start[-1] != '/') start--;
+            length = (int) (end - start + 1);
+        }
+    }
+    if ((size_t) length > size - 1) {
+        errno = ERANGE;
+        return -1;
+    }
+    memcpy(buffer, start, (size_t) length);
+    buffer[length] = '\0';
+    return length;
+}
+
+char *dirname(char *path)
+{
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static char *(*real_dirname)(char *);
+        if (real_dirname == NULL) real_dirname = (char *(*)(char *)) dlsym(RTLD_NEXT, "dirname");
+        if (real_dirname != NULL) return real_dirname(path);
+    }
+    return westlake_dirname_r(path, westlake_dirname_buffer, sizeof(westlake_dirname_buffer)) < 0
+            ? NULL : westlake_dirname_buffer;
+}
+
+char *basename(char *path)
+{
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static char *(*real_basename)(char *);
+        if (real_basename == NULL) real_basename = (char *(*)(char *)) dlsym(RTLD_NEXT, "basename");
+        if (real_basename != NULL) return real_basename(path);
+    }
+    return westlake_basename_r(path, westlake_basename_buffer, sizeof(westlake_basename_buffer)) < 0
+            ? NULL : westlake_basename_buffer;
+}
+
+const char *__gnu_basename(const char *path)
+{
+    const char *last = strrchr(path, '/');
+    return last != NULL ? last + 1 : path;
+}
+
 const struct prop_info *__system_property_find(const char *name)
 {
     if (name == NULL) {
@@ -2699,11 +3102,18 @@ const struct prop_info *__system_property_find(const char *name)
     }
     char value[WEBVIEW_PROP_VALUE_MAX];
     /*
-     * Not the table: Chromium reads the API level by find + read_callback, and finding
-     * ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*, which the
-     * WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43 apps).
+     * Not the table for the WebView: Chromium reads the API level by find + read_callback, and
+     * finding ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*,
+     * which the WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43
+     * apps). An app's own libraries find what __system_property_get and enumeration answer: their
+     * libandroid has ASharedMemory_* (this library's).
      */
-    if (read_android_property(name, value, 0) == 0) {
+    if (read_android_property(name, value, !caller_is_webview(__builtin_return_address(0), NULL)) == 0) {
+        const char *caller = NULL;
+        if (caller_is_android_dso(__builtin_return_address(0), &caller) &&
+            westlake_first_ask(&g_absent_properties, name)) {
+            fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s: absent, asked by %s\n", name, caller);
+        }
         return NULL;
     }
 
@@ -2893,12 +3303,6 @@ int android_fdsan_set_error_level_from_property(int default_level)
     return 0;
 }
 
-void android_set_abort_message(const char *message)
-{
-    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] abort message: %s\n",
-            message != NULL ? message : "<null>");
-}
-
 /*
  * WESTLAKE §709: do not export bionic/jemalloc's optional sdallocx API.
  *
@@ -3047,11 +3451,11 @@ static bool westlake_runtime_code(uint64_t pc)
  * the callers past x30. A fault inside a library function names its caller only this way: Haochang's
  * SIGSEGV was in musl's strlen inside create_loadtask, so dlopen had been handed a file name at 0x125c,
  * and x30 could not say whose call that was. A record is read only when its memory is mapped readable,
- * and the chain must climb the stack; at most ten frames.
+ * and the chain must climb the stack; at most `most` frames.
  */
-static char *westlake_frames(char *out, char *limit, uint64_t fp)
+static char *westlake_frames(char *out, char *limit, uint64_t fp, uint64_t most)
 {
-    for (uint64_t depth = 1; depth <= 10 && fp != 0 && (fp & 15) == 0 && out + 48 < limit; ++depth) {
+    for (uint64_t depth = 1; depth <= most && fp != 0 && (fp & 15) == 0 && out + 48 < limit; ++depth) {
         int readable = 0, readable_high = 0;
         westlake_place(out, out, fp, &readable);
         westlake_place(out, out, fp + 8, &readable_high);
@@ -3072,6 +3476,27 @@ static char *westlake_frames(char *out, char *limit, uint64_t fp)
         fp = next;
     }
     return out;
+}
+
+/*
+ * Bionic keeps the message a library sets just before it calls abort(); Westlake prints it, then the
+ * callers up the frame-pointer chain. The SIGABRT that follows reaches no witness, and ART's report of
+ * it lists no frames. libc++abi's "terminating due to uncaught exception of type X" names the type but
+ * not the throw, and its frames climb through the terminate handler and __cxa_throw to the code that
+ * threw it (Friday Night Funkin': St16invalid_argument right after it opened an AAudio stream). The
+ * same holds for "Pure virtual function called!" and the -fno-exceptions length_error.
+ */
+void android_set_abort_message(const char *message)
+{
+    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] abort message: %s\n",
+            message != NULL ? message : "<null>");
+    char frames[2400];
+    char *end = westlake_text(frames, "[WESTLAKE-ABORT-FRAMES] tid=", 40);
+    end = westlake_hex(end, (uint64_t) gettid());
+    end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) (uintptr_t) __builtin_frame_address(0), 16);
+    *end++ = '\n';
+    ssize_t written = write(2, frames, (size_t) (end - frames));
+    (void) written;
 }
 
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
@@ -3166,7 +3591,7 @@ static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *co
         char frames[1600];
         char *end = westlake_text(frames, "[WESTLAKE-SIGNAL-FRAMES] tid=", 40);
         end = westlake_hex(end, (uint64_t) gettid());
-        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29]);
+        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29], 10);
         *end++ = '\n';
         written = write(2, frames, (size_t) (end - frames));
         (void) written;
@@ -3454,29 +3879,96 @@ void __pthread_cleanup_pop(WebviewBionicCleanup *c, int execute)
 }
 
 /*
- * Deprecated property enumeration. bionic keeps both for old NDK code;
- * both are expressed over the cache this shim already maintains, so a
- * property is only enumerable once something has looked it up.
+ * Property enumeration (bionic keeps both calls for old NDK code). Bionic lists every property the
+ * process may read, hundreds on a phone. This shim listed only the properties looked up so far,
+ * none at first: the protection libraries of Authenticator, Netflix and PayPal, and PairIP in
+ * Grindr and ShopBack, enumerated and got 0, and Authenticator's then called atoi on a null
+ * pointer, a value it had expected to find. The list is every name __system_property_get answers
+ * here under an Android name -- the table and the identity names above, with the values a lookup
+ * returns -- then any other property looked up since. Each entry stays at its address for the life
+ * of the process, as a prop_info does in bionic's property area.
  */
+#define WEBVIEW_PROP_ENUM_SIZE 64
+static struct prop_info g_property_enum[WEBVIEW_PROP_ENUM_SIZE];
+static size_t g_property_enum_count;
+static pthread_once_t g_property_enum_once = PTHREAD_ONCE_INIT;
+
+static void westlake_property_enum_add(const char *name)
+{
+    char value[WEBVIEW_PROP_VALUE_MAX];
+    if (g_property_enum_count >= WEBVIEW_PROP_ENUM_SIZE || read_android_property(name, value, 1) == 0) return;
+    for (size_t i = 0; i < g_property_enum_count; ++i) {
+        if (strcmp(g_property_enum[i].name, name) == 0) return;
+    }
+    struct prop_info *entry = &g_property_enum[g_property_enum_count++];
+    snprintf(entry->name, sizeof(entry->name), "%s", name);
+    snprintf(entry->value, sizeof(entry->value), "%s", value);
+    entry->serial = 1;
+}
+
+static void westlake_property_enum_build(void)
+{
+    for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+        westlake_property_enum_add(g_android_properties[i].name);
+    }
+    for (size_t i = 0; i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
+        westlake_property_enum_add(g_oh_property_aliases[i].name);
+    }
+}
+
+/* The n-th property of the enumeration: the list above, then the looked-up ones it does not hold. */
+static const struct prop_info *westlake_property_nth(size_t n, size_t *total)
+{
+    pthread_once(&g_property_enum_once, westlake_property_enum_build);
+    const struct prop_info *found = n < g_property_enum_count ? &g_property_enum[n] : NULL;
+    size_t count = g_property_enum_count;
+    pthread_mutex_lock(&g_property_mutex);
+    for (size_t i = 0; i < g_property_count; ++i) {
+        int listed = 0;
+        for (size_t k = 0; k < g_property_enum_count && !listed; ++k) {
+            listed = strcmp(g_property_enum[k].name, g_property_cache[i].name) == 0;
+        }
+        if (listed) continue;
+        if (count == n) found = &g_property_cache[i];
+        ++count;
+    }
+    pthread_mutex_unlock(&g_property_mutex);
+    if (total != NULL) *total = count;
+    return found;
+}
+
 int __system_property_foreach(void (*callback)(const struct prop_info *, void *), void *cookie)
 {
     if (callback == NULL) {
         return -1;
     }
-    pthread_mutex_lock(&g_property_mutex);
-    size_t count = g_property_count;
-    pthread_mutex_unlock(&g_property_mutex);
+    size_t count = 0;
+    westlake_property_nth((size_t) -1, &count);
+    static int told;
+    if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
+        const char *caller = NULL;
+        caller_is_android_dso(__builtin_return_address(0), &caller);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (foreach) by %s: %zu properties\n",
+                caller != NULL ? caller : "?", count);
+    }
     for (size_t i = 0; i < count; ++i) {
-        callback(&g_property_cache[i], cookie);
+        const struct prop_info *entry = westlake_property_nth(i, NULL);
+        if (entry != NULL) callback(entry, cookie);
     }
     return 0;
 }
 
 const struct prop_info *__system_property_find_nth(unsigned n)
 {
-    pthread_mutex_lock(&g_property_mutex);
-    const struct prop_info *entry = n < g_property_count ? &g_property_cache[n] : NULL;
-    pthread_mutex_unlock(&g_property_mutex);
+    size_t count = 0;
+    const struct prop_info *entry = westlake_property_nth(n, &count);
+    static int told;
+    if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
+        const char *caller = NULL;
+        caller_is_android_dso(__builtin_return_address(0), &caller);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (find_nth) by %s: %zu properties\n",
+                caller != NULL ? caller : "?", count);
+    }
     return entry;
 }
 

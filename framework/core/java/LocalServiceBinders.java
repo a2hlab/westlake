@@ -499,11 +499,26 @@ public final class LocalServiceBinders {
     }
 
     /**
-     * Wi-Fi as this process can see it through Android's interface: nothing, because OH's
-     * wifi manager is not bridged. isWifiEnabled answers false and scans are empty; an app that
-     * needs Wi-Fi state learns it is unavailable rather than crashing on a null manager.
+     * Wi-Fi as this process can see it through Android's interface. OH's wifi manager is not
+     * bridged: scans are empty and the connection info is AOSP's "not connected" default. The
+     * state follows the network ConnectivityManager reports here (ConnectivityManagerAdapter, from
+     * OH's default network): WIFI_STATE_ENABLED while that network runs over Wi-Fi, DISABLED
+     * otherwise. The default answer, 0, is WIFI_STATE_DISABLING, a transition a phone only passes
+     * through, and it disagreed with ConnectivityManager's TYPE_WIFI on a board on Wi-Fi.
+     * Asphalt 8 asks its Device helper IsWifiEnabling and IsWifiDisabling, then faulted on a null
+     * string from that helper.
      */
     private static Object wifi(String method, Object[] args) {
+        if ("getWifiEnabledState".equals(method)) {
+            try {
+                OhConnectivityState.Snapshot state = OhConnectivityState.query();
+                return state.available && state.hasBearer(OH_BEARER_WIFI)
+                        ? android.net.wifi.WifiManager.WIFI_STATE_ENABLED
+                        : android.net.wifi.WifiManager.WIFI_STATE_DISABLED;
+            } catch (Throwable t) {
+                return android.net.wifi.WifiManager.WIFI_STATE_DISABLED;
+            }
+        }
         // A null connection info NPE'd NYTimes' startup initializer. AOSP's default WifiInfo is
         // "not connected": unknown SSID, network id -1, invalid RSSI.
         if ("getConnectionInfo".equals(method)) {
@@ -517,6 +532,9 @@ public final class LocalServiceBinders {
         }
         return DEFAULT;
     }
+
+    /** OH's NetBearType for Wi-Fi, as ConnectivityManagerAdapter numbers it. */
+    private static final int OH_BEARER_WIFI = 1;
 
     /**
      * Network statistics with nothing counted. TrafficStats' counters (getUidStats, getIfaceStats,

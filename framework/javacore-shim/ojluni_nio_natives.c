@@ -1,8 +1,8 @@
 /*
  * libcore's NIO natives (AOSP libcore/ojluni/src/main/native, built unmodified by
  * tools/build_missing_natives.sh), which the staged runtime does not register: sun.nio.ch's
- * Net, IOUtil, the socket/datagram channels, PollArrayWrapper, FileDispatcherImpl, and
- * java.nio.MappedByteBuffer. Without them NIO socket channels fail in their class initializers
+ * Net, IOUtil, the socket/datagram channels, PollArrayWrapper, FileDispatcherImpl,
+ * java.nio.MappedByteBuffer, and FileChannelImpl.transferTo0. Without them NIO socket channels fail in their class initializers
  * (Mindustry, Unciv: sun.nio.ch.Net.pollinValue) and MappedByteBuffer.load() throws (Zoom).
  *
  * This file supplies what those sources take from libopenjdkjvm and libnativehelper.
@@ -135,6 +135,25 @@ static int register_copy_file(JNIEnv* env)
                                     (int) (sizeof(methods) / sizeof(methods[0]))) == JNI_OK;
 }
 
+/*
+ * sun.nio.ch.FileChannelImpl.transferTo0, from AOSP's FileChannelImpl.c (built unmodified): the
+ * sendfile behind FileChannel.transferTo, and so behind transferFrom and the copy helpers built on
+ * them. The runtime registers the class's other natives but not this one, and the first transfer
+ * threw UnsatisfiedLinkError (UC Browser, Taobao and Meituan's food app, at start). Only transferTo0
+ * is registered: initIDs, map0, unmap0 and position0 keep the runtime's. Returns 1 when registered.
+ */
+JNIEXPORT jlong JNICALL FileChannelImpl_transferTo0(JNIEnv* env, jobject this, jobject src, jlong position,
+                                                    jlong count, jobject dst);
+
+static int register_transfer_to(JNIEnv* env)
+{
+    static const JNINativeMethod methods[] = {
+        { "transferTo0", "(Ljava/io/FileDescriptor;JJLjava/io/FileDescriptor;)J", (void*) FileChannelImpl_transferTo0 },
+    };
+    return jniRegisterNativeMethods(env, "sun/nio/ch/FileChannelImpl", methods,
+                                    (int) (sizeof(methods) / sizeof(methods[0]))) == JNI_OK;
+}
+
 /* Returns how many classes were registered. */
 int wl_register_ojluni_nio(JNIEnv* env)
 {
@@ -156,5 +175,6 @@ int wl_register_ojluni_nio(JNIEnv* env)
     }
     done += register_file_times(env);
     done += register_copy_file(env);
+    done += register_transfer_to(env);
     return done;
 }
