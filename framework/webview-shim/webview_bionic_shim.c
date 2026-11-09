@@ -3150,12 +3150,6 @@ int android_fdsan_set_error_level_from_property(int default_level)
     return 0;
 }
 
-void android_set_abort_message(const char *message)
-{
-    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] abort message: %s\n",
-            message != NULL ? message : "<null>");
-}
-
 /*
  * WESTLAKE §709: do not export bionic/jemalloc's optional sdallocx API.
  *
@@ -3304,11 +3298,11 @@ static bool westlake_runtime_code(uint64_t pc)
  * the callers past x30. A fault inside a library function names its caller only this way: Haochang's
  * SIGSEGV was in musl's strlen inside create_loadtask, so dlopen had been handed a file name at 0x125c,
  * and x30 could not say whose call that was. A record is read only when its memory is mapped readable,
- * and the chain must climb the stack; at most ten frames.
+ * and the chain must climb the stack; at most `most` frames.
  */
-static char *westlake_frames(char *out, char *limit, uint64_t fp)
+static char *westlake_frames(char *out, char *limit, uint64_t fp, uint64_t most)
 {
-    for (uint64_t depth = 1; depth <= 10 && fp != 0 && (fp & 15) == 0 && out + 48 < limit; ++depth) {
+    for (uint64_t depth = 1; depth <= most && fp != 0 && (fp & 15) == 0 && out + 48 < limit; ++depth) {
         int readable = 0, readable_high = 0;
         westlake_place(out, out, fp, &readable);
         westlake_place(out, out, fp + 8, &readable_high);
@@ -3329,6 +3323,27 @@ static char *westlake_frames(char *out, char *limit, uint64_t fp)
         fp = next;
     }
     return out;
+}
+
+/*
+ * Bionic keeps the message a library sets just before it calls abort(); Westlake prints it, then the
+ * callers up the frame-pointer chain. The SIGABRT that follows reaches no witness, and ART's report of
+ * it lists no frames. libc++abi's "terminating due to uncaught exception of type X" names the type but
+ * not the throw, and its frames climb through the terminate handler and __cxa_throw to the code that
+ * threw it (Friday Night Funkin': St16invalid_argument right after it opened an AAudio stream). The
+ * same holds for "Pure virtual function called!" and the -fno-exceptions length_error.
+ */
+void android_set_abort_message(const char *message)
+{
+    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] abort message: %s\n",
+            message != NULL ? message : "<null>");
+    char frames[2400];
+    char *end = westlake_text(frames, "[WESTLAKE-ABORT-FRAMES] tid=", 40);
+    end = westlake_hex(end, (uint64_t) gettid());
+    end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) (uintptr_t) __builtin_frame_address(0), 16);
+    *end++ = '\n';
+    ssize_t written = write(2, frames, (size_t) (end - frames));
+    (void) written;
 }
 
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
@@ -3423,7 +3438,7 @@ static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *co
         char frames[1600];
         char *end = westlake_text(frames, "[WESTLAKE-SIGNAL-FRAMES] tid=", 40);
         end = westlake_hex(end, (uint64_t) gettid());
-        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29]);
+        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29], 10);
         *end++ = '\n';
         written = write(2, frames, (size_t) (end - frames));
         (void) written;
