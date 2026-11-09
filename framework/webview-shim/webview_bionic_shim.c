@@ -8,6 +8,8 @@
 #include <grp.h>
 #include <ifaddrs.h>
 #include <link.h>
+#include <sys/auxv.h>
+#include <sys/syscall.h>
 #include <locale.h>
 #include <math.h>
 #include <netdb.h>
@@ -3189,6 +3191,58 @@ __attribute__((constructor)) static void westlake_install_signal_witness(void)
      */
     const char *segv = getenv("WESTLAKE_SEGV_WITNESS");
     if (segv != NULL && strcmp(segv, "1") == 0) add(SIGSEGV, &action);
+}
+
+/*
+ * SIGCHLD back to its default in each process appspawn-x forks, as Android's zygote leaves an app
+ * (UnsetChldSignalHandler). appspawn-x reaps its children with a SIGCHLD handler that waits for any
+ * child, and a forked app kept it: the handler reaped the app's own subprocesses before the app could
+ * wait for them. Dart's process code then failed waitpid with ECHILD and aborted ("Wait for process
+ * exit failed: 10", GlobalComix), and a Runtime.exec caller could lose its child's exit code. The reset
+ * runs in the fork child, before any app code, and only while the inherited handler is appspawn-x's
+ * own; it uses the system call directly, as nothing else may run in a fork child of a threaded process.
+ */
+struct westlake_kernel_sigaction {
+    uintptr_t handler;
+    unsigned long flags;
+    uintptr_t restorer;
+    unsigned long mask;
+};
+static uintptr_t westlake_zygote_start, westlake_zygote_end;
+
+static void westlake_sigchld_default_in_child(void)
+{
+    struct westlake_kernel_sigaction current, standard = {0, 0, 0, 0};   /* SIG_DFL */
+    if (syscall(SYS_rt_sigaction, SIGCHLD, NULL, &current, sizeof(current.mask)) != 0) return;
+    if (current.handler < westlake_zygote_start || current.handler >= westlake_zygote_end) return;
+    syscall(SYS_rt_sigaction, SIGCHLD, &standard, NULL, sizeof(standard.mask));
+}
+
+__attribute__((constructor)) static void westlake_watch_zygote_forks(void)
+{
+    char exe[256];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0) return;
+    exe[n] = '\0';
+    const char *base = strrchr(exe, '/');
+    if (strcmp(base != NULL ? base + 1 : exe, "appspawn-x") != 0) return;
+    /* The executable's loaded image, from its program headers: where appspawn-x's handler is. */
+    const ElfW(Phdr) *phdr = (const ElfW(Phdr) *) getauxval(AT_PHDR);
+    size_t count = (size_t) getauxval(AT_PHNUM);
+    if (phdr == NULL || count == 0) return;
+    uintptr_t bias = 0, low = UINTPTR_MAX, high = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (phdr[i].p_type == PT_PHDR) bias = (uintptr_t) phdr - phdr[i].p_vaddr;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (phdr[i].p_type != PT_LOAD) continue;
+        if (phdr[i].p_vaddr < low) low = phdr[i].p_vaddr;
+        if (phdr[i].p_vaddr + phdr[i].p_memsz > high) high = phdr[i].p_vaddr + phdr[i].p_memsz;
+    }
+    if (high <= low) return;
+    westlake_zygote_start = bias + low;
+    westlake_zygote_end = bias + high;
+    pthread_atfork(NULL, NULL, westlake_sigchld_default_in_child);
 }
 
 /*
