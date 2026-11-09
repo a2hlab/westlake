@@ -204,22 +204,43 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
 
         final IBinder fToken = token;
         final boolean[] fReported = new boolean[]{ false };
+        final boolean[] fFrameLogged = new boolean[]{ false };
+        final long resumedAt = android.os.SystemClock.uptimeMillis();
         // The reason names the path that fired: a frame drawn, or the timeout with none drawn yet.
         // Start-up times read the first; an app that holds its draws (a pre-draw listener that
         // returns false) only ever logs the second.
         final class Reporter implements Runnable {
             private final String reason;
-            Reporter(String reason) { this.reason = reason; }
+            private final boolean frame;
+            Reporter(String reason, boolean frame) { this.reason = reason; this.frame = frame; }
             @Override public void run() {
+                boolean report;
                 synchronized (sFgReported) {
-                    if (fReported[0]) return;  // already fired (other path)
-                    fReported[0] = true;
-                    sFgReported.put(fToken, Boolean.TRUE);
+                    if (!fReported[0]) {
+                        fReported[0] = true;
+                        sFgReported.put(fToken, Boolean.TRUE);
+                        report = true;
+                    } else if (frame && !fFrameLogged[0]) {
+                        // The timeout reported first. Log the first frame anyway: start-up times
+                        // read it, and without it an app that draws after the timeout reads as one
+                        // that never drew (YouTube Music drew about 3 s after resuming, after the
+                        // 800 ms timeout had run).
+                        report = false;
+                    } else {
+                        return;
+                    }
+                    if (frame) fFrameLogged[0] = true;
                 }
-                reportOhLifecycle(fToken, OH_STATE_FOREGROUND, reason);
+                if (report) {
+                    reportOhLifecycle(fToken, OH_STATE_FOREGROUND, reason);
+                } else {
+                    Log.i(TAG, reason + " after the timeout, "
+                            + (android.os.SystemClock.uptimeMillis() - resumedAt)
+                            + " ms after resume: FOREGROUND already reported");
+                }
             }
         }
-        final Runnable reporter = new Reporter("activityResumed (first-frame)");
+        final Runnable reporter = new Reporter("activityResumed (first-frame)", true);
 
         // Try to attach OnDrawListener on the Activity's DecorView.  Need to
         // reach Activity from token via ActivityThread.mActivities reflection.
@@ -282,7 +303,7 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
         // Fallback timeout — fire reporter if first frame doesn't arrive in 800ms.
         // 800ms < OH AMS LIFECYCLE_HALF_TIMEOUT (1s) — keeps us safe from kill.
         new android.os.Handler(android.os.Looper.getMainLooper())
-                .postDelayed(new Reporter("activityResumed (first-frame timeout)"), 800);
+                .postDelayed(new Reporter("activityResumed (first-frame timeout)", false), 800);
 
         if (!listenerAttached) {
             Log.w(TAG, "activityResumed: no OnDrawListener attached, relying on 800ms timeout for FG report");
