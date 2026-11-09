@@ -1647,7 +1647,169 @@ static int westlake_names_running_libc(const char *file)
     return stat(file, &st) == 0 && st.st_dev == libc_dev && st.st_ino == libc_ino;
 }
 
+/*
+ * DT_INIT, which Bionic's linker runs and OH's loader does not.
+ *
+ * Bionic starts a library with its DT_INIT function and then its .init_array
+ * (soinfo::call_constructors). OH builds musl for arm64 with NO_LEGACY_INITFINI, so its loader runs
+ * the .init_array alone and never calls DT_INIT (nor DT_FINI). A library whose start-up lives in
+ * DT_INIT never starts. Unity games packed with libu8t.so keep part of libunity.so's code encrypted
+ * on disk, with an empty .init_array and a DT_INIT that is a five-instruction stub calling libu8t's
+ * xx1, which decrypts the code and runs the constructors. Not called, the games ran ciphertext:
+ * SIGILL in libunity.so in Stella Sora, Survivor.io and Zen Word, on bytes identical to the file's.
+ * Garena's libBqCCS.so has the same shape: a segment added for the unpacker, DT_INIT in it, the
+ * original .text encrypted, and libanort.so as a dependency.
+ *
+ * After each load an app asks for, every app library loaded since whose only start-up is DT_INIT
+ * (its .init_array empty) gets it called, once, dependencies before the libraries that need them,
+ * before the handle is returned: for such a library that is Bionic's order exactly. A library with
+ * both has had its .init_array run by musl already, and calling DT_INIT after it would be an order
+ * Bionic never uses, so it is only logged. 439 of the corpus's 545 DT_INIT libraries are of that
+ * kind, 243 of them libnms.so, in apps that draw without it; the 106 with DT_INIT alone are in 61
+ * apps. The calls hold a lock, as Bionic's linker holds its own while it runs constructors, so
+ * another thread's load cannot return a library whose DT_INIT has not finished.
+ */
+#define WESTLAKE_DT_INIT_SEEN_MAX 2048
+#define WESTLAKE_DT_INIT_BATCH 64
+
+struct westlake_dt_init {
+    uintptr_t init;
+    uint64_t init_array_size;
+    const char *path;   /* the loader's own copy of the name, kept while the library is loaded */
+};
+
+struct westlake_dt_init_scan {
+    struct westlake_dt_init found[WESTLAKE_DT_INIT_BATCH];
+    size_t count;
+    int more;
+    unsigned long long adds;
+};
+
+static pthread_mutex_t g_dt_init_lock;
+static pthread_once_t g_dt_init_once = PTHREAD_ONCE_INIT;
+/* Libraries looked at, by load address and name: an address alone can be reused after a dlclose. */
+static struct { uintptr_t base; uint64_t name; } g_dt_init_seen[WESTLAKE_DT_INIT_SEEN_MAX];
+static size_t g_dt_init_seen_count;
+static unsigned long long g_dt_init_adds;
+
+static void westlake_dt_init_lock_init(void)
+{
+    pthread_mutexattr_t attributes;
+    pthread_mutexattr_init(&attributes);
+    pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_dt_init_lock, &attributes);
+    pthread_mutexattr_destroy(&attributes);
+}
+
+/* An app's own library: from its library directory, anywhere else under /data but Westlake's
+ * runtime, or through a descriptor. The system's and the runtime's libraries are left alone. */
+static int westlake_is_app_library(const char *path)
+{
+    if (path == NULL || path[0] == '\0') return 0;
+    if (strstr(path, "/data/local/tmp/asx/lib/") != NULL) return 1;
+    if (strncmp(path, "/data/local/tmp/", 16) == 0) return 0;
+    return strncmp(path, "/data/", 6) == 0 || strncmp(path, "/proc/self/fd/", 14) == 0;
+}
+
+static int westlake_dt_init_adds(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void) size;
+    *(unsigned long long *) data = info->dlpi_adds;
+    return 1;
+}
+
+static int westlake_dt_init_collect(struct dl_phdr_info *info, size_t size, void *data)
+{
+    struct westlake_dt_init_scan *scan = data;
+    (void) size;
+    scan->adds = info->dlpi_adds;
+    if (!westlake_is_app_library(info->dlpi_name)) return 0;
+    uint64_t name = 0xcbf29ce484222325ULL;   /* FNV-1a */
+    for (const char *c = info->dlpi_name; *c != '\0'; ++c) name = (name ^ (unsigned char) *c) * 0x100000001b3ULL;
+    for (size_t i = 0; i < g_dt_init_seen_count; ++i) {
+        if (g_dt_init_seen[i].base == (uintptr_t) info->dlpi_addr && g_dt_init_seen[i].name == name) return 0;
+    }
+    const ElfW(Dyn) *dyn = NULL;
+    for (ElfW(Half) i = 0; i < info->dlpi_phnum; ++i) {
+        if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
+            dyn = (const ElfW(Dyn) *) (info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+        }
+    }
+    uintptr_t init = 0;
+    uint64_t init_array_size = 0;
+    for (; dyn != NULL && dyn->d_tag != DT_NULL; ++dyn) {
+        if (dyn->d_tag == DT_INIT) init = (uintptr_t) dyn->d_un.d_ptr;
+        if (dyn->d_tag == DT_INIT_ARRAYSZ) init_array_size = dyn->d_un.d_val;
+    }
+    if (init != 0 && scan->count == WESTLAKE_DT_INIT_BATCH) {
+        scan->more = 1;   /* left unseen for the next pass */
+        return 0;
+    }
+    if (g_dt_init_seen_count < WESTLAKE_DT_INIT_SEEN_MAX) {
+        g_dt_init_seen[g_dt_init_seen_count].base = (uintptr_t) info->dlpi_addr;
+        g_dt_init_seen[g_dt_init_seen_count++].name = name;
+    } else {
+        return 0;   /* never reached in practice: apps load a few hundred libraries at most */
+    }
+    if (init != 0) {
+        struct westlake_dt_init *found = &scan->found[scan->count++];
+        found->init = (uintptr_t) info->dlpi_addr + init;
+        found->init_array_size = init_array_size;
+        found->path = info->dlpi_name;
+    }
+    return 0;
+}
+
+static void westlake_run_dt_inits(void)
+{
+    unsigned long long adds = 0;
+    dl_iterate_phdr(westlake_dt_init_adds, &adds);
+    if (adds == __atomic_load_n(&g_dt_init_adds, __ATOMIC_ACQUIRE)) return;
+    pthread_once(&g_dt_init_once, westlake_dt_init_lock_init);
+    pthread_mutex_lock(&g_dt_init_lock);
+    int more;
+    unsigned long long scanned = 0;
+    do {
+        struct westlake_dt_init_scan scan;
+        scan.count = 0;
+        scan.more = 0;
+        scan.adds = 0;
+        dl_iterate_phdr(westlake_dt_init_collect, &scan);
+        scanned = scan.adds;
+        more = scan.more;
+        /* musl lists a load's libraries in the order it opened them, each before its dependencies. */
+        for (size_t i = scan.count; i-- > 0;) {
+            const struct westlake_dt_init *found = &scan.found[i];
+            if (found->init_array_size != 0) {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT not called: OH's loader ran its %llu .init_array "
+                              "constructors, which Bionic runs after DT_INIT\n",
+                              found->path, (unsigned long long) (found->init_array_size / sizeof(void *)));
+                continue;
+            }
+            wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, its only start-up (OH's loader skips DT_INIT)\n",
+                          found->path);
+            ((void (*)(void)) found->init)();
+        }
+    } while (more);
+    /* Recorded only now: a load in another thread that finds this count waits for nothing, so the
+     * libraries counted must have finished. A DT_INIT's own loads (in this thread) may have
+     * recorded a later count already. */
+    if (scanned > __atomic_load_n(&g_dt_init_adds, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&g_dt_init_adds, scanned, __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&g_dt_init_lock);
+}
+
+static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode);
+
 void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
+{
+    void *handle = westlake_dlopen_ns(ns, file, mode);
+    if (handle != NULL) westlake_run_dt_inits();
+    return handle;
+}
+
+static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode)
 {
     typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
     static DlopenNsFn real_dlopen_ns;
@@ -1699,9 +1861,17 @@ static void *westlake_real_dlopen_fn(void *context, const char *file, int flags)
     return real != NULL ? real(file, flags) : NULL;
 }
 
+static void *westlake_dlopen(const char *filename, int flags, void *caller);
+
 void *dlopen(const char *filename, int flags)
 {
-    void *caller = __builtin_return_address(0);
+    void *handle = westlake_dlopen(filename, flags, __builtin_return_address(0));
+    if (handle != NULL) westlake_run_dt_inits();
+    return handle;
+}
+
+static void *westlake_dlopen(const char *filename, int flags, void *caller)
+{
     typedef void *(*DlopenFn)(const char *, int);
     static DlopenFn real_dlopen;
     if (real_dlopen == NULL) {
