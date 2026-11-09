@@ -28,7 +28,7 @@ ${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Werror -I$HERE/frame
 OJ=$SRC/libcore/ojluni/src/main/native
 for f in Net IOUtil SocketChannelImpl ServerSocketChannelImpl DatagramChannelImpl DatagramDispatcher \
          PollArrayWrapper FileDispatcherImpl MappedByteBuffer InetAddress Inet4Address Inet6Address \
-         UnixNativeDispatcher UnixCopyFile jni_util jni_util_md net_util net_util_md; do
+         UnixNativeDispatcher UnixCopyFile FileChannelImpl jni_util jni_util_md net_util net_util_md; do
   $CC -fvisibility=hidden -w -D_GNU_SOURCE -DLINUX -I$OJ -I$HERE/framework/javacore-shim/expat-compat \
     -I$SRC/libnativehelper/include -I$SRC/libnativehelper/include_jni -I$SRC/libnativehelper/header_only_include \
     -c $OJ/$f.c -o $OBJ/oj_$f.o
