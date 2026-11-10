@@ -1843,9 +1843,18 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /*
+     * The installer of the launched app is the Play Store (com.android.vending), as for an app installed
+     * from Google Play, which is where the apps run here come from. The Play Store is installed (the
+     * microG Companion, or the Play Store guest beside shared Play services), so the name resolves.
+     * Packages installed with the system image report no installer, as on a phone.
+     */
+    private static final String PLAY_STORE_PACKAGE = "com.android.vending";
+
     @Override
     public java.lang.String getInstallerPackageName(java.lang.String arg0) throws android.os.RemoteException {
-        logStub("getInstallerPackageName", "");
+        if (arg0 != null && SourcePackageRegistry.contains(arg0)) return PLAY_STORE_PACKAGE;
+        logStub("getInstallerPackageName", arg0 == null ? "" : arg0);
         return null;
     }
 
@@ -1854,11 +1863,13 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public android.content.pm.InstallSourceInfo getInstallSourceInfo(java.lang.String arg0, int arg1) throws android.os.RemoteException {
         // ApplicationPackageManager turns null into NameNotFoundException, which told apps their
         // own package was not installed: package_info_plus failed with PlatformException(Name not
-        // found, <package>) and FOSS Warn, mucke and Cardabase stopped at startup. The launched
-        // APK was placed by the launcher, not by an installer app, so its truthful source is
-        // "none known" -- every field null, as PackageManagerService reports for such installs.
+        // found, <package>) and FOSS Warn, mucke and Cardabase stopped at startup. The launched app
+        // reports what PackageManagerService records for a Play Store install on Android 14 and
+        // later: the Play Store initiated and installed it, owns its updates, and the source is a
+        // store. Its signing info stays unknown (null), which Android also reports when it has none.
         if (arg0 != null && SourcePackageRegistry.contains(arg0)) {
-            return new android.content.pm.InstallSourceInfo(null, null, null, null);
+            return new android.content.pm.InstallSourceInfo(PLAY_STORE_PACKAGE, null, null, PLAY_STORE_PACKAGE,
+                    PLAY_STORE_PACKAGE, android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE);
         }
         logStub("getInstallSourceInfo", arg0 == null ? "" : arg0);
         return null;
