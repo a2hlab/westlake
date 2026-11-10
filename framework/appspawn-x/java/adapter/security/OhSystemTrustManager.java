@@ -28,6 +28,7 @@ import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedHashSet;
@@ -40,6 +41,7 @@ import javax.net.ssl.X509ExtendedTrustManager;
 /** A PKIX trust manager whose default anchors are the host platform roots. */
 public final class OhSystemTrustManager extends X509ExtendedTrustManager {
     private static final String OH_CA_BUNDLE = "/etc/ssl/certs/cacert.pem";
+    private static final String ANDROID_CA_STORE = "AndroidCAStore";
 
     private final Set<TrustAnchor> trustAnchors;
     private final X509Certificate[] acceptedIssuers;
@@ -47,7 +49,10 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
     public OhSystemTrustManager(KeyStore suppliedStore)
             throws GeneralSecurityException, IOException {
         LinkedHashSet<X509Certificate> roots = new LinkedHashSet<>();
-        if (suppliedStore != null) {
+        // As Conscrypt's TrustManagerImpl: an AndroidCAStore stands for the platform's roots, which
+        // it reads itself rather than through the store the caller passed.
+        boolean platform = suppliedStore == null || ANDROID_CA_STORE.equals(suppliedStore.getType());
+        if (!platform) {
             loadKeyStore(suppliedStore, roots);
         } else {
             loadAndroidSystemDirectory(roots);
@@ -55,7 +60,7 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
                 loadPemBundle(new File(OH_CA_BUNDLE), roots);
             }
         }
-        if (roots.isEmpty() && suppliedStore == null) {
+        if (roots.isEmpty() && platform) {
             throw new KeyStoreException("No platform CA certificates are available");
         }
 
@@ -67,14 +72,24 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
         acceptedIssuers = roots.toArray(new X509Certificate[0]);
     }
 
-    private static void loadKeyStore(KeyStore store, Set<X509Certificate> roots)
-            throws KeyStoreException {
-        Enumeration<String> aliases = store.aliases();
-        while (aliases.hasMoreElements()) {
-            Certificate cert = store.getCertificate(aliases.nextElement());
-            if (cert instanceof X509Certificate) {
-                roots.add((X509Certificate) cert);
+    /*
+     * The certificates a supplied store holds, as Conscrypt's TrustManagerImpl collects its accepted
+     * issuers: a store that cannot be read, such as one that was never loaded, holds none, and the
+     * manager is still made (it trusts nothing). Microsoft Authenticator initializes a trust manager
+     * factory with an AndroidKeyStore it never loads; KeyStore.aliases threw "Uninitialized keystore",
+     * TrustManagerFactory.init failed, and so did Application.onCreate.
+     */
+    private static void loadKeyStore(KeyStore store, Set<X509Certificate> roots) {
+        try {
+            Enumeration<String> aliases = store.aliases();
+            while (aliases.hasMoreElements()) {
+                Certificate cert = store.getCertificate(aliases.nextElement());
+                if (cert instanceof X509Certificate) {
+                    roots.add((X509Certificate) cert);
+                }
             }
+        } catch (KeyStoreException unreadable) {
+            roots.clear();
         }
     }
 
@@ -182,12 +197,18 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
             ArrayList<X509Certificate> pathCertificates = new ArrayList<>();
             Collections.addAll(pathCertificates, chain);
 
-            // A PKIX CertPath excludes its TrustAnchor.  Servers occasionally
-            // include the root, so remove it when it exactly matches one of ours.
-            if (!pathCertificates.isEmpty()
-                    && findMatchingAnchor(pathCertificates.get(pathCertificates.size() - 1))
-                    != null) {
-                pathCertificates.remove(pathCertificates.size() - 1);
+            // A PKIX CertPath excludes its TrustAnchor, so the path ends below the first
+            // certificate that is one of our roots: the root itself, which servers occasionally
+            // include, or the same CA (subject and key) cross-signed by an older root, as Conscrypt
+            // reads it. CloudFront sends DigiCert Global Root G2 cross-signed by VeriSign Class 3
+            // G5, which this store does not hold. Validated as sent, the path needed G5: Prime
+            // Video's and Audible's images failed validation, and Prime Video showed its service
+            // as unreachable.
+            for (int i = 0; i < pathCertificates.size(); i++) {
+                if (findMatchingAnchor(pathCertificates.get(i)) != null) {
+                    pathCertificates.subList(i, pathCertificates.size()).clear();
+                    break;
+                }
             }
             if (pathCertificates.isEmpty()) {
                 chain[0].checkValidity();
@@ -215,11 +236,19 @@ public final class OhSystemTrustManager extends X509ExtendedTrustManager {
         }
     }
 
+    /** Our root a certificate stands for: the same certificate, or the same CA (subject and key). */
     private TrustAnchor findMatchingAnchor(X509Certificate certificate) {
+        byte[] key = null;
         for (TrustAnchor anchor : trustAnchors) {
             X509Certificate trusted = anchor.getTrustedCert();
             if (certificate.equals(trusted)) {
                 return anchor;
+            }
+            if (certificate.getSubjectX500Principal().equals(trusted.getSubjectX500Principal())) {
+                if (key == null) key = certificate.getPublicKey().getEncoded();
+                if (Arrays.equals(key, trusted.getPublicKey().getEncoded())) {
+                    return anchor;
+                }
             }
         }
         return null;

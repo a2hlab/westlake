@@ -7,7 +7,10 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <ifaddrs.h>
+#include <limits.h>
 #include <link.h>
+#include <sys/auxv.h>
+#include <sys/syscall.h>
 #include <locale.h>
 #include <math.h>
 #include <netdb.h>
@@ -32,6 +35,9 @@
 #include <wchar.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/eventfd.h>
+#include <sys/syscall.h>
+#include <time.h>
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -493,8 +499,17 @@ static void westlake_log_install(const char *kind, int signal_number, const void
  * instruction for Breakpad's handler to catch, and FFRT's handler took the trap instead and the
  * process died. Trap hooks and CPU-feature probes use these two signals; SIGSEGV and the rest stay
  * as OH sets them.
+ *
+ * The claim ends when the app hands the signal back: it installs SIG_DFL or SIG_IGN, or puts back
+ * the handler OH's code had installed before it (westlake_oh_handlers, the last one OH applied). A
+ * crash reporter does the latter when it has handled a trap: it restores the handler it displaced
+ * and returns, so the trap reaches that handler next. Naver's Whale did so after a CHECK, which put
+ * FFRT's handler back; FFRT then restores its own predecessor and returns in the same way, and with
+ * the claim still standing that was refused, so FFRT's handler took the same trap 567,000 times
+ * before the dump.
  */
 static volatile unsigned int westlake_android_signal_claims;
+static void *volatile westlake_oh_handlers[32];
 
 static int westlake_claimable_signal(int signal_number)
 {
@@ -513,7 +528,8 @@ static int westlake_android_sigaction(int signal_number, const struct westlake_w
     if (result == 0 && action != NULL && westlake_claimable_signal(signal_number)) {
         void (*handler)(int) = action->callback.handler;
         unsigned int bit = 1u << signal_number;
-        if (handler == SIG_DFL || handler == SIG_IGN) {
+        void *oh_handler = __atomic_load_n(&westlake_oh_handlers[signal_number], __ATOMIC_RELAXED);
+        if (handler == SIG_DFL || handler == SIG_IGN || (oh_handler != NULL && (void *) handler == oh_handler)) {
             __atomic_fetch_and(&westlake_android_signal_claims, ~bit, __ATOMIC_RELAXED);
         } else {
             __atomic_fetch_or(&westlake_android_signal_claims, bit, __ATOMIC_RELAXED);
@@ -546,13 +562,23 @@ int sigaction(int signal_number, const struct sigaction *action,
                              __builtin_return_address(0));
         if (westlake_claimable_signal(signal_number) &&
             (__atomic_load_n(&westlake_android_signal_claims, __ATOMIC_RELAXED) & (1u << signal_number)) != 0) {
-            /* The app's handler stays; the caller is told what is installed. */
-            fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied: the app's handler stays\n",
-                    signal_number);
+            /* The app's handler stays; the caller is told what is installed. Logged a few times per
+             * signal: a handler that restores its predecessor and returns makes a trap repeat, and
+             * Naver's Whale repeated this 567,000 times before the dump. */
+            static unsigned int refused[64];
+            unsigned int count = __atomic_add_fetch(&refused[signal_number & 63], 1, __ATOMIC_RELAXED);
+            if (count <= 4 || (count & (count - 1)) == 0) {
+                fprintf(stderr, "[WESTLAKE-SIGNAL-INSTALL] oh signal=%d not applied (%u times): the app's handler stays\n",
+                        signal_number, count);
+            }
             return old_action != NULL ? real_sigaction(signal_number, NULL, old_action) : 0;
         }
     }
-    return real_sigaction(signal_number, action, old_action);
+    int result = real_sigaction(signal_number, action, old_action);
+    if (result == 0 && action != NULL && westlake_claimable_signal(signal_number)) {
+        __atomic_store_n(&westlake_oh_handlers[signal_number], (void *) action->sa_handler, __ATOMIC_RELAXED);
+    }
+    return result;
 }
 
 /*
@@ -650,9 +676,25 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex)
  * pthread_detach under the C11 name (one function, two names), so no dlsym is needed (see
  * pthread_mutex_trylock).
  */
+/*
+ * A thread detached already. Bionic answers EINVAL (its join state is no longer "not joined");
+ * musl's detach takes it for one that is exiting, joins it, and its join traps on a detached thread
+ * (a store to address 0). VivaVideo detached a thread twice from two threads at once, and both
+ * faulted in pthread_join under thrd_detach. A thread's detach state is read with
+ * pthread_getattr_np, as long as the thread is still there to read: a detached thread that has
+ * exited is gone, and Bionic, which finds it missing from its list, answers ESRCH, where this
+ * can only pass it on.
+ */
 int pthread_detach(pthread_t thread)
 {
     if (thread == 0) return ESRCH;
+    pthread_attr_t attr;
+    if (thread != pthread_self() && pthread_getattr_np(thread, &attr) == 0) {
+        int state = PTHREAD_CREATE_JOINABLE;
+        int detached = pthread_attr_getdetachstate(&attr, &state) == 0 && state == PTHREAD_CREATE_DETACHED;
+        pthread_attr_destroy(&attr);
+        if (detached) return EINVAL;
+    }
     return thrd_detach((thrd_t) thread);
 }
 
@@ -1623,7 +1665,236 @@ static int westlake_names_running_libc(const char *file)
     return stat(file, &st) == 0 && st.st_dev == libc_dev && st.st_ino == libc_ino;
 }
 
+/*
+ * DT_INIT, which Bionic's linker runs and OH's loader does not.
+ *
+ * Bionic starts a library with its DT_INIT function and then its .init_array
+ * (soinfo::call_constructors). OH builds musl for arm64 with NO_LEGACY_INITFINI, so its loader runs
+ * the .init_array alone and never calls DT_INIT (nor DT_FINI). A library whose start-up lives in
+ * DT_INIT never starts. Unity games packed with libu8t.so keep part of libunity.so's code encrypted
+ * on disk, with an empty .init_array and a DT_INIT that is a five-instruction stub calling libu8t's
+ * xx1, which decrypts the code and runs the constructors. Not called, the games ran ciphertext:
+ * SIGILL in libunity.so in Stella Sora, Survivor.io and Zen Word, on bytes identical to the file's.
+ * Garena's libBqCCS.so has the same shape: a segment added for the unpacker, DT_INIT in it, the
+ * original .text encrypted, and libanort.so as a dependency.
+ *
+ * After each load an app asks for, every app library loaded since whose only start-up is DT_INIT
+ * (its .init_array empty) gets it called, once, dependencies before the libraries that need them,
+ * before the handle is returned: for such a library that is Bionic's order exactly. A library with
+ * both has had its .init_array run by musl already, and calling DT_INIT after it would be an order
+ * Bionic never uses, so it is only logged. 439 of the corpus's 545 DT_INIT libraries are of that
+ * kind, 243 of them libnms.so, in apps that draw without it; the 106 with DT_INIT alone are in 61
+ * apps. The calls hold a lock, as Bionic's linker holds its own while it runs constructors, so
+ * another thread's load cannot return a library whose DT_INIT has not finished.
+ */
+#define WESTLAKE_DT_INIT_SEEN_MAX 2048
+#define WESTLAKE_DT_INIT_BATCH 64
+
+struct westlake_dt_init {
+    uintptr_t init;
+    uint64_t init_array_size;
+    uintptr_t renamed_array;          /* the .init_array the launcher hid from musl, or 0 */
+    uint64_t renamed_array_size;
+    const char *path;   /* the loader's own copy of the name, kept while the library is loaded */
+};
+
+/*
+ * A library with DT_INIT and an .init_array needs the first to run before the second, and musl runs
+ * the array alone. The launcher stages such a library with DT_INIT_ARRAY{,SZ} renamed to these tags
+ * (probe_source_app.py, legacy_init_staged), so that musl runs neither, and this shim calls DT_INIT
+ * and then the array, in bionic's order. iQIYI faulted inside libmsaoaidsec.so the moment it loaded:
+ * DT_INIT, then six array entries, and only the array had run. The marker below tells the launcher
+ * that this shim runs the renamed arrays; under a shim without it, their constructors would never
+ * run, so the launcher renames nothing.
+ */
+#define WESTLAKE_DT_INIT_ARRAY 0x6fffe0f0
+#define WESTLAKE_DT_INIT_ARRAYSZ 0x6fffe0f1
+__attribute__((used)) static const char westlake_runs_renamed_init_arrays[] = "WESTLAKE_RUNS_RENAMED_INIT_ARRAYS=1";
+
+struct westlake_dt_init_scan {
+    struct westlake_dt_init found[WESTLAKE_DT_INIT_BATCH];
+    size_t count;
+    int more;
+    unsigned long long adds;
+};
+
+static pthread_mutex_t g_dt_init_lock;
+static pthread_once_t g_dt_init_once = PTHREAD_ONCE_INIT;
+/* Libraries looked at, by load address and name: an address alone can be reused after a dlclose. */
+static struct { uintptr_t base; uint64_t name; } g_dt_init_seen[WESTLAKE_DT_INIT_SEEN_MAX];
+static size_t g_dt_init_seen_count;
+static unsigned long long g_dt_init_adds;
+
+static void westlake_dt_init_lock_init(void)
+{
+    pthread_mutexattr_t attributes;
+    pthread_mutexattr_init(&attributes);
+    pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_dt_init_lock, &attributes);
+    pthread_mutexattr_destroy(&attributes);
+}
+
+/* An app's own library: from its library directory, anywhere else under /data but Westlake's
+ * runtime, or through a descriptor. The system's and the runtime's libraries are left alone. */
+static int westlake_is_app_library(const char *path)
+{
+    if (path == NULL || path[0] == '\0') return 0;
+    if (strstr(path, "/data/local/tmp/asx/lib/") != NULL) return 1;
+    if (strncmp(path, "/data/local/tmp/", 16) == 0) return 0;
+    return strncmp(path, "/data/", 6) == 0 || strncmp(path, "/proc/self/fd/", 14) == 0;
+}
+
+static int westlake_dt_init_adds(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void) size;
+    *(unsigned long long *) data = info->dlpi_adds;
+    return 1;
+}
+
+static int westlake_dt_init_collect(struct dl_phdr_info *info, size_t size, void *data)
+{
+    struct westlake_dt_init_scan *scan = data;
+    (void) size;
+    scan->adds = info->dlpi_adds;
+    if (!westlake_is_app_library(info->dlpi_name)) return 0;
+    uint64_t name = 0xcbf29ce484222325ULL;   /* FNV-1a */
+    for (const char *c = info->dlpi_name; *c != '\0'; ++c) name = (name ^ (unsigned char) *c) * 0x100000001b3ULL;
+    for (size_t i = 0; i < g_dt_init_seen_count; ++i) {
+        if (g_dt_init_seen[i].base == (uintptr_t) info->dlpi_addr && g_dt_init_seen[i].name == name) return 0;
+    }
+    const ElfW(Dyn) *dyn = NULL;
+    for (ElfW(Half) i = 0; i < info->dlpi_phnum; ++i) {
+        if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) {
+            dyn = (const ElfW(Dyn) *) (info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+        }
+    }
+    uintptr_t init = 0, renamed_array = 0;
+    uint64_t init_array_size = 0, renamed_array_size = 0;
+    for (; dyn != NULL && dyn->d_tag != DT_NULL; ++dyn) {
+        if (dyn->d_tag == DT_INIT) init = (uintptr_t) dyn->d_un.d_ptr;
+        if (dyn->d_tag == DT_INIT_ARRAYSZ) init_array_size = dyn->d_un.d_val;
+        if (dyn->d_tag == WESTLAKE_DT_INIT_ARRAY) renamed_array = (uintptr_t) dyn->d_un.d_ptr;
+        if (dyn->d_tag == WESTLAKE_DT_INIT_ARRAYSZ) renamed_array_size = dyn->d_un.d_val;
+    }
+    if (init != 0 && scan->count == WESTLAKE_DT_INIT_BATCH) {
+        scan->more = 1;   /* left unseen for the next pass */
+        return 0;
+    }
+    if (g_dt_init_seen_count < WESTLAKE_DT_INIT_SEEN_MAX) {
+        g_dt_init_seen[g_dt_init_seen_count].base = (uintptr_t) info->dlpi_addr;
+        g_dt_init_seen[g_dt_init_seen_count++].name = name;
+    } else {
+        return 0;   /* never reached in practice: apps load a few hundred libraries at most */
+    }
+    if (init != 0) {
+        struct westlake_dt_init *found = &scan->found[scan->count++];
+        found->init = (uintptr_t) info->dlpi_addr + init;
+        found->init_array_size = init_array_size;
+        found->renamed_array = renamed_array != 0 ? (uintptr_t) info->dlpi_addr + renamed_array : 0;
+        found->renamed_array_size = renamed_array_size;
+        found->path = info->dlpi_name;
+    }
+    return 0;
+}
+
+static void westlake_run_dt_inits(void)
+{
+    unsigned long long adds = 0;
+    dl_iterate_phdr(westlake_dt_init_adds, &adds);
+    if (adds == __atomic_load_n(&g_dt_init_adds, __ATOMIC_ACQUIRE)) return;
+    pthread_once(&g_dt_init_once, westlake_dt_init_lock_init);
+    pthread_mutex_lock(&g_dt_init_lock);
+    int more;
+    unsigned long long scanned = 0;
+    do {
+        struct westlake_dt_init_scan scan;
+        scan.count = 0;
+        scan.more = 0;
+        scan.adds = 0;
+        dl_iterate_phdr(westlake_dt_init_collect, &scan);
+        scanned = scan.adds;
+        more = scan.more;
+        /* musl lists a load's libraries in the order it opened them, each before its dependencies. */
+        for (size_t i = scan.count; i-- > 0;) {
+            const struct westlake_dt_init *found = &scan.found[i];
+            if (found->init_array_size != 0) {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT not called: OH's loader ran its %llu .init_array "
+                              "constructors, which Bionic runs after DT_INIT\n",
+                              found->path, (unsigned long long) (found->init_array_size / sizeof(void *)));
+                continue;
+            }
+            size_t entries = found->renamed_array != 0 ? (size_t) (found->renamed_array_size / sizeof(void *)) : 0;
+            if (entries != 0) {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, then its %zu .init_array constructors, which "
+                              "the launcher hid from OH's loader (bionic's order)\n", found->path, entries);
+            } else {
+                wl_relocs_log("[WESTLAKE-LOADER] %s: DT_INIT called, its only start-up (OH's loader skips DT_INIT)\n",
+                              found->path);
+            }
+            ((void (*)(void)) found->init)();
+            /* The entries are relocated: musl applies relocations by address, whatever the tags say.
+             * Null and -1 entries are skipped, as bionic's call_array skips them. */
+            const uintptr_t *array = (const uintptr_t *) found->renamed_array;
+            for (size_t k = 0; k < entries; ++k) {
+                if (array[k] != 0 && array[k] != (uintptr_t) -1) ((void (*)(void)) array[k])();
+            }
+        }
+    } while (more);
+    /* Recorded only now: a load in another thread that finds this count waits for nothing, so the
+     * libraries counted must have finished. A DT_INIT's own loads (in this thread) may have
+     * recorded a later count already. */
+    if (scanned > __atomic_load_n(&g_dt_init_adds, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&g_dt_init_adds, scanned, __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&g_dt_init_lock);
+}
+
+static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode);
+
+/*
+ * ART's loader opens each library the launcher routes to the Android namespace RTLD_GLOBAL
+ * (OpenInAndroidNamespace, art-build stubs/link_stubs_arm64.cc); Android's native loader opens an
+ * app's libraries with RTLD_NOW alone, local. Under musl a global library comes first for every
+ * library relocated after it, ahead of that library's own definitions, so the first routed library
+ * that defined a name answered it for all the others, even a library's references to its own copy.
+ * FNF's liblime.so carries its own libc++: its throw helper reached std::invalid_argument's type info
+ * through a GOT slot, which the APK's libc++_shared.so (opened before it, global) answered, while its
+ * catch clause compared with its own copy. The two no longer matched, the std::stoll exception went
+ * through noexcept alcCreateContext uncaught, and terminate() ended the app. ART's opens there are
+ * local here, as on Android. The bionic boundary ART preloads in that namespace stays global, as does
+ * the bootstrap anchor that installs one (appspawn-x android_native_namespace_bootstrap.c), and an
+ * app's own dlopen keeps the flags it asked for (it does not come from libart).
+ */
+static int westlake_art_opens_app_library(const Dl_namespace *ns, const char *file, void *caller)
+{
+    if (ns == NULL || file == NULL || strcmp(ns->name, "westlake_android_app") != 0) return 0;
+    static const char *const kGlobal[] = { "WESTLAKE_ANDROID_NATIVE_PRELOAD", "WESTLAKE_ANDROID_NATIVE_ANCHOR" };
+    for (size_t i = 0; i < sizeof(kGlobal) / sizeof(kGlobal[0]); i++) {
+        const char *value = getenv(kGlobal[i]);
+        if (value != NULL && strcmp(file, value) == 0) return 0;
+    }
+    Dl_info info;
+    if (dladdr(caller, &info) == 0 || info.dli_fname == NULL) return 0;
+    const char *base = strrchr(info.dli_fname, '/');
+    return strcmp(base != NULL ? base + 1 : info.dli_fname, "libart.so") == 0;
+}
+
 void *dlopen_ns(Dl_namespace *ns, const char *file, int mode)
+{
+    if ((mode & RTLD_GLOBAL) && westlake_art_opens_app_library(ns, file, __builtin_return_address(0))) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-LOADER] ART's loads in the Android namespace are local, as on Android (%s)\n",
+                          file);
+        }
+        mode &= ~RTLD_GLOBAL;
+    }
+    void *handle = westlake_dlopen_ns(ns, file, mode);
+    if (handle != NULL) westlake_run_dt_inits();
+    return handle;
+}
+
+static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode)
 {
     typedef void *(*DlopenNsFn)(Dl_namespace *, const char *, int);
     static DlopenNsFn real_dlopen_ns;
@@ -1677,9 +1948,17 @@ static void *westlake_real_dlopen_fn(void *context, const char *file, int flags)
     return real != NULL ? real(file, flags) : NULL;
 }
 
+static void *westlake_dlopen(const char *filename, int flags, void *caller);
+
 void *dlopen(const char *filename, int flags)
 {
-    void *caller = __builtin_return_address(0);
+    void *handle = westlake_dlopen(filename, flags, __builtin_return_address(0));
+    if (handle != NULL) westlake_run_dt_inits();
+    return handle;
+}
+
+static void *westlake_dlopen(const char *filename, int flags, void *caller)
+{
     typedef void *(*DlopenFn)(const char *, int);
     static DlopenFn real_dlopen;
     if (real_dlopen == NULL) {
@@ -2384,6 +2663,44 @@ static const char *westlake_android_root(void)
     return root[0] != '\0' ? root : NULL;
 }
 
+/*
+ * What an app's own libraries asked this runtime for and did not get, each name told once: an
+ * environment variable the process does not have, a property nothing answers. A phone answers some
+ * of these and not others, so a line is not a fault; it is what the app expected of Android, written
+ * where it asks, for the gap map and for reading a crash that follows (Authenticator's protection
+ * library called atoi on a null pointer, with nothing in the log to say which answer was missing).
+ * The first 64 names of each kind; a name is skipped rather than waited for when another thread
+ * holds the table, so a forked child can never block here.
+ */
+#define WESTLAKE_ASKED_MAX 64
+
+struct westlake_asked {
+    pthread_mutex_t lock;
+    unsigned count;
+    char names[WESTLAKE_ASKED_MAX][64];
+};
+
+static struct westlake_asked g_unset_environment = { PTHREAD_MUTEX_INITIALIZER, 0, {{0}} };
+static struct westlake_asked g_absent_properties = { PTHREAD_MUTEX_INITIALIZER, 0, {{0}} };
+
+/* 1 the first time name is seen in asked, 0 after (and once the table is full or busy). */
+static int westlake_first_ask(struct westlake_asked *asked, const char *name)
+{
+    if (pthread_mutex_trylock(&asked->lock) != 0) {
+        return 0;
+    }
+    unsigned i = 0;
+    while (i < asked->count && strncmp(asked->names[i], name, sizeof(asked->names[i]) - 1) != 0) {
+        ++i;
+    }
+    int first = i == asked->count && asked->count < WESTLAKE_ASKED_MAX;
+    if (first) {
+        snprintf(asked->names[asked->count++], sizeof(asked->names[0]), "%s", name);
+    }
+    pthread_mutex_unlock(&asked->lock);
+    return first;
+}
+
 char *getenv(const char *name)
 {
     typedef char *(*GetenvFn)(const char *);
@@ -2406,6 +2723,11 @@ char *getenv(const char *name)
             }
             return (char *) android_root;
         }
+    }
+    const char *caller = NULL;
+    if (value == NULL && name != NULL && caller_is_android_dso(__builtin_return_address(0), &caller) &&
+        westlake_first_ask(&g_unset_environment, name)) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] getenv %s: unset, asked by %s\n", name, caller);
     }
     return value;
 }
@@ -2561,6 +2883,15 @@ static int read_oh_property(const char *name, char *value, size_t value_size)
  * The heap size is a hint Chromium clamps into a sane range rather than a number it trusts; it is
  * reported as a plain Android default instead of a measurement, because this runtime's ART heap
  * ceiling is not the app's to know.
+ *
+ * All of that table's non-empty entries are here, so native code reads what Java reads: its build,
+ * version and ABI entries (ro.build.fingerprint, ro.build.tags and ro.build.type came back empty
+ * natively) and its identity, DAYU200 / rk3568. The identity used to be passed through from the
+ * board's own OH names (const.product.*, ohos.boot.hardware), so native code saw a different device
+ * from the one Build.* reports, which apps and their protection libraries can compare. One device
+ * answers on both sides now. Before, every identity name read empty natively, which no Android device
+ * answers: Meitu's liblabdeviceinfo.so joins ro.product.manufacturer and ro.product.model and copied
+ * from a null pointer when both were empty.
  */
 static const struct {
     const char *name;
@@ -2572,48 +2903,40 @@ static const struct {
     { "ro.build.id",               "oh-adapter" },
     { "ro.arch",                   "arm64" },
     { "dalvik.vm.heapsize",        "512m" },
+    { "ro.product.cpu.abilist",    "arm64-v8a" },
+    { "ro.product.cpu.abilist64",  "arm64-v8a" },
+    { "ro.product.cpu.abi",        "arm64-v8a" },
+    { "ro.build.version.release_or_codename", "14" },
+    { "ro.build.version.codename_or_preview", "REL" },
+    { "ro.build.version.all_codenames", "REL" },
+    { "ro.build.version.known_codenames", "REL" },
+    { "ro.build.version.preview_sdk", "0" },
+    { "ro.build.version.preview_sdk_fingerprint", "REL" },
+    { "ro.build.version.release_or_preview_display", "14" },
+    { "ro.product.first_api_level", "34" },
+    { "ro.build.version.incremental", "oh-adapter" },
+    { "ro.build.version.security_patch", "2024-01-01" },
+    { "ro.build.fingerprint",      "OpenHarmony/rk3568/rk3568:14/oh-adapter:user/release-keys" },
+    { "ro.build.tags",             "release-keys" },
+    { "ro.build.type",             "user" },
+    { "ro.build.user",             "oh-adapter" },
+    { "ro.build.host",             "oh-adapter" },
+    { "ro.build.display.id",       "oh-adapter" },
+    { "ro.product.brand",          "OpenHarmony" },
+    { "ro.product.manufacturer",   "OpenHarmony" },
+    { "ro.product.model",          "DAYU200" },
+    { "ro.product.device",         "rk3568" },
+    { "ro.product.name",           "rk3568" },
+    { "ro.hardware",               "rk3568" },
+    { "ro.board.platform",         "rk3568" },
+    { "ro.boot.hardware",          "rk3568" },
 };
 
-/*
- * The device's identity, which Android keeps under ro.product.* and OH under const.product.* and
- * ohos.boot.hardware. Read under the Android names, every one was empty, which no Android device
- * answers: Meitu's liblabdeviceinfo.so joins ro.product.manufacturer and ro.product.model and,
- * when both are empty, copies from a null pointer (SIGSEGV in memcpy on its analytics thread).
- * The board's own values are passed through, whatever they are.
- */
-static const struct {
-    const char *name;
-    const char *oh_name;
-} g_oh_property_aliases[] = {
-    { "ro.product.model",               "const.product.model" },
-    { "ro.product.vendor.model",        "const.product.model" },
-    { "ro.product.manufacturer",        "const.product.manufacturer" },
-    { "ro.product.vendor.manufacturer", "const.product.manufacturer" },
-    { "ro.product.brand",               "const.product.brand" },
-    { "ro.product.vendor.brand",        "const.product.brand" },
-    { "ro.product.name",                "const.product.name" },
-    { "ro.product.device",              "const.product.name" },
-    { "ro.product.board",               "ohos.boot.hardware" },
-    { "ro.board.platform",              "ohos.boot.hardware" },
-    { "ro.hardware",                    "ohos.boot.hardware" },
-};
-
-/* A property by its Android name: OH's store, then the OH name it is kept under, then (with_table)
- * the table above. Returns the value's length, 0 when nothing answers. */
+/* A property by its Android name: OH's store, then (with_table) the table above, the order the
+ * runtime's SystemProperties uses for Java. Returns the value's length, 0 when nothing answers. */
 static int read_android_property(const char *name, char *value, int with_table)
 {
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
-    for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
-        if (strcmp(name, g_oh_property_aliases[i].name) == 0) {
-            length = read_oh_property(g_oh_property_aliases[i].oh_name, value, WEBVIEW_PROP_VALUE_MAX);
-            /* "default" is OH's placeholder for a brand or manufacturer nobody set, not a name.
-             * Answered as one, it crashed an app's protection library on launch (Baitu). */
-            if (strcmp(value, "default") == 0) {
-                value[0] = '\0';
-                length = 0;
-            }
-        }
-    }
     for (size_t i = 0; with_table && length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
         if (strcmp(name, g_android_properties[i].name) == 0) {
             snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
@@ -2671,6 +2994,123 @@ int android_get_device_api_level(void)
     return atoi(value);
 }
 
+/*
+ * Bionic's timelocal (LIBC, from tzcode), which musl does not have: mktime, with tm_isdst set to -1
+ * first in case the caller left it uninitialized, as Bionic does. Meta's liboacrair_accounts.so
+ * (Stella) imports it, and failed to relocate without it.
+ */
+#include <time.h>
+time_t timelocal(struct tm *tm)
+{
+    if (tm != NULL) tm->tm_isdst = -1;
+    return mktime(tm);
+}
+
+/*
+ * Bionic's dirname, basename and __gnu_basename (libgen.cpp), which never write to the path they are
+ * given. musl's dirname and basename, as POSIX allows, write a NUL into it, so an Android caller
+ * that passes a string literal faults (SEGV_ACCERR: NetEase's game called dirname on
+ * "/data/.bluestacks..." in its read-only data), and one that goes on using its path after asking
+ * for the directory finds it cut short. Bionic copies the answer into a thread's buffer of its own
+ * (PATH_MAX) and returns that, or "." or "/". 209 apps of the Hong Kong corpus import dirname and
+ * 451 basename (React Native and Sentry among them). Callers built for musl -- OH's and Westlake's
+ * own libraries -- keep musl's. __gnu_basename, which musl lacks, is what Bionic's <string.h>
+ * names a GNU basename call: a pointer to the path's last component, within the path itself; the
+ * libraries that import it (Kuaishou's libkwai-unwind.so, OpenVPN's libopenvpn.so) did not load.
+ */
+static __thread char westlake_dirname_buffer[PATH_MAX];
+static __thread char westlake_basename_buffer[PATH_MAX];
+
+/* Bionic's __dirname_r: the length of the answer, with it in buffer, or -1 with errno set. */
+static int westlake_dirname_r(const char *path, char *buffer, size_t size)
+{
+    const char *end = NULL;
+    int length;
+    if (path == NULL || *path == '\0') {
+        path = ".";
+        length = 1;
+    } else {
+        end = path + strlen(path) - 1;
+        while (end > path && *end == '/') end--;       /* the trailing slashes */
+        while (end > path && *end != '/') end--;       /* the last component */
+        if (end == path) {
+            path = *end == '/' ? "/" : ".";
+            length = 1;
+        } else {
+            do { end--; } while (end > path && *end == '/');
+            length = (int) (end - path + 1);
+        }
+    }
+    if (length + 1 > PATH_MAX) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    if ((size_t) length > size - 1) {
+        errno = ERANGE;
+        return -1;
+    }
+    memcpy(buffer, path, (size_t) length);
+    buffer[length] = '\0';
+    return length;
+}
+
+/* Bionic's __basename_r. */
+static int westlake_basename_r(const char *path, char *buffer, size_t size)
+{
+    const char *start, *end;
+    int length;
+    if (path == NULL || *path == '\0') {
+        start = ".";
+        length = 1;
+    } else {
+        end = path + strlen(path) - 1;
+        while (end > path && *end == '/') end--;
+        if (end == path && *end == '/') {
+            start = "/";
+            length = 1;
+        } else {
+            start = end;
+            while (start > path && start[-1] != '/') start--;
+            length = (int) (end - start + 1);
+        }
+    }
+    if ((size_t) length > size - 1) {
+        errno = ERANGE;
+        return -1;
+    }
+    memcpy(buffer, start, (size_t) length);
+    buffer[length] = '\0';
+    return length;
+}
+
+char *dirname(char *path)
+{
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static char *(*real_dirname)(char *);
+        if (real_dirname == NULL) real_dirname = (char *(*)(char *)) dlsym(RTLD_NEXT, "dirname");
+        if (real_dirname != NULL) return real_dirname(path);
+    }
+    return westlake_dirname_r(path, westlake_dirname_buffer, sizeof(westlake_dirname_buffer)) < 0
+            ? NULL : westlake_dirname_buffer;
+}
+
+char *basename(char *path)
+{
+    if (!caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        static char *(*real_basename)(char *);
+        if (real_basename == NULL) real_basename = (char *(*)(char *)) dlsym(RTLD_NEXT, "basename");
+        if (real_basename != NULL) return real_basename(path);
+    }
+    return westlake_basename_r(path, westlake_basename_buffer, sizeof(westlake_basename_buffer)) < 0
+            ? NULL : westlake_basename_buffer;
+}
+
+const char *__gnu_basename(const char *path)
+{
+    const char *last = strrchr(path, '/');
+    return last != NULL ? last + 1 : path;
+}
+
 const struct prop_info *__system_property_find(const char *name)
 {
     if (name == NULL) {
@@ -2678,11 +3118,18 @@ const struct prop_info *__system_property_find(const char *name)
     }
     char value[WEBVIEW_PROP_VALUE_MAX];
     /*
-     * Not the table: Chromium reads the API level by find + read_callback, and finding
-     * ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*, which the
-     * WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43 apps).
+     * Not the table for the WebView: Chromium reads the API level by find + read_callback, and
+     * finding ro.build.version.sdk=34 there moved WebView's shared memory onto ASharedMemory_*,
+     * which the WebView's libandroid does not have (SIGSEGV calling null on CrBrowserMain in 43
+     * apps). An app's own libraries find what __system_property_get and enumeration answer: their
+     * libandroid has ASharedMemory_* (this library's).
      */
-    if (read_android_property(name, value, 0) == 0) {
+    if (read_android_property(name, value, !caller_is_webview(__builtin_return_address(0), NULL)) == 0) {
+        const char *caller = NULL;
+        if (caller_is_android_dso(__builtin_return_address(0), &caller) &&
+            westlake_first_ask(&g_absent_properties, name)) {
+            fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property %s: absent, asked by %s\n", name, caller);
+        }
         return NULL;
     }
 
@@ -2872,12 +3319,6 @@ int android_fdsan_set_error_level_from_property(int default_level)
     return 0;
 }
 
-void android_set_abort_message(const char *message)
-{
-    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] abort message: %s\n",
-            message != NULL ? message : "<null>");
-}
-
 /*
  * WESTLAKE §709: do not export bionic/jemalloc's optional sdallocx API.
  *
@@ -3021,6 +3462,59 @@ static bool westlake_runtime_code(uint64_t pc)
     return false;
 }
 
+/*
+ * The return addresses up the frame-pointer chain that starts at fp, each as " #n <path>+<offset>":
+ * the callers past x30. A fault inside a library function names its caller only this way: Haochang's
+ * SIGSEGV was in musl's strlen inside create_loadtask, so dlopen had been handed a file name at 0x125c,
+ * and x30 could not say whose call that was. A record is read only when its memory is mapped readable,
+ * and the chain must climb the stack; at most `most` frames.
+ */
+static char *westlake_frames(char *out, char *limit, uint64_t fp, uint64_t most)
+{
+    for (uint64_t depth = 1; depth <= most && fp != 0 && (fp & 15) == 0 && out + 48 < limit; ++depth) {
+        int readable = 0, readable_high = 0;
+        westlake_place(out, out, fp, &readable);
+        westlake_place(out, out, fp + 8, &readable_high);
+        if (!readable || !readable_high) break;
+        const volatile uint64_t *record = (const volatile uint64_t *) (uintptr_t) fp;
+        uint64_t next = record[0], ret = record[1] & 0x00ffffffffffffffULL;
+        if (ret == 0) break;
+        out = westlake_text(out, " #", 2);
+        out = westlake_hex(out, depth);
+        char *placed = westlake_place(out, limit, ret, NULL);
+        if (placed == out) {
+            *out++ = ' ';
+            out = westlake_hex(out, ret);
+        } else {
+            out = placed;
+        }
+        if (next <= fp) break;
+        fp = next;
+    }
+    return out;
+}
+
+/*
+ * Bionic keeps the message a library sets just before it calls abort(); Westlake prints it, then the
+ * callers up the frame-pointer chain. The SIGABRT that follows reaches no witness, and ART's report of
+ * it lists no frames. libc++abi's "terminating due to uncaught exception of type X" names the type but
+ * not the throw, and its frames climb through the terminate handler and __cxa_throw to the code that
+ * threw it (Friday Night Funkin': St16invalid_argument right after it opened an AAudio stream). The
+ * same holds for "Pure virtual function called!" and the -fno-exceptions length_error.
+ */
+void android_set_abort_message(const char *message)
+{
+    fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] abort message: %s\n",
+            message != NULL ? message : "<null>");
+    char frames[2400];
+    char *end = westlake_text(frames, "[WESTLAKE-ABORT-FRAMES] tid=", 40);
+    end = westlake_hex(end, (uint64_t) gettid());
+    end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) (uintptr_t) __builtin_frame_address(0), 16);
+    *end++ = '\n';
+    ssize_t written = write(2, frames, (size_t) (end - frames));
+    (void) written;
+}
+
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
 {
     static int witnessed;
@@ -3109,6 +3603,15 @@ static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *co
     *out++ = '\n';
     ssize_t written = write(2, line, (size_t) (out - line));
     (void) written;
+    if (uc != NULL) {
+        char frames[1600];
+        char *end = westlake_text(frames, "[WESTLAKE-SIGNAL-FRAMES] tid=", 40);
+        end = westlake_hex(end, (uint64_t) gettid());
+        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29], 10);
+        *end++ = '\n';
+        written = write(2, frames, (size_t) (end - frames));
+        (void) written;
+    }
     return false;
 }
 
@@ -3132,6 +3635,75 @@ __attribute__((constructor)) static void westlake_install_signal_witness(void)
      */
     const char *segv = getenv("WESTLAKE_SEGV_WITNESS");
     if (segv != NULL && strcmp(segv, "1") == 0) add(SIGSEGV, &action);
+}
+
+/*
+ * SIGCHLD back to its default in each process appspawn-x forks, as Android's zygote leaves an app
+ * (UnsetChldSignalHandler). appspawn-x reaps its children with a SIGCHLD handler that waits for any
+ * child, and a forked app kept it: the handler reaped the app's own subprocesses before the app could
+ * wait for them. Dart's process code then failed waitpid with ECHILD and aborted ("Wait for process
+ * exit failed: 10", GlobalComix), and a Runtime.exec caller could lose its child's exit code. The reset
+ * runs in the fork child, before any app code, and only while the inherited handler is appspawn-x's
+ * own; it uses the system call directly, as nothing else may run in a fork child of a threaded process.
+ */
+struct westlake_kernel_sigaction {
+    uintptr_t handler;
+    unsigned long flags;
+    uintptr_t restorer;
+    unsigned long mask;
+};
+static uintptr_t westlake_zygote_start, westlake_zygote_end;
+
+static void westlake_sigchld_default_in_child(void)
+{
+    struct westlake_kernel_sigaction current, standard = {0, 0, 0, 0};   /* SIG_DFL */
+    if (syscall(SYS_rt_sigaction, SIGCHLD, NULL, &current, sizeof(current.mask)) != 0) return;
+    if (current.handler < westlake_zygote_start || current.handler >= westlake_zygote_end) return;
+    syscall(SYS_rt_sigaction, SIGCHLD, &standard, NULL, sizeof(standard.mask));
+}
+
+__attribute__((constructor)) static void westlake_watch_zygote_forks(void)
+{
+    char exe[256];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0) return;
+    exe[n] = '\0';
+    const char *base = strrchr(exe, '/');
+    if (strcmp(base != NULL ? base + 1 : exe, "appspawn-x") != 0) return;
+    /* The executable's loaded image, from its program headers: where appspawn-x's handler is. */
+    const ElfW(Phdr) *phdr = (const ElfW(Phdr) *) getauxval(AT_PHDR);
+    size_t count = (size_t) getauxval(AT_PHNUM);
+    if (phdr == NULL || count == 0) return;
+    uintptr_t bias = 0, low = UINTPTR_MAX, high = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (phdr[i].p_type == PT_PHDR) bias = (uintptr_t) phdr - phdr[i].p_vaddr;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (phdr[i].p_type != PT_LOAD) continue;
+        if (phdr[i].p_vaddr < low) low = phdr[i].p_vaddr;
+        if (phdr[i].p_vaddr + phdr[i].p_memsz > high) high = phdr[i].p_vaddr + phdr[i].p_memsz;
+    }
+    if (high <= low) return;
+    westlake_zygote_start = bias + low;
+    westlake_zygote_end = bias + high;
+    pthread_atfork(NULL, NULL, westlake_sigchld_default_in_child);
+}
+
+/*
+ * The character type of bionic's default locale. bionic starts every process in C.UTF-8: MB_CUR_MAX is
+ * 4, and mbrtowc, wcrtomb and the rest convert UTF-8. musl starts in its byte-based C locale: MB_CUR_MAX
+ * is 1, wcrtomb has no multibyte form for a character past U+00FF (on the board, wcrtomb(U+4E2D) is -1),
+ * and mbrtowc reads each byte of UTF-8 as a character of its own (U+DF80 + byte). Code built against
+ * bionic converts its strings through these and sizes them by MB_CUR_MAX. (Office's file names that
+ * reach Java cut short, such as "en-US/msointl30_andro", were suspected here; they are cut the same way
+ * with this locale set, so their cause lies elsewhere.) LC_CTYPE alone is set; bionic's other
+ * categories are C anyway.
+ */
+__attribute__((constructor)) static void westlake_bionic_ctype_locale(void)
+{
+    if (setlocale(LC_CTYPE, "C.UTF-8") == NULL) {
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] LC_CTYPE C.UTF-8 refused; multibyte conversions stay byte-based\n");
+    }
 }
 
 __attribute__((constructor)) static void initialize_bionic_ctype(void)
@@ -3323,29 +3895,93 @@ void __pthread_cleanup_pop(WebviewBionicCleanup *c, int execute)
 }
 
 /*
- * Deprecated property enumeration. bionic keeps both for old NDK code;
- * both are expressed over the cache this shim already maintains, so a
- * property is only enumerable once something has looked it up.
+ * Property enumeration (bionic keeps both calls for old NDK code). Bionic lists every property the
+ * process may read, hundreds on a phone. This shim listed only the properties looked up so far,
+ * none at first: the protection libraries of Authenticator, Netflix and PayPal, and PairIP in
+ * Grindr and ShopBack, enumerated and got 0, and Authenticator's then called atoi on a null
+ * pointer, a value it had expected to find. The list is every name __system_property_get answers
+ * here under an Android name -- the table above, identity included, with the values a lookup
+ * returns -- then any other property looked up since. Each entry stays at its address for the life
+ * of the process, as a prop_info does in bionic's property area.
  */
+#define WEBVIEW_PROP_ENUM_SIZE 64
+static struct prop_info g_property_enum[WEBVIEW_PROP_ENUM_SIZE];
+static size_t g_property_enum_count;
+static pthread_once_t g_property_enum_once = PTHREAD_ONCE_INIT;
+
+static void westlake_property_enum_add(const char *name)
+{
+    char value[WEBVIEW_PROP_VALUE_MAX];
+    if (g_property_enum_count >= WEBVIEW_PROP_ENUM_SIZE || read_android_property(name, value, 1) == 0) return;
+    for (size_t i = 0; i < g_property_enum_count; ++i) {
+        if (strcmp(g_property_enum[i].name, name) == 0) return;
+    }
+    struct prop_info *entry = &g_property_enum[g_property_enum_count++];
+    snprintf(entry->name, sizeof(entry->name), "%s", name);
+    snprintf(entry->value, sizeof(entry->value), "%s", value);
+    entry->serial = 1;
+}
+
+static void westlake_property_enum_build(void)
+{
+    for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
+        westlake_property_enum_add(g_android_properties[i].name);
+    }
+}
+
+/* The n-th property of the enumeration: the list above, then the looked-up ones it does not hold. */
+static const struct prop_info *westlake_property_nth(size_t n, size_t *total)
+{
+    pthread_once(&g_property_enum_once, westlake_property_enum_build);
+    const struct prop_info *found = n < g_property_enum_count ? &g_property_enum[n] : NULL;
+    size_t count = g_property_enum_count;
+    pthread_mutex_lock(&g_property_mutex);
+    for (size_t i = 0; i < g_property_count; ++i) {
+        int listed = 0;
+        for (size_t k = 0; k < g_property_enum_count && !listed; ++k) {
+            listed = strcmp(g_property_enum[k].name, g_property_cache[i].name) == 0;
+        }
+        if (listed) continue;
+        if (count == n) found = &g_property_cache[i];
+        ++count;
+    }
+    pthread_mutex_unlock(&g_property_mutex);
+    if (total != NULL) *total = count;
+    return found;
+}
+
 int __system_property_foreach(void (*callback)(const struct prop_info *, void *), void *cookie)
 {
     if (callback == NULL) {
         return -1;
     }
-    pthread_mutex_lock(&g_property_mutex);
-    size_t count = g_property_count;
-    pthread_mutex_unlock(&g_property_mutex);
+    size_t count = 0;
+    westlake_property_nth((size_t) -1, &count);
+    static int told;
+    if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
+        const char *caller = NULL;
+        caller_is_android_dso(__builtin_return_address(0), &caller);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (foreach) by %s: %zu properties\n",
+                caller != NULL ? caller : "?", count);
+    }
     for (size_t i = 0; i < count; ++i) {
-        callback(&g_property_cache[i], cookie);
+        const struct prop_info *entry = westlake_property_nth(i, NULL);
+        if (entry != NULL) callback(entry, cookie);
     }
     return 0;
 }
 
 const struct prop_info *__system_property_find_nth(unsigned n)
 {
-    pthread_mutex_lock(&g_property_mutex);
-    const struct prop_info *entry = n < g_property_count ? &g_property_cache[n] : NULL;
-    pthread_mutex_unlock(&g_property_mutex);
+    size_t count = 0;
+    const struct prop_info *entry = westlake_property_nth(n, &count);
+    static int told;
+    if (!__atomic_exchange_n(&told, 1, __ATOMIC_RELAXED)) {
+        const char *caller = NULL;
+        caller_is_android_dso(__builtin_return_address(0), &caller);
+        fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] property enumeration (find_nth) by %s: %zu properties\n",
+                caller != NULL ? caller : "?", count);
+    }
     return entry;
 }
 
@@ -3600,14 +4236,37 @@ int isnanf(float value)
 }
 
 /*
+ * libbinder_ndk's AIBinder_getCallingPid and AIBinder_getCallingUid (API 29), which the runtime's
+ * libbinder_ndk.so does not define: Edge's libchrome.so imports the first and failed to relocate
+ * on it. Binder calls in this runtime stay in the process, and Android answers a caller outside an
+ * incoming transaction with its own pid and uid, so those are the answers.
+ */
+pid_t AIBinder_getCallingPid(void)
+{
+    return getpid();
+}
+
+uid_t AIBinder_getCallingUid(void)
+{
+    return getuid();
+}
+
+/*
  * The NDK's ASharedMemory (libandroid.so, API 26), which neither OH nor the runtime's or the
  * WebView's libandroid.so provides: Instagram's and Messenger's libstartup.so failed to relocate on
- * ASharedMemory_create. Android backs it with ashmem; a sealable memfd gives the same fd-passing,
- * mmap-able region. setProt narrows nothing: ashmem enforces a narrowed protection on later
- * mappings, a memfd seal would fail while a writable mapping exists, and callers use it as a
- * safety net rather than for behaviour. ASharedMemory_dupFromJava is not provided (this library has
- * no JNI headers).
+ * ASharedMemory_create. A memfd, as Android's memfd-backed ashmem (libcutils) makes it: the size is
+ * sealed once set (F_SEAL_GROW | F_SEAL_SHRINK), and setProt to read-only adds F_SEAL_FUTURE_WRITE,
+ * which, like ashmem's protection mask, narrows later mappings without failing on writable ones
+ * already made. Those seals are also how code tells such a region from an ashmem device fd:
+ * Chromium's ashmem helpers read the protection from the seals of a memfd that has both size seals,
+ * and otherwise ask the ashmem device, which starts with an fstat that OH's policy refuses an app
+ * on a memfd (EACCES). Yandex Browser's shared memory failed that way, and Chromium CHECKed the
+ * region's protection. ASharedMemory_dupFromJava is not provided (this library has no JNI headers).
  */
+#ifndef F_SEAL_FUTURE_WRITE
+#define F_SEAL_FUTURE_WRITE 0x0010
+#endif
+
 int ASharedMemory_create(const char *name, size_t size)
 {
     int fd = memfd_create(name != NULL && name[0] != '\0' ? name : "ashmem", MFD_CLOEXEC | MFD_ALLOW_SEALING);
@@ -3619,6 +4278,15 @@ int ASharedMemory_create(const char *name, size_t size)
         close(fd);
         errno = saved;
         return -1;
+    }
+    /* libcutils fails the creation when the seals are refused; Android never refuses them. Should OH's
+     * policy, the region is still usable, unsealed, and that is said once. */
+    if (fcntl(fd, F_ADD_SEALS, F_SEAL_GROW | F_SEAL_SHRINK) != 0) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            fprintf(stderr, "[WESTLAKE-BIONIC] ASharedMemory_create: size seals refused (errno %d); region unsealed\n",
+                    errno);
+        }
     }
     return fd;
 }
@@ -3634,13 +4302,26 @@ size_t ASharedMemory_getSize(int fd)
     return end > 0 ? (size_t)end : 0;
 }
 
+/* As libcutils' memfd_set_prot_region: read-only seals future writes; asking for write back after
+ * that is EINVAL, as ashmem refuses to widen a narrowed mask. */
 int ASharedMemory_setProt(int fd, int prot)
 {
     if (fcntl(fd, F_GETFD) < 0 || (prot & ~(PROT_READ | PROT_WRITE | PROT_EXEC)) != 0) {
         errno = EINVAL;
         return -1;
     }
-    return 0;
+    int seals = fcntl(fd, F_GET_SEALS);
+    if (seals < 0) {
+        return 0;   /* not one of these memfds: nothing to narrow */
+    }
+    if (prot & PROT_WRITE) {
+        if (seals & F_SEAL_FUTURE_WRITE) {
+            errno = EINVAL;
+            return -1;
+        }
+        return 0;
+    }
+    return fcntl(fd, F_ADD_SEALS, F_SEAL_FUTURE_WRITE | F_SEAL_SEAL) == 0 ? 0 : -1;
 }
 
 /*
@@ -3716,18 +4397,25 @@ WESTLAKE_ALOOPER_FORWARD(int, ALooper_addFd,
 WESTLAKE_ALOOPER_FORWARD(int, ALooper_removeFd, (ALooper *looper, int fd), (looper, fd))
 
 /*
- * libandroid's ASurfaceControl and ASurfaceTransaction (API 29), which neither the runtime's
- * libandroid.so nor the native bridge has: YouTube's libgoogle3.so imports eleven of them and, being
- * BIND_NOW, did not load at all. OH has no child-surface API this runtime can hand an app, so a
- * surface control cannot be created and the create calls answer NULL, which is Android's own answer
- * when the compositor refuses one; callers check it and keep drawing into their window. A
- * transaction is a real object, so the code that builds one before it has a control works, and
- * apply runs its completion callback with no stats, as the WebView's libandroid does for Chromium.
+ * libandroid's ASurfaceControl and ASurfaceTransaction, which neither the runtime's libandroid.so
+ * nor the native bridge has: YouTube's libgoogle3.so imports eleven of them and, being BIND_NOW, did
+ * not load at all; Edge's libchrome.so imports 27. OH has no child-surface API this runtime can hand
+ * an app, so a surface control cannot be created and the create calls answer NULL, which is
+ * Android's own answer when the compositor refuses one; callers check it and keep drawing into their
+ * window (Chromium then presents through its GL surface). A transaction is a real object, so the
+ * code that builds one before it has a control works, and apply runs its commit and completion
+ * callbacks with no stats, as the WebView's libandroid does for Chromium.
+ *
+ * The whole API is here, up to the level this runtime reports (34): code gated on that level calls
+ * the newer entry points through weak imports without a null check, and Chromium CHECKs that every
+ * API 29 one is present before it decides whether to use them.
  */
 typedef void (*WlTransactionCallback)(void *context, void *stats);
 typedef struct {
     void *context;
     WlTransactionCallback callback;
+    void *commit_context;
+    WlTransactionCallback commit_callback;
 } WlSurfaceTransaction;
 
 void *ASurfaceControl_create(void *parent, const char *debug_name)
@@ -3764,13 +4452,39 @@ void ASurfaceTransaction_setOnComplete(void *transaction, void *context, WlTrans
     t->callback = callback;
 }
 
+/* API 31. Android calls it when the transaction is committed, before the completion callback. */
+void ASurfaceTransaction_setOnCommit(void *transaction, void *context, WlTransactionCallback callback)
+{
+    WlSurfaceTransaction *t = (WlSurfaceTransaction *) transaction;
+    if (t == NULL) return;
+    t->commit_context = context;
+    t->commit_callback = callback;
+}
+
 void ASurfaceTransaction_apply(void *transaction)
 {
     WlSurfaceTransaction *t = (WlSurfaceTransaction *) transaction;
-    if (t == NULL || t->callback == NULL) return;
-    WlTransactionCallback callback = t->callback;
+    if (t == NULL) return;
+    WlTransactionCallback commit = t->commit_callback;
+    WlTransactionCallback complete = t->callback;
+    t->commit_callback = NULL;
     t->callback = NULL;
-    callback(t->context, NULL);
+    if (commit != NULL) commit(t->commit_context, NULL);
+    if (complete != NULL) complete(t->context, NULL);
+}
+
+/* ASurfaceControl_fromJava and ASurfaceTransaction_fromJava (API 34): the framework's Java
+ * SurfaceControl objects have no native control this API can hand out either. */
+void *ASurfaceControl_fromJava(void *env, void *surface_control_object)
+{
+    (void) env; (void) surface_control_object;
+    return NULL;
+}
+
+void *ASurfaceTransaction_fromJava(void *env, void *transaction_object)
+{
+    (void) env; (void) transaction_object;
+    return NULL;
 }
 
 /* Every setter names a surface control, and none can exist, so there is nothing to change. */
@@ -3807,10 +4521,136 @@ void ASurfaceTransaction_setZOrder(void *transaction, void *surface_control, int
     (void) transaction; (void) surface_control; (void) z_order;
 }
 
+void ASurfaceTransaction_setBufferTransparency(void *transaction, void *surface_control, int8_t transparency)
+{
+    (void) transaction; (void) surface_control; (void) transparency;
+}
+
+void ASurfaceTransaction_setDamageRegion(void *transaction, void *surface_control, const void *rects,
+                                         uint32_t count)
+{
+    (void) transaction; (void) surface_control; (void) rects; (void) count;
+}
+
+void ASurfaceTransaction_setBufferAlpha(void *transaction, void *surface_control, float alpha)
+{
+    (void) transaction; (void) surface_control; (void) alpha;
+}
+
+void ASurfaceTransaction_setColor(void *transaction, void *surface_control, float r, float g, float b,
+                                  float alpha, int32_t data_space)
+{
+    (void) transaction; (void) surface_control; (void) r; (void) g; (void) b; (void) alpha; (void) data_space;
+}
+
+void ASurfaceTransaction_setHdrMetadata_smpte2086(void *transaction, void *surface_control, const void *metadata)
+{
+    (void) transaction; (void) surface_control; (void) metadata;
+}
+
+void ASurfaceTransaction_setHdrMetadata_cta861_3(void *transaction, void *surface_control, const void *metadata)
+{
+    (void) transaction; (void) surface_control; (void) metadata;
+}
+
+void ASurfaceTransaction_setFrameRate(void *transaction, void *surface_control, float frame_rate,
+                                      int8_t compatibility)
+{
+    (void) transaction; (void) surface_control; (void) frame_rate; (void) compatibility;
+}
+
+void ASurfaceTransaction_setFrameRateWithChangeStrategy(void *transaction, void *surface_control, float frame_rate,
+                                                        int8_t compatibility, int8_t change_frame_rate_strategy)
+{
+    (void) transaction; (void) surface_control; (void) frame_rate; (void) compatibility;
+    (void) change_frame_rate_strategy;
+}
+
+void ASurfaceTransaction_clearFrameRate(void *transaction, void *surface_control)
+{
+    (void) transaction; (void) surface_control;
+}
+
+void ASurfaceTransaction_setEnableBackPressure(void *transaction, void *surface_control, bool enable)
+{
+    (void) transaction; (void) surface_control; (void) enable;
+}
+
+void ASurfaceTransaction_setPosition(void *transaction, void *surface_control, int32_t x, int32_t y)
+{
+    (void) transaction; (void) surface_control; (void) x; (void) y;
+}
+
+void ASurfaceTransaction_setCrop(void *transaction, void *surface_control, const void *crop)
+{
+    (void) transaction; (void) surface_control; (void) crop;
+}
+
+void ASurfaceTransaction_setBufferTransform(void *transaction, void *surface_control, int32_t transform)
+{
+    (void) transaction; (void) surface_control; (void) transform;
+}
+
+void ASurfaceTransaction_setScale(void *transaction, void *surface_control, float x_scale, float y_scale)
+{
+    (void) transaction; (void) surface_control; (void) x_scale; (void) y_scale;
+}
+
+void ASurfaceTransaction_setExtendedRangeBrightness(void *transaction, void *surface_control,
+                                                    float current_buffer_ratio, float desired_ratio)
+{
+    (void) transaction; (void) surface_control; (void) current_buffer_ratio; (void) desired_ratio;
+}
+
+/* Settings of the transaction itself, which nothing presents. */
+void ASurfaceTransaction_setDesiredPresentTime(void *transaction, int64_t desired_present_time)
+{
+    (void) transaction; (void) desired_present_time;
+}
+
+void ASurfaceTransaction_setFrameTimeline(void *transaction, int64_t vsync_id)
+{
+    (void) transaction; (void) vsync_id;
+}
+
+/*
+ * The stats a callback receives. apply passes none (NULL), and with no surface control no stats
+ * name one: no controls, and no fences or times to report.
+ */
 int ASurfaceTransactionStats_getPreviousReleaseFenceFd(void *stats, void *surface_control)
 {
     (void) stats; (void) surface_control;
     return -1;
+}
+
+int ASurfaceTransactionStats_getPresentFenceFd(void *stats)
+{
+    (void) stats;
+    return -1;
+}
+
+int64_t ASurfaceTransactionStats_getLatchTime(void *stats)
+{
+    (void) stats;
+    return -1;
+}
+
+int64_t ASurfaceTransactionStats_getAcquireTime(void *stats, void *surface_control)
+{
+    (void) stats; (void) surface_control;
+    return -1;
+}
+
+void ASurfaceTransactionStats_getASurfaceControls(void *stats, void ***out_controls, size_t *out_count)
+{
+    (void) stats;
+    if (out_controls != NULL) *out_controls = NULL;
+    if (out_count != NULL) *out_count = 0;
+}
+
+void ASurfaceTransactionStats_releaseASurfaceControls(void **controls)
+{
+    free(controls);
 }
 
 /*
@@ -4412,28 +5252,417 @@ WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nresult, (int fd, int *rcode, uint8_t *answer, size_t length),
                          (fd, rcode, answer, length))
 
-/* AChoreographer, for the same reason (Duolingo's packaged libraries import it); the runtime's
- * definitions live in liboh_hwui_shim.so, which libandroid.so's dependencies reach. */
+/*
+ * AChoreographer, for the same reason (Duolingo's packaged libraries import it). The runtime's
+ * definitions live in liboh_hwui_shim.so, which libandroid.so's dependencies reach, and libhwui keeps
+ * using them through these names: a caller that is not app code is forwarded there.
+ *
+ * App code gets AChoreographer as Android delivers it. A choreographer belongs to the thread that got
+ * it, and its callbacks run on that thread, from its looper, at the first vsync at or after the time
+ * asked for; when the thread and its looper are gone, nothing runs. The runtime's implementation runs
+ * every callback on OH's vsync thread instead. Unity's frame pacing (Swappy) tears its choreographer
+ * thread down and deletes the object a callback was posted for, and the callback then ran on the vsync
+ * thread into the deleted object: "Pure virtual function called" (Adventure Party, Cat Hole). Here a
+ * vsync from OH (OH_NativeVSync, on its own thread) only marks the due callbacks and wakes an eventfd
+ * that the owner's looper polls; the looper calls them.
+ */
 typedef struct AChoreographer AChoreographer;
 typedef void (*westlake_frame_callback)(long time, void *data);
 typedef void (*westlake_frame_callback64)(int64_t time, void *data);
 typedef void (*westlake_refresh_rate_callback)(int64_t period, void *data);
+typedef void (*westlake_vsync_callback)(const void *frame_data, void *data);
 
-WESTLAKE_ALOOPER_FORWARD(AChoreographer *, AChoreographer_getInstance, (void), ())
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback,
-                         (AChoreographer *c, westlake_frame_callback callback, void *data), (c, callback, data))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed,
-                         (AChoreographer *c, westlake_frame_callback callback, void *data, long delay),
-                         (c, callback, data, delay))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallback64,
-                         (AChoreographer *c, westlake_frame_callback64 callback, void *data), (c, callback, data))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_postFrameCallbackDelayed64,
-                         (AChoreographer *c, westlake_frame_callback64 callback, void *data, uint32_t delay),
-                         (c, callback, data, delay))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_registerRefreshRateCallback,
-                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
-WESTLAKE_ALOOPER_FORWARD(void, AChoreographer_unregisterRefreshRateCallback,
-                         (AChoreographer *c, westlake_refresh_rate_callback callback, void *data), (c, callback, data))
+enum { WL_CHOREO_LONG, WL_CHOREO_64, WL_CHOREO_VSYNC };
+
+typedef struct WlChoreoCallback {
+    struct WlChoreoCallback *next;
+    int kind;
+    void *callback, *data;
+    int64_t due;                         /* CLOCK_MONOTONIC, as OH's vsync timestamps are */
+} WlChoreoCallback;
+
+typedef struct {
+    westlake_refresh_rate_callback callback;
+    void *data;
+} WlRefreshCallback;
+
+typedef struct {
+    pthread_mutex_t lock;
+    int fd;                              /* eventfd the owner's looper polls */
+    void *vsync;                         /* OH_NativeVSync */
+    int requested;                       /* a vsync request is outstanding */
+    int refresh_owed;                    /* the refresh-rate callbacks are to be called */
+    int64_t frame_time, vsync_id;
+    WlChoreoCallback *pending, *ready;   /* each in posting order */
+    WlRefreshCallback refresh[8];
+} WlChoreographer;
+
+/* AChoreographerFrameCallbackData, as this implementation hands it to a vsync callback: one timeline. */
+typedef struct {
+    int64_t frame_time, vsync_id, expected_presentation, deadline;
+} WlChoreoFrameData;
+
+static struct {
+    void *(*create)(const char *name, unsigned int length);
+    int (*request)(void *vsync, void (*callback)(long long timestamp, void *data), void *data);
+    int (*period)(void *vsync, long long *period);
+} wl_vsync_api;
+static pthread_once_t wl_vsync_once = PTHREAD_ONCE_INIT;
+static __thread WlChoreographer *wl_thread_choreographer;
+
+static void wl_vsync_load(void)
+{
+    void *library = dlopen("libnative_vsync.so", RTLD_NOW | RTLD_LOCAL);
+    if (library == NULL) return;
+    wl_vsync_api.create = (void *(*)(const char *, unsigned int)) dlsym(library, "OH_NativeVSync_Create");
+    wl_vsync_api.request = (int (*)(void *, void (*)(long long, void *), void *))
+            dlsym(library, "OH_NativeVSync_RequestFrame");
+    wl_vsync_api.period = (int (*)(void *, long long *)) dlsym(library, "OH_NativeVSync_GetPeriod");
+}
+
+static int64_t wl_choreo_period(WlChoreographer *c)
+{
+    long long period = 0;
+    if (wl_vsync_api.period != NULL && c->vsync != NULL && wl_vsync_api.period(c->vsync, &period) == 0 &&
+        period > 0) {
+        return (int64_t) period;
+    }
+    return INT64_C(16666666);
+}
+
+static void wl_choreo_vsync(long long timestamp, void *data);
+
+/* Called with the lock held. */
+static void wl_choreo_request(WlChoreographer *c)
+{
+    if (!c->requested && c->vsync != NULL && wl_vsync_api.request(c->vsync, wl_choreo_vsync, c) == 0) {
+        c->requested = 1;
+    }
+}
+
+static void wl_choreo_wake(WlChoreographer *c)
+{
+    uint64_t one = 1;
+    ssize_t written = write(c->fd, &one, sizeof(one));
+    (void) written;
+}
+
+/* OH's vsync thread: the due callbacks become ready, and the owner's looper is woken for them. */
+static void wl_choreo_vsync(long long timestamp, void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) data;
+    WlChoreoCallback **from, **to;
+    int wake;
+    pthread_mutex_lock(&c->lock);
+    c->requested = 0;
+    c->frame_time = (int64_t) timestamp;
+    c->vsync_id++;
+    for (to = &c->ready; *to != NULL; to = &(*to)->next) {}
+    for (from = &c->pending; *from != NULL;) {
+        WlChoreoCallback *item = *from;
+        if (item->due > c->frame_time) {
+            from = &item->next;
+            continue;
+        }
+        *from = item->next;
+        item->next = NULL;
+        *to = item;
+        to = &item->next;
+    }
+    wake = c->ready != NULL;
+    if (c->pending != NULL) wl_choreo_request(c);
+    pthread_mutex_unlock(&c->lock);
+    if (wake) wl_choreo_wake(c);
+}
+
+/* The owner's looper: the ready callbacks, then the refresh-rate callbacks if they are owed. */
+static int wl_choreo_dispatch(int fd, int events, void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) data;
+    WlRefreshCallback refresh[sizeof(c->refresh) / sizeof(c->refresh[0])];
+    WlChoreoCallback *ready;
+    int64_t frame_time, vsync_id, period;
+    uint64_t count;
+    int refresh_owed;
+    (void) events;
+    while (read(fd, &count, sizeof(count)) > 0) {}
+    pthread_mutex_lock(&c->lock);
+    ready = c->ready;
+    c->ready = NULL;
+    refresh_owed = c->refresh_owed;
+    c->refresh_owed = 0;
+    memcpy(refresh, c->refresh, sizeof(refresh));
+    frame_time = c->frame_time;
+    vsync_id = c->vsync_id;
+    pthread_mutex_unlock(&c->lock);
+    period = wl_choreo_period(c);
+    while (ready != NULL) {
+        WlChoreoCallback *item = ready;
+        ready = item->next;
+        if (item->kind == WL_CHOREO_LONG) {
+            ((westlake_frame_callback) item->callback)((long) frame_time, item->data);
+        } else if (item->kind == WL_CHOREO_64) {
+            ((westlake_frame_callback64) item->callback)(frame_time, item->data);
+        } else {
+            WlChoreoFrameData frame = {frame_time, vsync_id, frame_time + period, frame_time + period};
+            ((westlake_vsync_callback) item->callback)(&frame, item->data);
+        }
+        free(item);
+    }
+    if (refresh_owed) {
+        for (size_t i = 0; i < sizeof(refresh) / sizeof(refresh[0]); i++) {
+            if (refresh[i].callback != NULL) refresh[i].callback(period, refresh[i].data);
+        }
+    }
+    return 1;
+}
+
+/* This thread's choreographer, made on first use; none for a thread without a looper, as on Android. */
+static WlChoreographer *wl_choreographer_for_thread(void)
+{
+    WlChoreographer *c = wl_thread_choreographer;
+    if (c != NULL) return c;
+    pthread_once(&wl_vsync_once, wl_vsync_load);
+    ALooper *looper = ALooper_forThread();
+    if (looper == NULL || wl_vsync_api.create == NULL || wl_vsync_api.request == NULL) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-CHOREO] AChoreographer_getInstance on a thread with %s: none\n",
+                          looper == NULL ? "no looper" : "no OH vsync");
+        }
+        return NULL;
+    }
+    c = (WlChoreographer *) calloc(1, sizeof(*c));
+    if (c == NULL) return NULL;
+    pthread_mutex_init(&c->lock, NULL);
+    c->fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    char name[40];
+    int length = snprintf(name, sizeof(name), "westlake_app_choreo_%ld", (long) syscall(SYS_gettid));
+    c->vsync = c->fd >= 0 ? wl_vsync_api.create(name, length > 0 ? (unsigned int) length : 0) : NULL;
+    if (c->vsync == NULL || ALooper_addFd(looper, c->fd, -2 /* ALOOPER_POLL_CALLBACK */,
+                                          1 /* ALOOPER_EVENT_INPUT */, wl_choreo_dispatch, c) != 1) {
+        /* The OH vsync object, if made, is kept: it may not be destroyed while a request is pending. */
+        if (c->fd >= 0) close(c->fd);
+        pthread_mutex_destroy(&c->lock);
+        if (c->vsync == NULL) free(c);
+        return NULL;
+    }
+    /* Kept for the life of the process: OH's vsync thread may still call into it after the thread ends. */
+    wl_thread_choreographer = c;
+    return c;
+}
+
+static void wl_choreo_post(AChoreographer *choreographer, int kind, void *callback, void *data, int64_t delay_ns)
+{
+    WlChoreographer *c = (WlChoreographer *) choreographer;
+    WlChoreoCallback *item, **tail;
+    struct timespec now;
+    if (c == NULL || callback == NULL) return;
+    item = (WlChoreoCallback *) calloc(1, sizeof(*item));
+    if (item == NULL) return;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    item->kind = kind;
+    item->callback = callback;
+    item->data = data;
+    item->due = (int64_t) now.tv_sec * 1000000000 + now.tv_nsec + (delay_ns > 0 ? delay_ns : 0);
+    pthread_mutex_lock(&c->lock);
+    for (tail = &c->pending; *tail != NULL; tail = &(*tail)->next) {}
+    *tail = item;
+    wl_choreo_request(c);
+    pthread_mutex_unlock(&c->lock);
+}
+
+/* The runtime's definition of an AChoreographer call, for a caller that is not app code. */
+static void *wl_runtime_choreographer(const char *name)
+{
+    return westlake_runtime_android_symbol(name);
+}
+
+#define WL_FROM_APP() caller_is_android_dso(__builtin_return_address(0), NULL)
+
+AChoreographer *AChoreographer_getInstance(void)
+{
+    if (!WL_FROM_APP()) {
+        AChoreographer *(*real)(void) = (AChoreographer *(*)(void)) wl_runtime_choreographer("AChoreographer_getInstance");
+        return real != NULL ? real() : NULL;
+    }
+    return (AChoreographer *) wl_choreographer_for_thread();
+}
+
+void AChoreographer_postFrameCallback(AChoreographer *c, westlake_frame_callback callback, void *data)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback, void *) =
+                (void (*)(AChoreographer *, westlake_frame_callback, void *)) wl_runtime_choreographer("AChoreographer_postFrameCallback");
+        if (real != NULL) real(c, callback, data);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_LONG, (void *) callback, data, 0);
+}
+
+void AChoreographer_postFrameCallbackDelayed(AChoreographer *c, westlake_frame_callback callback, void *data, long delay)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback, void *, long) =
+                (void (*)(AChoreographer *, westlake_frame_callback, void *, long))
+                wl_runtime_choreographer("AChoreographer_postFrameCallbackDelayed");
+        if (real != NULL) real(c, callback, data, delay);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_LONG, (void *) callback, data, (int64_t) delay * 1000000);
+}
+
+void AChoreographer_postFrameCallback64(AChoreographer *c, westlake_frame_callback64 callback, void *data)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback64, void *) =
+                (void (*)(AChoreographer *, westlake_frame_callback64, void *))
+                wl_runtime_choreographer("AChoreographer_postFrameCallback64");
+        if (real != NULL) real(c, callback, data);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_64, (void *) callback, data, 0);
+}
+
+void AChoreographer_postFrameCallbackDelayed64(AChoreographer *c, westlake_frame_callback64 callback, void *data,
+                                               uint32_t delay)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_frame_callback64, void *, uint32_t) =
+                (void (*)(AChoreographer *, westlake_frame_callback64, void *, uint32_t))
+                wl_runtime_choreographer("AChoreographer_postFrameCallbackDelayed64");
+        if (real != NULL) real(c, callback, data, delay);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_64, (void *) callback, data, (int64_t) delay * 1000000);
+}
+
+void AChoreographer_postVsyncCallback(AChoreographer *c, westlake_vsync_callback callback, void *data)
+{
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_vsync_callback, void *) =
+                (void (*)(AChoreographer *, westlake_vsync_callback, void *))
+                wl_runtime_choreographer("AChoreographer_postVsyncCallback");
+        if (real != NULL) real(c, callback, data);
+        return;
+    }
+    wl_choreo_post(c, WL_CHOREO_VSYNC, (void *) callback, data, 0);
+}
+
+/* Android calls a newly registered refresh-rate callback once the display's mode is known, on the
+ * choreographer's looper; here at once, from the looper. A callback already registered is not added
+ * twice. */
+void AChoreographer_registerRefreshRateCallback(AChoreographer *choreographer, westlake_refresh_rate_callback callback,
+                                                void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) choreographer;
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_refresh_rate_callback, void *) =
+                (void (*)(AChoreographer *, westlake_refresh_rate_callback, void *))
+                wl_runtime_choreographer("AChoreographer_registerRefreshRateCallback");
+        if (real != NULL) real(choreographer, callback, data);
+        return;
+    }
+    if (c == NULL || callback == NULL) return;
+    pthread_mutex_lock(&c->lock);
+    size_t free_slot = sizeof(c->refresh) / sizeof(c->refresh[0]);
+    int present = 0;
+    for (size_t i = 0; i < sizeof(c->refresh) / sizeof(c->refresh[0]); i++) {
+        if (c->refresh[i].callback == callback && c->refresh[i].data == data) present = 1;
+        else if (c->refresh[i].callback == NULL && free_slot == sizeof(c->refresh) / sizeof(c->refresh[0])) free_slot = i;
+    }
+    if (!present && free_slot < sizeof(c->refresh) / sizeof(c->refresh[0])) {
+        c->refresh[free_slot].callback = callback;
+        c->refresh[free_slot].data = data;
+    }
+    c->refresh_owed = 1;
+    pthread_mutex_unlock(&c->lock);
+    wl_choreo_wake(c);
+}
+
+void AChoreographer_unregisterRefreshRateCallback(AChoreographer *choreographer, westlake_refresh_rate_callback callback,
+                                                  void *data)
+{
+    WlChoreographer *c = (WlChoreographer *) choreographer;
+    if (!WL_FROM_APP()) {
+        void (*real)(AChoreographer *, westlake_refresh_rate_callback, void *) =
+                (void (*)(AChoreographer *, westlake_refresh_rate_callback, void *))
+                wl_runtime_choreographer("AChoreographer_unregisterRefreshRateCallback");
+        if (real != NULL) real(choreographer, callback, data);
+        return;
+    }
+    if (c == NULL) return;
+    pthread_mutex_lock(&c->lock);
+    for (size_t i = 0; i < sizeof(c->refresh) / sizeof(c->refresh[0]); i++) {
+        if (c->refresh[i].callback == callback && c->refresh[i].data == data) {
+            c->refresh[i].callback = NULL;
+            c->refresh[i].data = NULL;
+        }
+    }
+    pthread_mutex_unlock(&c->lock);
+}
+
+/* The frame data a vsync callback gets: one timeline, the frame's own. */
+int64_t AChoreographerFrameCallbackData_getFrameTimeNanos(const void *data)
+{
+    return data != NULL ? ((const WlChoreoFrameData *) data)->frame_time : 0;
+}
+
+size_t AChoreographerFrameCallbackData_getFrameTimelinesLength(const void *data)
+{
+    return data != NULL ? 1 : 0;
+}
+
+size_t AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex(const void *data)
+{
+    (void) data;
+    return 0;
+}
+
+int64_t AChoreographerFrameCallbackData_getFrameTimelineVsyncId(const void *data, size_t index)
+{
+    return data != NULL && index == 0 ? ((const WlChoreoFrameData *) data)->vsync_id : 0;
+}
+
+int64_t AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos(const void *data, size_t index)
+{
+    return data != NULL && index == 0 ? ((const WlChoreoFrameData *) data)->expected_presentation : 0;
+}
+
+int64_t AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos(const void *data, size_t index)
+{
+    return data != NULL && index == 0 ? ((const WlChoreoFrameData *) data)->deadline : 0;
+}
+
+/* This library's AChoreographer entry point of that name, for a lookup by name from app code. */
+static void *wl_choreographer_symbol(const char *name)
+{
+    static const struct { const char *name; void *address; } kChoreographer[] = {
+        { "AChoreographer_getInstance", (void *) &AChoreographer_getInstance },
+        { "AChoreographer_postFrameCallback", (void *) &AChoreographer_postFrameCallback },
+        { "AChoreographer_postFrameCallbackDelayed", (void *) &AChoreographer_postFrameCallbackDelayed },
+        { "AChoreographer_postFrameCallback64", (void *) &AChoreographer_postFrameCallback64 },
+        { "AChoreographer_postFrameCallbackDelayed64", (void *) &AChoreographer_postFrameCallbackDelayed64 },
+        { "AChoreographer_postVsyncCallback", (void *) &AChoreographer_postVsyncCallback },
+        { "AChoreographer_registerRefreshRateCallback", (void *) &AChoreographer_registerRefreshRateCallback },
+        { "AChoreographer_unregisterRefreshRateCallback", (void *) &AChoreographer_unregisterRefreshRateCallback },
+        { "AChoreographerFrameCallbackData_getFrameTimeNanos", (void *) &AChoreographerFrameCallbackData_getFrameTimeNanos },
+        { "AChoreographerFrameCallbackData_getFrameTimelinesLength",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelinesLength },
+        { "AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex",
+          (void *) &AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex },
+        { "AChoreographerFrameCallbackData_getFrameTimelineVsyncId",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelineVsyncId },
+        { "AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelineExpectedPresentationTimeNanos },
+        { "AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos",
+          (void *) &AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos },
+    };
+    for (size_t i = 0; i < sizeof(kChoreographer) / sizeof(kChoreographer[0]); i++) {
+        if (strcmp(name, kChoreographer[i].name) == 0) return kChoreographer[i].address;
+    }
+    return NULL;
+}
 
 /*
  * Importing an AHardwareBuffer into EGL. Westlake's AHardwareBuffer is an OH_NativeBuffer, but
@@ -4472,6 +5701,7 @@ typedef struct {
     unsigned (*destroy_image)(WlEglDisplay, WlEglImage);
     int (*dup_fence)(WlEglDisplay, void *);
     void *(*create_window_surface)(WlEglDisplay, void *, void *, const WlEglInt *);
+    const char *(*query_string)(WlEglDisplay, WlEglInt);
 } WlEglImplementation;
 static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
 static int wl_egl_implementation_count;
@@ -4512,6 +5742,7 @@ static void wl_egl_add_implementation(void *library)
     e->dup_fence = (int (*)(WlEglDisplay, void *)) wl_egl_entry(library, "eglDupNativeFenceFDANDROID");
     e->create_window_surface = (void *(*)(WlEglDisplay, void *, void *, const WlEglInt *))
             wl_egl_entry(library, "eglCreateWindowSurface");
+    e->query_string = (const char *(*)(WlEglDisplay, WlEglInt)) wl_egl_entry(library, "eglQueryString");
     Dl_info info;
     wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
                   dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
@@ -4638,13 +5869,47 @@ void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, c
  */
 enum { WL_WINDOW_SET_GEOMETRY = 0, WL_WINDOW_GET_GEOMETRY = 1, WL_WINDOW_SET_FORMAT = 3 };
 
+static void *wl_native_buffer_symbol(const char *name);
+
+/*
+ * The host format for Android's RGB_565. This board's allocator has no RGB_565 buffer a GPU can
+ * render to: OH_NativeBuffer_Alloc refuses it with or without CPU access, while RGBA_8888,
+ * RGBX_8888, RGB_888 and RGBA_1010102 succeed. A window set to it failed every buffer request
+ * (NATIVE_ERROR_UNKNOWN), so Unity games that render to a 16-bit display buffer drew nothing
+ * (Pikmin Bloom, Just Dance, Lightning Link). Where the allocator refuses RGB_565, such a window
+ * gets RGBX_8888, the nearest opaque format, and ANativeWindow_lock reports that format to a
+ * caller that locks the window, as an Android window may.
+ */
+static int32_t wl_rgb565_host_format(void)
+{
+    static int32_t chosen;   /* 0 until probed */
+    int32_t format = __atomic_load_n(&chosen, __ATOMIC_ACQUIRE);
+    if (format != 0) return format;
+    typedef struct { int32_t width, height, format, usage, stride; } WlBufferConfig;   /* OH_NativeBuffer_Config */
+    typedef void *(*Alloc)(const WlBufferConfig *);
+    typedef int32_t (*Unreference)(void *);
+    Alloc alloc = (Alloc) wl_native_buffer_symbol("OH_NativeBuffer_Alloc");
+    Unreference unreference = (Unreference) wl_native_buffer_symbol("OH_NativeBuffer_Unreference");
+    format = 3;   /* RGB_565 */
+    if (alloc != NULL && unreference != NULL) {
+        WlBufferConfig config = {64, 64, 3, (1 << 3) | (1 << 8) | (1 << 9), 0};   /* DMA, GPU render and texture */
+        void *buffer = alloc(&config);
+        if (buffer != NULL) unreference(buffer);
+        else format = 11;   /* RGBX_8888 */
+    }
+    __atomic_store_n(&chosen, format, __ATOMIC_RELEASE);
+    wl_relocs_log("[WESTLAKE-WINDOW] RGB_565 windows use OH format %d%s\n", format,
+                  format == 3 ? "" : ": the allocator has no RGB_565 for rendering");
+    return format;
+}
+
 static int32_t wl_host_window_format(int32_t android)
 {
     switch (android) {
         case 1: return 12;     /* RGBA_8888 */
         case 2: return 11;     /* RGBX_8888 */
         case 3: return 13;     /* RGB_888 */
-        case 4: return 3;      /* RGB_565 */
+        case 4: return wl_rgb565_host_format();   /* RGB_565, where the board can render to it */
         case 5: return 20;     /* BGRA_8888 */
         case 0x16: return 39;  /* RGBA_FP16 */
         case 0x2b: return 34;  /* RGBA_1010102 */
@@ -5049,6 +6314,29 @@ int eglDupNativeFenceFDANDROID(WlEglDisplay display, void *sync)
 }
 
 /*
+ * eglQueryString. With EGL_NO_DISPLAY and EGL_EXTENSIONS it is EGL_EXT_client_extensions' query for
+ * the client extensions, which Android's loader always answers. OH's libEGL.so answers EGL_BAD_DISPLAY
+ * and NULL ("invalid display pointer"), as the extension allows only where it is absent, and Asphalt
+ * 8's GL thread passed that NULL to strlen. The answer here is EGL_EXT_client_extensions alone: none
+ * of Android's platform extensions, whose eglGetPlatformDisplay(EGL_PLATFORM_ANDROID_KHR) OH's EGL
+ * does not take. Every other query goes to the implementation that owns the display.
+ */
+#define WL_EGL_EXTENSIONS 0x3055
+const char *eglQueryString(WlEglDisplay display, WlEglInt name)
+{
+    if (display == NULL && name == WL_EGL_EXTENSIONS) return "EGL_EXT_client_extensions";
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    const char *answer = NULL;
+    for (int k = 0; k < count && answer == NULL; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->query_string == NULL) continue;
+        answer = e->query_string(display, name);
+        if (answer == NULL && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
+    }
+    return answer;
+}
+
+/*
  * eglTerminate. hwui renders the whole process through the default display and keeps it
  * initialized for the life of the process; Android's EGL loader counts initializations, so an app's
  * own eglTerminate (GLSurfaceView, a renderer through EGL14) never tears that display down there.
@@ -5087,9 +6375,27 @@ static void *westlake_find_musl_symbol(const char *name)
     return query.address;
 }
 
+/*
+ * musl's __dlsym(handle, name, return address): its aarch64 dlsym is only "mov x2, x30; b __dlsym"
+ * (src/ldso/aarch64/dlsym.s), and the return address is what RTLD_DEFAULT and RTLD_NEXT are resolved
+ * against (the caller's namespace, the library after the caller). Calling it with the caller's return
+ * address is the tail call to dlsym, with the answer coming back here. NULL when the entry is not that
+ * pair of instructions.
+ */
+typedef void *(*WestlakeDlsymRaFn)(void *, const char *, void *);
+static WestlakeDlsymRaFn westlake_musl_dlsym_ra;
+
 static WestlakeDlsymFn westlake_find_musl_dlsym(void)
 {
     WestlakeDlsymFn found = (WestlakeDlsymFn) westlake_find_musl_symbol("dlsym");
+    if (found != NULL) {
+        const uint32_t *code = (const uint32_t *) (uintptr_t) found;
+        if (code[0] == 0xaa1e03e2u && (code[1] & 0xfc000000u) == 0x14000000u) {   /* mov x2, x30; b */
+            int64_t offset = (int64_t) ((int32_t) (code[1] << 6) >> 6) * 4;
+            __atomic_store_n(&westlake_musl_dlsym_ra, (WestlakeDlsymRaFn) ((uintptr_t) &code[1] + offset),
+                             __ATOMIC_RELEASE);
+        }
+    }
     __atomic_store_n(&westlake_musl_dlsym, found, __ATOMIC_RELEASE);
     return found;
 }
@@ -5099,6 +6405,78 @@ __attribute__((constructor)) static void westlake_dlsym_init(void)
     if (westlake_find_musl_dlsym() == NULL) {
         fprintf(stderr, "[WESTLAKE-LOADER] musl's dlsym not found; EGL lookups by handle are not redirected\n");
     }
+}
+
+/*
+ * The handle of a library already loaded, by its path: in the Android namespace, the namespace of
+ * the libraries an app writes, or the default one, wherever it was opened. Nothing is loaded.
+ */
+static void *westlake_loaded_handle(const char *path)
+{
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    static DlnsGetFn get;
+    if (get == NULL) get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    static const char *const kNamespaces[] = { "westlake_android_app", "westlake_app_libs" };
+    for (size_t i = 0; get != NULL && i < sizeof(kNamespaces) / sizeof(kNamespaces[0]); i++) {
+        Dl_namespace ns;
+        memset(&ns, 0, sizeof(ns));
+        if (get(kNamespaces[i], &ns) != 0) continue;
+        void *handle = westlake_real_dlopen_ns_fn(&ns, path, RTLD_NOW | RTLD_NOLOAD);
+        if (handle != NULL) return handle;
+    }
+    return westlake_real_dlopen_fn(NULL, path, RTLD_NOW | RTLD_NOLOAD);
+}
+
+/*
+ * dlsym(RTLD_DEFAULT) from an app's library, not found among the global libraries: Bionic then
+ * searches the caller's own local group, the library and what it needs (dlsym_linear_lookup in
+ * linker.cpp); musl stops there. An app library's lookups of names in its own libraries had reached
+ * them only while ART opened those libraries global (see westlake_art_opens_app_library). Searched
+ * here as Bionic does; the error the failed global lookup left is cleared when this one answers.
+ */
+static void *westlake_dlsym_caller_group(WestlakeDlsymRaFn by_ra, const char *name, void *caller)
+{
+    const char *path = NULL;
+    Dl_info info;
+    if (!caller_is_android_dso(caller, &path) || path == NULL || caller_is_webview(caller, NULL) ||
+        dladdr(caller, &info) == 0 || info.dli_fbase == NULL) {
+        return NULL;
+    }
+    /* Each library's handle is looked for once (a failed look leaves lines in OH's log). */
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static struct { void *base; void *handle; } known[32];
+    void *self = NULL;
+    int seen = 0;
+    pthread_mutex_lock(&lock);
+    for (size_t i = 0; i < sizeof(known) / sizeof(known[0]) && known[i].base != NULL && !seen; i++) {
+        if (known[i].base == info.dli_fbase) {
+            self = known[i].handle;
+            seen = 1;
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    if (!seen) {
+        self = westlake_loaded_handle(path);
+        pthread_mutex_lock(&lock);
+        for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) {
+            if (known[i].base == NULL || known[i].base == info.dli_fbase) {
+                known[i].base = info.dli_fbase;
+                known[i].handle = self;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&lock);
+    }
+    void *found = self != NULL ? by_ra(self, name, caller) : NULL;
+    if (found != NULL) {
+        (void) dlerror();
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-LOADER] dlsym(RTLD_DEFAULT, %s) from %s: found in its own libraries, as Bionic "
+                          "searches them\n", name, path);
+        }
+    }
+    return found;
 }
 
 /*
@@ -5133,6 +6511,7 @@ static void *westlake_egl_by_handle(const char *name)
 {
     if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
     if (strcmp(name, "eglTerminate") == 0) return (void *) &eglTerminate;
+    if (strcmp(name, "eglQueryString") == 0) return (void *) &eglQueryString;
     return NULL;
 }
 
@@ -5152,6 +6531,46 @@ static void *westlake_egl_get_proc_address(const char *name)
     if (own != NULL) return own;
     WestlakeEglProcFn next = __atomic_load_n(&westlake_egl_get_proc, __ATOMIC_ACQUIRE);
     return next != NULL ? next(name) : NULL;
+}
+
+/*
+ * A name of the NDK's libandroid.so, asked of a handle whose search reaches the runtime's
+ * libandroid.so (the library the handle names, or one of its dependencies). That copy holds part of
+ * the NDK library (assets, ALooper, multinetwork); the rest (ASharedMemory, ASurfaceControl and
+ * ASurfaceTransaction, sensors, ...) is defined in this library, where imports find it in the
+ * global scope. A lookup by handle searches only the handle's library and its dependencies, so it
+ * missed them: Yandex Browser's dlsym(dlopen("libandroid.so"), "ASharedMemory_create") came back
+ * NULL and the browser called it (SIGSEGV at pc 0), and Naver's Whale CHECKed that its
+ * ASurfaceControl entry points had loaded (SIGTRAP). Android's libandroid.so answers such a lookup,
+ * so this library's definition does. Only the runtime's copy is completed this way: the WebView's
+ * libandroid.so has its own transactions, which must not be mixed with this library's.
+ */
+static int westlake_ndk_android_name(const char *name)
+{
+    return (name[0] == 'A' && name[1] >= 'A' && name[1] <= 'Z') || strncmp(name, "android_", 8) == 0;
+}
+
+static void *westlake_libandroid_by_handle(WestlakeDlsymFn real, void *handle, const char *name)
+{
+    static void *runtime_probe;   /* AAssetManager_fromJava, as the runtime's libandroid.so defines it */
+    void *expected = __atomic_load_n(&runtime_probe, __ATOMIC_ACQUIRE);
+    if (expected == NULL) {
+        expected = westlake_runtime_android_symbol("AAssetManager_fromJava");
+        if (expected == NULL) return NULL;
+        __atomic_store_n(&runtime_probe, expected, __ATOMIC_RELEASE);
+    }
+    if (real(handle, "AAssetManager_fromJava") != expected) return NULL;
+    void *found = real(RTLD_DEFAULT, name);
+    Dl_info definition, self;
+    if (found == NULL || dladdr(found, &definition) == 0 ||
+        dladdr((void *) &westlake_libandroid_by_handle, &self) == 0 || definition.dli_fbase != self.dli_fbase) {
+        return NULL;
+    }
+    static int logged;
+    if (__atomic_fetch_add(&logged, 1, __ATOMIC_RELAXED) < 32) {
+        wl_relocs_log("[WESTLAKE-LOADER] libandroid.so by handle: %s from the bionic shim\n", name);
+    }
+    return found;
 }
 
 void *dlsym(void *handle, const char *name)
@@ -5210,6 +6629,35 @@ void *dlsym(void *handle, const char *name)
             }
             return own;
         }
+    }
+    /* AChoreographer by handle, from app code: this library's, which calls back on the caller's looper
+     * (see AChoreographer_getInstance). Only where the handle's own lookup finds one: the WebView's
+     * libandroid.so has none, and the WebView keeps going without. */
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && name[0] == 'A' &&
+        strncmp(name, "AChoreographer", 14) == 0) {
+        void *caller = __builtin_return_address(0);
+        if (caller_is_android_dso(caller, NULL) && !caller_is_webview(caller, NULL)) {
+            void *own = wl_choreographer_symbol(name);
+            if (own != NULL && real(handle, name) != NULL) return own;
+        }
+    }
+    /* By a handle the caller's address plays no part in the lookup, so this call need not be the
+     * tail call that keeps it. */
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && westlake_ndk_android_name(name)) {
+        void *found = real(handle, name);
+        if (found == NULL && caller_is_android_dso(__builtin_return_address(0), NULL)) {
+            found = westlake_libandroid_by_handle(real, handle, name);
+            if (found != NULL) (void) dlerror();   /* the failed lookup's error does not stand */
+        }
+        return found;
+    }
+    /* RTLD_DEFAULT through __dlsym with the caller's return address: the same lookup, then Bionic's
+     * second place to look when it fails. */
+    WestlakeDlsymRaFn by_ra = __atomic_load_n(&westlake_musl_dlsym_ra, __ATOMIC_ACQUIRE);
+    if (handle == RTLD_DEFAULT && name != NULL && by_ra != NULL) {
+        void *caller = __builtin_return_address(0);
+        void *found = by_ra(RTLD_DEFAULT, name, caller);
+        return found != NULL ? found : westlake_dlsym_caller_group(by_ra, name, caller);
     }
     __attribute__((musttail)) return real(handle, name);
 }
@@ -5310,6 +6758,40 @@ static void *westlake_thread_start(void *data)
     return routine(argument);
 }
 
+/*
+ * Bionic's default thread stack, 1 MiB less its signal stack and guard (PTHREAD_STACK_SIZE_DEFAULT in
+ * bionic's pthread_internal.h): what an Android thread gets when it is created without attributes, or
+ * with attributes from pthread_attr_init that set no size. musl's default is 128 KiB, an eighth of it.
+ * Unreal Engine's FileThread (eFootball), made that way, ran off the end of its stack inside this
+ * library's dlopen, deep in a file call. An Android caller's attributes start at Bionic's size, and a
+ * thread it creates without attributes gets that size; a size the caller sets is kept.
+ */
+#define WESTLAKE_BIONIC_STACK_DEFAULT ((1024 * 1024) - (16 * 1024) - 4096)
+
+typedef int (*WestlakeAttrInitFn)(pthread_attr_t *);
+static WestlakeAttrInitFn westlake_musl_attr_init;
+
+static WestlakeAttrInitFn westlake_attr_init_fn(void)
+{
+    WestlakeAttrInitFn real = __atomic_load_n(&westlake_musl_attr_init, __ATOMIC_ACQUIRE);
+    if (__builtin_expect(real == NULL, 0)) {
+        real = (WestlakeAttrInitFn) westlake_find_musl_symbol("pthread_attr_init");
+        if (real == NULL) real = (WestlakeAttrInitFn) dlsym(RTLD_NEXT, "pthread_attr_init");
+        __atomic_store_n(&westlake_musl_attr_init, real, __ATOMIC_RELEASE);
+    }
+    return real;
+}
+
+int pthread_attr_init(pthread_attr_t *attr)
+{
+    WestlakeAttrInitFn real = westlake_attr_init_fn();
+    int result = real != NULL ? real(attr) : ENOSYS;
+    if (result == 0 && caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        (void) pthread_attr_setstacksize(attr, WESTLAKE_BIONIC_STACK_DEFAULT);
+    }
+    return result;
+}
+
 int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restrict attr,
                    void *(*routine)(void *), void *__restrict argument)
 {
@@ -5328,7 +6810,15 @@ int pthread_create(pthread_t *__restrict thread, const pthread_attr_t *__restric
     start->routine = routine;
     start->argument = argument;
     start->state = 0;
-    int result = real(thread, attr, westlake_thread_start, start);
+    pthread_attr_t bionic;
+    const pthread_attr_t *used = attr;
+    WestlakeAttrInitFn attr_init = attr == NULL ? westlake_attr_init_fn() : NULL;
+    if (attr_init != NULL && attr_init(&bionic) == 0) {
+        (void) pthread_attr_setstacksize(&bionic, WESTLAKE_BIONIC_STACK_DEFAULT);
+        used = &bionic;
+    }
+    int result = real(thread, used, westlake_thread_start, start);
+    if (used == &bionic) pthread_attr_destroy(&bionic);
     if (result != 0) {
         free(start); /* no thread was started */
         return result;

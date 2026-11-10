@@ -18,6 +18,9 @@
  */
 #include <dlfcn.h>
 #include <errno.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <fcntl.h>
 #include <jni.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -189,13 +192,49 @@ int westlake_thread_has_java_looper(void)
     return current != NULL;
 }
 
-/* ANativeActivity_setWindowFormat, which the runtime's libandroid lacks (Unreal Engine 4's libUE4.so
- * imports it and failed to load). OH's window takes the format of the buffers drawn into it, so the
- * request has nothing to set. */
+/*
+ * ANativeActivity's requests: finish, window format and flags, soft input. The runtime's libandroid
+ * lacks them (Unreal Engine 4's libUE4.so imports ANativeActivity_setWindowFormat and failed to load).
+ * AOSP's libandroid hands each to libandroid_runtime, which writes it to the activity's main-thread
+ * pipe; here the runtime's NativeActivity natives (libwl_missing_natives) register that step as a
+ * hook, and drop a request for an activity that is not theirs. With a runtime from before them there
+ * is no hook, and a request does nothing.
+ */
+typedef void (*WlNativeActivityCommandHook)(void *activity, int32_t command, int32_t a, int32_t b);
+static WlNativeActivityCommandHook wl_native_activity_hook;
+
+void wl_native_activity_set_command_hook(WlNativeActivityCommandHook hook)
+{
+    __atomic_store_n(&wl_native_activity_hook, hook, __ATOMIC_RELEASE);
+}
+
+static void wl_native_activity_command(void *activity, int32_t command, int32_t a, int32_t b)
+{
+    WlNativeActivityCommandHook hook = __atomic_load_n(&wl_native_activity_hook, __ATOMIC_ACQUIRE);
+    if (hook != NULL && activity != NULL) hook(activity, command, a, b);
+}
+
+/* AOSP's command numbers (android_app_NativeActivity.cpp). */
+void ANativeActivity_finish(void *activity) { wl_native_activity_command(activity, 1, 0, 0); }
+
 void ANativeActivity_setWindowFormat(void *activity, int32_t format)
 {
-    (void) activity;
-    (void) format;
+    wl_native_activity_command(activity, 2, format, 0);
+}
+
+void ANativeActivity_setWindowFlags(void *activity, uint32_t add, uint32_t remove)
+{
+    wl_native_activity_command(activity, 3, (int32_t) add, (int32_t) remove);
+}
+
+void ANativeActivity_showSoftInput(void *activity, uint32_t flags)
+{
+    wl_native_activity_command(activity, 4, (int32_t) flags, 0);
+}
+
+void ANativeActivity_hideSoftInput(void *activity, uint32_t flags)
+{
+    wl_native_activity_command(activity, 5, (int32_t) flags, 0);
 }
 
 void AConfiguration_delete(AConfiguration *config)
@@ -435,40 +474,240 @@ int ASensor_getReportingMode(ASensor const *sensor) { (void) sensor; return -1; 
 bool ASensor_isWakeUpSensor(ASensor const *sensor) { (void) sensor; return false; }
 int ASensor_getHandle(ASensor const *sensor) { (void) sensor; return -1; }
 
-/* ---- Input: no input queue reaches an app --------------------------------------------------- */
+/* ---- Input: the queue a NativeActivity reads ------------------------------------------------- */
 
 /*
- * AOSP hands an AInputQueue only to a NativeActivity (onInputQueueCreated), and its events come from
- * that queue or from AKeyEvent_fromJava/AMotionEvent_fromJava. The runtime has no NativeActivity
- * natives, and the fromJava calls are not defined here, so no queue or event can reach an app: the
- * queue calls answer as an empty queue, and the event getters, which have no event to read, zero.
- * They exist for libraries that link the NDK's input API without using it: Go's mobile runtime links
- * its NativeActivity glue into every library (aaaaxy's libgojni.so, which loads it from an ordinary
- * activity), and could not relocate without them.
+ * AOSP hands a NativeActivity its window's input queue (onInputQueueCreated). The app reads it on its
+ * own thread (AInputQueue_attachLooper, then AInputQueue_getEvent) and finishes each event with
+ * AInputQueue_finishEvent, which tells the window whether the app handled it. The queue and its
+ * events live here, because the app binds these names to this library in every namespace. The
+ * runtime's InputQueue natives (libwl_missing_natives) make a queue (wl_input_queue_create), push
+ * each event the window sends (wl_input_queue_push_key, _motion), and get each finish back through
+ * the callback they gave. AKeyEvent_fromJava and AMotionEvent_fromJava are not defined here.
+ * Libraries that link the input API without using it (Go's mobile runtime links its NativeActivity
+ * glue into every library: aaaaxy's libgojni.so) still relocate. A getter with no event answers 0.
  */
 typedef struct AInputEvent AInputEvent;
 typedef struct AInputQueue AInputQueue;
+typedef struct ALooper ALooper;
 typedef int (*ALooper_callbackFunc)(int fd, int events, void *data);
+int ALooper_addFd(ALooper *looper, int fd, int ident, int events, ALooper_callbackFunc callback, void *data);
+int ALooper_removeFd(ALooper *looper, int fd);
 
-void AInputQueue_attachLooper(AInputQueue *queue, void *looper, int ident, ALooper_callbackFunc callback, void *data)
+#define WL_INPUT_MAX_POINTERS 16
+enum { WL_INPUT_KEY = 1, WL_INPUT_MOTION = 2 };   /* AINPUT_EVENT_TYPE_KEY, AINPUT_EVENT_TYPE_MOTION */
+
+typedef struct {
+    int32_t id, tool_type;
+    float x, y, raw_x, raw_y, pressure, size, touch_major, touch_minor, tool_major, tool_minor, orientation;
+} WlInputPointer;
+
+struct AInputEvent {
+    int32_t type, device_id, source, action, flags, meta_state;
+    int64_t down_time, event_time;   /* nanoseconds, as the NDK reports them */
+    int32_t key_code, scan_code, repeat_count;
+    int32_t action_button, button_state, edge_flags;
+    float x_precision, y_precision;
+    size_t pointer_count;
+    WlInputPointer pointers[WL_INPUT_MAX_POINTERS];
+    int64_t queue_id;                /* the window's id for it, given back when it is finished */
+    struct AInputEvent *next;
+};
+
+typedef void (*WlInputFinishedFn)(void *owner, int64_t id, int handled);
+
+struct AInputQueue {
+    pthread_mutex_t lock;
+    AInputEvent *head, *tail;
+    int wake[2];                     /* readable while events wait */
+    ALooper *looper;
+    bool dead;
+    WlInputFinishedFn finished;
+    void *owner;
+};
+
+AInputQueue *wl_input_queue_create(WlInputFinishedFn finished, void *owner)
 {
-    (void) queue;
-    (void) looper;
-    (void) ident;
-    (void) callback;
-    (void) data;
+    AInputQueue *queue = calloc(1, sizeof(*queue));
+    if (queue == NULL) return NULL;
+    if (pipe2(queue->wake, O_CLOEXEC | O_NONBLOCK) != 0) {
+        free(queue);
+        return NULL;
+    }
+    pthread_mutex_init(&queue->lock, NULL);
+    queue->finished = finished;
+    queue->owner = owner;
+    return queue;
 }
 
-void AInputQueue_detachLooper(AInputQueue *queue) { (void) queue; }
-int32_t AInputQueue_hasEvents(AInputQueue *queue) { return queue != NULL ? 0 : -EINVAL; }
+void *wl_input_queue_owner(AInputQueue *queue)
+{
+    return queue != NULL ? queue->owner : NULL;
+}
+
+static void wl_input_drain(AInputQueue *queue)
+{
+    char bytes[64];
+    while (read(queue->wake[0], bytes, sizeof(bytes)) > 0) {
+    }
+}
+
+/* The window is gone: waiting events go unread. The queue itself stays, since an app thread may still
+ * finish an event it took; such a finish is not reported. */
+void wl_input_queue_destroy(AInputQueue *queue)
+{
+    AInputEvent *event;
+    if (queue == NULL) return;
+    pthread_mutex_lock(&queue->lock);
+    queue->dead = true;
+    event = queue->head;
+    queue->head = queue->tail = NULL;
+    wl_input_drain(queue);
+    pthread_mutex_unlock(&queue->lock);
+    while (event != NULL) {
+        AInputEvent *next = event->next;
+        free(event);
+        event = next;
+    }
+}
+
+static int wl_input_queue_add(AInputQueue *queue, AInputEvent *event)
+{
+    pthread_mutex_lock(&queue->lock);
+    if (queue->dead) {
+        pthread_mutex_unlock(&queue->lock);
+        free(event);
+        return -1;
+    }
+    if (queue->tail != NULL) queue->tail->next = event;
+    else queue->head = event;
+    queue->tail = event;
+    (void) write(queue->wake[1], "e", 1);   /* full only while it is readable anyway */
+    pthread_mutex_unlock(&queue->lock);
+    return 0;
+}
+
+int wl_input_queue_push_key(AInputQueue *queue, int64_t id, int32_t device_id, int32_t source, int32_t action,
+                            int32_t flags, int32_t key_code, int32_t scan_code, int32_t meta_state,
+                            int32_t repeat_count, int64_t down_time, int64_t event_time)
+{
+    AInputEvent *event = queue != NULL ? calloc(1, sizeof(*event)) : NULL;
+    if (event == NULL) return -1;
+    event->type = WL_INPUT_KEY;
+    event->queue_id = id;
+    event->device_id = device_id;
+    event->source = source;
+    event->action = action;
+    event->flags = flags;
+    event->key_code = key_code;
+    event->scan_code = scan_code;
+    event->meta_state = meta_state;
+    event->repeat_count = repeat_count;
+    event->down_time = down_time;
+    event->event_time = event_time;
+    return wl_input_queue_add(queue, event);
+}
+
+/*
+ * ints: device id, source, action, flags, edge flags, meta state, button state, action button.
+ * pointer_ints: id and tool type per pointer. pointer_floats, 11 per pointer: x, y, raw x, raw y,
+ * pressure, size, touch major, touch minor, tool major, tool minor, orientation.
+ */
+int wl_input_queue_push_motion(AInputQueue *queue, int64_t id, const int32_t *ints, float x_precision,
+                               float y_precision, int64_t down_time, int64_t event_time, size_t pointer_count,
+                               const int32_t *pointer_ints, const float *pointer_floats)
+{
+    AInputEvent *event = queue != NULL && ints != NULL ? calloc(1, sizeof(*event)) : NULL;
+    size_t i;
+    if (event == NULL) return -1;
+    if (pointer_count > WL_INPUT_MAX_POINTERS) pointer_count = WL_INPUT_MAX_POINTERS;
+    event->type = WL_INPUT_MOTION;
+    event->queue_id = id;
+    event->device_id = ints[0];
+    event->source = ints[1];
+    event->action = ints[2];
+    event->flags = ints[3];
+    event->edge_flags = ints[4];
+    event->meta_state = ints[5];
+    event->button_state = ints[6];
+    event->action_button = ints[7];
+    event->x_precision = x_precision;
+    event->y_precision = y_precision;
+    event->down_time = down_time;
+    event->event_time = event_time;
+    event->pointer_count = pointer_count;
+    for (i = 0; i < pointer_count; i++) {
+        WlInputPointer *pointer = &event->pointers[i];
+        const float *f = &pointer_floats[i * 11];
+        pointer->id = pointer_ints[i * 2];
+        pointer->tool_type = pointer_ints[i * 2 + 1];
+        pointer->x = f[0];
+        pointer->y = f[1];
+        pointer->raw_x = f[2];
+        pointer->raw_y = f[3];
+        pointer->pressure = f[4];
+        pointer->size = f[5];
+        pointer->touch_major = f[6];
+        pointer->touch_minor = f[7];
+        pointer->tool_major = f[8];
+        pointer->tool_minor = f[9];
+        pointer->orientation = f[10];
+    }
+    return wl_input_queue_add(queue, event);
+}
+
+void AInputQueue_attachLooper(AInputQueue *queue, ALooper *looper, int ident, ALooper_callbackFunc callback, void *data)
+{
+    if (queue == NULL || looper == NULL) return;
+    pthread_mutex_lock(&queue->lock);
+    queue->looper = looper;
+    pthread_mutex_unlock(&queue->lock);
+    ALooper_addFd(looper, queue->wake[0], ident, 1 /* ALOOPER_EVENT_INPUT */, callback, data);
+}
+
+void AInputQueue_detachLooper(AInputQueue *queue)
+{
+    ALooper *looper;
+    if (queue == NULL) return;
+    pthread_mutex_lock(&queue->lock);
+    looper = queue->looper;
+    queue->looper = NULL;
+    pthread_mutex_unlock(&queue->lock);
+    if (looper != NULL) ALooper_removeFd(looper, queue->wake[0]);
+}
+
+int32_t AInputQueue_hasEvents(AInputQueue *queue)
+{
+    int32_t has;
+    if (queue == NULL) return -EINVAL;
+    pthread_mutex_lock(&queue->lock);
+    has = queue->head != NULL ? 1 : 0;
+    pthread_mutex_unlock(&queue->lock);
+    return has;
+}
 
 int32_t AInputQueue_getEvent(AInputQueue *queue, AInputEvent **outEvent)
 {
-    (void) queue;
+    AInputEvent *event;
     if (outEvent != NULL) *outEvent = NULL;
-    return -EAGAIN; /* InputQueue::getEvent's WOULD_BLOCK */
+    if (queue == NULL || outEvent == NULL) return -EINVAL;
+    pthread_mutex_lock(&queue->lock);
+    event = queue->head;
+    if (event != NULL) {
+        queue->head = event->next;
+        if (queue->head == NULL) {
+            queue->tail = NULL;
+            wl_input_drain(queue);
+        }
+        event->next = NULL;
+    }
+    pthread_mutex_unlock(&queue->lock);
+    if (event == NULL) return -EAGAIN;   /* InputQueue::getEvent's WOULD_BLOCK */
+    *outEvent = event;
+    return 0;
 }
 
+/* No input method takes key events first here, so none is consumed before the app sees it. */
 int32_t AInputQueue_preDispatchEvent(AInputQueue *queue, AInputEvent *event)
 {
     (void) queue;
@@ -478,62 +717,102 @@ int32_t AInputQueue_preDispatchEvent(AInputQueue *queue, AInputEvent *event)
 
 void AInputQueue_finishEvent(AInputQueue *queue, AInputEvent *event, int handled)
 {
-    (void) queue;
-    (void) event;
-    (void) handled;
+    WlInputFinishedFn finished = NULL;
+    void *owner = NULL;
+    if (event == NULL) return;
+    if (queue != NULL) {
+        pthread_mutex_lock(&queue->lock);
+        if (!queue->dead) {
+            finished = queue->finished;
+            owner = queue->owner;
+        }
+        pthread_mutex_unlock(&queue->lock);
+    }
+    if (finished != NULL) finished(owner, event->queue_id, handled);
+    free(event);
 }
 
-#define WL_EVENT_GETTER(type, name) \
-    type name(const AInputEvent *event) { (void) event; return 0; }
-#define WL_POINTER_GETTER(type, name) \
-    type name(const AInputEvent *event, size_t pointer) { (void) event; (void) pointer; return 0; }
+void AInputEvent_release(const AInputEvent *event) { (void) event; }   /* for fromJava events only */
+
+static const WlInputPointer *wl_pointer(const AInputEvent *event, size_t index)
+{
+    return event != NULL && index < event->pointer_count ? &event->pointers[index] : NULL;
+}
+
+#define WL_EVENT_FIELD(type, name, field) \
+    type name(const AInputEvent *event) { return event != NULL ? (type) event->field : (type) 0; }
+#define WL_POINTER_FIELD(type, name, field)                     \
+    type name(const AInputEvent *event, size_t index)           \
+    {                                                           \
+        const WlInputPointer *pointer = wl_pointer(event, index); \
+        return pointer != NULL ? (type) pointer->field : (type) 0; \
+    }
+/* No history is kept: each event carries its current sample only. */
 #define WL_HISTORICAL_GETTER(type, name) \
     type name(const AInputEvent *event, size_t pointer, size_t history) \
     { (void) event; (void) pointer; (void) history; return 0; }
 
-WL_EVENT_GETTER(int32_t, AInputEvent_getType)
-WL_EVENT_GETTER(int32_t, AInputEvent_getDeviceId)
-WL_EVENT_GETTER(int32_t, AInputEvent_getSource)
-void AInputEvent_release(const AInputEvent *event) { (void) event; }
+WL_EVENT_FIELD(int32_t, AInputEvent_getType, type)
+WL_EVENT_FIELD(int32_t, AInputEvent_getDeviceId, device_id)
+WL_EVENT_FIELD(int32_t, AInputEvent_getSource, source)
 
-WL_EVENT_GETTER(int32_t, AKeyEvent_getAction)
-WL_EVENT_GETTER(int32_t, AKeyEvent_getFlags)
-WL_EVENT_GETTER(int32_t, AKeyEvent_getKeyCode)
-WL_EVENT_GETTER(int32_t, AKeyEvent_getScanCode)
-WL_EVENT_GETTER(int32_t, AKeyEvent_getMetaState)
-WL_EVENT_GETTER(int32_t, AKeyEvent_getRepeatCount)
-WL_EVENT_GETTER(int64_t, AKeyEvent_getDownTime)
-WL_EVENT_GETTER(int64_t, AKeyEvent_getEventTime)
+WL_EVENT_FIELD(int32_t, AKeyEvent_getAction, action)
+WL_EVENT_FIELD(int32_t, AKeyEvent_getFlags, flags)
+WL_EVENT_FIELD(int32_t, AKeyEvent_getKeyCode, key_code)
+WL_EVENT_FIELD(int32_t, AKeyEvent_getScanCode, scan_code)
+WL_EVENT_FIELD(int32_t, AKeyEvent_getMetaState, meta_state)
+WL_EVENT_FIELD(int32_t, AKeyEvent_getRepeatCount, repeat_count)
+WL_EVENT_FIELD(int64_t, AKeyEvent_getDownTime, down_time)
+WL_EVENT_FIELD(int64_t, AKeyEvent_getEventTime, event_time)
 
-WL_EVENT_GETTER(int32_t, AMotionEvent_getAction)
-WL_EVENT_GETTER(int32_t, AMotionEvent_getActionButton)
-WL_EVENT_GETTER(int32_t, AMotionEvent_getButtonState)
-WL_EVENT_GETTER(int32_t, AMotionEvent_getClassification)
-WL_EVENT_GETTER(int32_t, AMotionEvent_getEdgeFlags)
-WL_EVENT_GETTER(int32_t, AMotionEvent_getFlags)
-WL_EVENT_GETTER(int32_t, AMotionEvent_getMetaState)
-WL_EVENT_GETTER(int64_t, AMotionEvent_getDownTime)
-WL_EVENT_GETTER(int64_t, AMotionEvent_getEventTime)
-WL_EVENT_GETTER(float, AMotionEvent_getXOffset)
-WL_EVENT_GETTER(float, AMotionEvent_getYOffset)
-WL_EVENT_GETTER(float, AMotionEvent_getXPrecision)
-WL_EVENT_GETTER(float, AMotionEvent_getYPrecision)
-WL_EVENT_GETTER(size_t, AMotionEvent_getPointerCount)
-WL_EVENT_GETTER(size_t, AMotionEvent_getHistorySize)
-WL_POINTER_GETTER(int32_t, AMotionEvent_getPointerId)
-WL_POINTER_GETTER(int32_t, AMotionEvent_getToolType)
-WL_POINTER_GETTER(float, AMotionEvent_getRawX)
-WL_POINTER_GETTER(float, AMotionEvent_getRawY)
-WL_POINTER_GETTER(float, AMotionEvent_getX)
-WL_POINTER_GETTER(float, AMotionEvent_getY)
-WL_POINTER_GETTER(float, AMotionEvent_getPressure)
-WL_POINTER_GETTER(float, AMotionEvent_getSize)
-WL_POINTER_GETTER(float, AMotionEvent_getTouchMajor)
-WL_POINTER_GETTER(float, AMotionEvent_getTouchMinor)
-WL_POINTER_GETTER(float, AMotionEvent_getToolMajor)
-WL_POINTER_GETTER(float, AMotionEvent_getToolMinor)
-WL_POINTER_GETTER(float, AMotionEvent_getOrientation)
-WL_POINTER_GETTER(int64_t, AMotionEvent_getHistoricalEventTime) /* (event, history) */
+WL_EVENT_FIELD(int32_t, AMotionEvent_getAction, action)
+WL_EVENT_FIELD(int32_t, AMotionEvent_getActionButton, action_button)
+WL_EVENT_FIELD(int32_t, AMotionEvent_getButtonState, button_state)
+WL_EVENT_FIELD(int32_t, AMotionEvent_getEdgeFlags, edge_flags)
+WL_EVENT_FIELD(int32_t, AMotionEvent_getFlags, flags)
+WL_EVENT_FIELD(int32_t, AMotionEvent_getMetaState, meta_state)
+WL_EVENT_FIELD(int64_t, AMotionEvent_getDownTime, down_time)
+WL_EVENT_FIELD(int64_t, AMotionEvent_getEventTime, event_time)
+WL_EVENT_FIELD(float, AMotionEvent_getXPrecision, x_precision)
+WL_EVENT_FIELD(float, AMotionEvent_getYPrecision, y_precision)
+WL_EVENT_FIELD(size_t, AMotionEvent_getPointerCount, pointer_count)
+
+int32_t AMotionEvent_getClassification(const AInputEvent *event) { (void) event; return 0; }   /* NONE */
+size_t AMotionEvent_getHistorySize(const AInputEvent *event) { (void) event; return 0; }
+
+/* x = raw x + x offset, as AOSP's MotionEvent keeps them. */
+float AMotionEvent_getXOffset(const AInputEvent *event)
+{
+    const WlInputPointer *pointer = wl_pointer(event, 0);
+    return pointer != NULL ? pointer->x - pointer->raw_x : 0;
+}
+
+float AMotionEvent_getYOffset(const AInputEvent *event)
+{
+    const WlInputPointer *pointer = wl_pointer(event, 0);
+    return pointer != NULL ? pointer->y - pointer->raw_y : 0;
+}
+
+WL_POINTER_FIELD(int32_t, AMotionEvent_getPointerId, id)
+WL_POINTER_FIELD(int32_t, AMotionEvent_getToolType, tool_type)
+WL_POINTER_FIELD(float, AMotionEvent_getRawX, raw_x)
+WL_POINTER_FIELD(float, AMotionEvent_getRawY, raw_y)
+WL_POINTER_FIELD(float, AMotionEvent_getX, x)
+WL_POINTER_FIELD(float, AMotionEvent_getY, y)
+WL_POINTER_FIELD(float, AMotionEvent_getPressure, pressure)
+WL_POINTER_FIELD(float, AMotionEvent_getSize, size)
+WL_POINTER_FIELD(float, AMotionEvent_getTouchMajor, touch_major)
+WL_POINTER_FIELD(float, AMotionEvent_getTouchMinor, touch_minor)
+WL_POINTER_FIELD(float, AMotionEvent_getToolMajor, tool_major)
+WL_POINTER_FIELD(float, AMotionEvent_getToolMinor, tool_minor)
+WL_POINTER_FIELD(float, AMotionEvent_getOrientation, orientation)
+
+int64_t AMotionEvent_getHistoricalEventTime(const AInputEvent *event, size_t history)
+{
+    (void) history;
+    return event != NULL ? event->event_time : 0;
+}
+
 WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalRawX)
 WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalRawY)
 WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalX)
@@ -546,12 +825,23 @@ WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalToolMajor)
 WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalToolMinor)
 WL_HISTORICAL_GETTER(float, AMotionEvent_getHistoricalOrientation)
 
-float AMotionEvent_getAxisValue(const AInputEvent *event, int32_t axis, size_t pointer)
+/* AMOTION_EVENT_AXIS_X .. AXIS_ORIENTATION (0..8); this event carries no other axis. */
+float AMotionEvent_getAxisValue(const AInputEvent *event, int32_t axis, size_t index)
 {
-    (void) event;
-    (void) axis;
-    (void) pointer;
-    return 0;
+    const WlInputPointer *pointer = wl_pointer(event, index);
+    if (pointer == NULL) return 0;
+    switch (axis) {
+    case 0: return pointer->x;
+    case 1: return pointer->y;
+    case 2: return pointer->pressure;
+    case 3: return pointer->size;
+    case 4: return pointer->touch_major;
+    case 5: return pointer->touch_minor;
+    case 6: return pointer->tool_major;
+    case 7: return pointer->tool_minor;
+    case 8: return pointer->orientation;
+    default: return 0;
+    }
 }
 
 float AMotionEvent_getHistoricalAxisValue(const AInputEvent *event, int32_t axis, size_t pointer, size_t history)

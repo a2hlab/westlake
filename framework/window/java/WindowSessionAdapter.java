@@ -598,7 +598,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // to its session's one OH window, so a SurfaceView's producer (an engine's EGL or Vulkan
     // swapchain) and hwui drew into the same OH window: Flutter and game engines never showed.
     // A SurfaceView that fills its window gets an OH sub-window session of its own, created after
-    // the activity's (so above it: OH stacks app windows by creation order) and bound to its
+    // the activity's (so above it: OH stacks app windows by creation order, unless a z-level says
+    // otherwise, as attachSurfaceView's does for a SurfaceView below its window) and bound to its
     // BLAST SurfaceControl before its BLASTBufferQueue resolves a window. OH windows cannot be
     // placed here (updateSessionRect has no IPC on this path; every window sits at 0,0), so a
     // smaller SurfaceView gets one only where it starts at its window's origin, which a window
@@ -648,17 +649,51 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 return 0;
             }
             int sessionId = info[0];
-            nativeShowWindow(sessionId);
+            // Android stacks a SurfaceView's layer below its window (sublayer -2; -1 for a media
+            // overlay) unless the app puts it on top (setZOrderOnTop: 0 or more). The window turns
+            // translucent and hwui punches a hole where the SurfaceView shows, so the views drawn
+            // over it stay on top. OH stacked this session above the activity's (created later,
+            // raised to the app's top): in one Hong Kong round all 38 apps that stopped with such a
+            // session showed a pure black screen, YouTube Music's idle player over its whole UI
+            // among them. The SurfaceView's sublayer becomes the session's OH z-level, which orders
+            // sibling sub-windows: below the activity's window and its dialogs (z-level 0), above
+            // the host's window, their parent. WESTLAKE_SURFACEVIEW_ORDER=above keeps it on top;
+            // =hidden never shows it, to see what the window draws without it.
+            String order = System.getenv("WESTLAKE_SURFACEVIEW_ORDER");
+            int subLayer = surfaceViewSubLayer(surfaceView);
+            String placed = "on top";
+            if ("hidden".equals(order)) {
+                placed = "hidden";
+            } else if (subLayer < 0 && !"above".equals(order)) {
+                int rc = OhWindowOrder.setSubWindowZLevel(sessionId, subLayer);
+                placed = "below its window (z-level " + subLayer + ", rc=" + rc + ")";
+            }
+            if (!"hidden".equals(order)) nativeShowWindow(sessionId);
             nativeAttachSessionToSc(blast, sessionId);
             synchronized (sSurfaceViewSessions) {
                 sSurfaceViewSessions.put(surfaceView, sessionId);
                 sSurfaceViewWindows.put(surfaceView, window);
             }
             System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
-                    + " at " + at[0] + "," + at[1] + " -> own sessionId=" + sessionId);
+                    + " at " + at[0] + "," + at[1] + " -> own sessionId=" + sessionId + ", " + placed);
             return sessionId;
         } catch (Throwable t) {
             System.err.println("[OH_WSA] SurfaceView '" + name + "' own session failed: " + t);
+            return 0;
+        }
+    }
+
+    /**
+     * The SurfaceView's sublayer (SurfaceView.mSubLayer, set before its BLAST layer is built): below
+     * 0 when it sits below its window. 0, on top, when it cannot be read: the order before z-levels.
+     */
+    private static int surfaceViewSubLayer(Object surfaceView) {
+        try {
+            java.lang.reflect.Field field = android.view.SurfaceView.class.getDeclaredField("mSubLayer");
+            field.setAccessible(true);
+            return field.getInt(surfaceView);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] SurfaceView sublayer unread: " + t);
             return 0;
         }
     }
@@ -1307,8 +1342,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // the frame as its window's position. Inside its own size a centred dialog came out at
         // (0,0): the app was told its dialog sat at the top left (getLocationOnScreen) while it was
         // drawn centred, and a popup anchored in that dialog would open in the wrong place.
-        int[] display = getDefaultDisplaySize();
-        Configuration config = sizedConfiguration(display[0], display[1]);
+        int[] display = getDefaultDisplayMetrics();
+        Configuration config = sizedConfiguration(display[0], display[1], display[2]);
         outMergedConfiguration.setOverrideConfiguration(config);
         // The global side is the display's, as WMS reports it for every window. ViewRootImpl hands
         // it to ActivityThread's config callback, which applies it to the process's resources, and
@@ -1316,7 +1351,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // window bounds. Set from this window, a smaller window shrank the app's whole idea of the
         // screen: Draw Anywhere's 180x180 overlay button made the display 180 px wide, and placing
         // its 640 px toolbar threw "Cannot coerce value to an empty range: maximum -460".
-        Configuration globalConfig = sizedConfiguration(display[0], display[1]);
+        Configuration globalConfig = sizedConfiguration(display[0], display[1], display[2]);
         outMergedConfiguration.setGlobalConfiguration(globalConfig);
         System.err.println("[OH_WSA-relayout] outMergedConfiguration set: window=" + width + "x" + height
                 + " winConfig.mBounds=" + config.windowConfiguration.getBounds()
@@ -1325,12 +1360,19 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 + " global=" + globalConfig.screenWidthDp + "x" + globalConfig.screenHeightDp);
     }
 
-    /** A configuration whose screen and window bounds are width x height pixels. */
-    private static Configuration sizedConfiguration(int width, int height) {
+    /**
+     * A configuration whose screen and window bounds are width x height pixels, at the display's
+     * density. It reaches the process's resources (ActivityThread applies the global side), so it
+     * must say what the first configuration said: a fixed 320 turned the board's 360 dpi into 320
+     * at every app's first relayout, 533 dp of screen width into 600 with the smallest width left
+     * at 533, which no portrait Android display reports.
+     */
+    private static Configuration sizedConfiguration(int width, int height, int densityDpi) {
         Configuration config = new Configuration();
-        config.screenWidthDp = width * 160 / 320; // approximate dp conversion
-        config.screenHeightDp = height * 160 / 320;
-        config.densityDpi = 320;
+        config.screenWidthDp = width * 160 / densityDpi;
+        config.screenHeightDp = height * 160 / densityDpi;
+        config.smallestScreenWidthDp = Math.min(config.screenWidthDp, config.screenHeightDp);
+        config.densityDpi = densityDpi;
         Rect bounds = new Rect(0, 0, width, height);
         config.windowConfiguration.setBounds(bounds);
         config.windowConfiguration.setAppBounds(bounds);
@@ -1774,6 +1816,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      * Buttons to render outside the HWC-composited 720×1280 visible region.
      */
     static int[] getDefaultDisplaySize() {
+        int[] metrics = getDefaultDisplayMetrics();
+        return new int[]{metrics[0], metrics[1]};
+    }
+
+    /**
+     * The default display's width, height and density, {width, height, densityDpi}, as
+     * DisplayManagerGlobal reports them: the same display the process's first configuration is
+     * built from (AppSchedulerBridge, from OhDisplayProvider).
+     */
+    static int[] getDefaultDisplayMetrics() {
         try {
             android.view.Display d = android.hardware.display.DisplayManagerGlobal
                     .getInstance()
@@ -1782,15 +1834,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
                 d.getRealMetrics(dm);
                 if (dm.widthPixels > 0 && dm.heightPixels > 0) {
-                    return new int[]{dm.widthPixels, dm.heightPixels};
+                    return new int[]{dm.widthPixels, dm.heightPixels,
+                            dm.densityDpi > 0 ? dm.densityDpi : 320};
                 }
             }
         } catch (Throwable t) {
-            Log.w(TAG, "getDefaultDisplaySize: DisplayManagerGlobal lookup failed,"
+            Log.w(TAG, "getDefaultDisplayMetrics: DisplayManagerGlobal lookup failed,"
                     + " using DAYU200 baseline 720x1280", t);
         }
         // DAYU200 native resolution (per CLAUDE.md target hardware).
-        return new int[]{720, 1280};
+        return new int[]{720, 1280, 320};
     }
 
     static int resolveRelayoutDimension(int layoutDimension, int requestedDimension,

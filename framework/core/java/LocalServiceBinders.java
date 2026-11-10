@@ -499,11 +499,26 @@ public final class LocalServiceBinders {
     }
 
     /**
-     * Wi-Fi as this process can see it through Android's interface: nothing, because OH's
-     * wifi manager is not bridged. isWifiEnabled answers false and scans are empty; an app that
-     * needs Wi-Fi state learns it is unavailable rather than crashing on a null manager.
+     * Wi-Fi as this process can see it through Android's interface. OH's wifi manager is not
+     * bridged: scans are empty and the connection info is AOSP's "not connected" default. The
+     * state follows the network ConnectivityManager reports here (ConnectivityManagerAdapter, from
+     * OH's default network): WIFI_STATE_ENABLED while that network runs over Wi-Fi, DISABLED
+     * otherwise. The default answer, 0, is WIFI_STATE_DISABLING, a transition a phone only passes
+     * through, and it disagreed with ConnectivityManager's TYPE_WIFI on a board on Wi-Fi.
+     * Asphalt 8 asks its Device helper IsWifiEnabling and IsWifiDisabling, then faulted on a null
+     * string from that helper.
      */
     private static Object wifi(String method, Object[] args) {
+        if ("getWifiEnabledState".equals(method)) {
+            try {
+                OhConnectivityState.Snapshot state = OhConnectivityState.query();
+                return state.available && state.hasBearer(OH_BEARER_WIFI)
+                        ? android.net.wifi.WifiManager.WIFI_STATE_ENABLED
+                        : android.net.wifi.WifiManager.WIFI_STATE_DISABLED;
+            } catch (Throwable t) {
+                return android.net.wifi.WifiManager.WIFI_STATE_DISABLED;
+            }
+        }
         // A null connection info NPE'd NYTimes' startup initializer. AOSP's default WifiInfo is
         // "not connected": unknown SSID, network id -1, invalid RSSI.
         if ("getConnectionInfo".equals(method)) {
@@ -518,10 +533,53 @@ public final class LocalServiceBinders {
         return DEFAULT;
     }
 
+    /** OH's NetBearType for Wi-Fi, as ConnectivityManagerAdapter numbers it. */
+    private static final int OH_BEARER_WIFI = 1;
+
+    /**
+     * Network statistics with nothing counted. TrafficStats' counters (getUidStats, getIfaceStats,
+     * getTotalStats, all long) answer TrafficStats.UNSUPPORTED. A usage session (NetworkStatsManager's
+     * querySummary and queryDetails open one) answers empty statistics. The counters used to be
+     * matched by the name's "Stats" ending, which caught openSessionForUsageStats too: its Long
+     * answer could not be an INetworkStatsSession, and Stella's querySummary died on a
+     * ClassCastException in a background thread.
+     */
     private static Object netStats(String method, Object[] args) {
-        // getUidStats / getIfaceStats / getTotalStats return long: TrafficStats.UNSUPPORTED.
-        if (method.endsWith("Stats")) return Long.valueOf(-1L);
-        return DEFAULT;
+        switch (method) {
+            case "getUidStats":
+            case "getIfaceStats":
+            case "getTotalStats":
+                return Long.valueOf(-1L);
+            case "openSession":
+            case "openSessionForUsageStats":
+                return emptyNetworkStatsSession();
+            default:
+                return DEFAULT;
+        }
+    }
+
+    /** An INetworkStatsSession whose every query finds nothing: empty NetworkStats and history. */
+    private static Object emptyNetworkStatsSession() {
+        try {
+            Class<?> iface = Class.forName("android.net.INetworkStatsSession");
+            Binder binder = new Binder();
+            return Proxy.newProxyInstance(LocalServiceBinders.class.getClassLoader(), new Class<?>[] {iface},
+                    (self, method, args) -> {
+                        Class<?> type = method.getReturnType();
+                        if ("asBinder".equals(method.getName())) return binder;
+                        if (type == android.net.NetworkStats.class) {
+                            return new android.net.NetworkStats(android.os.SystemClock.elapsedRealtime(), 0);
+                        }
+                        if (type == android.net.NetworkStatsHistory.class) {
+                            return new android.net.NetworkStatsHistory(android.text.format.DateUtils.HOUR_IN_MILLIS);
+                        }
+                        if (type == int[].class) return new int[0];
+                        return defaultValue(type);
+                    });
+        } catch (Throwable t) {
+            System.err.println("[" + TAG + "] no network stats session: " + t);
+            return null;
+        }
     }
 
     private static Object telephonyRegistry(String method, Object[] args) {

@@ -341,14 +341,48 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         return null;
     }
 
+    /**
+     * Whether the package holding a uid is signed with a certificate. PackageManagerService looks
+     * the uid up and answers as hasSigningCertificate does for that package.
+     */
     @Override
     public boolean hasUidSigningCertificate(int uid, byte[] signingCertificate, int flags) {
-        return false;
+        String packageName = SourcePackageRegistry.packageForUid(uid);
+        if (packageName == null) packageName = RemotePackages.packageForUid(uid);
+        return packageName != null && hasSigningCertificate(packageName, signingCertificate, flags);
     }
 
+    /**
+     * Whether a package is signed with a certificate, given as its X.509 bytes
+     * (CERT_INPUT_RAW_X509) or their SHA-256 (CERT_INPUT_SHA256). PackageManagerService answers
+     * from the package's signing details, current signers and past ones. These are the details
+     * getPackageInfo returns with GET_SIGNING_CERTIFICATES, so both calls give one answer.
+     *
+     * It used to answer false for every package. accurate.weather's libencore checks its own
+     * package with it in JNI_OnLoad (API 28 and later, SHA-256) and returns JNI_ERR on false, so
+     * the app's process never bound. AndroidX's PackageInfoCompat.hasSignatures asks the same.
+     */
     @Override
     public boolean hasSigningCertificate(String packageName, byte[] signingCertificate, int flags) {
-        return false;
+        if (packageName == null || signingCertificate == null) return false;
+        PackageInfo info;
+        try {
+            info = getPackageInfo(packageName,
+                    android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES, 0);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "hasSigningCertificate: " + packageName + ": " + e);
+            return false;
+        }
+        if (info == null || info.signingInfo == null) return false;
+        android.content.pm.SigningDetails details = info.signingInfo.getSigningDetails();
+        switch (flags) {
+            case android.content.pm.PackageManager.CERT_INPUT_RAW_X509:
+                return details.hasCertificate(signingCertificate);
+            case android.content.pm.PackageManager.CERT_INPUT_SHA256:
+                return details.hasSha256Certificate(signingCertificate);
+            default:
+                return false;
+        }
     }
 
     @Override
@@ -727,18 +761,103 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         app.sourceDir = app.publicSourceDir = "/system/android/framework/framework-res.apk";
         app.nonLocalizedLabel = "Android System";
         info.applicationInfo = app;
+        signWithPlatformCertificate(info, flags);
+        return info;
+    }
+
+    /** The platform certificate as a package's signature, when flags ask for signatures. */
+    private static void signWithPlatformCertificate(PackageInfo info, long flags) {
         if ((flags & (android.content.pm.PackageManager.GET_SIGNATURES
-                | android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)) != 0) {
-            android.content.pm.Signature platform = new android.content.pm.Signature(
-                    android.util.Base64.decode(PLATFORM_CERTIFICATE, android.util.Base64.DEFAULT));
-            info.signatures = new android.content.pm.Signature[] {platform};
-            try {
-                info.signingInfo = new android.content.pm.SigningInfo(new android.content.pm.SigningDetails(
-                        info.signatures, android.content.pm.SigningDetails.SignatureSchemeVersion.SIGNING_BLOCK_V3));
-            } catch (java.security.cert.CertificateException e) {
-                Log.w(TAG, "platform package: no signing info: " + e);
-            }
+                | android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)) == 0) {
+            return;
         }
+        android.content.pm.Signature platform = new android.content.pm.Signature(
+                android.util.Base64.decode(PLATFORM_CERTIFICATE, android.util.Base64.DEFAULT));
+        info.signatures = new android.content.pm.Signature[] {platform};
+        try {
+            info.signingInfo = new android.content.pm.SigningInfo(new android.content.pm.SigningDetails(
+                    info.signatures, android.content.pm.SigningDetails.SignatureSchemeVersion.SIGNING_BLOCK_V3));
+        } catch (java.security.cert.CertificateException e) {
+            Log.w(TAG, info.packageName + ": no signing info: " + e);
+        }
+    }
+
+    /**
+     * The browser every Android device has, for an app that looks one up before it opens a web link.
+     * OH answers no handler for VIEW of an http(s) address on the board, so the lookup found nothing,
+     * and apps that check first gave up: Flow's sign-in said "No browser available to complete login"
+     * (AppAuth's BrowserSelector), Truecaller "install/enable your browser". A link started without
+     * asking already opens in WebLinkDialog over the app; this names that answer as a browser package
+     * with one activity, a full browser by Android's measure (VIEW, BROWSABLE, http and https, any
+     * host), signed with the platform certificate. ActivityTaskManagerAdapter opens a start of it in
+     * the same dialog. It offers no Custom Tabs service, so apps fall back to a plain link.
+     */
+    public static final String WEB_LINK_BROWSER = "org.westlake.weblink";
+    private static final String WEB_LINK_ACTIVITY = WEB_LINK_BROWSER + ".WebLinkActivity";
+    private static final String WEB_LINK_LABEL = "Web link";
+
+    /** Whether an intent looks for a web browser: VIEW of an http(s) address, or of the scheme alone. */
+    private static boolean looksForBrowser(Intent intent) {
+        if (!Intent.ACTION_VIEW.equals(intent.getAction())) return false;
+        String target = intent.getComponent() != null ? intent.getComponent().getPackageName() : intent.getPackage();
+        if (target != null && !WEB_LINK_BROWSER.equals(target)) return false;
+        String scheme = intent.getScheme();
+        return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+    }
+
+    private static ApplicationInfo webLinkApplicationInfo() {
+        ApplicationInfo app = new ApplicationInfo();
+        app.packageName = WEB_LINK_BROWSER;
+        app.processName = WEB_LINK_BROWSER;
+        app.uid = android.os.Process.FIRST_APPLICATION_UID;
+        app.flags = ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_INSTALLED;
+        app.enabled = true;
+        app.minSdkVersion = app.targetSdkVersion = android.os.Build.VERSION.SDK_INT;
+        app.sourceDir = app.publicSourceDir = "/system/android/framework/framework-res.apk";
+        app.nonLocalizedLabel = WEB_LINK_LABEL;
+        return app;
+    }
+
+    private static ActivityInfo webLinkActivityInfo() {
+        ActivityInfo activity = new ActivityInfo();
+        activity.packageName = WEB_LINK_BROWSER;
+        activity.name = WEB_LINK_ACTIVITY;
+        activity.processName = WEB_LINK_BROWSER;
+        activity.exported = true;
+        activity.enabled = true;
+        activity.nonLocalizedLabel = WEB_LINK_LABEL;
+        activity.applicationInfo = webLinkApplicationInfo();
+        return activity;
+    }
+
+    private static ResolveInfo webLinkResolveInfo(long flags) {
+        ResolveInfo info = new ResolveInfo();
+        info.activityInfo = webLinkActivityInfo();
+        info.nonLocalizedLabel = WEB_LINK_LABEL;
+        info.match = android.content.IntentFilter.MATCH_CATEGORY_SCHEME
+                | android.content.IntentFilter.MATCH_ADJUSTMENT_NORMAL;
+        info.isDefault = true;
+        if ((flags & android.content.pm.PackageManager.GET_RESOLVED_FILTER) != 0) {
+            android.content.IntentFilter filter = new android.content.IntentFilter(Intent.ACTION_VIEW);
+            filter.addCategory(Intent.CATEGORY_DEFAULT);
+            filter.addCategory(Intent.CATEGORY_BROWSABLE);
+            filter.addDataScheme("http");
+            filter.addDataScheme("https");
+            info.filter = filter;
+        }
+        return info;
+    }
+
+    private static PackageInfo webLinkPackageInfo(long flags) {
+        PackageInfo info = new PackageInfo();
+        info.packageName = WEB_LINK_BROWSER;
+        info.versionName = "1";
+        info.setLongVersionCode(1);
+        info.applicationInfo = webLinkApplicationInfo();
+        if ((flags & android.content.pm.PackageManager.GET_ACTIVITIES) != 0) {
+            info.activities = new ActivityInfo[] {webLinkActivityInfo()};
+        }
+        signWithPlatformCertificate(info, flags);
         return info;
     }
 
@@ -757,6 +876,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         }
         if ("android".equals(packageName)) {
             return platformPackageInfo(flags);
+        }
+        if (WEB_LINK_BROWSER.equals(packageName)) {
+            return webLinkPackageInfo(flags);
         }
         if (GuestPackages.contains(packageName)) {
             return GuestPackages.packageInfo(packageName, flags);
@@ -815,6 +937,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         }
         if ("android".equals(packageName)) {
             return platformPackageInfo(flags).applicationInfo;
+        }
+        if (WEB_LINK_BROWSER.equals(packageName)) {
+            return webLinkApplicationInfo();
         }
         if (GuestPackages.contains(packageName)) {
             return GuestPackages.applicationInfo(packageName, flags);
@@ -902,6 +1027,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public ActivityInfo getActivityInfo(ComponentName component, long flags, int userId) {
         logBridged("getActivityInfo", component.flattenToShortString());
+        if (WEB_LINK_BROWSER.equals(component.getPackageName())) {
+            return WEB_LINK_ACTIVITY.equals(component.getClassName()) ? webLinkActivityInfo() : null;
+        }
         if (SourcePackageRegistry.contains(component.getPackageName())) {
             PackageInfo info = SourcePackageRegistry.packageInfo(component.getPackageName(),
                     flags | android.content.pm.PackageManager.GET_ACTIVITIES);
@@ -973,7 +1101,10 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (target != null && SourcePackageRegistry.contains(target)) {
             return new ParceledListSlice<>(result);
         }
-        result.addAll(ohAbilities(intent, flags));
+        List<ResolveInfo> outside = ohAbilities(intent, flags);
+        result.addAll(outside);
+        // A web link nothing outside the app handles: the stand-in browser (WEB_LINK_BROWSER).
+        if (outside.isEmpty() && looksForBrowser(intent)) result.add(webLinkResolveInfo(flags));
         return new ParceledListSlice<>(result);
     }
 
@@ -1746,9 +1877,18 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /*
+     * The installer of the launched app is the Play Store (com.android.vending), as for an app installed
+     * from Google Play, which is where the apps run here come from. The Play Store is installed (the
+     * microG Companion, or the Play Store guest beside shared Play services), so the name resolves.
+     * Packages installed with the system image report no installer, as on a phone.
+     */
+    private static final String PLAY_STORE_PACKAGE = "com.android.vending";
+
     @Override
     public java.lang.String getInstallerPackageName(java.lang.String arg0) throws android.os.RemoteException {
-        logStub("getInstallerPackageName", "");
+        if (arg0 != null && SourcePackageRegistry.contains(arg0)) return PLAY_STORE_PACKAGE;
+        logStub("getInstallerPackageName", arg0 == null ? "" : arg0);
         return null;
     }
 
@@ -1757,11 +1897,13 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     public android.content.pm.InstallSourceInfo getInstallSourceInfo(java.lang.String arg0, int arg1) throws android.os.RemoteException {
         // ApplicationPackageManager turns null into NameNotFoundException, which told apps their
         // own package was not installed: package_info_plus failed with PlatformException(Name not
-        // found, <package>) and FOSS Warn, mucke and Cardabase stopped at startup. The launched
-        // APK was placed by the launcher, not by an installer app, so its truthful source is
-        // "none known" -- every field null, as PackageManagerService reports for such installs.
+        // found, <package>) and FOSS Warn, mucke and Cardabase stopped at startup. The launched app
+        // reports what PackageManagerService records for a Play Store install on Android 14 and
+        // later: the Play Store initiated and installed it, owns its updates, and the source is a
+        // store. Its signing info stays unknown (null), which Android also reports when it has none.
         if (arg0 != null && SourcePackageRegistry.contains(arg0)) {
-            return new android.content.pm.InstallSourceInfo(null, null, null, null);
+            return new android.content.pm.InstallSourceInfo(PLAY_STORE_PACKAGE, null, null, PLAY_STORE_PACKAGE,
+                    PLAY_STORE_PACKAGE, android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE);
         }
         logStub("getInstallSourceInfo", arg0 == null ? "" : arg0);
         return null;

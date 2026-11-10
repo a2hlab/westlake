@@ -205,7 +205,13 @@ public final class OHTouchInjector {
             try {
                 View target = targetFor(view, event)[0];
                 event.offsetLocation(-gestureLeft, -gestureTop);
-                lastHandled = target.dispatchTouchEvent(event) ? 1 : 0;
+                android.view.InputQueue queue = takenInputQueue(target);
+                if (queue != null) {
+                    sendToInputQueue(queue, target, event);
+                    lastHandled = 1;
+                } else {
+                    lastHandled = target.dispatchTouchEvent(event) ? 1 : 0;
+                }
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     gestureView = null;
                 }
@@ -280,6 +286,45 @@ public final class OHTouchInjector {
     }
 
     public static String lastRoute = "none";
+
+    /*
+     * The InputQueue of a window that took it (a NativeActivity's: Window.takeInputQueue). Android's
+     * ViewRootImpl sends such a window's input events to that queue (NativePostImeInputStage), and the
+     * app's native code reads them from it; an event it leaves unhandled goes on to the window's views.
+     * This dispatch reaches views directly, so for such a window an event goes to its queue first,
+     * and to the views only when the app leaves it unhandled.
+     */
+    private static java.lang.reflect.Field inputQueueField;
+
+    private static android.view.InputQueue takenInputQueue(View root) {
+        try {
+            Object viewRoot = root.getViewRootImpl();
+            if (viewRoot == null) return null;
+            java.lang.reflect.Field field = inputQueueField;
+            if (field == null) {
+                field = viewRoot.getClass().getDeclaredField("mInputQueue");
+                field.setAccessible(true);
+                inputQueueField = field;
+            }
+            return (android.view.InputQueue) field.get(viewRoot);
+        } catch (Throwable throwable) {
+            return null;
+        }
+    }
+
+    private static void sendToInputQueue(android.view.InputQueue queue, final View target, MotionEvent event) {
+        final MotionEvent copy = MotionEvent.obtain(event);
+        queue.sendInputEvent(event, copy, false, new android.view.InputQueue.FinishedInputEventCallback() {
+            @Override
+            public void onFinishedInputEvent(Object token, boolean handled) {
+                try {
+                    if (!handled && target.isAttachedToWindow()) target.dispatchTouchEvent(copy);
+                } finally {
+                    copy.recycle();
+                }
+            }
+        });
+    }
 
     private static boolean forceClickAt(View view, float x, float y) {
         if (view instanceof ViewGroup) {

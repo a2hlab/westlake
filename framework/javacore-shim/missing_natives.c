@@ -644,6 +644,7 @@ int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
 int wl_register_image_reader(JNIEnv* env);
+int wl_register_native_activity(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
 {
@@ -1307,7 +1308,9 @@ static jfieldID wl_GetStaticFieldID(JNIEnv* env, jclass c, const char* name, con
  * substrings in WESTLAKE_JNI_TRACE_STRINGS (a launcher --runtime-env): the length and the code units
  * in hex, with the calling library. A name that arrives garbled is then seen as its library built it:
  * Office asked its Java asset manager for "en-US/msointlandroid." followed by characters the log
- * could not print, and "officeandroid.odf" was cut at a different length in each run.
+ * could not print, and "officeandroid.odf" was cut at a different length in each run. A token that
+ * starts with '=' matches only the whole text (of a NewString, its first 64 characters): Hermes threw
+ * "Invalid subtag: i" for Midland's Intl.NumberFormat, and a lone "i" contains no substring worth tracing.
  */
 static jstring (*g_new_string)(JNIEnv*, const jchar*, jsize);
 static jstring (*g_new_string_utf)(JNIEnv*, const char*);
@@ -1319,7 +1322,7 @@ static int traced_text(const char* text)
     char wanted[256];
     snprintf(wanted, sizeof(wanted), "%s", g_trace_strings);
     for (char* save = NULL, *token = strtok_r(wanted, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save)) {
-        if (*token != '\0' && strstr(text, token) != NULL) return 1;
+        if (*token == '=' ? strcmp(text, token + 1) == 0 : *token != '\0' && strstr(text, token) != NULL) return 1;
     }
     return 0;
 }
@@ -1369,6 +1372,48 @@ static jstring wl_NewStringUTF(JNIEnv* env, const char* bytes)
     return g_new_string_utf(env, bytes);
 }
 
+/*
+ * Java exceptions a native library takes off the stack, printed first when the library's file name
+ * holds one of the comma-separated substrings in WESTLAKE_JNI_TRACE_EXCEPTIONS (a launcher
+ * --runtime-env). fbjni turns a pending Java exception into a C++ JniException this way, and when
+ * React Native's JS thread does not catch it the process ends on "terminating with uncaught exception
+ * of type facebook::jni::JniException" with the Java exception printed nowhere (Midland's property
+ * app, at start, in every round). ExceptionDescribe prints it with its stack and clears it, which is
+ * what the caller asked for. At most 20.
+ */
+static void (*g_exception_clear)(JNIEnv*);
+static void (*g_exception_describe)(JNIEnv*);
+static jboolean (*g_exception_check)(JNIEnv*);
+static char g_trace_exceptions[256];
+static int g_traced_exceptions;
+
+static const char* traced_exception_library(const void* caller)
+{
+    Dl_info info;
+    if (dladdr(caller, &info) == 0 || info.dli_fname == NULL) return NULL;
+    const char* base = strrchr(info.dli_fname, '/');
+    base = base != NULL ? base + 1 : info.dli_fname;
+    char wanted[256];
+    snprintf(wanted, sizeof(wanted), "%s", g_trace_exceptions);
+    for (char* save = NULL, *token = strtok_r(wanted, ",", &save); token != NULL; token = strtok_r(NULL, ",", &save)) {
+        if (*token != '\0' && strstr(base, token) != NULL) return base;
+    }
+    return NULL;
+}
+
+static void wl_ExceptionClear(JNIEnv* env)
+{
+    const char* library = g_exception_check(env) ? traced_exception_library(__builtin_return_address(0)) : NULL;
+    if (library != NULL && __atomic_fetch_add(&g_traced_exceptions, 1, __ATOMIC_RELAXED) < 20) {
+        char line[256];
+        snprintf(line, sizeof(line), "[WL-JNI-EXCEPTION] %s clears a pending Java exception:\n", library);
+        note(line);
+        g_exception_describe(env);
+        return;
+    }
+    g_exception_clear(env);
+}
+
 static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
 {
     typedef void (*SetTableOverrideFn)(const struct JNINativeInterface*);
@@ -1397,6 +1442,14 @@ static int install_lookup_logging(JNIEnv* env, JavaVM* vm)
         g_new_string_utf = g_lookup_table.NewStringUTF;
         g_lookup_table.NewString = wl_NewString;
         g_lookup_table.NewStringUTF = wl_NewStringUTF;
+    }
+    const char* exceptions = getenv("WESTLAKE_JNI_TRACE_EXCEPTIONS");
+    if (exceptions != NULL && *exceptions != '\0') {
+        snprintf(g_trace_exceptions, sizeof(g_trace_exceptions), "%s", exceptions);
+        g_exception_clear = g_lookup_table.ExceptionClear;
+        g_exception_describe = g_lookup_table.ExceptionDescribe;
+        g_exception_check = g_lookup_table.ExceptionCheck;
+        g_lookup_table.ExceptionClear = wl_ExceptionClear;
     }
     set_override(&g_lookup_table);
     return 1;
@@ -1532,6 +1585,11 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
                  at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, ir, cl, more);
+        note(line);
+    }
+    {
+        char line[96];
+        snprintf(line, sizeof(line), "[WL-NATIVES] bound NativeActivity+InputQueue=%d/22\n", wl_register_native_activity(env));
         note(line);
     }
     wl_register_media(env, vm);

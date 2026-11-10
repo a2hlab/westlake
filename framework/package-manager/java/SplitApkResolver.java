@@ -2,9 +2,14 @@ package adapter.packagemanager;
 
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
+import android.content.pm.parsing.ApkLite;
+import android.content.pm.parsing.ApkLiteParseUtils;
+import android.content.pm.parsing.result.ParseResult;
+import android.content.pm.parsing.result.ParseTypeImpl;
+import android.util.SparseArray;
 
 import java.io.File;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.TreeMap;
 
 /** Populates installed APK split paths from the adapter's per-package directory. */
@@ -38,7 +43,7 @@ public final class SplitApkResolver {
         // nor a package-named parent identifies them.
         String declared = System.getenv("ASX_SPLIT_APK_PATHS");
         if (declared != null && !declared.isEmpty()) {
-            TreeMap<String, String> explicit = new TreeMap<>();
+            TreeMap<String, Split> explicit = new TreeMap<>();
             String basePrefix = base.getName().endsWith(".apk")
                     ? base.getName().substring(0, base.getName().length() - 4) + "."
                     : null;
@@ -62,7 +67,9 @@ public final class SplitApkResolver {
                 if (splitName.startsWith("split_")) {
                     splitName = splitName.substring("split_".length());
                 }
-                if (!splitName.isEmpty()) explicit.put(splitName, candidate.getAbsolutePath());
+                if (splitName.isEmpty()) continue;
+                Split split = Split.read(splitName, candidate);
+                explicit.put(split.name, split);
             }
             if (!explicit.isEmpty()) {
                 apply(packageInfo, info, explicit, "declared");
@@ -74,7 +81,7 @@ public final class SplitApkResolver {
         File[] siblings = parent != null ? parent.listFiles() : null;
         if (siblings == null || siblings.length == 0) return;
 
-        TreeMap<String, String> splits = new TreeMap<>();
+        TreeMap<String, Split> splits = new TreeMap<>();
         String baseAbsolute = base.getAbsolutePath();
         String baseName = base.getName();
         String parentPath = parent.getAbsolutePath();
@@ -99,62 +106,135 @@ public final class SplitApkResolver {
                     || name.startsWith("config.");
             if (!packageOwnedDirectory && !conventionalSplit) continue;
             String splitName = name.substring(0, name.length() - 4);
-            if (!splitName.isEmpty()) splits.put(splitName, candidate.getAbsolutePath());
+            if (splitName.isEmpty()) continue;
+            Split split = Split.read(splitName, candidate);
+            splits.put(split.name, split);
         }
 
         apply(packageInfo, info, splits, "scanned");
     }
 
     /**
-     * What SplitDependencyLoader.createDependenciesFromPackage would produce, keyed by split index
-     * plus one, with the base at 0: the base depends on nothing and lists its config splits, and a
-     * feature split depends on the base. LoadedApk walks this whenever the app asks for isolated
-     * split loading, as Play services does, and a null array throws while its context is made.
-     * The split manifests are not read here, so a split's kind comes from Android's naming
-     * convention, and a feature split's own config splits are treated as the base's.
+     * A split as its own manifest declares it: its name (the manifest's split attribute), whether it
+     * is a feature split, the split it uses and, for a config split, the split it configures.
+     * Android takes all of these from the split manifests, and the staged file name need not carry
+     * the name: Chrome's and Brave's bundles name their code split "config.chrome.apk", and named
+     * "config.chrome" it was taken for a config split of the base, so Chrome's isolated split
+     * loading gave its code no class loader (ClassNotFoundException making SplitChromeApplication).
+     * A split whose manifest cannot be read keeps the file name, and its kind comes from Android's
+     * naming convention.
      */
-    private static android.util.SparseArray<int[]> dependencies(String[] names) {
-        android.util.SparseArray<int[]> dependencies = new android.util.SparseArray<>();
-        int configs = 0;
-        for (String name : names) {
-            if (name.startsWith("config.")) configs++;
+    private static final class Split {
+        final String name;
+        final String path;
+        final boolean feature;
+        final String usesSplit;
+        final String configFor;
+
+        Split(String name, String path, boolean feature, String usesSplit, String configFor) {
+            this.name = name;
+            this.path = path;
+            this.feature = feature;
+            this.usesSplit = usesSplit;
+            this.configFor = configFor;
         }
-        int[] base = new int[configs + 1];
-        base[0] = -1;
-        int next = 1;
-        for (int i = 0; i < names.length; i++) {
-            if (names[i].startsWith("config.")) {
-                base[next++] = i + 1;
-            } else {
-                dependencies.put(i + 1, new int[] {0});
+
+        static Split read(String fileName, File file) {
+            try {
+                ParseResult<ApkLite> result =
+                        ApkLiteParseUtils.parseApkLite(ParseTypeImpl.forDefaultParsing().reset(), file, 0);
+                if (result.isSuccess()) {
+                    ApkLite lite = result.getResult();
+                    String name = lite.getSplitName();
+                    if (name != null && !name.isEmpty()) {
+                        String usesSplit = lite.getUsesSplitName();
+                        String configFor = lite.getConfigForSplit();
+                        return new Split(name, file.getAbsolutePath(), lite.isFeatureSplit(),
+                                usesSplit == null || usesSplit.isEmpty() ? null : usesSplit,
+                                configFor == null || configFor.isEmpty() ? null : configFor);
+                    }
+                }
+            } catch (Throwable unreadable) {
+                // Fall back to the name and the convention.
             }
+            int config = fileName.indexOf(".config.");
+            if (fileName.startsWith("config.")) {
+                return new Split(fileName, file.getAbsolutePath(), false, null, null);
+            }
+            if (config > 0) {
+                return new Split(fileName, file.getAbsolutePath(), false, null, fileName.substring(0, config));
+            }
+            return new Split(fileName, file.getAbsolutePath(), true, null, null);
         }
-        dependencies.put(0, base);
+    }
+
+    /**
+     * As SplitDependencyLoader.createDependenciesFromPackage makes it, keyed by split index plus one
+     * (splits in name order), with the base at 0: the base depends on nothing; a feature split on
+     * the split it uses, else the base; and a config split is listed after the dependency of the
+     * split it configures, else the base's. LoadedApk walks this whenever the app asks for isolated
+     * split loading (Chrome, Play services), and a null array throws while its context is made. A
+     * dependency on a split that is not here falls back to the base, where Android would refuse.
+     */
+    private static SparseArray<int[]> dependencies(Split[] splits) {
+        String[] names = new String[splits.length];
+        for (int i = 0; i < splits.length; i++) names[i] = splits[i].name;
+        SparseArray<int[]> dependencies = new SparseArray<>();
+        dependencies.put(0, new int[] {-1});
+        for (int i = 0; i < splits.length; i++) {
+            if (!splits[i].feature) continue;
+            int target = 0;
+            if (splits[i].usesSplit != null) {
+                int found = Arrays.binarySearch(names, splits[i].usesSplit);
+                if (found >= 0 && splits[found].feature) target = found + 1;
+            }
+            dependencies.put(i + 1, new int[] {target});
+        }
+        for (int i = 0; i < splits.length; i++) {
+            if (splits[i].feature) continue;
+            int target = 0;
+            if (splits[i].configFor != null) {
+                int found = Arrays.binarySearch(names, splits[i].configFor);
+                if (found >= 0 && splits[found].feature) target = found + 1;
+            }
+            int[] current = dependencies.get(target);
+            int[] grown = Arrays.copyOf(current, current.length + 1);
+            grown[current.length] = i + 1;
+            dependencies.put(target, grown);
+        }
         return dependencies;
     }
 
     private static void apply(PackageInfo packageInfo, ApplicationInfo info,
-            TreeMap<String, String> splits, String source) {
+            TreeMap<String, Split> splits, String source) {
         int count = splits.size();
+        Split[] ordered = splits.values().toArray(new Split[0]);
         String[] names = new String[count];
         String[] paths = new String[count];
-        int index = 0;
-        for (Map.Entry<String, String> entry : splits.entrySet()) {
-            names[index] = entry.getKey();
-            paths[index] = entry.getValue();
-            index++;
+        for (int index = 0; index < count; index++) {
+            names[index] = ordered[index].name;
+            paths[index] = ordered[index].path;
         }
 
         info.splitNames = names;
         info.splitSourceDirs = paths;
         info.splitPublicSourceDirs = paths.clone();
-        info.splitDependencies = dependencies(names);
+        info.splitDependencies = dependencies(ordered);
+        // One class loader name per split, null where the split's manifest names none (Chrome's and
+        // Brave's name none). LoadedApk reads it by split index when isolated split loading makes a
+        // split's class loader, and with no array Chrome's SplitChromeApplication failed there:
+        // "Attempt to read from null array" in SplitDependencyLoaderImpl.constructSplit. Names the
+        // split manifests gave (SourcePackageRegistry parses them in this same order) are kept.
+        if (info.splitClassLoaderNames == null || info.splitClassLoaderNames.length != count) {
+            info.splitClassLoaderNames = new String[count];
+        }
         if (packageInfo != null) {
             packageInfo.splitNames = names.clone();
             packageInfo.splitRevisionCodes = new int[count];
         }
         System.err.println("[WESTLAKE-PM] split APKs " + info.packageName
                 + " source=" + source + " count=" + count
-                + " paths=" + java.util.Arrays.toString(paths));
+                + " names=" + Arrays.toString(names)
+                + " paths=" + Arrays.toString(paths));
     }
 }

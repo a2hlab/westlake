@@ -27,16 +27,26 @@ import java.util.List;
  * address that is not http or https (an app's own redirect, as at the end of a sign-in) is handed on
  * as VIEW of that address, as a browser hands it on, and closes the dialog. A link that names a
  * package keeps Android's answer when that package is missing: ActivityNotFoundException.
+ *
+ * Apps that look for a browser before they open a link find one: the package manager answers with
+ * a stand-in browser (PackageManagerAdapter.WEB_LINK_BROWSER), and a link started in that package,
+ * as AppAuth starts a sign-in page in the browser it chose, opens here too.
  */
 final class WebLinkDialog {
     private static final String TAG = "WL_WebLink";
 
     private WebLinkDialog() {}
 
-    /** Whether intent asks a browser for a web page: VIEW of http(s), no component or package named. */
+    /**
+     * Whether intent asks a browser for a web page: VIEW of http(s), with no component or package
+     * named, or naming the stand-in browser.
+     */
     static boolean opensWebLink(Intent intent) {
         if (!Intent.ACTION_VIEW.equals(intent.getAction())) return false;
-        if (intent.getComponent() != null || intent.getPackage() != null) return false;
+        String target = intent.getComponent() != null ? intent.getComponent().getPackageName() : intent.getPackage();
+        if (target != null && !adapter.packagemanager.PackageManagerAdapter.WEB_LINK_BROWSER.equals(target)) {
+            return false;
+        }
         return isWeb(intent.getData());
     }
 

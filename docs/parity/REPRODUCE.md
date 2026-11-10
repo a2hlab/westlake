@@ -107,8 +107,10 @@ startup/scrolling performance, or proof of hardware-independent Android parity.
 
 ## Window, input and networking controls
 
-The window helper must be loaded through `WESTLAKE_WINDOW_POLICY_PATH` and the
-Java `OhWindowPolicy` calls included in both synchronous and asynchronous
+A bridge built from `framework/jni/BUILD.gn` carries the window helper's native, and
+`OhWindowPolicy` uses it from there. For a bridge built without it, load the helper
+through `WESTLAKE_WINDOW_POLICY_PATH`. The Java `OhWindowPolicy` calls are included in
+both synchronous and asynchronous
 `WindowSessionAdapter.relayout` paths plus removal. The source `android_os_Process`
 registration also includes `register_android_os_ProcessCpuTime`; full runtime
 builders must compile `oh_process_cpu_time.cpp`. For the isolated old runtime,

@@ -6,6 +6,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageParser;
 import android.content.pm.pkg.FrameworkPackageUserState;
+import android.content.res.AssetManager;
 import android.os.Parcel;
 import android.os.Process;
 import java.io.File;
@@ -24,10 +25,12 @@ public final class SourcePackageRegistry {
             throws PackageParser.PackageParserException {
         if (parsed != null) throw new IllegalStateException("Source package already registered");
         if (runtime.uid != Process.myUid()) throw new SecurityException("Source package UID differs");
-        PackageParser.Package candidate = new PackageParser().parsePackage(new File(runtime.sourceDir), 0);
+        PackageParser parser = new PackageParser();
+        PackageParser.Package candidate = parser.parsePackage(new File(runtime.sourceDir), 0);
         if (!runtime.packageName.equals(candidate.packageName)) {
             throw new SecurityException("Original APK package differs from launch request");
         }
+        parseSplits(parser, candidate, runtime);
         location = new ApplicationInfo(runtime);
         parsed = candidate;
         applyLocation(parsed.applicationInfo);
@@ -36,6 +39,73 @@ public final class SourcePackageRegistry {
                 + " version=" + parsed.mVersionCode + " targetSdk=" + result.targetSdkVersion
                 + " nativeLibraryDir=" + result.nativeLibraryDir);
         return result;
+    }
+
+    /**
+     * The split APKs' own manifests, parsed into the package as Android's cluster parse does: every
+     * split in order, and each component a split declares takes that split's name, which gives its
+     * activity the split's class loader and resources. Chrome declares ChromeTabbedActivity and 48
+     * more activities in its "chrome" split (Brave 71 more). Parsed from the base APK alone, the
+     * launch met that activity with no theme and no split, its context had none of the split's
+     * resources, and SemanticColorUtils found its theme attribute unset. The splits are staged as
+     * loose files, not in a package directory, so the parser's directory parse cannot find them; its
+     * split parse is called for each one, with the split list the launch resolves (SplitApkResolver).
+     */
+    private static void parseSplits(PackageParser parser, PackageParser.Package pkg, ApplicationInfo runtime) {
+        ApplicationInfo resolved = new ApplicationInfo(runtime);
+        SplitApkResolver.populate(resolved);
+        String[] names = resolved.splitNames;
+        String[] paths = resolved.splitSourceDirs;
+        if (names == null || paths == null || names.length == 0 || names.length != paths.length) return;
+        int count = names.length;
+        pkg.splitNames = names.clone();
+        pkg.splitCodePaths = paths.clone();
+        pkg.splitRevisionCodes = new int[count];
+        pkg.splitFlags = new int[count];
+        pkg.splitPrivateFlags = new int[count];
+        // The package's ApplicationInfo names the same splits, as Android's cluster parse
+        // (splitNames, splitDependencies) and package scan (splitSourceDirs and
+        // splitPublicSourceDirs from the code paths) give it. Without them getPackageInfo answered
+        // splitNames with no splitSourceDirs beside them. Play Core's asset-pack lookup reads
+        // applicationInfo.splitSourceDirs at the index of the pack's name in splitNames, so a
+        // racing game (com.longe.racehmt) died in GameActivity.onCreate with "Attempt to read
+        // from null array" while looking up an asset in its install-time pack.
+        pkg.applicationInfo.splitNames = names.clone();
+        pkg.applicationInfo.splitSourceDirs = paths.clone();
+        pkg.applicationInfo.splitPublicSourceDirs = paths.clone();
+        pkg.applicationInfo.splitDependencies = resolved.splitDependencies;
+        pkg.applicationInfo.splitClassLoaderNames = new String[count];
+        java.lang.reflect.Method parseSplit;
+        try {
+            parseSplit = PackageParser.class.getDeclaredMethod("parseSplitApk", PackageParser.Package.class,
+                    int.class, AssetManager.class, int.class);
+            parseSplit.setAccessible(true);
+        } catch (NoSuchMethodException e) {
+            System.err.println("[WESTLAKE-PM] split manifests not parsed: " + e);
+            return;
+        }
+        int before = componentCount(pkg);
+        for (int i = 0; i < count; i++) {
+            AssetManager assets = new AssetManager();
+            try {
+                if (assets.addAssetPath(paths[i]) == 0) {
+                    System.err.println("[WESTLAKE-PM] split manifest unreadable: " + paths[i]);
+                    continue;
+                }
+                parseSplit.invoke(parser, pkg, i, assets, 0);
+            } catch (ReflectiveOperationException e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                System.err.println("[WESTLAKE-PM] split manifest " + names[i] + " not parsed: " + cause);
+            } finally {
+                assets.close();
+            }
+        }
+        System.err.println("[WESTLAKE-PM] split manifests " + pkg.packageName + ": " + count + " splits, "
+                + (componentCount(pkg) - before) + " components");
+    }
+
+    private static int componentCount(PackageParser.Package pkg) {
+        return pkg.activities.size() + pkg.receivers.size() + pkg.services.size() + pkg.providers.size();
     }
 
     /** The registered package's <uses-library> names, required then optional. */

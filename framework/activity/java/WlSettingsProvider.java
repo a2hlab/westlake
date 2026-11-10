@@ -14,9 +14,10 @@ package adapter.activity;
  * provider map at bind time — acquireProvider finds it BEFORE any AMS call, so the
  * stub AMS is never involved.
  *
- * Semantics: every read reports "unset" — GET_* methods return a Bundle without a
- * value entry (getString -> null), LIST_* methods return an empty serializable map.
- * Callers then take their documented defaults, exactly like a fresh device image.
+ * Semantics: a read reports "unset" -- GET_* methods return a Bundle without a value entry
+ * (getString -> null), LIST_* methods return an empty serializable map -- and callers take their
+ * documented defaults, except for the settings every device in use holds (SYSTEM, GLOBAL, SECURE
+ * below), which are answered with Android's first-boot values.
  *
  * One exception: Settings.Secure.ANDROID_ID. Android never leaves it unset; every app gets a
  * 64-bit value, stable for that app on that device. Jellyfin's API client builds its device
@@ -56,9 +57,53 @@ public class WlSettingsProvider extends android.content.ContentProvider {
         return sAndroidId = id;
     }
 
+    /**
+     * Settings a device in use always holds, as Android's SettingsProvider writes them on first boot
+     * (DatabaseHelper, with AOSP's defaults.xml), and as a device past its setup wizard holds them.
+     * Apps read some of these with getInt(resolver, name), which throws when the setting is unset:
+     * ByteDance's video engine reads screen_brightness that way as every video starts, and Prime Video
+     * the global boot_count as it starts a session. Settings for hardware the runtime does not report
+     * (Bluetooth, a notification LED) stay unset, and so do the settings apps read to judge the device
+     * itself (adb_enabled, development_settings_enabled).
+     */
+    private static final java.util.Map<String, String> SYSTEM = new java.util.HashMap<>();
+    private static final java.util.Map<String, String> GLOBAL = new java.util.HashMap<>();
+    private static final java.util.Map<String, String> SECURE = new java.util.HashMap<>();
+    static {
+        SYSTEM.put("screen_brightness", "102");
+        SYSTEM.put("screen_brightness_mode", "0");          // manual
+        SYSTEM.put("screen_off_timeout", "60000");
+        SYSTEM.put("accelerometer_rotation", "0");
+        SYSTEM.put("user_rotation", "0");
+        SYSTEM.put("dim_screen", "1");
+        SYSTEM.put("haptic_feedback_enabled", "1");
+        SYSTEM.put("sound_effects_enabled", "1");
+        SYSTEM.put("dtmf_tone", "1");
+        SYSTEM.put("pointer_speed", "0");
+        SYSTEM.put("font_scale", "1.0");
+        GLOBAL.put("airplane_mode_on", "0");
+        GLOBAL.put("auto_time", "1");
+        GLOBAL.put("auto_time_zone", "1");
+        GLOBAL.put("stay_on_while_plugged_in", "0");
+        GLOBAL.put("mode_ringer", "2");                     // AudioManager.RINGER_MODE_NORMAL
+        GLOBAL.put("device_provisioned", "1");              // set by the setup wizard
+        GLOBAL.put("boot_count", "1");                      // counted by the system at each boot
+        SECURE.put("user_setup_complete", "1");             // set by the setup wizard
+    }
+
     /** The value a GET_* call answers, or null for "unset". */
     public static String answer(String method, String name) {
-        return "GET_secure".equals(method) && "android_id".equals(name) ? androidId() : null;
+        if (method == null || name == null) return null;
+        switch (method) {
+            case "GET_secure":
+                return "android_id".equals(name) ? androidId() : SECURE.get(name);
+            case "GET_system":
+                return SYSTEM.get(name);
+            case "GET_global":
+                return GLOBAL.get(name);
+            default:
+                return null;
+        }
     }
 
     @Override

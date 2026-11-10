@@ -2405,11 +2405,10 @@ public class AppSpawnXInit {
                 "high_text_contrast_enabled",
             };
             primeSettingsCache("android.provider.Settings$Secure", secureKeys, "0");
-            String[] systemKeys = {
-                "font_scale",
-                "screen_brightness_mode",
-            };
-            primeSettingsCache("android.provider.Settings$System", systemKeys, "0");
+            // Android's values (WlSettingsProvider): font_scale was primed "0", which an app that
+            // reads it scales its text by.
+            primeSettingsCache("android.provider.Settings$System", new String[] {"font_scale"}, "1.0");
+            primeSettingsCache("android.provider.Settings$System", new String[] {"screen_brightness_mode"}, "0");
             Log.i(TAG, "Settings.Global/Secure/System NameValueCache primed (PhoneWindow lookups bypass ContentProvider)");
         } catch (Throwable t) {
             Log.e(TAG, "preInitSettingsCache failed", t);
