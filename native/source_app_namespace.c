@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -65,6 +66,79 @@ static int overlay(const char* root, const char* mine, const char* system, const
     return 1;
 }
 
+static int id_chars(const char* s, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (!isalnum((unsigned char) s[i]) && s[i] != '-' && s[i] != '_') return 0;
+    }
+    return 1;
+}
+
+// The app's own files at an Android install path, when the launcher asks for one
+// (WESTLAKE_ANDROID_APP_DIR=/data/app/~~<id>==/<package>-<id>==, each id 22 URL-safe base64
+// characters): <root>/android-app holds base.apk, the split APKs and lib/arm64, as Android's
+// package manager leaves an install, and the app's ApplicationInfo names them there instead of
+// under /data/local/tmp. OH keeps its own tree in /data/app, so a tmpfs covers /data/app in this
+// namespace and each of OH's entries is bound back into it, with what is mounted below it (the
+// runtime's real root is under el2); the install directory goes beside them. OH's tree and the
+// install directory are reached through descriptors opened before the tmpfs covers them. The tmpfs
+// has the label of the el2 base directory, which app domains may search.
+static int install_dir(const char* root, uid_t uid) {
+    const char* target = getenv("WESTLAKE_ANDROID_APP_DIR");
+    const char* prefix = "/data/app/~~";
+    char source[PATH_MAX], parent[PATH_MAX], from[PATH_MAX], to[PATH_MAX];
+    char names[64][NAME_MAX + 1];
+    size_t count = 0, length, leaf_length;
+    if (target == NULL || target[0] == '\0') return 0;
+    length = strlen(target);
+    if (strncmp(target, prefix, strlen(prefix)) || length >= sizeof(parent)) return -1;
+    const char* id = target + strlen(prefix);
+    if (!id_chars(id, 22) || strncmp(id + 22, "==/", 3)) return -1;
+    const char* leaf = id + 25;
+    leaf_length = strlen(leaf);
+    if (leaf_length < 26 || leaf[leaf_length - 25] != '-' || !id_chars(leaf + leaf_length - 24, 22) ||
+        strcmp(leaf + leaf_length - 2, "==")) return -1;
+    for (const char* c = leaf; c < leaf + leaf_length - 25; c++) {
+        if (!isalnum((unsigned char) *c) && *c != '.' && *c != '_') return -1;
+    }
+    if (snprintf(source, sizeof(source), "%s/android-app", root) >= (int) sizeof(source) ||
+        !owned_directory(source, uid)) return -1;
+    memcpy(parent, target, (size_t) (leaf - target - 1));
+    parent[leaf - target - 1] = '\0';
+    DIR* dir = opendir("/data/app");
+    if (!dir) return -1;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        if (count == sizeof(names) / sizeof(names[0])) {
+            closedir(dir);
+            return -1;
+        }
+        snprintf(names[count++], sizeof(names[0]), "%s", entry->d_name);
+    }
+    closedir(dir);
+    int oh = open("/data/app", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int mine = open(source, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int rc = oh < 0 || mine < 0 ||
+             mount("tmpfs", "/data/app", "tmpfs", MS_NOSUID | MS_NODEV,
+                   "mode=0755,context=u:object_r:data_app_el2_file:s0") ? -1 : 0;
+    for (size_t i = 0; rc == 0 && i < count; i++) {
+        struct stat st;
+        if (snprintf(from, sizeof(from), "/proc/self/fd/%d/%s", oh, names[i]) >= (int) sizeof(from) ||
+            snprintf(to, sizeof(to), "/data/app/%s", names[i]) >= (int) sizeof(to)) {
+            rc = -1;
+            break;
+        }
+        if (stat(from, &st)) continue;  /* dangling or unreadable: nothing to show */
+        if ((S_ISDIR(st.st_mode) ? mkdir(to, 0755) : close(open(to, O_WRONLY | O_CREAT, 0644))) ||
+            mount(from, to, NULL, MS_BIND | MS_REC, NULL)) rc = -1;
+    }
+    if (rc == 0 && snprintf(from, sizeof(from), "/proc/self/fd/%d", mine) >= (int) sizeof(from)) rc = -1;
+    if (rc == 0 && (mkdir(parent, 0755) || mkdir(target, 0755) || mount(from, target, NULL, MS_BIND, NULL))) rc = -1;
+    if (oh >= 0) close(oh);
+    if (mine >= 0) close(mine);
+    return rc < 0 ? -1 : 1;
+}
+
 // Mount only this candidate's runtime and empty application data in a private
 // namespace. Appspawn performs the normal OH token and DAC transition later.
 int main(int argc, char** argv) {
@@ -97,8 +171,13 @@ int main(int argc, char** argv) {
     if (etc < 0 || fonts < 0) {
         perror("source application system files"); return 1;
     }
-    fprintf(stderr, "SOURCE_APP_NAMESPACE uid=%lu mount=%lu->%lu runtime=%s icu=%s etc=%s fonts=%s\n",
-            uid, before.st_ino, after.st_ino, root, icu_data, etc ? "merged" : "absent", fonts ? "merged" : "absent");
+    int install = install_dir(root, (uid_t) uid);
+    if (install < 0) {
+        perror("source application install directory"); return 1;
+    }
+    fprintf(stderr, "SOURCE_APP_NAMESPACE uid=%lu mount=%lu->%lu runtime=%s icu=%s etc=%s fonts=%s install=%s\n",
+            uid, before.st_ino, after.st_ino, root, icu_data, etc ? "merged" : "absent", fonts ? "merged" : "absent",
+            install ? getenv("WESTLAKE_ANDROID_APP_DIR") : "staged");
     execvp(argv[3], argv + 3);
     perror("source app exec");
     return 1;
