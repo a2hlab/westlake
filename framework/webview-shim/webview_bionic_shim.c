@@ -2880,11 +2880,14 @@ static int read_oh_property(const char *name, char *value, size_t value_size)
  * reported as a plain Android default instead of a measurement, because this runtime's ART heap
  * ceiling is not the app's to know.
  *
- * All of that table's build, version and ABI entries are here (its non-empty ones), so native code
- * reads what Java reads: ro.build.fingerprint, ro.build.tags and ro.build.type came back empty
- * natively. Its identity entries (ro.product.brand and the rest, ro.hardware, ro.board.platform,
- * ro.boot.hardware) are not: natively the board's own OH values answer those names (the aliases
- * below), and which identity both sides report is a decision of its own.
+ * All of that table's non-empty entries are here, so native code reads what Java reads: its build,
+ * version and ABI entries (ro.build.fingerprint, ro.build.tags and ro.build.type came back empty
+ * natively) and its identity, DAYU200 / rk3568. The identity used to be passed through from the
+ * board's own OH names (const.product.*, ohos.boot.hardware), so native code saw a different device
+ * from the one Build.* reports, which apps and their protection libraries can compare. One device
+ * answers on both sides now. Before, every identity name read empty natively, which no Android device
+ * answers: Meitu's liblabdeviceinfo.so joins ro.product.manufacturer and ro.product.model and copied
+ * from a null pointer when both were empty.
  */
 static const struct {
     const char *name;
@@ -2915,48 +2918,21 @@ static const struct {
     { "ro.build.user",             "oh-adapter" },
     { "ro.build.host",             "oh-adapter" },
     { "ro.build.display.id",       "oh-adapter" },
+    { "ro.product.brand",          "OpenHarmony" },
+    { "ro.product.manufacturer",   "OpenHarmony" },
+    { "ro.product.model",          "DAYU200" },
+    { "ro.product.device",         "rk3568" },
+    { "ro.product.name",           "rk3568" },
+    { "ro.hardware",               "rk3568" },
+    { "ro.board.platform",         "rk3568" },
+    { "ro.boot.hardware",          "rk3568" },
 };
 
-/*
- * The device's identity, which Android keeps under ro.product.* and OH under const.product.* and
- * ohos.boot.hardware. Read under the Android names, every one was empty, which no Android device
- * answers: Meitu's liblabdeviceinfo.so joins ro.product.manufacturer and ro.product.model and,
- * when both are empty, copies from a null pointer (SIGSEGV in memcpy on its analytics thread).
- * The board's own values are passed through, whatever they are.
- */
-static const struct {
-    const char *name;
-    const char *oh_name;
-} g_oh_property_aliases[] = {
-    { "ro.product.model",               "const.product.model" },
-    { "ro.product.vendor.model",        "const.product.model" },
-    { "ro.product.manufacturer",        "const.product.manufacturer" },
-    { "ro.product.vendor.manufacturer", "const.product.manufacturer" },
-    { "ro.product.brand",               "const.product.brand" },
-    { "ro.product.vendor.brand",        "const.product.brand" },
-    { "ro.product.name",                "const.product.name" },
-    { "ro.product.device",              "const.product.name" },
-    { "ro.product.board",               "ohos.boot.hardware" },
-    { "ro.board.platform",              "ohos.boot.hardware" },
-    { "ro.hardware",                    "ohos.boot.hardware" },
-};
-
-/* A property by its Android name: OH's store, then the OH name it is kept under, then (with_table)
- * the table above. Returns the value's length, 0 when nothing answers. */
+/* A property by its Android name: OH's store, then (with_table) the table above, the order the
+ * runtime's SystemProperties uses for Java. Returns the value's length, 0 when nothing answers. */
 static int read_android_property(const char *name, char *value, int with_table)
 {
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
-    for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
-        if (strcmp(name, g_oh_property_aliases[i].name) == 0) {
-            length = read_oh_property(g_oh_property_aliases[i].oh_name, value, WEBVIEW_PROP_VALUE_MAX);
-            /* "default" is OH's placeholder for a brand or manufacturer nobody set, not a name.
-             * Answered as one, it crashed an app's protection library on launch (Baitu). */
-            if (strcmp(value, "default") == 0) {
-                value[0] = '\0';
-                length = 0;
-            }
-        }
-    }
     for (size_t i = 0; with_table && length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
         if (strcmp(name, g_android_properties[i].name) == 0) {
             snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
@@ -3920,7 +3896,7 @@ void __pthread_cleanup_pop(WebviewBionicCleanup *c, int execute)
  * none at first: the protection libraries of Authenticator, Netflix and PayPal, and PairIP in
  * Grindr and ShopBack, enumerated and got 0, and Authenticator's then called atoi on a null
  * pointer, a value it had expected to find. The list is every name __system_property_get answers
- * here under an Android name -- the table and the identity names above, with the values a lookup
+ * here under an Android name -- the table above, identity included, with the values a lookup
  * returns -- then any other property looked up since. Each entry stays at its address for the life
  * of the process, as a prop_info does in bionic's property area.
  */
@@ -3946,9 +3922,6 @@ static void westlake_property_enum_build(void)
 {
     for (size_t i = 0; i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
         westlake_property_enum_add(g_android_properties[i].name);
-    }
-    for (size_t i = 0; i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
-        westlake_property_enum_add(g_oh_property_aliases[i].name);
     }
 }
 
