@@ -18,9 +18,12 @@ import android.os.Parcel;
 import android.os.Process;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Packages other than the app whose code runs in the app's process: microG's GmsCore
@@ -34,7 +37,9 @@ import java.util.Map;
  * invalid and stays away from it, as it does on a phone without Play services.
  *
  * PairIP's license check (224 of the HK top 1000) binds Companion's licensing service, and
- * Companion reads its switches through GmsCore's settings provider, hence the pair.
+ * Companion reads its switches through GmsCore's settings provider, hence the pair. Beside a shared
+ * Play services process, Companion answers the Play Store services that process doesn't host and
+ * that Companion answers on the device alone (answersBesidePlayServices).
  */
 public final class GuestPackages {
     public static final String GMS = "com.google.android.gms";
@@ -52,12 +57,33 @@ public final class GuestPackages {
     private static Map<String, Guest> sGuests;
 
     /**
-     * Beside a shared Play services process, a guest answers only for the Play Store's licensing
-     * service, which that process doesn't host. Package details and every other service stay
-     * Play services', whose Google certificates the availability check reads.
+     * Beside a shared Play services process, a guest answers only for Play Store services that
+     * process doesn't host. Package details and every other service stay Play services', whose
+     * Google certificates the availability check reads.
      */
     private static final boolean BESIDE_PLAY_SERVICES = System.getenv("WESTLAKE_PLAY_SERVICES_CONNECT") != null;
-    private static final String LICENSING_ACTION = "com.android.vending.licensing.ILicensingService";
+
+    /**
+     * The Play Store services Companion answers beside Play services, by action. Each is answered
+     * on the device alone, with no account, no network and no screen of its own:
+     * - licensing: PairIP's license check (besideDefaults turns microG's switch on);
+     * - in-app updates: requestUpdateInfo answers that no update is available, as the Play Store
+     *   answers for an installed app at its latest version. Without it Play Core takes its error
+     *   path for a missing Play Store, whose exception class Monopoly Go's native plugin cannot
+     *   read (GetMethodID of getErrorCode failed);
+     * - the install referrer: an organic Play install, matching the installer the package manager
+     *   reports (com.android.vending);
+     * - age signals: not shared.
+     * Not answered: asset delivery and split installs, which download from Play with the user's
+     * account (app processes hold no accounts: LocalAccounts runs in the Play services process);
+     * integrity and express integrity (no attestation); billing; in-app review, which opens a
+     * Companion screen; engage.
+     */
+    private static final Set<String> BESIDE_ACTIONS = new HashSet<>(Arrays.asList(
+            "com.android.vending.licensing.ILicensingService",
+            "com.google.android.play.core.install.BIND_UPDATE_SERVICE",
+            "com.google.android.finsky.BIND_GET_INSTALL_REFERRER_SERVICE",
+            "com.google.android.finsky.ageverification.BIND"));
 
     /**
      * Beside shared Play services, the Play Store's details are Google's, without microG's
@@ -75,10 +101,16 @@ public final class GuestPackages {
         return copy;
     }
 
-    /** Whether a guest should answer this bind beside a shared Play services process. */
-    public static boolean answersLicensing(Intent intent) {
-        return BESIDE_PLAY_SERVICES && intent != null && LICENSING_ACTION.equals(intent.getAction())
-                && VENDING.equals(intent.getPackage()) && guests().containsKey(VENDING);
+    /**
+     * Whether a guest should answer this service intent beside a shared Play services process: one
+     * of BESIDE_ACTIONS, for the Play Store by package or by component (the install referrer
+     * library names the component).
+     */
+    public static boolean answersBesidePlayServices(Intent intent) {
+        if (!BESIDE_PLAY_SERVICES || intent == null || !BESIDE_ACTIONS.contains(intent.getAction())) return false;
+        ComponentName component = intent.getComponent();
+        String target = component != null ? component.getPackageName() : intent.getPackage();
+        return VENDING.equals(target) && guests().containsKey(VENDING);
     }
 
     private GuestPackages() {}
@@ -227,7 +259,7 @@ public final class GuestPackages {
     public static synchronized List<ResolveInfo> queryServices(Intent intent, String resolvedType, long flags) {
         List<ResolveInfo> out = new ArrayList<>();
         if (intent == null) return out;
-        if (BESIDE_PLAY_SERVICES && !answersLicensing(intent)) return out;
+        if (BESIDE_PLAY_SERVICES && !answersBesidePlayServices(intent)) return out;
         ComponentName component = intent.getComponent();
         String target = component != null ? component.getPackageName() : intent.getPackage();
         String type = resolvedType != null ? resolvedType : intent.getType();

@@ -1277,8 +1277,9 @@ public class AppSpawnXInit {
                                     new adapter.activity.InProcessServiceBinder(service, comp, connection));
                             return 1;
                         }
-                        // A guest package's service (microG Companion's licensing service, which
-                        // PairIP's license check binds by action), run in process by GuestHost.
+                        // A guest package's service, run in process by GuestHost: beside Play
+                        // services, Companion's licensing (PairIP's license check binds it by
+                        // action), in-app update, install referrer and age signal services.
                         android.content.pm.ServiceInfo guest = adapter.activity.GuestHost.resolveService(service);
                         if (connection != null && guest != null) {
                             System.err.println("[" + label + "] " + name + " -> guest " + guest.packageName + "/" + guest.name);

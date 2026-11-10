@@ -54,7 +54,7 @@ public final class GuestHost {
         if (intent == null || PlayServicesChannel.isHost()) return null;
         ComponentName comp = intent.getComponent();
         String pkg = comp != null ? comp.getPackageName() : intent.getPackage();
-        if (!GuestPackages.contains(pkg) && !GuestPackages.answersLicensing(intent)) return null;
+        if (!GuestPackages.contains(pkg) && !GuestPackages.answersBesidePlayServices(intent)) return null;
         List<ResolveInfo> found = GuestPackages.queryServices(intent, null, 0);
         return found.isEmpty() ? null : found.get(0).serviceInfo;
     }
