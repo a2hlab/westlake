@@ -2944,11 +2944,31 @@ static const struct {
     { "ro.boot.hardware",          "rk3568" },
 };
 
-/* A property by its Android name: OH's store, then (with_table) the table above, the order the
- * runtime's SystemProperties uses for Java. Returns the value's length, 0 when nothing answers. */
+/*
+ * Android properties a phone always sets whose value OH keeps under a name of its own: the zone the
+ * user chose. Java's default zone already comes from it (AppSpawnXInit's time zone supplier reads
+ * persist.time.timezone when persist.sys.timezone is empty); native code read persist.sys.timezone
+ * and found nothing. Unity's Mono takes TimeZoneInfo.Local from it and threw
+ * TimeZoneNotFoundException, which killed Boom Blitz on its main thread; eight apps read it.
+ */
+static const struct {
+    const char *android;
+    const char *oh;
+} g_oh_property_aliases[] = {
+    { "persist.sys.timezone", "persist.time.timezone" },
+};
+
+/* A property by its Android name: OH's store, under that name and then under the name OH keeps it by,
+ * then (with_table) the table above, the order the runtime's SystemProperties uses for Java. Returns
+ * the value's length, 0 when nothing answers. */
 static int read_android_property(const char *name, char *value, int with_table)
 {
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
+    for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
+        if (strcmp(name, g_oh_property_aliases[i].android) == 0) {
+            length = read_oh_property(g_oh_property_aliases[i].oh, value, WEBVIEW_PROP_VALUE_MAX);
+        }
+    }
     for (size_t i = 0; with_table && length == 0 && i < sizeof(g_android_properties) / sizeof(g_android_properties[0]); ++i) {
         if (strcmp(name, g_android_properties[i].name) == 0) {
             snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_android_properties[i].value);
