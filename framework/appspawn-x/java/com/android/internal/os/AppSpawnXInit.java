@@ -1112,6 +1112,7 @@ public class AppSpawnXInit {
             // app-scoped, mounted emulated volume backed by OH-writable storage.
             installStorageManagerAdapter();
             appLog("J_after_installStorageManagerAdapter");
+            installAndroidEnvironment();
             installActivityClientControllerStub();
             appLog("J_after_installActivityClientControllerStub");
             preInitSettingsCache();
@@ -1744,6 +1745,37 @@ public class AppSpawnXInit {
             System.err.println("[AdapterIAudioSvc] install FAILED: " + t);
             t.printStackTrace(System.err);
             System.err.flush();
+        }
+    }
+
+    /**
+     * The rest of the environment Android's init gives every process (init.environ.rc), which OH's
+     * lacks: native code reads these with getenv, and where one is missing it gets a null. An Unreal
+     * Engine game asks for EXTERNAL_STORAGE at start, and Environment.getLegacyExternalStorageDirectory
+     * makes a File of it. EXTERNAL_STORAGE is the primary shared storage, /sdcard on a phone. Here it
+     * names the app-scoped volume the storage service above publishes, so a path made from it agrees
+     * with Environment.getExternalStorageDirectory(). The other values are Android's own fixed paths.
+     * The runtime's own variables (ANDROID_ROOT, ANDROID_DATA, BOOTCLASSPATH and the rest) are set
+     * before the runtime starts, and nothing here replaces a value already present.
+     */
+    private static void installAndroidEnvironment() {
+        String packageName = System.getenv("ASX_LAUNCH_PKG");
+        String[][] values = {
+            {"ANDROID_BOOTLOGO", "1"},
+            {"ANDROID_ASSETS", "/system/app"},
+            {"ANDROID_STORAGE", "/storage"},
+            {"ASEC_MOUNTPOINT", "/mnt/asec"},
+            {"DOWNLOAD_CACHE", "/data/cache"},
+            {"EXTERNAL_STORAGE", isSafeAndroidPackageName(packageName)
+                    ? "/data/data/" + packageName + "/external" : null},
+        };
+        for (String[] value : values) {
+            if (value[1] == null || System.getenv(value[0]) != null) continue;
+            try {
+                android.system.Os.setenv(value[0], value[1], false);
+            } catch (android.system.ErrnoException e) {
+                System.err.println("[WESTLAKE-ENV] " + value[0] + " not set: " + e);
+            }
         }
     }
 
