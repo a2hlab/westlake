@@ -63,6 +63,17 @@ public final class SourcePackageRegistry {
         pkg.splitRevisionCodes = new int[count];
         pkg.splitFlags = new int[count];
         pkg.splitPrivateFlags = new int[count];
+        // The package's ApplicationInfo names the same splits, as Android's cluster parse
+        // (splitNames, splitDependencies) and package scan (splitSourceDirs and
+        // splitPublicSourceDirs from the code paths) give it. Without them getPackageInfo answered
+        // splitNames with no splitSourceDirs beside them. Play Core's asset-pack lookup reads
+        // applicationInfo.splitSourceDirs at the index of the pack's name in splitNames, so a
+        // racing game (com.longe.racehmt) died in GameActivity.onCreate with "Attempt to read
+        // from null array" while looking up an asset in its install-time pack.
+        pkg.applicationInfo.splitNames = names.clone();
+        pkg.applicationInfo.splitSourceDirs = paths.clone();
+        pkg.applicationInfo.splitPublicSourceDirs = paths.clone();
+        pkg.applicationInfo.splitDependencies = resolved.splitDependencies;
         pkg.applicationInfo.splitClassLoaderNames = new String[count];
         java.lang.reflect.Method parseSplit;
         try {
