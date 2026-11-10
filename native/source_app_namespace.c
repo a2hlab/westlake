@@ -77,66 +77,130 @@ static int id_chars(const char* s, size_t n) {
 // (WESTLAKE_ANDROID_APP_DIR=/data/app/~~<id>==/<package>-<id>==, each id 22 URL-safe base64
 // characters): <root>/android-app holds base.apk, the split APKs and lib/arm64, as Android's
 // package manager leaves an install, and the app's ApplicationInfo names them there instead of
-// under /data/local/tmp. OH keeps its own tree in /data/app, so a tmpfs covers /data/app in this
-// namespace and each of OH's entries is bound back into it, with what is mounted below it (the
-// runtime's real root is under el2); the install directory goes beside them. OH's tree and the
-// install directory are reached through descriptors opened before the tmpfs covers them. The tmpfs
-// has the label of the el2 base directory, which app domains may search.
+// under /data/local/tmp. OH keeps its own tree in /data/app, so in this namespace a new directory
+// of the runtime, <root>/data-app, covers /data/app; each of OH's entries is bound back into it,
+// with what is mounted below it (the runtime's real root is under el2), and the install directory
+// goes beside them. The cover has the runtime's label, which the app's domain reads; a tmpfs would
+// need a context= relabel, and the board refuses that for any file type. The cover is made here,
+// by root, so nothing the app wrote is in it, and OH's tree and the install directory are reached
+// through descriptors opened before the cover hides them.
+static int install_fail(const char* step, const char* path) {
+    fprintf(stderr, "source application install directory: %s%s%s: %s\n", step, path ? " " : "",
+            path ? path : "", strerror(errno));
+    return -1;
+}
+
 static int install_dir(const char* root, uid_t uid) {
     const char* target = getenv("WESTLAKE_ANDROID_APP_DIR");
     const char* prefix = "/data/app/~~";
-    char source[PATH_MAX], parent[PATH_MAX], from[PATH_MAX], to[PATH_MAX];
+    char source[PATH_MAX], cover[PATH_MAX], parent[PATH_MAX], from[PATH_MAX], to[PATH_MAX];
     char names[64][NAME_MAX + 1];
     size_t count = 0, length, leaf_length;
     if (target == NULL || target[0] == '\0') return 0;
+    errno = EINVAL;
     length = strlen(target);
-    if (strncmp(target, prefix, strlen(prefix)) || length >= sizeof(parent)) return -1;
+    if (strncmp(target, prefix, strlen(prefix)) || length >= sizeof(parent)) return install_fail("check", target);
     const char* id = target + strlen(prefix);
-    if (!id_chars(id, 22) || strncmp(id + 22, "==/", 3)) return -1;
+    if (!id_chars(id, 22) || strncmp(id + 22, "==/", 3)) return install_fail("check", target);
     const char* leaf = id + 25;
     leaf_length = strlen(leaf);
     if (leaf_length < 26 || leaf[leaf_length - 25] != '-' || !id_chars(leaf + leaf_length - 24, 22) ||
-        strcmp(leaf + leaf_length - 2, "==")) return -1;
+        strcmp(leaf + leaf_length - 2, "==")) return install_fail("check", target);
     for (const char* c = leaf; c < leaf + leaf_length - 25; c++) {
-        if (!isalnum((unsigned char) *c) && *c != '.' && *c != '_') return -1;
+        if (!isalnum((unsigned char) *c) && *c != '.' && *c != '_') return install_fail("check", target);
     }
     if (snprintf(source, sizeof(source), "%s/android-app", root) >= (int) sizeof(source) ||
-        !owned_directory(source, uid)) return -1;
+        !owned_directory(source, uid)) return install_fail("check", source);
     memcpy(parent, target, (size_t) (leaf - target - 1));
     parent[leaf - target - 1] = '\0';
     DIR* dir = opendir("/data/app");
-    if (!dir) return -1;
+    if (!dir) return install_fail("list", "/data/app");
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if (count == sizeof(names) / sizeof(names[0])) {
             closedir(dir);
-            return -1;
+            errno = E2BIG;
+            return install_fail("list", "/data/app");
         }
         snprintf(names[count++], sizeof(names[0]), "%s", entry->d_name);
     }
     closedir(dir);
-    int oh = open("/data/app", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    int mine = open(source, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    int rc = oh < 0 || mine < 0 ||
-             mount("tmpfs", "/data/app", "tmpfs", MS_NOSUID | MS_NODEV,
-                   "mode=0755,context=u:object_r:data_app_el2_file:s0") ? -1 : 0;
-    for (size_t i = 0; rc == 0 && i < count; i++) {
+    if (snprintf(cover, sizeof(cover), "%s/data-app", root) >= (int) sizeof(cover)) {
+        errno = ENAMETOOLONG;
+        return install_fail("name", root);
+    }
+    if (mkdir(cover, 0755)) return install_fail("make", cover);
+    int rc = -1;
+    int mine = -1, made = -1, oh = open("/data/app", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (oh < 0) {
+        install_fail("open", "/data/app");
+        goto done;
+    }
+    mine = open(source, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (mine < 0) {
+        install_fail("open", source);
+        goto done;
+    }
+    made = open(cover, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (made < 0) {
+        install_fail("open", cover);
+        goto done;
+    }
+    // As Android leaves them: /data/app as OH has it (system, 0771: an app may pass through it but
+    // not list it), the install's parent system-owned 0775 and the install directory 0755.
+    struct stat system_app;
+    if (fstat(oh, &system_app) || fchown(made, system_app.st_uid, system_app.st_gid) ||
+        fchmod(made, system_app.st_mode & 07777)) {
+        install_fail("own", cover);
+        goto done;
+    }
+    snprintf(from, sizeof(from), "/proc/self/fd/%d", made);
+    if (mount(from, "/data/app", NULL, MS_BIND, NULL)) {
+        install_fail("cover", "/data/app");
+        goto done;
+    }
+    for (size_t i = 0; i < count; i++) {
         struct stat st;
         if (snprintf(from, sizeof(from), "/proc/self/fd/%d/%s", oh, names[i]) >= (int) sizeof(from) ||
             snprintf(to, sizeof(to), "/data/app/%s", names[i]) >= (int) sizeof(to)) {
-            rc = -1;
-            break;
+            errno = ENAMETOOLONG;
+            install_fail("name", names[i]);
+            goto done;
         }
         if (stat(from, &st)) continue;  /* dangling or unreadable: nothing to show */
-        if ((S_ISDIR(st.st_mode) ? mkdir(to, 0755) : close(open(to, O_WRONLY | O_CREAT, 0644))) ||
-            mount(from, to, NULL, MS_BIND | MS_REC, NULL)) rc = -1;
+        if (S_ISDIR(st.st_mode) ? mkdir(to, 0755) : close(open(to, O_WRONLY | O_CREAT, 0644))) {
+            install_fail("make", to);
+            goto done;
+        }
+        if (mount(from, to, NULL, MS_BIND | MS_REC, NULL)) {
+            install_fail("bind back", to);
+            goto done;
+        }
     }
-    if (rc == 0 && snprintf(from, sizeof(from), "/proc/self/fd/%d", mine) >= (int) sizeof(from)) rc = -1;
-    if (rc == 0 && (mkdir(parent, 0755) || mkdir(target, 0755) || mount(from, target, NULL, MS_BIND, NULL))) rc = -1;
+    snprintf(from, sizeof(from), "/proc/self/fd/%d", mine);
+    if (mkdir(parent, 0775) || chown(parent, system_app.st_uid, system_app.st_gid) || chmod(parent, 0775)) {
+        install_fail("make", parent);
+        goto done;
+    }
+    if (mkdir(target, 0755)) {
+        install_fail("make", target);
+        goto done;
+    }
+    if (fchown(mine, system_app.st_uid, system_app.st_gid) || fchmod(mine, 0755)) {
+        install_fail("own", source);
+        goto done;
+    }
+    if (mount(from, target, NULL, MS_BIND, NULL)) {
+        install_fail("bind", target);
+        goto done;
+    }
+    rc = 1;
+done:
     if (oh >= 0) close(oh);
     if (mine >= 0) close(mine);
-    return rc < 0 ? -1 : 1;
+    if (made >= 0) close(made);
+    return rc;
 }
 
 // Mount only this candidate's runtime and empty application data in a private
@@ -172,9 +236,7 @@ int main(int argc, char** argv) {
         perror("source application system files"); return 1;
     }
     int install = install_dir(root, (uid_t) uid);
-    if (install < 0) {
-        perror("source application install directory"); return 1;
-    }
+    if (install < 0) return 1;
     fprintf(stderr, "SOURCE_APP_NAMESPACE uid=%lu mount=%lu->%lu runtime=%s icu=%s etc=%s fonts=%s install=%s\n",
             uid, before.st_ino, after.st_ino, root, icu_data, etc ? "merged" : "absent", fonts ? "merged" : "absent",
             install ? getenv("WESTLAKE_ANDROID_APP_DIR") : "staged");
