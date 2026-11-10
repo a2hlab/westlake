@@ -52,14 +52,25 @@ static int caller_is_webview(void *return_address, const char **caller_path)
     return 1;
 }
 
+/* The app's library directory, ASX_NATIVE_LIB_DIR: under /data/local/tmp/asx/lib/ as staged, or
+ * lib/arm64 of an Android install path (/data/app/~~<id>==/<package>-<id>==) when the launcher
+ * stages the app there. */
+static int in_app_library_dir(const char *path)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    size_t length = dir != NULL ? strlen(dir) : 0;
+    return length > 1 && strncmp(path, dir, length) == 0 && path[length] == '/';
+}
+
 /* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
 /*
  * An Android-built (bionic ABI) caller: the WebView, a library the app packages
- * (/data/local/tmp/asx/lib/), or one the app wrote and loads from its own storage
- * (/data/data/<pkg>/..., including the code_cache/wl-exec copies this shim makes of
- * them). WhatsApp's superpack libraries run from those copies; its Breakpad setup
- * passed a 32-byte bionic old-action to OH's sigaction untranslated, musl wrote 152
- * bytes into it, and the clobbered stack crashed the app four seconds in.
+ * (/data/local/tmp/asx/lib/, or its library directory at an install path), or one the
+ * app wrote and loads from its own storage (/data/data/<pkg>/..., including the
+ * code_cache/wl-exec copies this shim makes of them). WhatsApp's superpack libraries run
+ * from those copies; its Breakpad setup passed a 32-byte bionic old-action to OH's
+ * sigaction untranslated, musl wrote 152 bytes into it, and the clobbered stack crashed
+ * the app four seconds in.
  */
 static int caller_is_android_dso(void *return_address, const char **caller_path)
 {
@@ -69,6 +80,7 @@ static int caller_is_android_dso(void *return_address, const char **caller_path)
     }
     if (strstr(caller.dli_fname, "libwebviewchromium.so") == NULL &&
         strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL &&
+        !in_app_library_dir(caller.dli_fname) &&
         strncmp(caller.dli_fname, "/data/data/", 11) != 0 &&
         strncmp(caller.dli_fname, "/data/user/", 11) != 0) {
         return 0;
