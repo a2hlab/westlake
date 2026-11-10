@@ -370,12 +370,39 @@ static int wl_resolve_ifuncs(int fd, unsigned char *data, Elf64_Rela **relocs, s
  * A section 0 that is not null is not itself the fault. Packers commonly leave a minimal table whose
  * section 0 is the symbol section, linked to the string table after it (17 libraries in 8 of 982
  * apps, among them Edge's, iQIYI's and Hang Seng's security libraries and Wizardry's il2cpp): OH's
- * loader follows that, and three of those apps draw. What selects a library for repair is a symbol
- * section not linked to a string table: Baidu's, and an obfuscated libloader.so in two other apps
- * whose symbol section is linked to the hash table, both of which crash on the main thread at start.
+ * loader follows that, and three of those apps draw. What selects a library for repair is section
+ * headers that would send OH's loader somewhere other than the dynamic section does: a symbol section
+ * not linked to a string table (Baidu's, and an obfuscated libloader.so in two other apps whose symbol
+ * section is linked to the hash table); a symbol section, or its string table, at another address
+ * than DT_SYMTAB or DT_STRTAB; or a section reaching past the end of the file. Alibaba's SecurityGuard
+ * libraries (libsgmainso and its companions, in Taobao, Alipay HK, 1688, Youku, UC Browser and a
+ * game) have all three of the last two, and DexHelper's (Futu) the address mismatch: each of those
+ * apps faulted in the loader the way Haochang did, strlen of a DT_NEEDED name off an unset table.
  */
 
-/* Whether a dynamic symbol section is not linked to a string table as OH's loader expects. */
+/* DT_SYMTAB and DT_STRTAB, 0 where the dynamic section is missing or does not name them. */
+static void wl_dynamic_tables(const unsigned char *data, size_t size, uint64_t *symtab, uint64_t *strtab)
+{
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
+    *symtab = *strtab = 0;
+    if (eh->e_phentsize != sizeof(Elf64_Phdr) || eh->e_phoff > size ||
+        (uint64_t) eh->e_phnum * sizeof(Elf64_Phdr) > size - eh->e_phoff) {
+        return;
+    }
+    const Elf64_Phdr *ph = (const Elf64_Phdr *) (data + eh->e_phoff);
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type != PT_DYNAMIC || ph[i].p_offset > size || ph[i].p_filesz > size - ph[i].p_offset) continue;
+        const Elf64_Dyn *dyn = (const Elf64_Dyn *) (data + ph[i].p_offset);
+        for (size_t k = 0; k < ph[i].p_filesz / sizeof(Elf64_Dyn) && dyn[k].d_tag != DT_NULL; ++k) {
+            if (dyn[k].d_tag == DT_SYMTAB) *symtab = dyn[k].d_un.d_ptr;
+            if (dyn[k].d_tag == DT_STRTAB) *strtab = dyn[k].d_un.d_ptr;
+        }
+    }
+}
+
+/* Whether the section headers would send OH's loader somewhere other than the dynamic section does: a
+ * dynamic symbol section not linked to a string table, one (or its string table) at another address
+ * than DT_SYMTAB (DT_STRTAB), or a section reaching past the end of the file. */
 static int wl_bad_section_headers(const unsigned char *data, size_t size)
 {
     const Elf64_Ehdr *eh = (const Elf64_Ehdr *) data;
@@ -384,11 +411,20 @@ static int wl_bad_section_headers(const unsigned char *data, size_t size)
         eh->e_shoff == 0 || eh->e_shoff + (uint64_t) eh->e_shnum * sizeof(Elf64_Shdr) > size) {
         return 0;
     }
+    uint64_t symtab, strtab;
+    wl_dynamic_tables(data, size, &symtab, &strtab);
     const Elf64_Shdr *sh = (const Elf64_Shdr *) (data + eh->e_shoff);
     for (int i = 0; i < eh->e_shnum; ++i) {
+        if (sh[i].sh_type != SHT_NULL && sh[i].sh_type != SHT_NOBITS &&
+            (sh[i].sh_offset > size || sh[i].sh_size > size - sh[i].sh_offset)) {
+            return 1;
+        }
         if (sh[i].sh_type != SHT_DYNSYM) continue;
         if (sh[i].sh_link >= eh->e_shnum || sh[sh[i].sh_link].sh_type != SHT_STRTAB ||
             sh[i].sh_entsize != sizeof(Elf64_Sym)) {
+            return 1;
+        }
+        if ((symtab != 0 && sh[i].sh_addr != symtab) || (strtab != 0 && sh[sh[i].sh_link].sh_addr != strtab)) {
             return 1;
         }
     }
@@ -451,7 +487,13 @@ static void wl_repair_section_headers(unsigned char *data, size_t size)
     uint64_t str_at = strtab != 0 ? wl_file_offset(data, size, strtab) : 0;
     if (sym_at == 0 || str_at == 0 || symbols == 0 || str_at + strsz > size) return;
     Elf64_Shdr *sh = (Elf64_Shdr *) (data + eh->e_shoff);
-    int names = eh->e_shstrndx < eh->e_shnum ? eh->e_shstrndx : -1;
+    int names = eh->e_shstrndx > 0 && eh->e_shstrndx < eh->e_shnum ? eh->e_shstrndx : -1;
+    /* A section-name table is kept only as a string table inside the file: loading needs no names, and
+     * OH's loader is not to read past the end of the file. */
+    if (names > 0 && (sh[names].sh_type != SHT_STRTAB || sh[names].sh_offset > size ||
+                      sh[names].sh_size > size - sh[names].sh_offset)) {
+        names = -1;
+    }
     int sym_slot = -1, str_slot = -1;
     for (int i = 1; i < eh->e_shnum; ++i) {
         if (i == names) continue;
