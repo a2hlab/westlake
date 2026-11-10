@@ -644,6 +644,7 @@ int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
 int wl_register_image_reader(JNIEnv* env);
+int wl_register_native_activity(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
 {
@@ -1584,6 +1585,11 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
                  at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, ir, cl, more);
+        note(line);
+    }
+    {
+        char line[96];
+        snprintf(line, sizeof(line), "[WL-NATIVES] bound NativeActivity+InputQueue=%d/22\n", wl_register_native_activity(env));
         note(line);
     }
     wl_register_media(env, vm);
