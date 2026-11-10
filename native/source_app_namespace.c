@@ -147,8 +147,8 @@ static int install_dir(const char* root, uid_t uid) {
         install_fail("open", cover);
         goto done;
     }
-    // As Android leaves them: /data/app as OH has it (system, 0771: an app may pass through it but
-    // not list it), the install's parent system-owned 0775 and the install directory 0755.
+    // As Android 15 leaves them: /data/app as OH has it (system, 0771: an app may pass through it
+    // but not list it), the install's parent system-owned 0771 and the install directory 0775.
     struct stat system_app;
     if (fstat(oh, &system_app) || fchown(made, system_app.st_uid, system_app.st_gid) ||
         fchmod(made, system_app.st_mode & 07777)) {
@@ -179,7 +179,7 @@ static int install_dir(const char* root, uid_t uid) {
         }
     }
     snprintf(from, sizeof(from), "/proc/self/fd/%d", mine);
-    if (mkdir(parent, 0775) || chown(parent, system_app.st_uid, system_app.st_gid) || chmod(parent, 0775)) {
+    if (mkdir(parent, 0771) || chown(parent, system_app.st_uid, system_app.st_gid) || chmod(parent, 0771)) {
         install_fail("make", parent);
         goto done;
     }
@@ -187,7 +187,7 @@ static int install_dir(const char* root, uid_t uid) {
         install_fail("make", target);
         goto done;
     }
-    if (fchown(mine, system_app.st_uid, system_app.st_gid) || fchmod(mine, 0755)) {
+    if (fchown(mine, system_app.st_uid, system_app.st_gid) || fchmod(mine, 0775)) {
         install_fail("own", source);
         goto done;
     }
