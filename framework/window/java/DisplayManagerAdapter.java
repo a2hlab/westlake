@@ -121,7 +121,33 @@ public final class DisplayManagerAdapter extends IDisplayManager.Stub {
             System.err.println("[" + TAG + "] getDisplayInfo(" + displayId + ") → null (only id 0 supported)");
             return null;
         }
+        synchronized (sDisplayInfoLock) {
+            if (sDisplayInfo != null && System.nanoTime() - sDisplayInfoAt < DISPLAY_INFO_FRESH_NANOS) {
+                return new DisplayInfo(sDisplayInfo);
+            }
+        }
+        DisplayInfo info = queryDisplayInfo();
+        synchronized (sDisplayInfoLock) {
+            sDisplayInfo = new DisplayInfo(info);
+            sDisplayInfoAt = System.nanoTime();
+        }
+        return info;
+    }
 
+    /*
+     * The last answer, reused for 100 ms. Each answer takes some fourteen queries of OH's display
+     * manager, and Android's own cache in front of this service (DisplayManagerGlobal's
+     * PropertyInvalidatedCache, which system_server enables by setting cache_key.display_info) never
+     * engages here, so every Display.getRotation() or size read made all of them: Gallerie's main
+     * thread spent half a minute of CPU in them and never drew. OH sends no display events to this
+     * process, so a changed display (a rotation) is seen at most 100 ms late.
+     */
+    private static final long DISPLAY_INFO_FRESH_NANOS = 100_000_000L;
+    private static final Object sDisplayInfoLock = new Object();
+    private static DisplayInfo sDisplayInfo;
+    private static long sDisplayInfoAt;
+
+    private DisplayInfo queryDisplayInfo() {
         DisplayInfo info = new DisplayInfo();
         try {
             int width   = nativeGetDefaultDisplayWidth();
