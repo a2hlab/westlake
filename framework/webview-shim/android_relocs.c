@@ -950,7 +950,7 @@ __attribute__((visibility("hidden"))) int wl_apk_member_for(const char *staged, 
     char *list = malloc(list_length);
     if (list == NULL) return 0;
     snprintf(list, list_length, "%s:%s", base != NULL ? base : "", splits != NULL ? splits : "");
-    int found = 0;
+    int found = 0, explained = 0;
     for (char *apk = list, *next; apk != NULL && !found; apk = next) {
         next = strchr(apk, ':');
         if (next != NULL) *next++ = '\0';
@@ -971,10 +971,14 @@ __attribute__((visibility("hidden"))) int wl_apk_member_for(const char *staged, 
         }
         if (why != NULL) {
             wl_relocs_log("[WESTLAKE-LOADER] %s: kept the extracted copy: %s (%s)\n", staged, why, apk);
+            explained = 1;
             continue;
         }
         found = snprintf(member, size, "%s!/%s", apk, entry) < (int) size;
     }
     free(list);
+    if (!found && !explained) {
+        wl_relocs_log("[WESTLAKE-LOADER] %s: kept the extracted copy: no APK member %s\n", staged, entry);
+    }
     return found;
 }

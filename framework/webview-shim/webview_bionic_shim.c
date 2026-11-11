@@ -2042,6 +2042,18 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
         actual_filename = staged;
         basename = strrchr(staged, '/') + 1;
     }
+    /* A library Android would map straight from its APK (android_relocs.c, wl_apk_member_for). An app's
+     * first libraries load here, before ART's namespace for them exists (PairIP's libpairipcore.so). */
+    char member[1024];
+    if (actual_filename != NULL && actual_filename[0] == '/' && !(flags & RTLD_NOLOAD) &&
+        in_app_library_dir(actual_filename) && wl_apk_member_for(actual_filename, member, sizeof(member))) {
+        void *mapped = real_dlopen(member, flags);
+        const char *error = mapped == NULL ? dlerror() : NULL;
+        wl_relocs_log("[WESTLAKE-LOADER] %s: %s from its APK, %s%s%s\n", actual_filename,
+                      mapped != NULL ? "mapped" : "not mapped", member, error != NULL ? ": " : "",
+                      error != NULL ? error : "");
+        if (mapped != NULL) return mapped;
+    }
     /*
      * OpenSL ES through dlopen. Oboe (Rhythm Engine) does not link libOpenSLES: it dlopens it and
      * looks up slCreateEngine and the SL_IID_* by handle, which reaches OH's library directly and
