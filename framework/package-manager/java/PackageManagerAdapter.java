@@ -246,7 +246,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public String[] getAppOpPermissionPackages(String permissionName, int userId) {
-        return null;
+        return new String[0]; // none, as Android answers; PackageManager passes it to the caller as is
     }
 
     @Override
@@ -281,9 +281,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         return null;
     }
 
+    /**
+     * None: Westlake's framework isn't made of mainline modules. Empty, as Android answers a device
+     * without them; ApplicationPackageManager hands this list to the app as it comes, and the Play
+     * Store streams it while it starts (a null one ended its process).
+     */
     @Override
     public List<ModuleInfo> getInstalledModules(int flags) {
-        return null;
+        return new java.util.ArrayList<>();
     }
 
     @Override

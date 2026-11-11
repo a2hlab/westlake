@@ -556,6 +556,10 @@ public final class PlayServicesChannel {
     /** getContentProvider for an authority in the other process, or null. */
     public static ContentProviderHolder provider(String authority) {
         if (isHost() && LocalGservices.AUTHORITY.equals(authority)) return LocalGservices.holder();
+        if (serves()) {
+            ContentProviderHolder own = ownProvider(authority);
+            if (own != null) return own;
+        }
         if (!isClient() || authority == null) return null;
         ProviderInfo info = RemotePackages.resolveProvider(authority, PackageManager.GET_META_DATA);
         if (info == null) return null;
@@ -650,6 +654,36 @@ public final class PlayServicesChannel {
     /** Whether this process is the shared Play services process. */
     public static boolean isHost() {
         return System.getenv(SERVE) != null;
+    }
+
+    /** Whether this process serves apps: the Play services process, or the Play Store's. */
+    private static boolean serves() {
+        return System.getenv(SERVE) != null || System.getenv(STORE_SERVE) != null;
+    }
+
+    /**
+     * A provider of this host's own package that Android runs in another of the package's processes
+     * (Play services' :persistent GmsModuleProvider, through which every client of Play services maps
+     * an action to its component): those processes run in this one (ADR-0001), so it is made here when
+     * first asked for, as the activity manager would start its process. The bind installs only the
+     * providers of the main process, so the lookup failed in this process and for every client.
+     */
+    private static ContentProviderHolder ownProvider(String authority) {
+        Application app = application();
+        if (app == null || authority == null) return null;
+        for (ProviderInfo info : adapter.packagemanager.PackageManagerAdapter.getProvidersForPackage(app.getPackageName())) {
+            if (info == null || info.authority == null) continue;
+            for (String declared : info.authority.split(";")) {
+                if (!authority.equals(declared.trim())) continue;
+                ContentProviderHolder holder = new ContentProviderHolder(info);
+                holder.mLocal = true;
+                holder.noReleaseNeeded = true;
+                System.err.println(TAG + "provider " + authority + " -> " + info.name + " made in this process (declared for "
+                        + info.processName + ")");
+                return holder;
+            }
+        }
+        return null;
     }
 
     private static final java.util.Map<String, IBinder> sClientCallbacks = new java.util.concurrent.ConcurrentHashMap<>();
