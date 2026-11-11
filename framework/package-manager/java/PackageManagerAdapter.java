@@ -1235,10 +1235,18 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      */
     private static final int VULKAN_API_VERSION = (1 << 22) | (2 << 12);  // VK_MAKE_API_VERSION(0, 1, 2, 0)
 
-    /** Every claimed feature and its version, for hasSystemFeature and getSystemAvailableFeatures. */
+    /**
+     * Every claimed feature and its version, for hasSystemFeature and getSystemAvailableFeatures. Each is
+     * backed by a working service. faketouch comes with the touchscreen, as Android's touchscreen.xml
+     * declares both. The microphone is AudioRecord over OH's audio capturer (the host holds OH's microphone
+     * permission). Google Play filters apps against this list, implied features included: faketouch for
+     * every app, and the microphone for any app requesting RECORD_AUDIO.
+     */
     private static final java.util.Map<String, Integer> CLAIMED_FEATURES = new java.util.LinkedHashMap<>();
     static {
         CLAIMED_FEATURES.put("android.hardware.touchscreen", 0);
+        CLAIMED_FEATURES.put("android.hardware.faketouch", 0);
+        CLAIMED_FEATURES.put("android.hardware.microphone", 0);
         CLAIMED_FEATURES.put("android.hardware.wifi", 0);
         CLAIMED_FEATURES.put("android.hardware.screen.portrait", 0);
         CLAIMED_FEATURES.put("android.hardware.screen.landscape", 0);
