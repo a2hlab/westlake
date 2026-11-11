@@ -1,0 +1,18 @@
+Add ReferenceAndSample records as braced aggregates.
+
+ReferenceAndSample is an aggregate; vector::emplace_back(ref, value) constructs it through C++20's
+parenthesized aggregate initialization (P0960), which Chromium's clang 16 predates (see 0001).
+push_back({ref, value}) builds the same record with the same members.
+
+--- a/base/metrics/persistent_histogram_allocator.cc
++++ b/base/metrics/persistent_histogram_allocator.cc
+@@ -220,3 +220,3 @@
+     if (found_id == match_id) {
+-      found_records.emplace_back(ref, value);
++      found_records.push_back({ref, value});
+       found = true;
+@@ -226,3 +226,3 @@
+       CHECK(samples);
+-      samples->emplace_back(ref, value);
++      samples->push_back({ref, value});
+     }

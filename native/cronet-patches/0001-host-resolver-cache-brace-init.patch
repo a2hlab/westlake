@@ -1,0 +1,13 @@
+Construct HostResolverCache::Key with braces.
+
+Key is an aggregate (no constructor). Key(a, b) is C++20's parenthesized aggregate initialization (P0960),
+which the clang Westlake builds Cronet with (Chromium's clang 16 from the 109 toolchain) predates; AOSP built
+this tree with clang 18. Key{a, b} initializes the same members in the same order, with no narrowing here.
+
+--- a/net/dns/host_resolver_cache.cc
++++ b/net/dns/host_resolver_cache.cc
+@@ -369,3 +369,3 @@
+   entries_.emplace(
+-      Key(std::move(domain_name), network_anonymization_key),
++      Key{std::move(domain_name), network_anonymization_key},
+       Entry(std::move(result), source, secure, staleness_generation));
