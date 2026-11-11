@@ -39,12 +39,18 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Connects apps to one shared Play services process over SocketBinder (ADR-0001).
+ * Connects apps to the shared Play services process, and to the Play Store's, over SocketBinder
+ * (ADR-0001).
  *
  * The Play services process serves when WESTLAKE_PLAY_SERVICES_SERVE names a socket; an app connects
  * when WESTLAKE_PLAY_SERVICES_CONNECT does. An app then asks the other process about Play services'
  * packages, binds and starts its services and acquires its content providers. What comes back are
  * real binders, so client libraries talk to Play services directly from there on.
+ *
+ * The Play Store runs as a second host, as GrapheneOS runs it beside Play services: it serves when
+ * WESTLAKE_PLAY_STORE_SERVE names a socket, and is itself a client of the Play services process (its
+ * account manager, Gservices and check-in are there). An app with WESTLAKE_PLAY_STORE_CONNECT reaches
+ * the Play Store's package there and everything else in the Play services process.
  *
  * Each app says which package it is, and nothing checks that. All Westlake processes share one uid,
  * the kernel reports only a pid, and OH's hidepid hides one app's /proc entries from another, so the
@@ -54,6 +60,9 @@ import java.util.concurrent.TimeUnit;
 public final class PlayServicesChannel {
     private static final String SERVE = "WESTLAKE_PLAY_SERVICES_SERVE";
     private static final String CONNECT = "WESTLAKE_PLAY_SERVICES_CONNECT";
+    private static final String STORE_SERVE = "WESTLAKE_PLAY_STORE_SERVE";
+    private static final String STORE_CONNECT = "WESTLAKE_PLAY_STORE_CONNECT";
+    private static final String PLAY_STORE = "com.android.vending";
     private static final String RUNTIME_ROOT = "WESTLAKE_RUNTIME_ROOT";
     private static final String REAL_ROOT = "WESTLAKE_RUNTIME_REAL_ROOT";
     private static final String TAG = "[WL-PLAY] ";
@@ -72,6 +81,8 @@ public final class PlayServicesChannel {
     private static final int PROVIDER = 10;
     private static final int STOP = 11;
     private static final int WHO_AM_I = 12;
+    /** A system service the Play services process keeps, for a client that is a host too (the account manager). */
+    private static final int SERVICE = 13;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -96,62 +107,113 @@ public final class PlayServicesChannel {
     // ---- App side ----
 
     private static final Object CLIENT_LOCK = new Object();
-    /** Held here, since the channel only holds what it has been sent while the peer does. */
+    /** Held here, since a channel only holds what it has been sent while the peer does. */
     private static final Binder sCallback = new ClientCallback();
-    private static SocketBinder sChannel;
     private static final Set<String> sAbsent = Collections.synchronizedSet(new HashSet<>());
     private static final Set<String> sPresent = Collections.synchronizedSet(new HashSet<>());
-    private static volatile String sRemoteRoot;
-    private static volatile String sRemoteRealRoot;
+
+    /** The connection to one host: the Play services process, or the Play Store's. */
+    private static final class Channel {
+        final String env;
+        final String label;
+        /** Guarded by CLIENT_LOCK. */
+        SocketBinder binder;
+        volatile String remoteRoot;
+        volatile String remoteRealRoot;
+
+        Channel(String env, String label) {
+            this.env = env;
+            this.label = label;
+        }
+
+        String socket() {
+            return System.getenv(env);
+        }
+    }
+
+    private static final Channel SERVICES = new Channel(CONNECT, "play-services");
+    private static final Channel STORE = new Channel(STORE_CONNECT, "play-store");
+
+    /** The hosts this process is a client of, the Play services process first. */
+    private static List<Channel> channels() {
+        List<Channel> found = new ArrayList<>(2);
+        if (SERVICES.socket() != null) found.add(SERVICES);
+        if (STORE.socket() != null) found.add(STORE);
+        return found;
+    }
+
+    /**
+     * The host a package's components run in: the Play Store's own process when there is one, as on
+     * Android, where the Play Store is an app of its own; the Play services process otherwise, which
+     * knows the Play Store as package details (and runs Companion's stand-ins for some of it).
+     */
+    private static Channel channelFor(String packageName) {
+        return PLAY_STORE.equals(packageName) && STORE.socket() != null ? STORE : SERVICES;
+    }
+
+    /** The host for a service intent: by its package or component, else by what it resolves to. */
+    private static Channel channelFor(Intent intent) {
+        String target = targetPackage(intent);
+        if (target == null) {
+            List<ResolveInfo> found = RemotePackages.queryServices(intent, null, 0);
+            if (!found.isEmpty() && found.get(0).serviceInfo != null) target = found.get(0).serviceInfo.packageName;
+        }
+        return channelFor(target);
+    }
+
+    /** This process's own package: a host that is also a client never asks another process about it. */
+    private static String ownPackage() {
+        return adapter.packagemanager.SourcePackageRegistry.packageForUid(Process.myUid());
+    }
 
     /**
      * The other process's files, as this one must name them. Each process sees its own runtime at
      * the same logical path, so a path in the other's ApplicationInfo would name this process's own
      * files. Client libraries load code from Play services' APK through it (DynamiteModule).
      */
-    private static String localPath(String path) {
-        String root = sRemoteRoot;
-        String real = sRemoteRealRoot;
+    private static String localPath(Channel channel, String path) {
+        String root = channel.remoteRoot;
+        String real = channel.remoteRealRoot;
         if (path == null || root == null || real == null || !path.startsWith(root + "/")) return path;
         return real + path.substring(root.length());
     }
 
-    private static ApplicationInfo localize(ApplicationInfo info) {
+    private static ApplicationInfo localize(Channel c, ApplicationInfo info) {
         if (info == null) return null;
-        info.sourceDir = localPath(info.sourceDir);
-        info.publicSourceDir = localPath(info.publicSourceDir);
-        info.nativeLibraryDir = localPath(info.nativeLibraryDir);
-        info.nativeLibraryRootDir = localPath(info.nativeLibraryRootDir);
-        info.secondaryNativeLibraryDir = localPath(info.secondaryNativeLibraryDir);
-        info.scanSourceDir = localPath(info.scanSourceDir);
-        info.scanPublicSourceDir = localPath(info.scanPublicSourceDir);
+        info.sourceDir = localPath(c, info.sourceDir);
+        info.publicSourceDir = localPath(c, info.publicSourceDir);
+        info.nativeLibraryDir = localPath(c, info.nativeLibraryDir);
+        info.nativeLibraryRootDir = localPath(c, info.nativeLibraryRootDir);
+        info.secondaryNativeLibraryDir = localPath(c, info.secondaryNativeLibraryDir);
+        info.scanSourceDir = localPath(c, info.scanSourceDir);
+        info.scanPublicSourceDir = localPath(c, info.scanPublicSourceDir);
         if (info.splitSourceDirs != null) {
-            for (int i = 0; i < info.splitSourceDirs.length; i++) info.splitSourceDirs[i] = localPath(info.splitSourceDirs[i]);
+            for (int i = 0; i < info.splitSourceDirs.length; i++) info.splitSourceDirs[i] = localPath(c, info.splitSourceDirs[i]);
         }
         if (info.splitPublicSourceDirs != null) {
-            for (int i = 0; i < info.splitPublicSourceDirs.length; i++) info.splitPublicSourceDirs[i] = localPath(info.splitPublicSourceDirs[i]);
+            for (int i = 0; i < info.splitPublicSourceDirs.length; i++) info.splitPublicSourceDirs[i] = localPath(c, info.splitPublicSourceDirs[i]);
         }
         return info;
     }
 
-    private static PackageInfo localize(PackageInfo info) {
-        if (info != null) localize(info.applicationInfo);
+    private static PackageInfo localize(Channel c, PackageInfo info) {
+        if (info != null) localize(c, info.applicationInfo);
         return info;
     }
 
-    private static ServiceInfo localize(ServiceInfo info) {
-        if (info != null) localize(info.applicationInfo);
+    private static ServiceInfo localize(Channel c, ServiceInfo info) {
+        if (info != null) localize(c, info.applicationInfo);
         return info;
     }
 
-    private static ProviderInfo localize(ProviderInfo info) {
-        if (info != null) localize(info.applicationInfo);
+    private static ProviderInfo localize(Channel c, ProviderInfo info) {
+        if (info != null) localize(c, info.applicationInfo);
         return info;
     }
 
-    /** Whether this process is an app connected to a Play services process. */
+    /** Whether this process is connected to a Play services or Play Store host. */
     public static boolean isClient() {
-        return System.getenv(CONNECT) != null;
+        return System.getenv(CONNECT) != null || System.getenv(STORE_CONNECT) != null;
     }
 
     /** Makes Play services' packages visible to this process, if it is a client. */
@@ -178,7 +240,7 @@ public final class PlayServicesChannel {
             } catch (ReflectiveOperationException e) {
                 System.err.println(TAG + "CHECK client library not callable by name: " + e);
             }
-            IBinder root = root();
+            IBinder root = root(SERVICES);
             if (root == null) return;
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
@@ -195,17 +257,17 @@ public final class PlayServicesChannel {
         }
     }
 
-    /** The other process's root binder, connecting if there is no live channel. Null if unreachable. */
-    private static IBinder root() {
-        String name = System.getenv(CONNECT);
+    /** A host's root binder, connecting if there is no live channel. Null if unreachable. */
+    private static IBinder root(Channel c) {
+        String name = c.socket();
         if (name == null) return null;
         synchronized (CLIENT_LOCK) {
-            if (sChannel != null && sChannel.isAlive()) return sChannel.getRemoteRoot();
+            if (c.binder != null && c.binder.isAlive()) return c.binder.getRemoteRoot();
             try {
-                SocketBinder channel = new SocketBinder(SocketBinder.connect(name), null, "play-services");
+                SocketBinder channel = new SocketBinder(SocketBinder.connect(name), null, c.label);
                 IBinder root = channel.getRemoteRoot();
-                hello(root);
-                sChannel = channel;
+                hello(c, root);
+                c.binder = channel;
                 System.err.println(TAG + "connected to " + name);
                 return root;
             } catch (IOException | RemoteException | RuntimeException e) {
@@ -215,7 +277,7 @@ public final class PlayServicesChannel {
         }
     }
 
-    private static void hello(IBinder root) throws RemoteException {
+    private static void hello(Channel c, IBinder root) throws RemoteException {
         String packageName = adapter.packagemanager.SourcePackageRegistry.packageForUid(Process.myUid());
         PackageInfo own;
         try {
@@ -232,16 +294,16 @@ public final class PlayServicesChannel {
             data.writeStrongBinder(sCallback);
             root.transact(HELLO, data, reply, 0);
             reply.readException();
-            sRemoteRoot = reply.readString();
-            sRemoteRealRoot = reply.readString();
+            c.remoteRoot = reply.readString();
+            c.remoteRealRoot = reply.readString();
         } finally {
             data.recycle();
             reply.recycle();
         }
     }
 
-    private static <T extends Parcelable> T callForObject(int code, Parcelable.Creator<T> creator, Marshal args) {
-        IBinder root = root();
+    private static <T extends Parcelable> T callForObject(Channel c, int code, Parcelable.Creator<T> creator, Marshal args) {
+        IBinder root = root(c);
         if (root == null) return null;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -290,8 +352,10 @@ public final class PlayServicesChannel {
         @Override
         public boolean owns(String packageName) {
             if (!PLAY_PACKAGES.contains(packageName) || sAbsent.contains(packageName)) return false;
+            // A host that is also a client (the Play Store's) runs its own package itself.
+            if (packageName.equals(ownPackage())) return false;
             if (sPresent.contains(packageName)) return true;
-            IBinder root = root();
+            IBinder root = root(channelFor(packageName));
             if (root == null) return false; // Not remembered: the other process may come back.
             if (packageInfo(packageName, 0) != null) {
                 sPresent.add(packageName);
@@ -303,7 +367,8 @@ public final class PlayServicesChannel {
 
         @Override
         public PackageInfo packageInfo(String packageName, long flags) {
-            return localize(callForObject(PACKAGE_INFO, PackageInfo.CREATOR, data -> {
+            Channel c = channelFor(packageName);
+            return localize(c, callForObject(c, PACKAGE_INFO, PackageInfo.CREATOR, data -> {
                 data.writeString(packageName);
                 data.writeLong(flags);
             }));
@@ -311,7 +376,8 @@ public final class PlayServicesChannel {
 
         @Override
         public ApplicationInfo applicationInfo(String packageName, long flags) {
-            return localize(callForObject(APPLICATION_INFO, ApplicationInfo.CREATOR, data -> {
+            Channel c = channelFor(packageName);
+            return localize(c, callForObject(c, APPLICATION_INFO, ApplicationInfo.CREATOR, data -> {
                 data.writeString(packageName);
                 data.writeLong(flags);
             }));
@@ -319,7 +385,8 @@ public final class PlayServicesChannel {
 
         @Override
         public ServiceInfo serviceInfo(ComponentName component, long flags) {
-            return localize(callForObject(SERVICE_INFO, ServiceInfo.CREATOR, data -> {
+            Channel c = channelFor(component == null ? null : component.getPackageName());
+            return localize(c, callForObject(c, SERVICE_INFO, ServiceInfo.CREATOR, data -> {
                 data.writeTypedObject(component, 0);
                 data.writeLong(flags);
             }));
@@ -327,7 +394,8 @@ public final class PlayServicesChannel {
 
         @Override
         public ProviderInfo providerInfo(ComponentName component, long flags) {
-            return localize(callForObject(PROVIDER_INFO, ProviderInfo.CREATOR, data -> {
+            Channel c = channelFor(component == null ? null : component.getPackageName());
+            return localize(c, callForObject(c, PROVIDER_INFO, ProviderInfo.CREATOR, data -> {
                 data.writeTypedObject(component, 0);
                 data.writeLong(flags);
             }));
@@ -335,15 +403,36 @@ public final class PlayServicesChannel {
 
         @Override
         public ProviderInfo resolveProvider(String authority, long flags) {
-            return localize(callForObject(RESOLVE_PROVIDER, ProviderInfo.CREATOR, data -> {
-                data.writeString(authority);
-                data.writeLong(flags);
-            }));
+            for (Channel c : channels()) {
+                ProviderInfo info = localize(c, callForObject(c, RESOLVE_PROVIDER, ProviderInfo.CREATOR, data -> {
+                    data.writeString(authority);
+                    data.writeLong(flags);
+                }));
+                if (info != null) return info;
+            }
+            return null;
         }
 
+        /**
+         * By its package when the intent names one; otherwise every host's answers, each keeping only
+         * the packages that run there (the Play services process still lists Companion's stand-ins for
+         * the Play Store's services, which the Play Store's own process answers once it runs).
+         */
         @Override
         public List<ResolveInfo> queryServices(Intent intent, String type, long flags) {
-            IBinder root = root();
+            String target = targetPackage(intent);
+            if (target != null) return query(channelFor(target), intent, type, flags);
+            List<ResolveInfo> found = new ArrayList<>();
+            for (Channel c : channels()) {
+                for (ResolveInfo item : query(c, intent, type, flags)) {
+                    if (item.serviceInfo != null && channelFor(item.serviceInfo.packageName) == c) found.add(item);
+                }
+            }
+            return found;
+        }
+
+        private List<ResolveInfo> query(Channel c, Intent intent, String type, long flags) {
+            IBinder root = root(c);
             if (root == null) return Collections.emptyList();
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
@@ -355,7 +444,7 @@ public final class PlayServicesChannel {
                 reply.readException();
                 List<ResolveInfo> found = reply.createTypedArrayList(ResolveInfo.CREATOR);
                 if (found == null) return Collections.emptyList();
-                for (ResolveInfo item : found) localize(item.serviceInfo);
+                for (ResolveInfo item : found) localize(c, item.serviceInfo);
                 return found;
             } catch (RemoteException | RuntimeException e) {
                 System.err.println(TAG + "query failed: " + e);
@@ -390,14 +479,16 @@ public final class PlayServicesChannel {
         }
         ServiceInfo info = found.get(0).serviceInfo;
         final ComponentName component = new ComponentName(info.packageName, info.name);
-        Thread thread = new Thread(() -> connect(intent, flags, component, connection), "play-services-bind");
+        final Channel channel = channelFor(info.packageName);
+        Thread thread = new Thread(() -> connect(channel, intent, flags, component, connection), "play-services-bind");
         thread.setDaemon(true);
         thread.start();
         return 1;
     }
 
-    private static void connect(Intent intent, int flags, ComponentName component, IServiceConnection connection) {
-        IBinder root = root();
+    private static void connect(Channel channel, Intent intent, int flags, ComponentName component,
+            IServiceConnection connection) {
+        IBinder root = root(channel);
         if (root == null) return;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -438,11 +529,11 @@ public final class PlayServicesChannel {
 
     /** startService of a service in the other process. Answers the component, or null if none. */
     public static ComponentName start(Intent intent) {
-        return callForObject(START, ComponentName.CREATOR, data -> data.writeTypedObject(intent, 0));
+        return callForObject(channelFor(intent), START, ComponentName.CREATOR, data -> data.writeTypedObject(intent, 0));
     }
 
     public static boolean stop(Intent intent) {
-        IBinder root = root();
+        IBinder root = root(channelFor(intent));
         if (root == null) return false;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -465,7 +556,7 @@ public final class PlayServicesChannel {
         if (!isClient() || authority == null) return null;
         ProviderInfo info = RemotePackages.resolveProvider(authority, PackageManager.GET_META_DATA);
         if (info == null) return null;
-        IBinder root = root();
+        IBinder root = root(channelFor(info.packageName));
         if (root == null) return null;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -489,7 +580,33 @@ public final class PlayServicesChannel {
         }
     }
 
-    // ---- Play services side ----
+    /**
+     * A system service of the Play services process, for a client that is a host too: the Play Store's
+     * account manager is the one there (LocalServiceBinders asks for it by name). Null if unreachable.
+     */
+    public static IBinder remoteService(String name) {
+        IBinder root = root(SERVICES);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeString(name);
+            root.transact(SERVICE, data, reply, 0);
+            reply.readException();
+            IBinder service = reply.readStrongBinder();
+            System.err.println(TAG + "service " + name + " from the Play services process: "
+                    + (service != null ? "connected" : "refused"));
+            return service;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "service " + name + " failed: " + e);
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    // ---- Host side ----
 
     /** Whether this process is the shared Play services process. */
     public static boolean isHost() {
@@ -630,9 +747,9 @@ public final class PlayServicesChannel {
         }
     }
 
-    /** Starts serving if this process was asked to. Call once the Application exists. */
+    /** Starts serving if this process was asked to (Play services, or the Play Store). Call once the Application exists. */
     public static void startHostIfAsked() {
-        final String name = System.getenv(SERVE);
+        final String name = System.getenv(SERVE) != null ? System.getenv(SERVE) : System.getenv(STORE_SERVE);
         if (name == null) return;
         SocketBinder.installCallingIdentity();
         announceBoot();
@@ -718,7 +835,14 @@ public final class PlayServicesChannel {
                 }
                 case RESOLVE_PROVIDER: {
                     String authority = data.readString();
-                    ProviderInfo info = packages.resolveContentProvider(authority, data.readLong(), user);
+                    long providerFlags = data.readLong();
+                    // Services Framework's settings table, which this process keeps (LocalGservices).
+                    if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
+                        ContentProviderHolder holder = LocalGservices.holder();
+                        reply.writeTypedObject(holder != null ? holder.info : null, 0);
+                        return true;
+                    }
+                    ProviderInfo info = packages.resolveContentProvider(authority, providerFlags, user);
                     reply.writeTypedObject(info != null && runsHere(info.packageName) ? info : null, 0);
                     return true;
                 }
@@ -757,6 +881,10 @@ public final class PlayServicesChannel {
                     reply.writeString(describeCaller());
                     return true;
                 }
+                case SERVICE: {
+                    reply.writeStrongBinder(hostService(data.readString()));
+                    return true;
+                }
                 default:
                     throw new IllegalArgumentException("unknown call " + code);
             }
@@ -779,6 +907,23 @@ public final class PlayServicesChannel {
             mIdentified = true;
             System.err.println(TAG + "client " + claimed + " pid=" + mPeerPid + " uid=" + uid);
         }
+    }
+
+    /**
+     * A system service this process keeps, for a client that is a host too: the account manager, for
+     * the Play Store's process only. Other apps keep the plain answers, as an app without visibility of
+     * Google accounts sees on Android, and the account's secrets stay behind the same-certificate check
+     * (LocalAccounts) whoever holds the binder. Each channel's package is what the client says it is,
+     * so this protects nothing until appspawn-x creates the channels (ADR-0001).
+     */
+    private static IBinder hostService(String name) {
+        if (!isHost() || !"account".equals(name)) return null;
+        String[] callers = application().getPackageManager().getPackagesForUid(Binder.getCallingUid());
+        if (callers == null || !Arrays.asList(callers).contains(PLAY_STORE)) {
+            System.err.println(TAG + "service " + name + " refused to uid " + Binder.getCallingUid());
+            return null;
+        }
+        return android.os.ServiceManager.getService(name);
     }
 
     /** The calling app as the APIs Play services uses describe it. */
@@ -889,6 +1034,10 @@ public final class PlayServicesChannel {
     }
 
     private static IBinder localProvider(String authority) throws RemoteException {
+        if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
+            ContentProviderHolder holder = LocalGservices.holder();
+            return holder != null && holder.provider != null ? holder.provider.asBinder() : null;
+        }
         ProviderInfo info = ActivityThread.getPackageManager().resolveContentProvider(authority, 0, UserHandle.myUserId());
         if (info == null || !runsHere(info.packageName)) return null;
         IContentProvider provider = ActivityThread.currentActivityThread().acquireProvider(

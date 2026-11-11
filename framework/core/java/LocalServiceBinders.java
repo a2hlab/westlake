@@ -80,9 +80,7 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.content.IClipboard", LocalServiceBinders::clipboard);
                     break;
                 case "account":
-                    binder = System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null
-                            ? proxy(name, "android.accounts.IAccountManager", LocalAccounts::answer, false)
-                            : proxy(name, "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+                    binder = accountService();
                     break;
                 case "audio":
                     binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
@@ -228,6 +226,32 @@ public final class LocalServiceBinders {
         sBinders.put(name, binder);
         System.err.println("[" + TAG + "] " + name + " bound in process");
         return binder;
+    }
+
+    /**
+     * The account service. In the Play services host, LocalAccounts as a real IAccountManager.Stub, which
+     * answers other processes too. In the Play Store host, that Stub through its channel: on Android the
+     * Play Store's account manager is the system's, which holds the Google account. Elsewhere, the plain
+     * answers: no accounts.
+     */
+    private static IBinder accountService() throws ClassNotFoundException {
+        if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
+        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
+            IBinder remote = playServicesHostService("account");
+            if (remote != null) return remote;
+        }
+        return proxy("account", "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+    }
+
+    /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */
+    private static IBinder playServicesHostService(String name) {
+        try {
+            return (IBinder) Class.forName("adapter.activity.PlayServicesChannel")
+                    .getMethod("remoteService", String.class).invoke(null, name);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            System.err.println("[" + TAG + "] " + name + " from the Play services host unavailable: " + e);
+            return null;
+        }
     }
 
     private static IBinder proxy(String name, String descriptor, Answers answers) throws ClassNotFoundException {
@@ -1019,7 +1043,7 @@ public final class LocalServiceBinders {
         }
     }
 
-    private static Object defaultValue(Class<?> type) {
+    static Object defaultValue(Class<?> type) {
         // An empty array, never null: callers iterate what a service hands back without checking,
         // and a null Account[] from getAccounts() throws inside the caller rather than here.
         if (type != null && type.isArray()) {
