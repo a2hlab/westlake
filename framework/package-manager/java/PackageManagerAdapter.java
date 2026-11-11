@@ -1904,12 +1904,23 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      * from Google Play, which is where the apps run here come from. The Play Store is installed (the
      * microG Companion, or the Play Store guest beside shared Play services), so the name resolves.
      * Packages installed with the system image report no installer, as on a phone.
+     *
+     * A host answers the same for the apps connected to it (RemotePackages clients): each is the launched
+     * app of its own process, and the Play Store host must see what that app sees of itself. Asked about a
+     * client, it got null, and the Play Store judged the app not installed from Play: split installs failed
+     * with APP_NOT_OWNED (-15) and every asset pack was "unavailable".
      */
     private static final String PLAY_STORE_PACKAGE = "com.android.vending";
 
+    /** Whether a package is presented as installed by the Play Store: this process's app or a client's. */
+    private static boolean installedByPlayStore(String packageName) {
+        return packageName != null
+                && (SourcePackageRegistry.contains(packageName) || RemotePackages.uidOf(packageName) >= 0);
+    }
+
     @Override
     public java.lang.String getInstallerPackageName(java.lang.String arg0) throws android.os.RemoteException {
-        if (arg0 != null && SourcePackageRegistry.contains(arg0)) return PLAY_STORE_PACKAGE;
+        if (installedByPlayStore(arg0)) return PLAY_STORE_PACKAGE;
         logStub("getInstallerPackageName", arg0 == null ? "" : arg0);
         return null;
     }
@@ -1923,7 +1934,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         // reports what PackageManagerService records for a Play Store install on Android 14 and
         // later: the Play Store initiated and installed it, owns its updates, and the source is a
         // store. Its signing info stays unknown (null), which Android also reports when it has none.
-        if (arg0 != null && SourcePackageRegistry.contains(arg0)) {
+        if (installedByPlayStore(arg0)) {
             return new android.content.pm.InstallSourceInfo(PLAY_STORE_PACKAGE, null, null, PLAY_STORE_PACKAGE,
                     PLAY_STORE_PACKAGE, android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE);
         }
