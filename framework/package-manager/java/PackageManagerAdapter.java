@@ -2196,10 +2196,34 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * The builtin shared libraries this runtime provides: the jars in <runtime root>/framework, where
+     * uses-library names resolve (AppSchedulerBridge.sharedLibraryJars), as Android's are in
+     * /system/framework. It was null, which Android returns only on a device with no shared libraries.
+     * Google's Play Store builds its device configuration with
+     * Arrays.asList(getSystemSharedLibraryNames()), so the null threw there, the configuration's
+     * device-attribute sections were never synced, and every table-of-contents request asked for them
+     * again until the Play Store gave up ("Failed to converge on device attributes for TOC").
+     */
     @Override
     public java.lang.String[] getSystemSharedLibraryNames() throws android.os.RemoteException {
-        logStub("getSystemSharedLibraryNames", "");
-        return null;
+        return systemSharedLibraries().keySet().toArray(new String[0]);
+    }
+
+    /** Library name to jar path for each builtin shared library (see getSystemSharedLibraryNames). */
+    private static java.util.Map<String, String> systemSharedLibraries() {
+        java.util.TreeMap<String, String> libraries = new java.util.TreeMap<>();
+        String root = System.getenv("WESTLAKE_RUNTIME_ROOT");
+        java.io.File[] jars = root != null ? new java.io.File(root, "framework").listFiles() : null;
+        if (jars != null) {
+            for (java.io.File jar : jars) {
+                String name = jar.getName();
+                if (jar.isFile() && name.endsWith(".jar")) {
+                    libraries.put(name.substring(0, name.length() - ".jar".length()), jar.getPath());
+                }
+            }
+        }
+        return libraries;
     }
 
 
@@ -2376,7 +2400,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.util.Map<java.lang.String,java.lang.String> getSystemSharedLibraryNamesAndPaths() throws android.os.RemoteException {
-        return java.util.Collections.emptyMap();
+        return systemSharedLibraries();
     }
 
     @Override
