@@ -1230,6 +1230,10 @@ public class AppSpawnXInit {
      * (Phase 7 #11 + Phase 8 #1). Returns null for asBinder() so the proxy
      * itself is returned as IBinder (since Proxy implements IBinder).
      */
+    /** The stub calls makeStubHandler has answered with a type default in this process (see there). */
+    private static final java.util.Set<String> STUB_DEFAULTS_LOGGED =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
     private static InvocationHandler makeStubHandler(final String label,
                                                      final java.util.Set<String> hotMethods) {
         return new InvocationHandler() {
@@ -1397,6 +1401,12 @@ public class AppSpawnXInit {
                 if ("hashCode".equals(name))   return System.identityHashCode(proxy);
                 if ("equals".equals(name))     return args != null && args.length == 1 && args[0] == proxy;
                 Class<?> rt = method.getReturnType();
+                // Each call answered with a type default is named once per process, so a round shows which
+                // of them apps reach: a null or 0 where Android answers otherwise drops the feature behind it.
+                if (rt != void.class && STUB_DEFAULTS_LOGGED.add(label + "." + name)) {
+                    System.err.println("[STUB-DEFAULT] " + label + "." + name + " -> "
+                            + (rt.isPrimitive() ? "0/false" : "null") + " (" + rt.getSimpleName() + ")");
+                }
                 if (rt == boolean.class) return Boolean.FALSE;
                 if (rt == byte.class)    return (byte) 0;
                 if (rt == short.class)   return (short) 0;
