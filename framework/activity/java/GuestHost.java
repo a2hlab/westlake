@@ -109,6 +109,22 @@ public final class GuestHost {
             throw new IllegalStateException(info.packageName + " is loaded from " + apk.getAppDir()
                     + ", not the guest's " + info.applicationInfo.sourceDir);
         }
+        if (apk.getResources() == null) {
+            // makeApplicationInner then dies on a null Resources with nothing to say why: name the paths
+            // and the asset loader's own error.
+            ApplicationInfo ai = info.applicationInfo;
+            String why;
+            try {
+                android.content.res.ApkAssets.loadFromPath(ai.sourceDir).close();
+                why = "its base APK loads alone";
+            } catch (Throwable t) {
+                why = t.toString();
+            }
+            System.err.println("[WL-GUEST] no resources for " + info.packageName + ": source=" + ai.sourceDir
+                    + " public=" + ai.publicSourceDir + " splits=" + java.util.Arrays.toString(ai.splitSourceDirs)
+                    + " libraries=" + java.util.Arrays.toString(ai.sharedLibraryFiles)
+                    + " overlays=" + java.util.Arrays.toString(ai.overlayPaths) + ": " + why);
+        }
         Application app = application(apk);
         svc = apk.getAppFactory().instantiateService(apk.getClassLoader(), info.name, intent);
         Context base = svc.createServiceBaseContext(thread, apk);
@@ -144,6 +160,13 @@ public final class GuestHost {
                 } catch (Throwable t) {
                     Log.e(TAG, "guest bind failed for " + comp, t);
                     System.err.println("[WL-GUEST] bind failed for " + comp.flattenToShortString() + ": " + t);
+                    // The first frames of each cause, where the failure happened (hilog holds the whole trace).
+                    for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+                        StackTraceElement[] frames = c.getStackTrace();
+                        for (int i = 0; i < Math.min(4, frames.length); i++) {
+                            System.err.println("[WL-GUEST]   at " + frames[i] + (i == 0 ? "  (" + c.getClass().getName() + ")" : ""));
+                        }
+                    }
                 }
             }
         });
