@@ -57,6 +57,21 @@ public final class GuestPackages {
     private static Map<String, Guest> sGuests;
 
     /**
+     * Code guests, in the shared Play services process only: a package whose code answers a few
+     * components there while its package details stay another APK's. The Play Store's details in
+     * that process are Google's, which the availability check reads, and its code does not run
+     * (binding billing there ended the process every app depends on). Asset delivery downloads with
+     * the account only that process holds, so Companion's asset module service, and the settings
+     * provider it reads, run there from Companion's APK, staged as code.<package>.apk.
+     */
+    private static Map<String, Guest> sCodeGuests;
+    private static final boolean PLAY_SERVICES_HOST = System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null;
+    private static final Set<String> CODE_SERVICES = new HashSet<>(Arrays.asList(
+            "com.google.android.finsky.assetmoduleservice.AssetModuleService"));
+    private static final Set<String> CODE_AUTHORITIES = new HashSet<>(Arrays.asList(
+            VENDING + ".microg.settings"));
+
+    /**
      * Beside a shared Play services process, a guest answers only for Play Store services that
      * process doesn't host. Package details and every other service stay Play services', whose
      * Google certificates the availability check reads.
@@ -118,6 +133,7 @@ public final class GuestPackages {
     private static synchronized Map<String, Guest> guests() {
         if (sGuests != null) return sGuests;
         sGuests = new LinkedHashMap<>();
+        sCodeGuests = new LinkedHashMap<>();
         String paths = System.getenv("ASX_GUEST_APKS");
         if (paths == null || paths.isEmpty()) return sGuests;
         for (String path : paths.split(":")) {
@@ -125,9 +141,11 @@ public final class GuestPackages {
             try {
                 PackageParser.Package parsed = new PackageParser().parsePackage(new File(path), 0);
                 if (SourcePackageRegistry.contains(parsed.packageName)) continue;
-                sGuests.put(parsed.packageName, new Guest(parsed, path));
+                boolean code = new File(path).getName().startsWith("code.");
+                if (code && !PLAY_SERVICES_HOST) continue;
+                (code ? sCodeGuests : sGuests).put(parsed.packageName, new Guest(parsed, path));
                 System.err.println("[WL-GUEST] " + parsed.packageName + " version=" + parsed.mVersionCode
-                        + " from " + path);
+                        + (code ? " code for " + CODE_SERVICES + " " + CODE_AUTHORITIES : "") + " from " + path);
             } catch (Throwable t) {
                 System.err.println("[WL-GUEST] cannot parse " + path + ": " + t);
             }
@@ -150,6 +168,14 @@ public final class GuestPackages {
      * is the path PairIP's check needs. Acquiring free apps on the user's account stays off.
      */
     private static void applyDefaults(ApplicationInfo info) {
+        if (VENDING.equals(info.packageName) && PLAY_SERVICES_HOST && guests() != null
+                && sCodeGuests.containsKey(VENDING)) {
+            // Companion's asset delivery, which reads its default from the Play Store's details.
+            // Device sync (fdfe/sync) stays at microG's default, off.
+            if (info.metaData == null) info.metaData = new android.os.Bundle();
+            info.metaData.putBoolean("org.microg.gms.settings.vending_asset_delivery", true);
+            return;
+        }
         if (!GMS.equals(info.packageName)) return;
         if (info.metaData == null) info.metaData = new android.os.Bundle();
         info.metaData.putBoolean("org.microg.gms.settings.vending_licensing", true);
@@ -187,6 +213,10 @@ public final class GuestPackages {
     public static synchronized PackageInfo packageInfo(String packageName, long flags) {
         Guest guest = guests().get(packageName);
         if (guest == null) return null;
+        return generate(guest, flags);
+    }
+
+    private static PackageInfo generate(Guest guest, long flags) {
         if ((flags & (PackageManager.MATCH_DIRECT_BOOT_AWARE | PackageManager.MATCH_DIRECT_BOOT_UNAWARE)) == 0) {
             flags |= PackageManager.MATCH_DIRECT_BOOT_AWARE | PackageManager.MATCH_DIRECT_BOOT_UNAWARE;
         }
@@ -248,6 +278,68 @@ public final class GuestPackages {
                 value.signingInfo = null;
             }
         }
+    }
+
+    /** The packages whose code runs here as code guests (none outside the Play services process). */
+    public static synchronized List<String> codePackages() {
+        if (!PLAY_SERVICES_HOST) return new ArrayList<>();
+        guests();
+        return new ArrayList<>(sCodeGuests.keySet());
+    }
+
+    /** Whether a component runs here as a code guest's (Companion's asset module service). */
+    public static synchronized boolean runsAsCode(ComponentName component) {
+        if (!PLAY_SERVICES_HOST) return false;
+        guests();
+        return component != null && sCodeGuests.containsKey(component.getPackageName())
+                && CODE_SERVICES.contains(component.getClassName());
+    }
+
+    /** The code guest's service an intent names, explicitly or by action, from the code guest's APK. */
+    public static synchronized ServiceInfo codeService(Intent intent) {
+        if (!PLAY_SERVICES_HOST || intent == null) return null;
+        guests();
+        ComponentName component = intent.getComponent();
+        String target = component != null ? component.getPackageName() : intent.getPackage();
+        Guest guest = target != null ? sCodeGuests.get(target) : null;
+        if (guest == null || guest.parsed.services == null) return null;
+        for (PackageParser.Service service : guest.parsed.services) {
+            if (!CODE_SERVICES.contains(service.info.name)) continue;
+            boolean named = component != null && component.getClassName().equals(service.info.name);
+            boolean matched = false;
+            if (component == null) {
+                for (PackageParser.ServiceIntentInfo filter : service.intents) {
+                    if (filter.match(intent.getAction(), intent.getType(), intent.getScheme(), intent.getData(),
+                            intent.getCategories(), "WESTLAKE-GUEST") >= 0) {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if (!named && !matched) continue;
+            PackageInfo info = generate(guest, PackageManager.GET_SERVICES | PackageManager.GET_META_DATA);
+            if (info != null && info.services != null) for (ServiceInfo generated : info.services) {
+                if (generated.name.equals(service.info.name)) return generated;
+            }
+        }
+        return null;
+    }
+
+    /** The code guest's provider for an allowlisted authority (Companion's settings), or null. */
+    public static synchronized ProviderInfo codeProvider(String authority) {
+        if (!PLAY_SERVICES_HOST || authority == null || !CODE_AUTHORITIES.contains(authority)) return null;
+        guests();
+        for (Guest guest : sCodeGuests.values()) {
+            PackageInfo info = generate(guest, PackageManager.GET_PROVIDERS | PackageManager.GET_META_DATA);
+            if (info == null || info.providers == null) continue;
+            for (ProviderInfo provider : info.providers) {
+                if (provider.authority == null) continue;
+                for (String declared : provider.authority.split(";")) {
+                    if (authority.equals(declared.trim())) return provider;
+                }
+            }
+        }
+        return null;
     }
 
     public static ApplicationInfo applicationInfo(String packageName, long flags) {

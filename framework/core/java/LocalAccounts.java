@@ -289,18 +289,23 @@ final class LocalAccounts {
 
     private static void getAuthToken(IAccountManagerResponse caller, Account account, String tokenType, Bundle options) {
         Bundle request = withCaller(options);
-        request.putString(AccountManager.KEY_ANDROID_PACKAGE_NAME, options == null ? null
-                : options.getString(AccountManager.KEY_ANDROID_PACKAGE_NAME));
+        final String who = options == null ? null : options.getString(AccountManager.KEY_ANDROID_PACKAGE_NAME);
+        request.putString(AccountManager.KEY_ANDROID_PACKAGE_NAME, who);
         IAccountManagerResponse caching = new IAccountManagerResponse.Stub() {
             @Override
             public void onResult(Bundle value) throws RemoteException {
                 String token = value == null ? null : value.getString(AccountManager.KEY_AUTHTOKEN);
                 if (token != null) put(key("token", account) + "/" + tokenType, token);
+                // The outcome only, never the token.
+                System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + " uid="
+                        + request.getInt(AccountManager.KEY_CALLER_UID) + ": "
+                        + (token != null ? "token" : value == null ? "no result" : "no token, keys " + value.keySet()));
                 if (caller != null) caller.onResult(value);
             }
 
             @Override
             public void onError(int code, String message) throws RemoteException {
+                System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + ": error " + code);
                 if (caller != null) caller.onError(code, message);
             }
         };

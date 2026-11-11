@@ -49,9 +49,14 @@ public final class GuestHost {
 
     private GuestHost() {}
 
-    /** The guest service an intent names (explicitly, or by action within a guest package), or null. */
+    /**
+     * The guest service an intent names (explicitly, or by action within a guest package), or null.
+     * In the shared Play services process, only a code guest's allowlisted service (Companion's
+     * asset module service, GuestPackages.codeService): there a guest is otherwise details only.
+     */
     public static ServiceInfo resolveService(Intent intent) {
-        if (intent == null || PlayServicesChannel.isHost()) return null;
+        if (intent == null) return null;
+        if (PlayServicesChannel.isHost()) return GuestPackages.codeService(intent);
         ComponentName comp = intent.getComponent();
         String pkg = comp != null ? comp.getPackageName() : intent.getPackage();
         if (!GuestPackages.contains(pkg) && !GuestPackages.answersBesidePlayServices(intent)) return null;
@@ -97,6 +102,13 @@ public final class GuestHost {
         if (svc != null) return svc;
         ActivityThread thread = ActivityThread.currentActivityThread();
         LoadedApk apk = thread.getPackageInfoNoCheck(info.applicationInfo);
+        // ActivityThread keeps one LoadedApk per package name. In the Play services process the
+        // Play Store's details are Google's APK; if its code had been loaded under that name first,
+        // this would run the genuine Play Store's class of the same name, which must not run there.
+        if (PlayServicesChannel.isHost() && !info.applicationInfo.sourceDir.equals(apk.getAppDir())) {
+            throw new IllegalStateException(info.packageName + " is loaded from " + apk.getAppDir()
+                    + ", not the guest's " + info.applicationInfo.sourceDir);
+        }
         Application app = application(apk);
         svc = apk.getAppFactory().instantiateService(apk.getClassLoader(), info.name, intent);
         Context base = svc.createServiceBaseContext(thread, apk);
@@ -124,7 +136,9 @@ public final class GuestHost {
                     Service svc = serviceFor(info, args);
                     args.setExtrasClassLoader(svc.getClassLoader());
                     IBinder binder = svc.onBind(args);
-                    if (binder != null) binder = new GuestBinder(binder, comp.flattenToShortString());
+                    if (binder != null) {
+                        binder = new GuestBinder(binder, comp.flattenToShortString(), PlayServicesChannel.isHost());
+                    }
                     connection.connected(comp, binder, false);
                     System.err.println("[WL-GUEST] bound " + comp.flattenToShortString() + " binder=" + binder);
                 } catch (Throwable t) {
@@ -141,16 +155,24 @@ public final class GuestHost {
      * guest's own thread (Companion's checkLicenseV2 is oneway and goes to the network), and a
      * failure in the guest reaches the caller as the death of the service process
      * (DeadObjectException) rather than as an exception thrown through the caller's own code.
+     *
+     * In the shared Play services process the caller is another process, across SocketBinder,
+     * which already gives oneway calls their semantics; there each call runs on the channel's
+     * thread, because the caller's identity (Binder.getCallingUid) belongs to that thread and
+     * Companion checks it on every call. Nothing a guest throws, Errors included, may leave the call:
+     * it would end the process every app depends on.
      */
     private static final class GuestBinder extends Binder {
         private static final java.util.concurrent.ExecutorService ONEWAY =
                 java.util.concurrent.Executors.newSingleThreadExecutor(r -> new Thread(r, "WL-guest-oneway"));
         private final IBinder mTarget;
         private final String mName;
+        private final boolean mCallerThread;
 
-        GuestBinder(IBinder target, String name) {
+        GuestBinder(IBinder target, String name, boolean callerThread) {
             mTarget = target;
             mName = name;
+            mCallerThread = callerThread;
         }
 
         @Override
@@ -165,6 +187,15 @@ public final class GuestHost {
         @Override
         protected boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags)
                 throws android.os.RemoteException {
+            if (mCallerThread) {
+                try {
+                    return mTarget.transact(code, data, reply, flags);
+                } catch (Throwable t) {
+                    Log.e(TAG, "call " + code + " to " + mName + " failed", t);
+                    if ((flags & FLAG_ONEWAY) != 0) return true;
+                    throw new android.os.DeadObjectException("guest " + mName + " failed: " + t);
+                }
+            }
             if ((flags & FLAG_ONEWAY) != 0) {
                 final android.os.Parcel copy = android.os.Parcel.obtain();
                 copy.appendFrom(data, 0, data.dataSize());
@@ -195,8 +226,10 @@ public final class GuestHost {
      * provider of another package in this process). Null when no guest declares the authority.
      */
     public static android.app.ContentProviderHolder provider(String authority) {
-        if (PlayServicesChannel.isHost()) return null;
-        ProviderInfo info = GuestPackages.resolveProvider(authority, android.content.pm.PackageManager.GET_META_DATA);
+        // In the shared Play services process, only a code guest's allowlisted provider (Companion's
+        // settings, which its asset module service reads).
+        ProviderInfo info = PlayServicesChannel.isHost() ? GuestPackages.codeProvider(authority)
+                : GuestPackages.resolveProvider(authority, android.content.pm.PackageManager.GET_META_DATA);
         if (info == null) return null;
         android.app.ContentProviderHolder holder = new android.app.ContentProviderHolder(info);
         holder.mLocal = true;
