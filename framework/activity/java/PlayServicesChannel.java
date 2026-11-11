@@ -693,11 +693,37 @@ public final class PlayServicesChannel {
      * Each process sees its own runtime at the same path, so an app's APK paths name nothing a host can
      * open. Android's services read an installed app's APKs (its resources for a label or icon, its
      * files for the Play Store); here the app hands its APKs over as open files with HELLO, read-only,
-     * and the host names them /proc/self/fd/<n>, which opens the same file. Kept per package while
-     * the host runs; a reconnect replaces them.
+     * and the host names them /proc/self/fd/<n>, which opens the same file. Kept per package while the
+     * app's channel is open: a reconnect replaces them, and its closing releases them and puts back the
+     * paths they stood for, since a closed descriptor's number is soon another file's.
      */
-    private static final java.util.Map<String, android.os.ParcelFileDescriptor[]> sClientApks =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<String, ClientApks> sClientApks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** A client's APKs as open files, and the ApplicationInfo paths they replaced. */
+    private static final class ClientApks {
+        final android.os.ParcelFileDescriptor[] files;
+        final ApplicationInfo app;
+        final String sourceDir;
+        final String publicSourceDir;
+        final String[] splitSourceDirs;
+        final String[] splitPublicSourceDirs;
+
+        ClientApks(android.os.ParcelFileDescriptor[] files, ApplicationInfo app) {
+            this.files = files;
+            this.app = app;
+            sourceDir = app.sourceDir;
+            publicSourceDir = app.publicSourceDir;
+            splitSourceDirs = app.splitSourceDirs;
+            splitPublicSourceDirs = app.splitPublicSourceDirs;
+        }
+
+        void restorePaths() {
+            app.sourceDir = sourceDir;
+            app.publicSourceDir = publicSourceDir;
+            app.splitSourceDirs = splitSourceDirs;
+            app.splitPublicSourceDirs = splitPublicSourceDirs;
+        }
+    }
 
     /** Appends the base and split APKs of this app, as open read-only files. */
     private static void writeApks(Parcel data, ApplicationInfo app) {
@@ -730,8 +756,8 @@ public final class PlayServicesChannel {
         return apks;
     }
 
-    /** Points a client's base and split APK paths at the open files it handed over. */
-    private static void exposeApks(String packageName, ApplicationInfo app, android.os.ParcelFileDescriptor[] apks) {
+    /** Points a client's base and split APK paths at the open files it handed over; null if it handed none. */
+    private static ClientApks exposeApks(String packageName, ApplicationInfo app, android.os.ParcelFileDescriptor[] apks) {
         int splits = app.splitSourceDirs != null ? app.splitSourceDirs.length : 0;
         boolean complete = apks.length == 1 + splits;
         for (android.os.ParcelFileDescriptor apk : apks) {
@@ -739,8 +765,9 @@ public final class PlayServicesChannel {
         }
         if (!complete) {
             closeAll(apks);
-            return;
+            return null;
         }
+        ClientApks kept = new ClientApks(apks, app);
         String base = "/proc/self/fd/" + apks[0].getFd();
         app.sourceDir = base;
         app.publicSourceDir = base;
@@ -750,8 +777,20 @@ public final class PlayServicesChannel {
             app.splitSourceDirs = dirs;
             app.splitPublicSourceDirs = dirs.clone();
         }
-        android.os.ParcelFileDescriptor[] previous = sClientApks.put(packageName, apks);
-        if (previous != null) closeAll(previous);
+        ClientApks previous = sClientApks.put(packageName, kept);
+        if (previous != null) {
+            previous.restorePaths();   // its ApplicationInfo may still be held somewhere here
+            closeAll(previous.files);
+        }
+        return kept;
+    }
+
+    /** A client's channel closed: its APK files go, and its paths are what it said again. */
+    private static void releaseApks(String packageName, ClientApks apks) {
+        if (sClientApks.remove(packageName, apks)) {   // not if a reconnect has replaced them
+            apks.restorePaths();
+            closeAll(apks.files);
+        }
     }
 
     private static void closeAll(android.os.ParcelFileDescriptor[] files) {
@@ -1049,7 +1088,14 @@ public final class PlayServicesChannel {
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
             }
-            exposeApks(claimed, info.applicationInfo, readApks(data));
+            ClientApks apks = exposeApks(claimed, info.applicationInfo, readApks(data));
+            if (apks != null && callback != null) {
+                try {
+                    callback.linkToDeath(() -> releaseApks(claimed, apks), 0);
+                } catch (RemoteException e) {
+                    releaseApks(claimed, apks);   // the app is already gone
+                }
+            }
             int uid = RemotePackages.registerClient(info, Process.myUid());
             mChannel.setCaller(uid, mPeerPid);
             if (callback != null) {
