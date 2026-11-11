@@ -640,6 +640,7 @@ int wl_register_localsocket(JNIEnv* env);
 int wl_register_surface_canvas(JNIEnv* env);
 int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
+int wl_install_android_app_seccomp(void);
 int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
@@ -1531,6 +1532,12 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
     JNIEnv* env = NULL;
     (void) reserved;
+    /* Android's app seccomp filter (seccomp_natives.c), first and before any app code: this library
+     * loads ahead of handleBindApplication. Opt-in while measured. */
+    {
+        const char* seccomp = getenv("WESTLAKE_ANDROID_SECCOMP");
+        if (seccomp != NULL && strcmp(seccomp, "1") == 0) wl_install_android_app_seccomp();
+    }
     if ((*vm)->GetEnv(vm, (void**) &env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {
         note("[WL-NATIVES] no JNIEnv in JNI_OnLoad\n");
         return JNI_VERSION_1_6;

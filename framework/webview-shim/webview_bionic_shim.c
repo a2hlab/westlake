@@ -594,6 +594,38 @@ int sigaction(int signal_number, const struct sigaction *action,
 }
 
 /*
+ * accept as bionic implements it, accept4 with no flags; the result is the same. musl's accept makes
+ * the accept system call, which bionic never makes, so Android's app seccomp policy leaves it out:
+ * under that policy (seccomp_natives.c) musl's accept ended the process with SIGSYS where Android's
+ * returns the connection.
+ */
+int accept(int fd, struct sockaddr *address, socklen_t *length)
+{
+    return accept4(fd, address, length, 0);
+}
+
+/*
+ * faccessat with flags, for Android code: bionic refuses AT_SYMLINK_NOFOLLOW and AT_EACCESS with EINVAL
+ * and never makes faccessat2, while musl makes faccessat2, which Android's app seccomp policy leaves
+ * out. Other callers get musl's.
+ */
+int faccessat(int directory, const char *path, int mode, int flags)
+{
+    typedef int (*FaccessatFn)(int, const char *, int, int);
+    static FaccessatFn real_faccessat;
+    if (flags != 0 && caller_is_android_dso(__builtin_return_address(0), NULL)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if (real_faccessat == NULL) real_faccessat = (FaccessatFn) dlsym(RTLD_NEXT, "faccessat");
+    if (real_faccessat == NULL) {
+        errno = ENOSYS;
+        return -1;
+    }
+    return real_faccessat(directory, path, mode, flags);
+}
+
+/*
  * Bionic's 64-bit signal API (API 28). On arm64 sigset64_t and struct sigaction64 lay out as Bionic's
  * sigset_t and struct sigaction, and musl has no such names, so only Android code calls these and
  * each is the Bionic translation. TikTok's and CapCut's libraries import them weak: missing, they
@@ -1165,6 +1197,7 @@ static int westlake_library_is_refused(const char *basename)
 int wl_needs_android_relocs(const char *path);
 int wl_needs_ifunc_resolution(const char *path);
 int wl_needs_section_repair(const char *path);
+int wl_apk_member_for(const char *staged, char *member, size_t size);
 int wl_write_loadable_copy(const char *path, const char *target, int retag);
 void wl_copy_needed_siblings(const char *path, const char *dir, int depth);
 void wl_copy_apk_needed(const char *path, const char *apk_lib_dir, const char *dir, int (*shared)(const char *name));
@@ -1919,6 +1952,16 @@ static void *westlake_dlopen_ns(Dl_namespace *ns, const char *file, int mode)
     char staged[512];
     const char *redirected = westlake_staged_apk_member(file, staged, sizeof(staged));
     const char *path = redirected != NULL ? redirected : file;
+    /* A library Android would map straight from its APK (android_relocs.c, wl_apk_member_for). */
+    char member[1024];
+    if (path != NULL && path[0] == '/' && !(mode & RTLD_NOLOAD) && in_app_library_dir(path) &&
+        wl_apk_member_for(path, member, sizeof(member))) {
+        void *mapped = real_dlopen_ns(ns, member, mode);
+        const char *error = mapped == NULL ? dlerror() : NULL;
+        wl_relocs_log("[WESTLAKE-LOADER] %s: %s from its APK, %s%s%s\n", path, mapped != NULL ? "mapped" : "not mapped",
+                      member, error != NULL ? ": " : "", error != NULL ? error : "");
+        if (mapped != NULL) return mapped;
+    }
     /* A library with IFUNC relocations or scrambled section headers (android_relocs.c), as ART loads
      * Edge's libtelclient.so, Yandex Browser's main library and Baidu's location SDK: its loadable copy,
      * opened in this namespace. The original is never opened: musl rejects IFUNCs, faults on such
