@@ -1333,36 +1333,42 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public boolean isPackageAvailable(java.lang.String arg0, int arg1) throws android.os.RemoteException {
-        logStub("isPackageAvailable", "");
-        return false;
+        // Installed, and neither hidden nor suspended, which no package here is.
+        return arg0 != null && getPackageInfo(arg0, 0, arg1) != null;
     }
 
 
     @Override
     public android.content.pm.PackageInfo getPackageInfoVersioned(android.content.pm.VersionedPackage arg0, long arg1, int arg2) throws android.os.RemoteException {
-        logStub("getPackageInfoVersioned", "");
-        return null;
+        // PackageManager.getPackageInfo(VersionedPackage, flags): the installed package if it is that version,
+        // or any version with VERSION_CODE_HIGHEST. It answered null for every package.
+        if (arg0 == null) return null;
+        PackageInfo info = getPackageInfo(arg0.getPackageName(), arg1, arg2);
+        long wanted = arg0.getLongVersionCode();
+        return info != null && (wanted == android.content.pm.PackageManager.VERSION_CODE_HIGHEST
+                || wanted == info.getLongVersionCode()) ? info : null;
     }
 
 
     @Override
     public int[] getPackageGids(java.lang.String arg0, long arg1, int arg2) throws android.os.RemoteException {
-        logStub("getPackageGids", "");
-        return null;
+        // No permission here maps to a supplementary group: an installed package has none, an unknown one null.
+        return arg0 != null && getPackageInfo(arg0, 0, arg2) != null ? new int[0] : null;
     }
 
 
     @Override
     public java.lang.String[] currentToCanonicalPackageNames(java.lang.String[] arg0) throws android.os.RemoteException {
-        logStub("currentToCanonicalPackageNames", "");
-        return null;
+        // No package here was renamed (original-package), so each name is its own: an array as long as the
+        // one asked about, as Android answers. ApplicationPackageManager hands the result to the app as is.
+        return arg0 == null ? null : arg0.clone();
     }
 
 
     @Override
     public java.lang.String[] canonicalToCurrentPackageNames(java.lang.String[] arg0) throws android.os.RemoteException {
-        logStub("canonicalToCurrentPackageNames", "");
-        return null;
+        // See currentToCanonicalPackageNames.
+        return arg0 == null ? null : arg0.clone();
     }
 
 
@@ -1492,8 +1498,11 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.lang.String[] getNamesForUids(int[] arg0) throws android.os.RemoteException {
-        logStub("getNamesForUids", "");
-        return null;
+        // One name per uid, null for a uid no package has, as Android answers.
+        if (arg0 == null) return null;
+        String[] names = new String[arg0.length];
+        for (int i = 0; i < arg0.length; i++) names[i] = getNameForUid(arg0[i]);
+        return names;
     }
 
 
