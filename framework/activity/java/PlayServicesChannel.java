@@ -120,6 +120,8 @@ public final class PlayServicesChannel {
         SocketBinder binder;
         volatile String remoteRoot;
         volatile String remoteRealRoot;
+        /** The uid the host gave this app's channel (0 from a host that doesn't say). */
+        volatile int uid;
 
         Channel(String env, String label) {
             this.env = env;
@@ -296,6 +298,7 @@ public final class PlayServicesChannel {
             reply.readException();
             c.remoteRoot = reply.readString();
             c.remoteRealRoot = reply.readString();
+            c.uid = reply.dataAvail() >= 4 ? reply.readInt() : 0;
         } finally {
             data.recycle();
             reply.recycle();
@@ -567,7 +570,7 @@ public final class PlayServicesChannel {
             IBinder binder = reply.readStrongBinder();
             if (binder == null) return null;
             ContentProviderHolder holder = new ContentProviderHolder(info);
-            holder.provider = ContentProviderNative.asInterface(binder);
+            holder.provider = attributed(channelFor(info.packageName), ContentProviderNative.asInterface(binder));
             holder.noReleaseNeeded = true;
             System.err.println(TAG + "provider " + authority + " -> " + info.packageName + "/" + info.name);
             return holder;
@@ -578,6 +581,42 @@ public final class PlayServicesChannel {
             data.recycle();
             reply.recycle();
         }
+    }
+
+    /**
+     * A provider in another host, with each call's AttributionSource naming this app as that host knows
+     * it. The host checks, as Android does whenever one is unparceled, that the source's uid is the
+     * caller's (enforceCallingUid); this process's own uid is the one every Westlake process shares, and
+     * the host knows this app by the uid it gave the channel. Package, pid and tag stay as they are.
+     */
+    private static IContentProvider attributed(Channel c, IContentProvider provider) {
+        final int uid = c.uid;
+        if (provider == null || uid == 0) return provider;
+        return (IContentProvider) java.lang.reflect.Proxy.newProxyInstance(PlayServicesChannel.class.getClassLoader(),
+                new Class<?>[] {IContentProvider.class}, (self, method, args) -> {
+                    if (args != null) {
+                        for (int i = 0; i < args.length; i++) {
+                            if (args[i] instanceof android.content.AttributionSource) {
+                                args[i] = withUid((android.content.AttributionSource) args[i], uid);
+                            }
+                        }
+                    }
+                    try {
+                        return method.invoke(provider, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+    }
+
+    private static android.content.AttributionSource withUid(android.content.AttributionSource source, int uid) {
+        if (source.getUid() == uid) return source;
+        android.content.AttributionSource.Builder builder = new android.content.AttributionSource.Builder(uid)
+                .setPid(source.getPid())
+                .setPackageName(source.getPackageName())
+                .setAttributionTag(source.getAttributionTag());
+        if (source.getNext() != null) builder.setNext(source.getNext());
+        return builder.build();
     }
 
     /**
@@ -800,10 +839,11 @@ public final class PlayServicesChannel {
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
             if (code == INTERFACE_TRANSACTION) return super.onTransact(code, data, reply, flags);
             if (code == HELLO) {
-                hello(data);
+                int uid = hello(data);
                 reply.writeNoException();
                 reply.writeString(System.getenv(RUNTIME_ROOT));
                 reply.writeString(System.getenv(REAL_ROOT));
+                reply.writeInt(uid);
                 return true;
             }
             if (!mIdentified) throw new SecurityException("channel has not said who it is");
@@ -890,7 +930,8 @@ public final class PlayServicesChannel {
             }
         }
 
-        private void hello(Parcel data) {
+        /** Registers the app this channel says it is; answers the uid it now has here. */
+        private int hello(Parcel data) {
             String claimed = data.readString();
             PackageInfo info = data.readTypedObject(PackageInfo.CREATOR);
             IBinder callback = data.readStrongBinder();
@@ -906,6 +947,7 @@ public final class PlayServicesChannel {
             }
             mIdentified = true;
             System.err.println(TAG + "client " + claimed + " pid=" + mPeerPid + " uid=" + uid);
+            return uid;
         }
     }
 

@@ -327,6 +327,19 @@ static void set_identity(jlong token)
     t_explicit = (uint32_t)token & EXPLICIT_IDENTITY;
 }
 
+/*
+ * Binder.isDirectlyHandlingTransaction: true while this thread serves a socket channel's call, as
+ * libbinder answers while a thread executes a transaction from the driver (its serving stack). Nested
+ * calls on a waiting thread count up and down. AttributionSource refuses to be unparceled outside a
+ * transaction (Android 12 and later), so every content provider call served over a channel threw.
+ */
+static __thread int t_serving;
+
+static jboolean directly_handling(void)
+{
+    return t_serving > 0 ? JNI_TRUE : JNI_FALSE;
+}
+
 static jlong critical_clear_identity(void)
 {
     jlong old = identity_token();
@@ -345,9 +358,14 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_installCallingIdenti
         {"clearCallingIdentity", "()J", (void*)critical_clear_identity},
         {"restoreCallingIdentity", "(J)V", (void*)set_identity},
     };
+    /* Apart, so that a framework without it (before Android 14) keeps the identity natives above. */
+    static const JNINativeMethod serving[] = {
+        {"isDirectlyHandlingTransactionNative", "()Z", (void*)directly_handling},
+    };
     jclass binder = (*env)->FindClass(env, "android/os/Binder");
     if (binder != NULL) {
         (*env)->RegisterNatives(env, binder, methods, sizeof(methods) / sizeof(methods[0]));
+        if ((*env)->RegisterNatives(env, binder, serving, 1) != JNI_OK) (*env)->ExceptionClear(env);
         (*env)->DeleteLocalRef(env, binder);
     }
 }
@@ -360,6 +378,7 @@ JNIEXPORT jlong JNICALL Java_adapter_core_SocketBinderNative_setCallingIdentity(
     t_calling_uid = uid;
     t_calling_pid = pid;
     t_explicit = 0;
+    t_serving++;
     return old;
 }
 
@@ -368,6 +387,7 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_restoreCallingIdenti
     (void)env;
     (void)c;
     set_identity(identity);
+    if (t_serving > 0) t_serving--;
 }
 
 JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_shutdown(JNIEnv* env, jclass c, jint fd)
