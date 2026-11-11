@@ -404,6 +404,75 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_close(JNIEnv* env, j
     close(fd);
 }
 
+/*
+ * CursorWindow's parcel natives. liboh_android_runtime's hand CursorWindow::writeToParcel and
+ * createFromParcel a null Parcel. Nothing reached them while every provider ran in the process that
+ * asked it: a provider's rows cross in a CursorWindow only to a caller in another process. Providers
+ * of the Play services process, queried by the Play Store's process over SocketBinder, are the first,
+ * and the provider's process died on the first query. These pass the Parcel behind the Java one to the
+ * same CursorWindow methods, which liboh_android_runtime exports.
+ */
+typedef int32_t (*CursorWindowWrite)(void* window, const void* parcel);
+typedef int32_t (*CursorWindowCreate)(const void* parcel, void** window);
+static CursorWindowWrite g_cursor_write;
+static CursorWindowCreate g_cursor_create;
+
+static void* runtime_symbol(const char* name)
+{
+    void* symbol = dlsym(RTLD_DEFAULT, name);
+    if (symbol == NULL) {
+        void* library = dlopen("liboh_android_runtime.so", RTLD_NOW);
+        if (library != NULL) symbol = dlsym(library, name);
+    }
+    return symbol;
+}
+
+static void cursor_window_write(JNIEnv* env, jclass c, jlong window, jobject parcel)
+{
+    (void)c;
+    const void* p = native_parcel(env, parcel);
+    if (p == NULL) return;
+    if (window == 0 || g_cursor_write == NULL) {
+        throw_named(env, "java/lang/IllegalStateException", "CursorWindow cannot be written");
+        return;
+    }
+    int32_t status = g_cursor_write((void*)(intptr_t)window, p);
+    if (status != 0) throw_named(env, "java/lang/RuntimeException", "Could not write CursorWindow to Parcel");
+}
+
+static jlong cursor_window_create(JNIEnv* env, jclass c, jobject parcel)
+{
+    (void)c;
+    const void* p = native_parcel(env, parcel);
+    if (p == NULL) return 0;
+    void* window = NULL;
+    int32_t status = g_cursor_create != NULL ? g_cursor_create(p, &window) : -1;
+    if (status != 0 || window == NULL) {
+        throw_named(env, "android/database/CursorWindowAllocationException", "Could not create CursorWindow from Parcel");
+        return 0;
+    }
+    return (jlong)(intptr_t)window;
+}
+
+/* Over liboh_android_runtime's registrations, when its CursorWindow methods are there to call. */
+static void register_cursor_window(JNIEnv* env)
+{
+    g_cursor_write = (CursorWindowWrite)runtime_symbol("_ZN7android12CursorWindow13writeToParcelEPNS_6ParcelE");
+    g_cursor_create = (CursorWindowCreate)runtime_symbol("_ZN7android12CursorWindow16createFromParcelEPNS_6ParcelEPPS0_");
+    if (g_cursor_write == NULL || g_cursor_create == NULL) return;
+    static const JNINativeMethod methods[] = {
+        {"nativeWriteToParcel", "(JLandroid/os/Parcel;)V", (void*)cursor_window_write},
+        {"nativeCreateFromParcel", "(Landroid/os/Parcel;)J", (void*)cursor_window_create},
+    };
+    jclass window = (*env)->FindClass(env, "android/database/CursorWindow");
+    if (window == NULL) {
+        (*env)->ExceptionClear(env);
+        return;
+    }
+    if ((*env)->RegisterNatives(env, window, methods, 2) != JNI_OK) (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, window);
+}
+
 #define NATIVE(name, signature) {#name, signature, (void*)Java_adapter_core_SocketBinderNative_##name}
 
 /* Binds onto the boot class from JNI_OnLoad; a framework without the class just skips it. */
@@ -433,5 +502,6 @@ int wl_register_socket_binder(JNIEnv* env)
     int rc = (*env)->RegisterNatives(env, c, methods, sizeof(methods) / sizeof(methods[0]));
     if (rc != 0) (*env)->ExceptionClear(env);
     (*env)->DeleteLocalRef(env, c);
+    register_cursor_window(env);
     return rc == 0;
 }
