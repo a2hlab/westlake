@@ -1449,7 +1449,16 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public java.lang.String[] getPackagesForUid(int arg0) throws android.os.RemoteException {
         String sourcePackage = SourcePackageRegistry.packageForUid(arg0);
-        if (sourcePackage != null) return new String[] {sourcePackage};
+        if (sourcePackage != null) {
+            // In the shared Play services process, the packages whose code runs there under its uid
+            // too (Companion's asset module service), as a uid shared by several packages answers.
+            java.util.List<String> code = arg0 == android.os.Process.myUid()
+                    ? GuestPackages.codePackages() : java.util.Collections.<String>emptyList();
+            java.util.List<String> all = new java.util.ArrayList<>();
+            all.add(sourcePackage);
+            for (String name : code) if (!all.contains(name)) all.add(name);
+            return all.toArray(new String[0]);
+        }
         String remotePackage = RemotePackages.packageForUid(arg0);
         if (remotePackage != null) return new String[] {remotePackage};
         logStub("getPackagesForUid", "");

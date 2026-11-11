@@ -729,7 +729,7 @@ public final class PlayServicesChannel {
                     List<ResolveInfo> found = new ArrayList<>();
                     for (Object item : packages.queryIntentServices(intent, type, packageFlags, user).getList()) {
                         ResolveInfo resolved = (ResolveInfo) item;
-                        if (resolved.serviceInfo != null && runsHere(resolved.serviceInfo.packageName)) found.add(resolved);
+                        if (resolved.serviceInfo != null && runsHere(resolved.serviceInfo)) found.add(resolved);
                     }
                     reply.writeTypedList(found);
                     return true;
@@ -820,6 +820,17 @@ public final class PlayServicesChannel {
         return application().getPackageName().equals(packageName);
     }
 
+    /** A service of this process's package, or a code guest's that runs here (GuestPackages.runsAsCode). */
+    private static boolean runsHere(ServiceInfo info) {
+        return info != null && (runsHere(info.packageName)
+                || adapter.packagemanager.GuestPackages.runsAsCode(new ComponentName(info.packageName, info.name)));
+    }
+
+    private static boolean runsHere(ComponentName component) {
+        return component != null && (runsHere(component.getPackageName())
+                || adapter.packagemanager.GuestPackages.runsAsCode(component));
+    }
+
     /** Resolved to a component in this process, as the activity manager adapter requires. */
     private static Intent explicit(Intent intent) throws RemoteException {
         Intent resolved = new Intent(intent);
@@ -830,7 +841,7 @@ public final class PlayServicesChannel {
             throw new IllegalArgumentException("no service for " + intent);
         }
         ServiceInfo info = found.get(0).serviceInfo;
-        if (!runsHere(info.packageName)) throw new IllegalArgumentException("not run here: " + intent);
+        if (!runsHere(info)) throw new IllegalArgumentException("not run here: " + intent);
         resolved.setComponent(new ComponentName(info.packageName, info.name));
         return resolved;
     }
@@ -838,7 +849,7 @@ public final class PlayServicesChannel {
     /** Binds a service of this process for a client and waits for the binder its onBind gave. */
     private static IBinder bindLocally(Intent intent, int flags) throws RemoteException {
         final Intent target = explicit(intent);
-        if (!runsHere(target.getComponent().getPackageName())) {
+        if (!runsHere(target.getComponent())) {
             throw new IllegalArgumentException("not run here: " + intent);
         }
         final CountDownLatch connected = new CountDownLatch(1);
