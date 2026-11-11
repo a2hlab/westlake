@@ -101,10 +101,18 @@ final class LocalAccounts {
         return found;
     }
 
+    /**
+     * What AccountManagerService sends when an account is added or removed: LOGIN_ACCOUNTS_CHANGED for
+     * receivers of the old broadcast, and ACTION_VISIBLE_ACCOUNTS_CHANGED to the package that registered
+     * a listener (registerAccountListener). Since Android 8, AccountManager's OnAccountsUpdateListeners
+     * run on the second one only; without it Google's settings screen still offered "Sign in" after
+     * its own add-account flow had added the account.
+     */
     private static void changed() {
         Context app = ActivityThread.currentApplication();
         if (app != null) {
             app.sendBroadcast(new Intent(AccountManager.LOGIN_ACCOUNTS_CHANGED_ACTION).setPackage(app.getPackageName()));
+            app.sendBroadcast(new Intent(AccountManager.ACTION_VISIBLE_ACCOUNTS_CHANGED).setPackage(app.getPackageName()));
         }
     }
 
