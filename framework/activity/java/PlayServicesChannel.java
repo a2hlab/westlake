@@ -294,6 +294,7 @@ public final class PlayServicesChannel {
             data.writeString(packageName);
             data.writeTypedObject(own, 0);
             data.writeStrongBinder(sCallback);
+            writeApks(data, own.applicationInfo);
             root.transact(HELLO, data, reply, 0);
             reply.readException();
             c.remoteRoot = reply.readString();
@@ -688,6 +689,82 @@ public final class PlayServicesChannel {
 
     private static final java.util.Map<String, IBinder> sClientCallbacks = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * Each process sees its own runtime at the same path, so an app's APK paths name nothing a host can
+     * open. Android's services read an installed app's APKs (its resources for a label or icon, its
+     * files for the Play Store); here the app hands its APKs over as open files with HELLO, read-only,
+     * and the host names them /proc/self/fd/<n>, which opens the same file. Kept per package while
+     * the host runs; a reconnect replaces them.
+     */
+    private static final java.util.Map<String, android.os.ParcelFileDescriptor[]> sClientApks =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Appends the base and split APKs of this app, as open read-only files. */
+    private static void writeApks(Parcel data, ApplicationInfo app) {
+        List<String> paths = new ArrayList<>();
+        if (app != null && app.sourceDir != null) paths.add(app.sourceDir);
+        if (app != null && app.splitSourceDirs != null) paths.addAll(Arrays.asList(app.splitSourceDirs));
+        List<android.os.ParcelFileDescriptor> apks = new ArrayList<>();
+        for (String path : paths) {
+            try {
+                apks.add(android.os.ParcelFileDescriptor.open(new java.io.File(path),
+                        android.os.ParcelFileDescriptor.MODE_READ_ONLY));
+            } catch (IOException e) {
+                apks.clear();   // all or none: a host maps them by position
+                break;
+            }
+        }
+        data.writeInt(apks.size());
+        for (android.os.ParcelFileDescriptor apk : apks) {
+            data.writeTypedObject(apk, Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
+        }
+    }
+
+    /** The APKs a client appended to HELLO; none from a client that predates them. */
+    private static android.os.ParcelFileDescriptor[] readApks(Parcel data) {
+        if (data.dataAvail() < 4) return new android.os.ParcelFileDescriptor[0];
+        int count = data.readInt();
+        if (count < 0 || count > 32) return new android.os.ParcelFileDescriptor[0];
+        android.os.ParcelFileDescriptor[] apks = new android.os.ParcelFileDescriptor[count];
+        for (int i = 0; i < count; i++) apks[i] = data.readTypedObject(android.os.ParcelFileDescriptor.CREATOR);
+        return apks;
+    }
+
+    /** Points a client's base and split APK paths at the open files it handed over. */
+    private static void exposeApks(String packageName, ApplicationInfo app, android.os.ParcelFileDescriptor[] apks) {
+        int splits = app.splitSourceDirs != null ? app.splitSourceDirs.length : 0;
+        boolean complete = apks.length == 1 + splits;
+        for (android.os.ParcelFileDescriptor apk : apks) {
+            complete &= apk != null;
+        }
+        if (!complete) {
+            closeAll(apks);
+            return;
+        }
+        String base = "/proc/self/fd/" + apks[0].getFd();
+        app.sourceDir = base;
+        app.publicSourceDir = base;
+        if (splits > 0) {
+            String[] dirs = new String[splits];
+            for (int i = 0; i < splits; i++) dirs[i] = "/proc/self/fd/" + apks[i + 1].getFd();
+            app.splitSourceDirs = dirs;
+            app.splitPublicSourceDirs = dirs.clone();
+        }
+        android.os.ParcelFileDescriptor[] previous = sClientApks.put(packageName, apks);
+        if (previous != null) closeAll(previous);
+    }
+
+    private static void closeAll(android.os.ParcelFileDescriptor[] files) {
+        for (android.os.ParcelFileDescriptor file : files) {
+            if (file == null) continue;
+            try {
+                file.close();
+            } catch (IOException ignored) {
+                // already closed
+            }
+        }
+    }
+
     /** A broadcast waiting for its app to connect. */
     private static final class Held {
         final Intent intent;
@@ -972,6 +1049,7 @@ public final class PlayServicesChannel {
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
             }
+            exposeApks(claimed, info.applicationInfo, readApks(data));
             int uid = RemotePackages.registerClient(info, Process.myUid());
             mChannel.setCaller(uid, mPeerPid);
             if (callback != null) {
