@@ -209,6 +209,11 @@ class Build:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if not target.exists():
                     shutil.copyfile(self.cronet / rel, target)
+                # A source includes its own header by a relative quote ("x.h"), found beside it first: the
+                # copy needs its directory's headers beside it too.
+                for header in (self.cronet / rel).parent.glob('*.h'):
+                    if not (target.parent / header.name).exists():
+                        shutil.copyfile(header, target.parent / header.name)
                 self.patched.add(rel)
             subprocess.run(['patch', '-p1', '-s', '-d', str(self.overlay), '-i', str(patch)], check=True)
         print('patches applied:', len(list(self.args.patches.glob('*.patch'))), sorted(self.patched))
