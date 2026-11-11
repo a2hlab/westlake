@@ -3072,6 +3072,46 @@ static char *westlake_frames(char *out, char *limit, uint64_t fp)
     return out;
 }
 
+/*
+ * Diagnostic, WESTLAKE_GPU_FD_WATCH=1 only: each close() of a descriptor that is a Mali device
+ * (/dev/mali*) is logged with its caller's frames. A Flutter 3.27/3.29 app drawing with Impeller's
+ * Vulkan backend had its GPU context end (base_jd_event_term) with no GPU fault in the kernel log:
+ * whether its device descriptor was closed under the driver, and by whom.
+ */
+int close(int fd)
+{
+    static int (*real_close)(int);
+    static int watch = -1;
+    if (__builtin_expect(real_close == NULL, 0)) real_close = (int (*)(int)) dlsym(RTLD_NEXT, "close");
+    if (__builtin_expect(watch < 0, 0)) {
+        const char *value = getenv("WESTLAKE_GPU_FD_WATCH");
+        watch = value != NULL && value[0] == '1';
+    }
+    if (watch && fd >= 0) {
+        char link[40], target[64];
+        snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+        ssize_t n = readlink(link, target, sizeof(target) - 1);
+        if (n > 0) {
+            target[n] = '\0';
+            if (strncmp(target, "/dev/mali", 9) == 0) {
+                char line[1600];
+                Dl_info caller = {0};
+                dladdr(__builtin_return_address(0), &caller);
+                int length = snprintf(line, sizeof(line), "[WESTLAKE-GPUFD] close(%d) of %s by tid %ld from %s:",
+                                      fd, target, (long) syscall(SYS_gettid),
+                                      caller.dli_fname != NULL ? caller.dli_fname : "?");
+                if (length < 0 || length >= (int) sizeof(line)) length = (int) sizeof(line) - 2;
+                char *end = westlake_frames(line + length, line + sizeof(line) - 2,
+                                            (uint64_t) (uintptr_t) __builtin_frame_address(0));
+                *end++ = '\n';
+                ssize_t written = write(2, line, (size_t) (end - line));
+                (void) written;
+            }
+        }
+    }
+    return real_close != NULL ? real_close(fd) : -1;
+}
+
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
 {
     static int witnessed;
