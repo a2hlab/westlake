@@ -1,7 +1,10 @@
 # ADR-0002: Run an app's secondary processes as Westlake processes from its own zygote
 
-- **Status:** proposed (needs a decision on priority against NativeActivity input and Play Store Phase A)
-- **Date:** 2026-11-08
+- **Status:** accepted 2026-11-12. It starts with the Play Store's `:background` process: the Play Store builds
+  a different Dagger component per process name, so every component it declares for `:background` failed to
+  inject in the one process (its downloads, Age Signals, Engage, the key transfer PairIP-encrypted apps wait
+  on, and a lookup its main process waits on while holding a lock).
+- **Date:** 2026-11-08 (proposed), 2026-11-12 (accepted)
 - **Builds on:** [ADR-0001](0001-shared-play-services-process.md), whose process start and
   `SocketBinder` this reuses
 
@@ -55,7 +58,7 @@ apps' own code. Making the environment transparent to these apps means giving th
 - **`PlayServicesChannel`** routes binds, starts, stops and provider lookups for another process's
   components through a `SocketBinder` channel and returns real binders.
 
-## Decision (proposed)
+## Decision
 
 1. **Start a secondary process on first use.** A component whose declared process differs from the
    caller's runs in a Westlake process of that name. The first time one of that process's components
