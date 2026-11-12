@@ -155,6 +155,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // RoleManager's constructor requires it; Fossify Messages asks whether it holds the
             // SMS role before its first screen.
             case "role":
+            // The Play Store requires a RollbackManager ("Android is missing rollback service" from
+            // its main thread ended its process once its :background process answered); no rollbacks.
+            case "rollback":
             // Play services casts SafetyCenterManager non-null and asks whether it is enabled; it is not.
             case "safety_center":
             // Settings.System.getConfiguration reads the user's grammatical gender from this manager
