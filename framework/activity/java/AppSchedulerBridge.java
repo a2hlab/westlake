@@ -242,6 +242,7 @@ public class AppSchedulerBridge {
                     + " splits=" + (ai.splitSourceDirs == null ? 0 : ai.splitSourceDirs.length));
 
             PlayServicesChannel.installClient();
+            PlayServicesChannel.readRestrictedSettingsAsUnset();
 
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
             sLaunchProcessName = declaredProcess(pkg, activityFqn);

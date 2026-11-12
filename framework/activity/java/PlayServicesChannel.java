@@ -229,6 +229,42 @@ public final class PlayServicesChannel {
         }
     }
 
+    /**
+     * In the Play services and Play Store processes, a restricted settings read answers unset instead of
+     * throwing, as GrapheneOS's Settings answers its GmsCompat apps (NameValueCache.getStringForUser
+     * returns null there). Since Android 12, reading a Settings key that is not @Readable, or is readable
+     * only up to a target SDK, throws SecurityException unless the app is a system or privileged app. On
+     * Android these two apps are privileged, and their code reads such keys unguarded: Play services'
+     * Nearby Presence service read Settings.Secure bluetooth_name on its main thread, and the uncaught
+     * exception ended the process seconds after it started. NameValueCache checks a key only if it is in
+     * its set of the class's keys, mAllFields, which it reads nowhere else; emptied, a restricted read
+     * reaches Westlake's settings provider, which answers a key it does not hold as unset. Every other
+     * process keeps Android's exception. Call before the application is bound.
+     */
+    public static void readRestrictedSettingsAsUnset() {
+        if (!serves()) return;
+        for (String name : new String[] {"android.provider.Settings$Secure", "android.provider.Settings$Global",
+                "android.provider.Settings$System"}) {
+            try {
+                Object cache = null;
+                for (java.lang.reflect.Field field : Class.forName(name).getDeclaredFields()) {
+                    if (field.getType().getSimpleName().equals("NameValueCache")
+                            && java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                        field.setAccessible(true);
+                        cache = field.get(null);
+                        break;
+                    }
+                }
+                java.lang.reflect.Field keys = cache.getClass().getDeclaredField("mAllFields");
+                keys.setAccessible(true);
+                ((Set<?>) keys.get(cache)).clear();
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                System.err.println(TAG + "restricted settings of " + name + " still throw: " + e);
+            }
+        }
+        System.err.println(TAG + "restricted settings read as unset in this process");
+    }
+
     /** For tests: the client library's own availability answer, and who the other process says this is. */
     private static void check() {
         try {
