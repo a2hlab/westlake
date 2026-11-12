@@ -223,7 +223,7 @@ public final class PlayServicesChannel {
                 return;
             }
             System.err.println(TAG + "bind " + component.flattenToShortString() + " in " + process);
-            connect(channel, intent, flags, component, connection);
+            connect(() -> ownProcess(process), intent, flags, component, connection, 0);
         }, "app-process-bind");
         thread.setDaemon(true);
         thread.start();
@@ -698,18 +698,40 @@ public final class PlayServicesChannel {
         final String process = AppProcesses.processOf(info);
         Thread thread = new Thread(() -> {
             // A service the host declares for another of its processes runs there (ADR-0002).
-            Channel own = remoteProcess(channel, info.packageName, process);
-            connect(own != null ? own : channel, intent, flags, component, connection);
+            connect(() -> {
+                Channel own = remoteProcess(channel, info.packageName, process);
+                return own != null ? own : channel;
+            }, intent, flags, component, connection, 0);
         }, "play-services-bind");
         thread.setDaemon(true);
         thread.start();
         return 1;
     }
 
+    /** A bound service's process that died is started again: after 1 s, four times longer each time, at most 60 s. */
+    private static final int MAX_REBINDS = 8;
+    private static final long REBIND_RESET_MS = 60_000;
+
     private static void connect(Channel channel, Intent intent, int flags, ComponentName component,
             IServiceConnection connection) {
-        IBinder root = root(channel);
-        if (root == null) return;
+        connect(() -> channel, intent, flags, component, connection, 0);
+    }
+
+    /**
+     * Binds through the channel where() finds and delivers the binder on the main looper. When the service's
+     * process dies the connection hears it (onServiceDisconnected), and a binding made with BIND_AUTO_CREATE is
+     * made again once where() finds the process, which it starts if it is one of this app's: ActiveServices
+     * restarts the service and the client gets onServiceConnected again. rebinds counts the attempts since the
+     * binding last lasted a minute.
+     */
+    private static void connect(java.util.function.Supplier<Channel> where, Intent intent, int flags,
+            ComponentName component, IServiceConnection connection, int rebinds) {
+        Channel channel = where.get();
+        IBinder root = channel == null ? null : root(channel);
+        if (root == null) {
+            if (rebinds > 0) rebindLater(where, intent, flags, component, connection, rebinds + 1);
+            return;
+        }
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         IBinder service = null;
@@ -721,6 +743,7 @@ public final class PlayServicesChannel {
             service = reply.readStrongBinder();
         } catch (RemoteException | RuntimeException e) {
             System.err.println(TAG + "bind of " + component.flattenToShortString() + " failed: " + e);
+            if (rebinds > 0) rebindLater(where, intent, flags, component, connection, rebinds + 1);
             return;
         } finally {
             data.recycle();
@@ -731,12 +754,39 @@ public final class PlayServicesChannel {
         Handler main = new Handler(Looper.getMainLooper());
         main.post(() -> deliver(connection, component, connected, false));
         if (connected != null) {
-            try {
-                connected.linkToDeath(() -> main.post(() -> deliver(connection, component, null, true)), 0);
-            } catch (RemoteException | RuntimeException e) {
+            final long since = android.os.SystemClock.elapsedRealtime();
+            Runnable died = () -> {
                 main.post(() -> deliver(connection, component, null, true));
+                if ((flags & Context.BIND_AUTO_CREATE) == 0) return;
+                boolean lasted = android.os.SystemClock.elapsedRealtime() - since >= REBIND_RESET_MS;
+                rebindLater(where, intent, flags, component, connection, lasted ? 1 : rebinds + 1);
+            };
+            try {
+                connected.linkToDeath(died::run, 0);
+            } catch (RemoteException | RuntimeException e) {
+                died.run();
             }
         }
+    }
+
+    private static void rebindLater(java.util.function.Supplier<Channel> where, Intent intent, int flags,
+            ComponentName component, IServiceConnection connection, int rebinds) {
+        if (rebinds > MAX_REBINDS) {
+            System.err.println(TAG + "gave up binding " + component.flattenToShortString() + " again");
+            return;
+        }
+        long delay = Math.min(60_000L, 1000L << (2 * Math.min(rebinds - 1, 5)));
+        Thread thread = new Thread(() -> {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                return;
+            }
+            System.err.println(TAG + "binding " + component.flattenToShortString() + " again (" + rebinds + ")");
+            connect(where, intent, flags, component, connection, rebinds);
+        }, "service-rebind");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static void deliver(IServiceConnection connection, ComponentName component, IBinder binder, boolean dead) {
