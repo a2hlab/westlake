@@ -773,6 +773,8 @@ public final class PlayServicesChannel {
     /** getContentProvider for an authority in the other process, or null. */
     public static ContentProviderHolder provider(String authority) {
         if (isHost() && LocalGservices.AUTHORITY.equals(authority)) return LocalGservices.holder();
+        ContentProviderHolder routed = ownProcessProvider(authority);
+        if (routed != null) return routed;
         if (serves()) {
             ContentProviderHolder own = ownProvider(authority);
             if (own != null) return own;
@@ -885,6 +887,48 @@ public final class PlayServicesChannel {
      * first asked for, as the activity manager would start its process. The bind installs only the
      * providers of the main process, so the lookup failed in this process and for every client.
      */
+    /**
+     * A provider this app declares for another of its processes (ADR-0002): that process's, started first if
+     * need be, as ActivityManager starts a provider's process for getContentProvider and waits for it to
+     * publish. Null when it runs here, or when the app runs everything in one process.
+     */
+    private static ContentProviderHolder ownProcessProvider(String authority) {
+        Application app = application();
+        if (!AppProcesses.enabled() || app == null || authority == null) return null;
+        for (ProviderInfo info : adapter.packagemanager.PackageManagerAdapter.getProvidersForPackage(app.getPackageName())) {
+            if (info == null || info.authority == null) continue;
+            for (String declared : info.authority.split(";")) {
+                if (!authority.equals(declared.trim())) continue;
+                String process = AppProcesses.processOf(info);
+                if (AppProcesses.runsHere(process)) return null;
+                Channel channel = ownProcess(process);
+                IBinder root = channel == null ? null : root(channel);
+                if (root == null) return null;
+                Parcel data = Parcel.obtain();
+                Parcel reply = Parcel.obtain();
+                try {
+                    data.writeString(authority);
+                    root.transact(PROVIDER, data, reply, 0);
+                    reply.readException();
+                    IBinder binder = reply.readStrongBinder();
+                    if (binder == null) return null;
+                    ContentProviderHolder holder = new ContentProviderHolder(info);
+                    holder.provider = ContentProviderNative.asInterface(binder);
+                    holder.noReleaseNeeded = true;
+                    System.err.println(TAG + "provider " + authority + " -> " + info.name + " in " + process);
+                    return holder;
+                } catch (RemoteException | RuntimeException e) {
+                    System.err.println(TAG + "provider " + authority + " in " + process + " failed: " + e);
+                    return null;
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        }
+        return null;
+    }
+
     private static ContentProviderHolder ownProvider(String authority) {
         Application app = application();
         if (app == null || authority == null) return null;
