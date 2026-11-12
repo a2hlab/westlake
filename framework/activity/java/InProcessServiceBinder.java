@@ -50,6 +50,15 @@ public class InProcessServiceBinder implements Runnable {
     // Services bound in process. A bound service outlives stopService and stopSelf, as in AOSP;
     // nothing tracks an unbind here, so one stays bound for the life of the process.
     private static final Set<String> sBound = ConcurrentHashMap.newKeySet();
+    // className -> what onBind answered per bind intent. ActiveServices calls onBind once for each
+    // intent that differs by filterEquals (IntentBindRecord) and hands every later bind with an equal
+    // intent the same binder, null included (onNullBinding). Calling onBind again broke Play services'
+    // chimera services: a second bind of PersistentApiServiceNoInstantApps or GmsApiService threw
+    // IllegalStateException "Check failed." from onBind, and the caller waited for a connection that
+    // never came. Nothing unbinds here (see sBound), so the binder stays the answer for the process.
+    // Main thread only.
+    private static final java.util.Map<String, java.util.Map<Intent.FilterComparison, IBinder>> sBinders =
+            new java.util.HashMap<>();
     // className -> why it cannot be created here: a class that does not load or link (a library the
     // platform has and this runtime does not) fails the same way every time. Play services started
     // its GoogleLocationManagerService about 68 times a second, each start failing on
@@ -130,7 +139,7 @@ public class InProcessServiceBinder implements Runnable {
         try {
             Service svc = serviceFor(mComp, mService);
             sBound.add(mComp.getClassName());
-            IBinder binder = svc.onBind(mService);
+            IBinder binder = bindOnce(svc, mComp, mService);
             mConnection.connected(mComp, binder, false);
             Log.i(TAG, "connected " + mComp.getClassName() + " binder=" + binder);
         } catch (Throwable t) {
@@ -146,7 +155,18 @@ public class InProcessServiceBinder implements Runnable {
     static IBinder bindForSystem(ComponentName comp, Intent intent) throws Exception {
         Service svc = serviceFor(comp, intent);
         sBound.add(comp.getClassName());
-        return svc.onBind(intent);
+        return bindOnce(svc, comp, intent);
+    }
+
+    /** onBind's answer for this intent: asked once per intent (filterEquals), as ActiveServices does. */
+    private static IBinder bindOnce(Service svc, ComponentName comp, Intent intent) {
+        java.util.Map<Intent.FilterComparison, IBinder> binders =
+                sBinders.computeIfAbsent(comp.getClassName(), k -> new java.util.HashMap<>());
+        Intent.FilterComparison key = new Intent.FilterComparison(new Intent(intent));
+        if (binders.containsKey(key)) return binders.get(key);
+        IBinder binder = svc.onBind(intent);
+        binders.put(key, binder);
+        return binder;
     }
 
     /**
