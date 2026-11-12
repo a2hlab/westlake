@@ -196,7 +196,7 @@ for the `safety_center` and `grammatical_inflection` services.
 - `LocalAccounts` stores tokens unencrypted, like Android's accounts database, in a sandbox shared with
   every app. Each launch's new stage replaces it, so accounts don't yet survive a restart of the process.
 
-## Next: the Play Store as a second shared process (plan, not built)
+## The Play Store as a second shared process (planned; built 2026-11-11, results below)
 
 GrapheneOS installs Play services and the Play Store as two ordinary apps. Here the Play Store's code
 must not run inside the Play services process: binding billing there ended the process every app
@@ -230,14 +230,45 @@ authenticator and Gservices answer from the Play services process.
 
 **What it will honestly answer:** integrity verdicts come signed from Google. Device integrity will
 fail (the board is not a certified device, and nothing will claim it is). App recognition is by binary
-and certificate. Licensing and `appLicensingVerdict` depend on the account's entitlement: an app placed
-by the launcher has no installer (`getInstallSourceInfo` reports none), so a free app the account has
-never acquired is unlicensed, which is the truth. Installing apps through the Play Store (phase B, needs
-Westlake to accept installs into its package system) is what makes that entitlement real.
+and certificate. Licensing and `appLicensingVerdict` depend on the account's entitlement. Since
+2026-11-09 a launched app reports the Play Store as its installer (`getInstallSourceInfo`), as a
+Play-installed app does. Installing apps through the Play Store (phase B, which needs Westlake to accept
+installs into its package system) is what makes that entitlement real.
 
 **Order:** routing by package and the dual-role host, then the account proxy, then start the Play Store
 host with no activity and watch it, then point integrity, licensing and billing binds at it, then
 remove Companion's stand-in. Needs the test account signed in on the board.
+
+### Built (2026-11-11, westlake #152, #153; manifest #61)
+
+Google's Play Store 53.5.48 runs as its own host beside Play services, with the signed-in test account.
+It loads its home page from Google, and Play Asset Delivery works through it: Adobe Scan, launched
+beside both hosts, receives `onRequestDownloadInfo` for its asset packs.
+
+What it took, beyond the plan above. Each item was an Android guarantee or platform part that one
+process per device had never exercised:
+- **Calls between processes.** Unparcelling an AttributionSource checks the caller (Android 12: uid;
+  Android 14: on a thread directly handling a transaction). Also: a `permission_checker` service;
+  CursorWindow parceling; other-process providers made on first use.
+- **The platform HTTP engine.** The Play Store's only native network stack is `HttpEngine`. Westlake
+  reports the S extension level 7 and builds `libmainlinecronet` from AOSP `external/cronet`. Its
+  Bionic-ABI imports (`getaddrinfo` and others) are renamed to the Bionic shim's entry points, as the
+  WebView engine's are.
+- **Truthful package answers.**
+  - `getSystemSharedLibraryNames()` was null, which broke the Play Store's device-configuration sync
+    ("Failed to converge on device attributes for TOC").
+  - `faketouch` and the microphone are claimed, both backed.
+  - A host reports the Play Store as installer for its clients, as each client reports for itself.
+    Before this, asset packs were "all unavailable".
+- **What a privileged service sees.** Hosts list their recent callers as foreground processes, as
+  GrapheneOS lists recent binder peers. Clients hand hosts their APKs as open files, because each
+  process sees its own runtime at the same path.
+
+Open: split installs start (`onStartInstall`) and then stall; downloading the split, a PackageInstaller
+session and state broadcasts from the Play Store's process to the app's are not built. Hosts and apps see
+Android user 200 (OH uid 20010054 / 100000), so `UserManager.isSystemUser()` is false, unlike a phone. The
+channel identities stay claimed, not attested: any process can say it is any package. Real accounts wait
+for the spawner to attest identity.
 
 ## Sources
 
