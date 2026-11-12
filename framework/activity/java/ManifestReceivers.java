@@ -75,6 +75,13 @@ final class ManifestReceivers {
             ActivityInfo info = resolved.activityInfo;
             Intent delivered = new Intent(intent);
             delivered.setComponent(new ComponentName(info.packageName, info.name));
+            // A receiver declared for another of the app's processes runs there (ADR-0002). An ordered
+            // broadcast's result does not come back from that process yet.
+            String process = AppProcesses.processOf(info);
+            if (!AppProcesses.runsHere(process)) {
+                PlayServicesChannel.deliverInOwnProcess(process, delivered);
+                continue;
+            }
             BroadcastReceiver.PendingResult result = new BroadcastReceiver.PendingResult(code, data, extras,
                     BroadcastReceiver.PendingResult.TYPE_UNREGISTERED, ordered, false, null, userId,
                     intent.getFlags());
@@ -102,6 +109,18 @@ final class ManifestReceivers {
                 Log.w(TAG, "result delivery of " + intent.getAction() + " failed", t);
             }
         }
+    }
+
+    /** A broadcast another process of this app routed to one of its manifest receivers declared for this one. */
+    static void deliverHere(Intent intent) {
+        List<ResolveInfo> receivers = new java.util.ArrayList<>(
+                adapter.packagemanager.SourcePackageRegistry.queryReceivers(intent, null, 0));
+        receivers.removeIf(r -> r.activityInfo == null || !AppProcesses.runsHere(AppProcesses.processOf(r.activityInfo)));
+        if (receivers.isEmpty()) {
+            Log.w(TAG, "no receiver here for " + intent);
+            return;
+        }
+        deliver(receivers, intent, null, 0, null, null, false, android.os.UserHandle.myUserId());
     }
 
     private static BroadcastReceiver instantiate(Application app, ClassLoader loader, String name, Intent intent)

@@ -87,6 +87,8 @@ public final class PlayServicesChannel {
     private static final int SERVICE = 13;
     /** To an app's launched process: start one of the app's other processes if it isn't running (ADR-0002). */
     private static final int ENSURE_PROCESS = 14;
+    /** To another process of the same app: a broadcast for one of its manifest receivers declared there. */
+    private static final int RECEIVER = 15;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -223,6 +225,60 @@ public final class PlayServicesChannel {
             System.err.println(TAG + "bind " + component.flattenToShortString() + " in " + process);
             connect(channel, intent, flags, component, connection);
         }, "app-process-bind");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /**
+     * Binds this app's service declared for another of its processes and returns what its onBind gave, as
+     * the system binds a JobService; null if that process cannot start. Blocks: never on the main thread.
+     */
+    static IBinder bindInOwnProcess(String process, Intent intent) {
+        Channel channel = ownProcess(process);
+        IBinder root = channel == null ? null : root(channel);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0);
+            data.writeInt(Context.BIND_AUTO_CREATE);
+            root.transact(BIND, data, reply, 0);
+            reply.readException();
+            System.err.println(TAG + "bound " + intent.getComponent().flattenToShortString() + " in " + process);
+            return reply.readStrongBinder();
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "bind " + intent.getComponent() + " in " + process + " failed: " + e);
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    /** A broadcast for this app's manifest receiver declared for another of its processes, delivered there. */
+    static void deliverInOwnProcess(final String process, final Intent intent) {
+        Thread thread = new Thread(() -> {
+            Channel channel = ownProcess(process);
+            IBinder root = channel == null ? null : root(channel);
+            if (root == null) {
+                System.err.println(TAG + intent.getAction() + " for " + intent.getComponent() + " not delivered: "
+                        + process + " unavailable");
+                return;
+            }
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeTypedObject(intent, 0);
+                root.transact(RECEIVER, data, reply, 0);
+                reply.readException();
+            } catch (RemoteException | RuntimeException e) {
+                System.err.println(TAG + intent.getAction() + " for " + intent.getComponent() + " in " + process
+                        + " failed: " + e);
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        }, "app-process-receiver");
         thread.setDaemon(true);
         thread.start();
     }
@@ -1253,6 +1309,14 @@ public final class PlayServicesChannel {
                 }
                 case SERVICE: {
                     reply.writeStrongBinder(hostService(data.readString()));
+                    return true;
+                }
+                case RECEIVER: {
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    if (Binder.getCallingUid() != Process.myUid()) {
+                        throw new SecurityException("only this app's own processes deliver to its receivers");
+                    }
+                    ManifestReceivers.deliverHere(intent);
                     return true;
                 }
                 case ENSURE_PROCESS: {
