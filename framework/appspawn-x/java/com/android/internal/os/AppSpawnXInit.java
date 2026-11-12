@@ -971,7 +971,14 @@ public class AppSpawnXInit {
      * @param targetClass    Main class to invoke (e.g. "android.app.ActivityThread")
      * @param targetSdkVersion Target SDK version for the app
      */
+    /**
+     * The name this process was spawned under: the host's OH name for the process an app is launched as,
+     * or one of the app's own process names for a process the app started (adapter.activity.AppProcesses).
+     */
+    public static volatile String sSpawnName;
+
     public static void initChild(String procName, String targetClass, int targetSdkVersion) {
+        sSpawnName = procName;
         // [FIX-AII 2026-05-24] CHILD ENTRY PING — direct nativeHiLog before
         // anything else. Required to diagnose pre-Java-entry crashes:
         // Netflix/Amazon/Maps/Spotify/Zoom all SEGV at boot-framework.oat+0xa3ee42
