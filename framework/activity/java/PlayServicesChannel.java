@@ -1239,12 +1239,34 @@ public final class PlayServicesChannel {
                 name, uid, false, android.app.ActivityManager.INTENT_SENDER_BROADCAST);
     }
 
+    /**
+     * Sends a sender this process holds only through another process (an app's, given to Play services'
+     * persistent process by its main one): the call goes to the sender's own binder, which relays it back to
+     * the process that made it (LocalIntentSenders.SEND_TRANSACTION). False if the binder can't be reached.
+     */
+    private static boolean sendThroughSender(android.content.IIntentSender sender, int code, Intent fillIn, String type) {
+        IBinder binder = sender == null ? null : sender.asBinder();
+        if (binder == null || !binder.isBinderAlive()) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeInterfaceToken("android.content.IIntentSender");
+            data.writeInt(code);
+            data.writeTypedObject(fillIn, 0);
+            data.writeString(type);
+            return binder.transact(LocalIntentSenders.SEND_TRANSACTION, data, null, IBinder.FLAG_ONEWAY);
+        } catch (RemoteException | RuntimeException e) {
+            return false;
+        } finally {
+            data.recycle();
+        }
+    }
+
     /** Sends an app's PendingIntent in that app. False if it isn't a connected app's. */
     public static boolean sendRemoteSender(android.content.IIntentSender sender, int code, Intent fillIn, String type) {
         int uid = sender == null ? 0 : SocketBinder.ownerUid(sender.asBinder());
         String name = uid == 0 ? null : RemotePackages.packageForUid(uid);
         IBinder callback = name == null ? null : sClientCallbacks.get(name);
-        if (callback == null) return false;
+        if (callback == null) return sendThroughSender(sender, code, fillIn, type);
         Parcel data = Parcel.obtain();
         try {
             data.writeStrongBinder(sender.asBinder());

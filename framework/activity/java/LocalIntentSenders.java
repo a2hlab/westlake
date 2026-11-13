@@ -97,6 +97,14 @@ public final class LocalIntentSenders {
      */
     static final int INFO_TRANSACTION = 0x574c49;
 
+    /**
+     * The other Westlake call on a sender's binder: send it, in the process that made it (one-way: code, the
+     * intent to fill in, its resolved type). A process that holds an app's sender only through another
+     * process (Play services' persistent one, given it by the main one) has no channel to that app of its own;
+     * the call goes back to the maker through each process the binder passed.
+     */
+    static final int SEND_TRANSACTION = 0x574c53;
+
     /** A sender's binder: it leads back to its record for as long as a PendingIntent holds it. */
     private static final class SenderBinder extends Binder {
         final Record record;
@@ -107,6 +115,14 @@ public final class LocalIntentSenders {
 
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            if (code == SEND_TRANSACTION) {
+                data.enforceInterface(SENDER_DESCRIPTOR);
+                int sendCode = data.readInt();
+                Intent fillIn = data.readTypedObject(Intent.CREATOR);
+                String resolvedType = data.readString();
+                send((IIntentSender) queryLocalInterface(SENDER_DESCRIPTOR), sendCode, fillIn, resolvedType, null);
+                return true;
+            }
             if (code != INFO_TRANSACTION) return super.onTransact(code, data, reply, flags);
             data.enforceInterface(SENDER_DESCRIPTOR);
             reply.writeNoException();
