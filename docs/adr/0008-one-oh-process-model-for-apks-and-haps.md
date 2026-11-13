@@ -66,7 +66,8 @@ and contain no `AttachApplication`. The code at the baseline shows four gaps:
    through Westlake's adapters. Android permissions map to explicit grants and are enforced
    (ADR-0004). Activities, tasks, the back stack and services get defined compatibility semantics,
    because Activities and UIAbilities have no universal one-to-one mapping. OH sees accurate
-   visible-task and process ownership.
+   visible-task and process ownership. [ADR-0009](0009-android-system-services-on-oh-services.md)
+   (proposed) applies the same rule to system services.
 6. **Comparable boundaries are not equal assurance.** The model aims for isolation boundaries comparable
    to a HAP's. That alone does not give equal security assurance: ART and the adapters must preserve
    authenticated caller identity and enforce permissions and token ownership. Confinement rules may
