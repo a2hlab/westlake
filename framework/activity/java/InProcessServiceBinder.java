@@ -134,6 +134,28 @@ public class InProcessServiceBinder implements Runnable {
 
     @Override
     public void run() {
+        // A service declared for another of the app's processes runs there (ADR-0002); here only if that
+        // process cannot start, as before.
+        String process = declaredProcess(mComp);
+        if (!AppProcesses.runsHere(process)) {
+            PlayServicesChannel.bindOwnProcess(process, mService, android.content.Context.BIND_AUTO_CREATE, mComp,
+                    mConnection, () -> new Handler(Looper.getMainLooper()).post(this::runHere));
+            return;
+        }
+        runHere();
+    }
+
+    /** The process this app declares a service of its own for (android:process), or null if unknown. */
+    static String declaredProcess(ComponentName comp) {
+        try {
+            Application app = ActivityThread.currentApplication();
+            return app == null ? null : AppProcesses.processOf(app.getPackageManager().getServiceInfo(comp, 0));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private void runHere() {
         // Known not to be creatable here: no connection, as after the first failure, without the work.
         if (sUnloadable.containsKey(mComp.getClassName())) return;
         try {
@@ -203,6 +225,11 @@ public class InProcessServiceBinder implements Runnable {
     public static ComponentName start(final Intent intent) {
         final ComponentName comp = resolveInApp(intent);
         if (comp == null) return null;
+        String process = declaredProcess(comp);
+        if (!AppProcesses.runsHere(process)) {
+            PlayServicesChannel.startOwnProcess(process, new Intent(intent).setComponent(comp), false);
+            return comp;
+        }
         if (sUnloadable.containsKey(comp.getClassName())) return null;   // as for no such service
         final Intent args = new Intent(intent);
         args.setComponent(comp);
@@ -230,6 +257,11 @@ public class InProcessServiceBinder implements Runnable {
      */
     public static boolean stop(ComponentName comp, int startId) {
         if (comp == null) return false;
+        String process = declaredProcess(comp);
+        if (!AppProcesses.runsHere(process)) {
+            PlayServicesChannel.startOwnProcess(process, new Intent().setComponent(comp), true);
+            return true;
+        }
         final String cls = comp.getClassName();
         final Service svc = sServices.get(cls);
         if (svc == null) return false;

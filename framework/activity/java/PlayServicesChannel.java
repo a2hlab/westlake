@@ -32,8 +32,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -83,6 +85,10 @@ public final class PlayServicesChannel {
     private static final int WHO_AM_I = 12;
     /** A system service the Play services process keeps, for a client that is a host too (the account manager). */
     private static final int SERVICE = 13;
+    /** To an app's launched process: start one of the app's other processes if it isn't running (ADR-0002). */
+    private static final int ENSURE_PROCESS = 14;
+    /** To another process of the same app: a broadcast for one of its manifest receivers declared there. */
+    private static final int RECEIVER = 15;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -116,6 +122,8 @@ public final class PlayServicesChannel {
     private static final class Channel {
         final String env;
         final String label;
+        /** One process's own socket (AppProcesses), for a channel not named by an environment variable. */
+        final String fixed;
         /** Guarded by CLIENT_LOCK. */
         SocketBinder binder;
         volatile String remoteRoot;
@@ -124,13 +132,180 @@ public final class PlayServicesChannel {
         volatile int uid;
 
         Channel(String env, String label) {
+            this(env, label, null);
+        }
+
+        Channel(String env, String label, String fixed) {
             this.env = env;
             this.label = label;
+            this.fixed = fixed;
         }
 
         String socket() {
-            return System.getenv(env);
+            return fixed != null ? fixed : System.getenv(env);
         }
+    }
+
+    /** Channels to single processes of an app (ADR-0002), by socket. */
+    private static final Map<String, Channel> PROCESS_CHANNELS = new HashMap<>();
+
+    private static Channel processChannel(String socket) {
+        synchronized (PROCESS_CHANNELS) {
+            return PROCESS_CHANNELS.computeIfAbsent(socket, name -> new Channel(null, "process " + name, name));
+        }
+    }
+
+    /** Asks an app's launched process, at root, to start its process if it isn't running. */
+    private static boolean ensureProcess(IBinder root, String process) throws RemoteException {
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeString(process);
+            root.transact(ENSURE_PROCESS, data, reply, 0);
+            reply.readException();
+            return reply.readBoolean();
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    /**
+     * The channel to the process another app declares a service for, when that app runs it (ADR-0002):
+     * its launched process starts it on request, and this app connects to it with its own identity,
+     * as on Android. Null when that app runs everything in one process, as Westlake did before.
+     */
+    private static Channel remoteProcess(Channel host, String packageName, String process) {
+        String socket = host.socket();
+        if (socket == null || process == null || process.equals(packageName)) return null;
+        try {
+            IBinder root = root(host);
+            if (root == null || !ensureProcess(root, process)) return null;
+            return processChannel(AppProcesses.socketOf(socket, packageName, process));
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + process + " of " + packageName + " not started: " + e);
+            return null;
+        }
+    }
+
+    /**
+     * The channel to another process of this app (ADR-0002), started first if need be: by this process
+     * if it is the one the app was launched as, else by asking that one. Null if it cannot start.
+     */
+    private static Channel ownProcess(String process) {
+        try {
+            if (AppProcesses.isSecondary()) {
+                if (!process.equals(AppProcesses.home())) {
+                    IBinder home = root(processChannel(AppProcesses.socketOf(AppProcesses.home())));
+                    if (home == null || !ensureProcess(home, process)) return null;
+                }
+            } else {
+                AppProcesses.ensure(process);
+            }
+            return processChannel(AppProcesses.socketOf(process));
+        } catch (IOException | RemoteException | RuntimeException e) {
+            System.err.println(TAG + "process " + process + " unavailable: " + e);
+            return null;
+        }
+    }
+
+    /**
+     * bindService of this app's service declared for another of its processes: connected from a thread,
+     * delivered on the main looper as bind() delivers. If that process cannot start, unavailable runs
+     * instead (the caller binds the service here, as before).
+     */
+    public static void bindOwnProcess(final String process, final Intent intent, final int flags,
+            final ComponentName component, final IServiceConnection connection, final Runnable unavailable) {
+        Thread thread = new Thread(() -> {
+            Channel channel = ownProcess(process);
+            if (channel == null) {
+                unavailable.run();
+                return;
+            }
+            System.err.println(TAG + "bind " + component.flattenToShortString() + " in " + process);
+            connect(() -> ownProcess(process), intent, flags, component, connection, 0);
+        }, "app-process-bind");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /**
+     * Binds this app's service declared for another of its processes and returns what its onBind gave, as
+     * the system binds a JobService; null if that process cannot start. Blocks: never on the main thread.
+     */
+    static IBinder bindInOwnProcess(String process, Intent intent) {
+        Channel channel = ownProcess(process);
+        IBinder root = channel == null ? null : root(channel);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0);
+            data.writeInt(Context.BIND_AUTO_CREATE);
+            root.transact(BIND, data, reply, 0);
+            reply.readException();
+            System.err.println(TAG + "bound " + intent.getComponent().flattenToShortString() + " in " + process);
+            return reply.readStrongBinder();
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "bind " + intent.getComponent() + " in " + process + " failed: " + e);
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    /** A broadcast for this app's manifest receiver declared for another of its processes, delivered there. */
+    static void deliverInOwnProcess(final String process, final Intent intent) {
+        Thread thread = new Thread(() -> {
+            Channel channel = ownProcess(process);
+            IBinder root = channel == null ? null : root(channel);
+            if (root == null) {
+                System.err.println(TAG + intent.getAction() + " for " + intent.getComponent() + " not delivered: "
+                        + process + " unavailable");
+                return;
+            }
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeTypedObject(intent, 0);
+                root.transact(RECEIVER, data, reply, 0);
+                reply.readException();
+            } catch (RemoteException | RuntimeException e) {
+                System.err.println(TAG + intent.getAction() + " for " + intent.getComponent() + " in " + process
+                        + " failed: " + e);
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        }, "app-process-receiver");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** startService (stop: stopService) of this app's service declared for another of its processes. */
+    public static void startOwnProcess(final String process, final Intent intent, final boolean stop) {
+        Thread thread = new Thread(() -> {
+            Channel channel = ownProcess(process);
+            if (channel == null) return;
+            IBinder root = root(channel);
+            if (root == null) return;
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeTypedObject(intent, 0);
+                root.transact(stop ? STOP : START, data, reply, 0);
+                reply.readException();
+            } catch (RemoteException | RuntimeException e) {
+                System.err.println(TAG + (stop ? "stop " : "start ") + intent.getComponent() + " in " + process
+                        + " failed: " + e);
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        }, "app-process-start");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static final Channel SERVICES = new Channel(CONNECT, "play-services");
@@ -520,16 +695,43 @@ public final class PlayServicesChannel {
         ServiceInfo info = found.get(0).serviceInfo;
         final ComponentName component = new ComponentName(info.packageName, info.name);
         final Channel channel = channelFor(info.packageName);
-        Thread thread = new Thread(() -> connect(channel, intent, flags, component, connection), "play-services-bind");
+        final String process = AppProcesses.processOf(info);
+        Thread thread = new Thread(() -> {
+            // A service the host declares for another of its processes runs there (ADR-0002).
+            connect(() -> {
+                Channel own = remoteProcess(channel, info.packageName, process);
+                return own != null ? own : channel;
+            }, intent, flags, component, connection, 0);
+        }, "play-services-bind");
         thread.setDaemon(true);
         thread.start();
         return 1;
     }
 
+    /** A bound service's process that died is started again: after 1 s, four times longer each time, at most 60 s. */
+    private static final int MAX_REBINDS = 8;
+    private static final long REBIND_RESET_MS = 60_000;
+
     private static void connect(Channel channel, Intent intent, int flags, ComponentName component,
             IServiceConnection connection) {
-        IBinder root = root(channel);
-        if (root == null) return;
+        connect(() -> channel, intent, flags, component, connection, 0);
+    }
+
+    /**
+     * Binds through the channel where() finds and delivers the binder on the main looper. When the service's
+     * process dies the connection hears it (onServiceDisconnected), and a binding made with BIND_AUTO_CREATE is
+     * made again once where() finds the process, which it starts if it is one of this app's: ActiveServices
+     * restarts the service and the client gets onServiceConnected again. rebinds counts the attempts since the
+     * binding last lasted a minute.
+     */
+    private static void connect(java.util.function.Supplier<Channel> where, Intent intent, int flags,
+            ComponentName component, IServiceConnection connection, int rebinds) {
+        Channel channel = where.get();
+        IBinder root = channel == null ? null : root(channel);
+        if (root == null) {
+            if (rebinds > 0) rebindLater(where, intent, flags, component, connection, rebinds + 1);
+            return;
+        }
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         IBinder service = null;
@@ -541,6 +743,7 @@ public final class PlayServicesChannel {
             service = reply.readStrongBinder();
         } catch (RemoteException | RuntimeException e) {
             System.err.println(TAG + "bind of " + component.flattenToShortString() + " failed: " + e);
+            if (rebinds > 0) rebindLater(where, intent, flags, component, connection, rebinds + 1);
             return;
         } finally {
             data.recycle();
@@ -551,12 +754,39 @@ public final class PlayServicesChannel {
         Handler main = new Handler(Looper.getMainLooper());
         main.post(() -> deliver(connection, component, connected, false));
         if (connected != null) {
-            try {
-                connected.linkToDeath(() -> main.post(() -> deliver(connection, component, null, true)), 0);
-            } catch (RemoteException | RuntimeException e) {
+            final long since = android.os.SystemClock.elapsedRealtime();
+            Runnable died = () -> {
                 main.post(() -> deliver(connection, component, null, true));
+                if ((flags & Context.BIND_AUTO_CREATE) == 0) return;
+                boolean lasted = android.os.SystemClock.elapsedRealtime() - since >= REBIND_RESET_MS;
+                rebindLater(where, intent, flags, component, connection, lasted ? 1 : rebinds + 1);
+            };
+            try {
+                connected.linkToDeath(died::run, 0);
+            } catch (RemoteException | RuntimeException e) {
+                died.run();
             }
         }
+    }
+
+    private static void rebindLater(java.util.function.Supplier<Channel> where, Intent intent, int flags,
+            ComponentName component, IServiceConnection connection, int rebinds) {
+        if (rebinds > MAX_REBINDS) {
+            System.err.println(TAG + "gave up binding " + component.flattenToShortString() + " again");
+            return;
+        }
+        long delay = Math.min(60_000L, 1000L << (2 * Math.min(rebinds - 1, 5)));
+        Thread thread = new Thread(() -> {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                return;
+            }
+            System.err.println(TAG + "binding " + component.flattenToShortString() + " again (" + rebinds + ")");
+            connect(where, intent, flags, component, connection, rebinds);
+        }, "service-rebind");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static void deliver(IServiceConnection connection, ComponentName component, IBinder binder, boolean dead) {
@@ -593,6 +823,8 @@ public final class PlayServicesChannel {
     /** getContentProvider for an authority in the other process, or null. */
     public static ContentProviderHolder provider(String authority) {
         if (isHost() && LocalGservices.AUTHORITY.equals(authority)) return LocalGservices.holder();
+        ContentProviderHolder routed = ownProcessProvider(authority);
+        if (routed != null) return routed;
         if (serves()) {
             ContentProviderHolder own = ownProvider(authority);
             if (own != null) return own;
@@ -705,6 +937,48 @@ public final class PlayServicesChannel {
      * first asked for, as the activity manager would start its process. The bind installs only the
      * providers of the main process, so the lookup failed in this process and for every client.
      */
+    /**
+     * A provider this app declares for another of its processes (ADR-0002): that process's, started first if
+     * need be, as ActivityManager starts a provider's process for getContentProvider and waits for it to
+     * publish. Null when it runs here, or when the app runs everything in one process.
+     */
+    private static ContentProviderHolder ownProcessProvider(String authority) {
+        Application app = application();
+        if (!AppProcesses.enabled() || app == null || authority == null) return null;
+        for (ProviderInfo info : adapter.packagemanager.PackageManagerAdapter.getProvidersForPackage(app.getPackageName())) {
+            if (info == null || info.authority == null) continue;
+            for (String declared : info.authority.split(";")) {
+                if (!authority.equals(declared.trim())) continue;
+                String process = AppProcesses.processOf(info);
+                if (AppProcesses.runsHere(process)) return null;
+                Channel channel = ownProcess(process);
+                IBinder root = channel == null ? null : root(channel);
+                if (root == null) return null;
+                Parcel data = Parcel.obtain();
+                Parcel reply = Parcel.obtain();
+                try {
+                    data.writeString(authority);
+                    root.transact(PROVIDER, data, reply, 0);
+                    reply.readException();
+                    IBinder binder = reply.readStrongBinder();
+                    if (binder == null) return null;
+                    ContentProviderHolder holder = new ContentProviderHolder(info);
+                    holder.provider = ContentProviderNative.asInterface(binder);
+                    holder.noReleaseNeeded = true;
+                    System.err.println(TAG + "provider " + authority + " -> " + info.name + " in " + process);
+                    return holder;
+                } catch (RemoteException | RuntimeException e) {
+                    System.err.println(TAG + "provider " + authority + " in " + process + " failed: " + e);
+                    return null;
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        }
+        return null;
+    }
+
     private static ContentProviderHolder ownProvider(String authority) {
         Application app = application();
         if (app == null || authority == null) return null;
@@ -974,11 +1248,31 @@ public final class PlayServicesChannel {
 
     /** Starts serving if this process was asked to (Play services, or the Play Store). Call once the Application exists. */
     public static void startHostIfAsked() {
-        final String name = System.getenv(SERVE) != null ? System.getenv(SERVE) : System.getenv(STORE_SERVE);
+        final String name = AppProcesses.isSecondary() ? AppProcesses.socketOf(AppProcesses.self())
+                : System.getenv(SERVE) != null ? System.getenv(SERVE) : System.getenv(STORE_SERVE);
         if (name == null) return;
         SocketBinder.installCallingIdentity();
-        announceBoot();
+        if (!AppProcesses.isSecondary()) announceBoot();
         Thread thread = new Thread(() -> serve(name), "play-services-host");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static boolean sServingLaunched;
+
+    /**
+     * An app that is not a host serves its launched process too once it starts another process, so
+     * that the other can reach the components declared for it (ADR-0002). A host serves already.
+     */
+    static void serveLaunchedProcess() {
+        if (serves() || AppProcesses.isSecondary()) return;
+        synchronized (PlayServicesChannel.class) {
+            if (sServingLaunched) return;
+            sServingLaunched = true;
+        }
+        final String name = AppProcesses.socketOf(AppProcesses.home());
+        SocketBinder.installCallingIdentity();
+        Thread thread = new Thread(() -> serve(name), "app-process-host");
         thread.setDaemon(true);
         thread.start();
     }
@@ -1111,6 +1405,26 @@ public final class PlayServicesChannel {
                     reply.writeStrongBinder(hostService(data.readString()));
                     return true;
                 }
+                case RECEIVER: {
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    if (Binder.getCallingUid() != Process.myUid()) {
+                        throw new SecurityException("only this app's own processes deliver to its receivers");
+                    }
+                    ManifestReceivers.deliverHere(intent);
+                    return true;
+                }
+                case ENSURE_PROCESS: {
+                    String process = data.readString();
+                    try {
+                        AppProcesses.ensure(process);
+                        reply.writeBoolean(true);
+                    } catch (IOException | RuntimeException e) {
+                        System.err.println(TAG + "process " + process + " not started for uid "
+                                + Binder.getCallingUid() + ": " + e);
+                        reply.writeBoolean(false);
+                    }
+                    return true;
+                }
                 default:
                     throw new IllegalArgumentException("unknown call " + code);
             }
@@ -1123,6 +1437,14 @@ public final class PlayServicesChannel {
             IBinder callback = data.readStrongBinder();
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
+            }
+            if (claimed.equals(application().getPackageName())) {
+                // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
+                int uid = Process.myUid();
+                mChannel.setCaller(uid, mPeerPid);
+                mIdentified = true;
+                System.err.println(TAG + "process of this app pid=" + mPeerPid + " uid=" + uid);
+                return uid;
             }
             ClientApks apks = exposeApks(claimed, info.applicationInfo, readApks(data));
             if (apks != null && callback != null) {

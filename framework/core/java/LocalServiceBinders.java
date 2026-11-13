@@ -109,6 +109,10 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "rollback":
+                    // RollbackManager: no rollback available, committed or pending (empty lists).
+                    binder = proxy(name, "android.content.rollback.IRollbackManager", (method, args) -> DEFAULT);
+                    break;
                 case "device_identifiers":
                     binder = proxy(name, "android.os.IDeviceIdentifiersPolicyService",
                             LocalServiceBinders::deviceIdentifiers);
