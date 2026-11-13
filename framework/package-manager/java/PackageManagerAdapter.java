@@ -89,7 +89,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         ai.scanSourceDir = apkPath;
         ai.scanPublicSourceDir = apkPath;
         ai.dataDir = dataDir;
-        ai.deviceProtectedDataDir = dataDir;
+        ai.deviceProtectedDataDir = DataDirs.deviceProtected(dataDir);
         ai.credentialProtectedDataDir = dataDir;
         ai.nativeLibraryDir = libDir;
         ai.nativeLibraryRootDir = libDir;
