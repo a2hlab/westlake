@@ -15,7 +15,10 @@ prerequisites, but they do not establish successful installation.
 At `d1dcb27760fc59ccc6f3af8ed8e24302e795b497`, `LocalServiceBinders.packageInstaller()` throws for
 `createSession`. Merely returning `com.android.vending` as an app's installer also does not establish
 an actual installation record or the Google account's server-side entitlement. The Play Store may
-correctly refuse a license or key for a sideloaded app it does not recognize as acquired.
+correctly refuse a license or key for a sideloaded app it does not recognize as acquired. Westlake
+answers `com.android.vending` as every launched application's installer, by an earlier project
+decision, so that applications that check their source behave as Play-installed ones. Every corpus
+application is sideloaded.
 
 ## Decision
 
@@ -30,14 +33,22 @@ correctly refuse a license or key for a sideloaded app it does not recognize as 
 3. **Keep Play unprivileged.** Require the applicable source authorization and user confirmation for
    installation. Support unattended updates only when their actual eligibility conditions are met.
    Cancellation and refusal must reach the genuine installer through the documented callbacks.
+   Westlake supplies the confirmation UI as its own activity, because its notifications do not reach
+   OH's notification centre and OH refuses activity starts from Westlake processes.
 4. **Record what actually happened.** Publish installed packages, splits, versions, signing identity,
-   installer attribution and update ownership from committed transactions. Remove unconditional
-   installer attribution from the production path. Report Google account entitlement only through
-   Google's genuine responses; local package metadata cannot manufacture it.
+   installer attribution and update ownership from committed transactions. Replacing today's
+   unconditional installer answer with these records revisits the earlier project decision: it needs
+   that decision changed, and an A/B corpus round showing the effect on sideloaded applications. Report
+   Google account entitlement only through Google's genuine responses; local package metadata cannot
+   manufacture it.
 5. **Complete component and result routing.** Route the Store's download/install services, jobs,
    receivers and PendingIntents to their declared processes. Deliver package changes and session
    status to authorized recipients, including callbacks after a process restart. Use the lifecycle
    contracts in [ADR-0007](0007-play-background-lifecycle-and-validation.md).
+6. **Gate updates of Google's own packages.** Refuse or cap updates of Play services, the Play Store
+   and Services Framework at the versions the compatibility configuration supports, as GrapheneOS
+   caps Play services in `gmscompat_config`. Westlake pins Play services 24.40.34; once sessions
+   commit, the Store must not replace it with a version Westlake's framework cannot run.
 
 ## Implementation boundaries
 
@@ -48,9 +59,12 @@ pack is not automatically an APK session, and a download callback is not evidenc
 split became usable.
 
 Reuse the current Cronet and multiprocess work. The staged experimental dependency chain includes
+[PR #149](https://github.com/a2hlab/westlake/pull/149),
 [PR #152](https://github.com/a2hlab/westlake/pull/152),
 [PR #153](https://github.com/a2hlab/westlake/pull/153),
-[PR #154](https://github.com/a2hlab/westlake/pull/154), and
+[PR #154](https://github.com/a2hlab/westlake/pull/154),
+[PR #155](https://github.com/a2hlab/westlake/pull/155),
+[PR #156](https://github.com/a2hlab/westlake/pull/156), and
 [PR #157](https://github.com/a2hlab/westlake/pull/157); all were open when this proposal was written.
 Their implementation is not being proposed a second time.
 
@@ -67,6 +81,8 @@ Their implementation is not being proposed a second time.
   consent. Split delivery produces a loadable feature; asset delivery produces consumable pack data.
 - Distinguish Store licensing/ownership failures from transport failures. A Play Integrity callback
   is recorded separately from its decoded verdict and is never treated as certification.
+- The Store's attempt to update Play services, itself or Services Framework past the supported
+  version is refused without disturbing the running hosts.
 
 ## Consequences and alternatives
 

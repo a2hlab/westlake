@@ -37,11 +37,13 @@ GmsCompat APK alone cannot provide the missing service contracts or authorizatio
    service lifecycle and foreground-call handling, and module loading. Preserve genuine denial of
    protected operations. A client-visible compatibility answer may avoid a crash without changing
    what the service or kernel permits. Avoid blanket exception suppression and type-default success.
-4. **Make compatibility configuration versioned and independently updateable.** Define a typed schema
-   for selected stubs, feature flags and component behavior, with package/process and version scope,
-   reasons and test references. Validate updates and authenticate their provenance. Publish immutable
-   snapshots atomically; retain the last known good compatible configuration when validation fails.
-   Configuration cannot grant OS permissions, modify APK signatures or install arbitrary code.
+4. **Make compatibility configuration typed, scoped and versioned.** Define a typed schema for
+   selected stubs, feature flags and component behavior, with package/process and version scope,
+   reasons and test references. Ship it with the framework build until Westlake has a channel that
+   delivers it separately. Such a channel, when added, validates updates, authenticates their
+   provenance, publishes immutable snapshots atomically and keeps the last known good compatible
+   configuration when validation fails. Configuration cannot grant OS permissions, modify APK
+   signatures or install arbitrary code.
 5. **Track upstream deliberately.** Record the GrapheneOS revision and license for reused code/data.
    Adapt each behavior to Westlake's AOSP source revision and advertised API/extension contracts.
    Current upstream branch 17 is not a drop-in patch for Westlake's mixed framework/runtime baseline.
@@ -69,8 +71,9 @@ legitimate empty result; redact credentials and private values from both.
   Binder, according to the API contract. An unprivileged app cannot update the grant store or config.
 - Supported Play workflows survive expected restricted-operation failures without exposing the data
   or privilege being denied. Unrelated applications retain their ordinary framework behavior.
-- Invalid, unauthenticated and incompatible configuration updates do not activate. A valid update and
-  rollback preserve active-call consistency and pass the affected feature regression tests.
+- Once configuration is delivered separately from the framework, invalid, unauthenticated and
+  incompatible updates do not activate, and a valid update and rollback preserve active-call
+  consistency and pass the affected feature regression tests.
 
 ## Consequences and alternatives
 

@@ -55,12 +55,14 @@ Android CE/DE security semantics, and include them in the lifecycle test matrix 
 
 - Deliver test pushes to foreground, background and eligible process-dead apps; verify the intended
   app displays or handles the payload. Test reboot, screen-off, suspend/resume, network loss/recovery,
-  host death and user force-stop separately. Record delivery latency, expiry and duplicate behavior.
+  host death and user force-stop separately, after establishing what screen-off and suspend do on the
+  test board. Record delivery latency, expiry and duplicate behavior.
 - Kill individual Google processes and fixture clients. Recover eligible bindings and work without
   impersonation, losing final callbacks or repeatedly spawning failed components.
 - Run the ADR-0001 24-hour host-stability test with periodic exercised APIs. Measure idle and active
-  RSS/PSS, CPU time, wakeups, battery/energy where the board supports it, and API latency against the
-  same workload on the existing backend. Set regression budgets before interpreting the run.
+  RSS/PSS, CPU time, wakeups and API latency against the same workload on the existing backend. The
+  test board has a dummy battery, so energy needs an external meter or another device. Set regression
+  budgets before interpreting the run.
 - Validate sign-in/token use, location with grant/revocation, background notifications and any claimed
   billing/Store capability independently. Do not infer billing or integrity success from app drawing.
 - Run the app corpus with healthy hosts and a windowless Store during screenshot measurement. Exclude

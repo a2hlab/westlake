@@ -13,20 +13,25 @@ from loading the modules they need. Making its entire data directory readable or
 would defeat the new isolation boundary.
 
 GrapheneOS uses a file service and framework/libcore/loader hooks to replace eligible module paths
-with file-descriptor references. Westlake already transports descriptors through SocketBinder and
-passes client APKs to the Play Store as read-only descriptors. That transport is useful infrastructure,
-but client-APK sharing is not a complete authorization model for Google module files.
+with file-descriptor references. Its `FileProxyService` runs inside Play services and opens, read-only,
+only regular files that Play services made world-readable under its own data directories. Play services
+verifies the modules it downloads, and the file mode is its own statement of what clients may load.
+Westlake already transports descriptors through SocketBinder and passes client APKs to its Play hosts
+as read-only descriptors, which the hosts name `/proc/self/fd/<n>`. That transport is useful
+infrastructure, but client-APK sharing is not a complete authorization model for Google module files.
 
 ## Decision
 
-1. **Expose a narrow module-file service.** An authenticated client requests an approved module artifact
-   and version. A compatibility adapter may translate a legacy path into that request, but the service
-   resolves it against a module inventory. It must not implement arbitrary reads of Play services' data.
-2. **Serve only validated, immutable artifacts.** Constrain resolution to approved module roots and
-   inventory entries. Reject traversal, symlink escapes, procfs paths and unexpected file types. Bind
-   validation and opening to the same object to avoid replacement races. Record the verified origin
-   and integrity mechanism for each module format; a caller-supplied hash alone is not provenance.
-   Publish complete artifacts atomically after download validation.
+1. **Expose a narrow module-file service in the Play services host.** As in GrapheneOS, the service
+   runs where the files are. An authenticated client asks for a module file; a compatibility adapter
+   may translate a legacy path into that request. The service must not implement arbitrary reads of
+   Play services' data.
+2. **Serve only the regular files Play services shares.** Start from GrapheneOS's rule: regular files
+   under Play services' data directories that Play services made world-readable, opened read-only.
+   Reject traversal, symlink escapes, procfs paths and other file types. Bind validation and opening to
+   the same object to avoid replacement races. Play services verifies and publishes its own modules;
+   add a Westlake inventory only if that rule admits files that are not module code. A caller-supplied
+   hash is never provenance.
 3. **Give consumers read-only descriptors.** Consumers cannot modify module files or the inventory.
    Keep artifacts immutable for the lifetime of open descriptors and mappings, including across a
    module update. Where a format requires a local copy, use an integrity-checked copy inside the
@@ -45,9 +50,16 @@ Google module loads before choosing the smallest necessary ART/libcore/native-lo
 GrapheneOS's behavior against Westlake's linker and runtime, rather than assuming its special FD path
 syntax is already understood here.
 
-Initially enable the service for pinned, exercised module families. Keep the old shared-storage
-development path explicitly non-isolated while bringing up the broker. It cannot be a fallback for a
-production-isolated launch. A missing required module must produce a diagnosable failure.
+Westlake's `/proc/self/fd/<n>` naming is the first candidate for the loaders. Reopening a file through
+that link checks the file's own mode and label, not its directories, so it should work across uids for
+world-readable module files. Test it before porting GrapheneOS's `/gmscompat_fd_<N>` hooks. Module
+native libraries load from `<apk>!/lib/<abi>` paths; name the Westlake loader path that serves them.
+
+Initially enable the service for pinned, exercised module families. Before Play services' storage
+becomes private, record which clients load modules by path today; that is the baseline the service
+must keep. Keep the old shared-storage development path explicitly non-isolated while bringing up the
+broker. It cannot be a fallback for a production-isolated launch. A missing required module must
+produce a diagnosable failure.
 
 ## Acceptance criteria
 
