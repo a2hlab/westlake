@@ -281,6 +281,57 @@ public final class AppProcesses {
         return com.android.internal.os.AppSpawnXInit.sSpawnName;
     }
 
+    /** This app's process names, for maySignal: sDeclared, or, with app processes off, read once here. */
+    private static volatile Set<String> sOwnNames;
+
+    /**
+     * Whether this process may send pid a signal (Process.sendSignal, so killProcess too): when pid runs under
+     * one of this app's process names, or this process forked it. On Android the kernel decides by uid, and
+     * each app's uid is its own. Every Westlake process runs under the one OH uid, so the kernel lets any of
+     * them signal any other: imo's SIGKILL ended the shared Play services host. libwl_missing_natives asks
+     * before each signal to another process, and a refused one is not sent, as Android's kernel refuses it
+     * (EPERM, which sendSignal ignores). A refusal is logged with the stack that sent it.
+     */
+    public static boolean maySignal(int pid, int signal) {
+        String app = sPackage;
+        String name = commandName(pid);
+        if (app == null || name == null) return true;   // not an app yet, or pid gone: as before
+        Set<String> own = sOwnNames;
+        if (own == null) {
+            own = !sDeclared.isEmpty() ? sDeclared : declaredProcesses(app);
+            sOwnNames = own;
+        }
+        if (name.equals(app) || name.startsWith(app + ":") || own.contains(name) || parentOf(pid) == Os.getpid()) {
+            return true;
+        }
+        new Throwable("[WESTLAKE-KILL] refused signal " + signal + " to pid " + pid + " (" + name
+                + "): not a process of " + app).printStackTrace();
+        return false;
+    }
+
+    /** The name pid runs under: its command line's first argument; null if it can't be read. */
+    private static String commandName(int pid) {
+        try {
+            byte[] line = Files.readAllBytes(Paths.get("/proc/" + pid + "/cmdline"));
+            int end = 0;
+            while (end < line.length && line[end] != 0) end++;
+            return end == 0 ? null : new String(line, 0, end, StandardCharsets.UTF_8);
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** pid's parent, from /proc/<pid>/stat (the field after the parenthesized name and state); -1 if unknown. */
+    private static int parentOf(int pid) {
+        try {
+            String stat = new String(Files.readAllBytes(Paths.get("/proc/" + pid + "/stat")), StandardCharsets.UTF_8);
+            String[] fields = stat.substring(stat.lastIndexOf(')') + 2).split(" ");
+            return Integer.parseInt(fields[1]);
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
+    }
+
     /** The process names the package's components declare, its own name included. */
     static Set<String> declaredProcesses(String packageName) {
         Set<String> names = new HashSet<>();

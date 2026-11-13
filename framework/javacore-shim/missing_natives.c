@@ -1046,12 +1046,34 @@ static void wl_readProcLines(JNIEnv* env, jclass c, jstring file, jobjectArray r
  * Process.sendSignal and sendSignalQuiet, as AOSP's android_os_Process: kill(pid, sig) for a pid
  * above 0. A signal the process sends itself (Process.killProcess(myPid()) is SIGKILL) first logs
  * the Java stack that sent it: an app that ends itself that way left no trace at all, neither a
- * crash dump nor an exit (Microsoft 365, WeChat, Zoom and others in the Level 2 run).
+ * crash dump nor an exit (Microsoft 365, WeChat, Zoom and others in the Level 2 run). A signal to
+ * a process of another app is not sent (wl_may_signal).
  */
+/*
+ * Whether this process may signal pid, which adapter.activity.AppProcesses.maySignal decides as
+ * Android's kernel does by uid: every Westlake process runs under the one OH uid, so the kernel
+ * lets any of them signal any other (imo's SIGKILL ended the shared Play services host). A process
+ * whose boot classes lack the check signals as before.
+ */
+static int wl_may_signal(JNIEnv* env, jint pid, jint sig)
+{
+    jboolean may = JNI_TRUE;
+    jclass check = (*env)->FindClass(env, "adapter/activity/AppProcesses");
+    jmethodID m = check != NULL ? (*env)->GetStaticMethodID(env, check, "maySignal", "(II)Z") : NULL;
+    if (m != NULL) may = (*env)->CallStaticBooleanMethod(env, check, m, pid, sig);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        may = JNI_TRUE;
+    }
+    if (check != NULL) (*env)->DeleteLocalRef(env, check);
+    return may == JNI_TRUE;
+}
+
 static void wl_send_signal(JNIEnv* env, jclass c, jint pid, jint sig)
 {
     (void) c;
     if (pid <= 0) return;
+    if (pid != getpid() && !wl_may_signal(env, pid, sig)) return;
     if (pid == getpid()) {
         char line[96];
         jclass t = (*env)->FindClass(env, "java/lang/Throwable");
