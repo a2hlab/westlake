@@ -95,9 +95,14 @@ proposed: none is implemented or device-verified.
 
 The spike must answer these questions before any work is scheduled:
 
-1. **The native bridge build.** Session-token propagation and window parenting live in the native
-   ability and window bridge. Its last recorded build attempt, in September, failed: 11 of its 50
-   sources lacked OH headers. Restoring that build comes first.
+1. **The native bridge build (answered 2026-11-13).** Session-token propagation and window parenting
+   live in the native ability and window bridge. In September, 11 of its 50 sources failed for lack of
+   OH headers. Two inputs fix that:
+   - jsoncpp 1.9.6, unpatched, from OpenHarmony's `third_party_jsoncpp` at OpenHarmony-v6.1-Release;
+   - stand-ins for seven headers that OpenHarmony generates from public IDL.
+
+   With them, all 50 sources compile, and the linked `liboh_adapter_bridge.so` is byte-identical to the
+   deployed library. The bridge can be changed again.
 2. **Runtime selection in AppMgr.** OH's `AppSpawnClient` supports several spawning service types, but
    nothing upstream selects appspawn-x for ART bundles; adding that is a host change. The spike also
    evaluates the alternative in the baseline's note: run ART inside the process AMS starts for the
@@ -153,7 +158,6 @@ attribution. Per-application kernel identity comes from OH rather than from a We
 **Costs.**
 - host changes: runtime selection in AppMgr, and possibly support for named processes;
 - a signed bundle for each APK;
-- a working build of the native bridge;
 - a migration period during which the direct-launch path remains.
 
 **Alternatives considered.**
