@@ -9,14 +9,18 @@
 
 #include "spawn_server.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <map>
 #include <poll.h>
 #include <signal.h>
+#include <string>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -453,13 +457,16 @@ static std::vector<int> openLaunchApks() {
     std::vector<int> fds;
     auto add = [&fds](const std::string& path) {
         if (path.empty() || fds.size() >= kMaxWhoisApks) return;
-        int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        // The app owns its install directory: never block on a FIFO it might have put in an APK's place.
+        int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
         if (fd < 0) return;
         struct stat st {};
         if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
             close(fd);
             return;
         }
+        int flags = fcntl(fd, F_GETFL);
+        if (flags >= 0) fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);   // the host gets an ordinary file
         fds.push_back(fd);
     };
     const char* base = getenv("ASX_APK_PATH");
@@ -533,6 +540,168 @@ static void answerWhois(int clientFd, const OhAppSpawnMsgHeader& request) {
     for (int fd : apks) close(fd);
 }
 
+// ---------------------------------------------------------------------------
+// The app-id registry (ADR-0003 decision 1)
+// ---------------------------------------------------------------------------
+// Every Westlake process gives a package the same app id (RemotePackages). The ids were kept in a
+// table in the host app's files, which every Westlake app can write: an app could have given itself
+// Play services' id, and Play services would then have taken the app's calls for its own. The table
+// now lives in a directory only root can enter, spawners alone write it, and every process asks its
+// own spawner (WL_MSG_APPID). The first time, it starts from the old table, so that no id changes.
+static const char kRegistryDir[] = "/data/service/el1/public/westlake-registry";
+static const char kRegistryTable[] = "/data/service/el1/public/westlake-registry/package-uids";
+constexpr int kFirstAppId = 10200;                 // RemotePackages.FIRST_APP_ID
+constexpr size_t kMaxRegistryBytes = 4u << 20;
+
+// A package name as a registry line holds it: letters, digits, '.' and '_'.
+static bool validPackageName(const char* name, size_t length) {
+    if (length == 0 || length >= OH_APP_LEN_PROC_NAME) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = static_cast<unsigned char>(name[i]);
+        if (!isalnum(c) && c != '.' && c != '_') return false;
+    }
+    return true;
+}
+
+// The whole of a small file; false on an error or past kMaxRegistryBytes.
+static bool readSmallFile(int fd, std::string& text) {
+    text.clear();
+    if (lseek(fd, 0, SEEK_SET) < 0) return false;
+    char chunk[4096];
+    for (;;) {
+        ssize_t n = read(fd, chunk, sizeof(chunk));
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) return false;
+        if (n == 0) return true;
+        text.append(chunk, static_cast<size_t>(n));
+        if (text.size() > kMaxRegistryBytes) return false;
+    }
+}
+
+static bool writeAllTo(int fd, const std::string& text) {
+    size_t done = 0;
+    while (done < text.size()) {
+        ssize_t n = write(fd, text.data() + done, text.size() - done);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return false;
+        done += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+// The "<package> <app id>" lines of text, as PackageUidTable reads them: the first id a package got,
+// from kFirstAppId on. A line a killed writer cut short is passed over.
+static void parseRegistry(const std::string& text, std::map<std::string, int>& ids) {
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(start, end - start);
+        start = end + 1;
+        size_t space = line.find(' ');
+        if (space == std::string::npos || space == 0 || space + 1 >= line.size()) continue;
+        std::string name = line.substr(0, space);
+        std::string number = line.substr(space + 1);
+        if (!validPackageName(name.c_str(), name.size()) || number.size() > 9) continue;
+        bool digits = true;
+        for (char c : number) digits = digits && isdigit(static_cast<unsigned char>(c)) != 0;
+        if (!digits) continue;
+        int id = atoi(number.c_str());
+        if (id >= kFirstAppId) ids.emplace(name, id);
+    }
+}
+
+// The old table: PackageUidTable's file beside every launch's runtime, <runtime>/../westlake-system.
+static std::string oldTableText() {
+    const char* runtime = getenv("WESTLAKE_RUNTIME_REAL_ROOT");
+    if (runtime == nullptr || *runtime == '\0') return "";
+    std::string path(runtime);
+    size_t slash = path.find_last_of('/');
+    if (slash == std::string::npos || slash == 0) return "";
+    path = path.substr(0, slash) + "/westlake-system/package-uids";
+    // Apps can write that directory: never block on what they put there, and read only a regular file.
+    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return "";
+    struct stat st {};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        return "";
+    }
+    std::string text;
+    bool ok = readSmallFile(fd, text);
+    close(fd);
+    return ok ? text : "";
+}
+
+// The package's app id, given now if it has none; -1 when the registry cannot be used.
+static int registryAppId(const std::string& package) {
+    if (mkdir(kRegistryDir, 0700) != 0 && errno != EEXIST) {
+        LOGE("[WESTLAKE-REGISTRY] cannot make %s: %s", kRegistryDir, strerror(errno));
+        return -1;
+    }
+    struct stat dir {};
+    if (lstat(kRegistryDir, &dir) != 0 || !S_ISDIR(dir.st_mode) || dir.st_uid != 0 || (dir.st_mode & 077) != 0) {
+        LOGE("[WESTLAKE-REGISTRY] %s is not a directory only root can enter", kRegistryDir);
+        return -1;
+    }
+    int fd = open(kRegistryTable, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        LOGE("[WESTLAKE-REGISTRY] cannot open %s: %s", kRegistryTable, strerror(errno));
+        return -1;
+    }
+    int id = -1;
+    std::string text;
+    if (flock(fd, LOCK_EX) == 0 && readSmallFile(fd, text)) {
+        if (text.empty()) {
+            // First use: every id the old table gave stays the package's.
+            std::map<std::string, int> old;
+            parseRegistry(oldTableText(), old);
+            std::string lines;
+            for (const auto& entry : old) lines += entry.first + " " + std::to_string(entry.second) + "\n";
+            if (!lines.empty() && writeAllTo(fd, lines) && fsync(fd) == 0) {
+                text = lines;
+                LOGI("[WESTLAKE-REGISTRY] started from the old table: %zu packages", old.size());
+            }
+        }
+        std::map<std::string, int> ids;
+        parseRegistry(text, ids);
+        auto found = ids.find(package);
+        if (found != ids.end()) {
+            id = found->second;
+        } else {
+            int next = kFirstAppId;
+            for (const auto& entry : ids) next = std::max(next, entry.second + 1);
+            bool ended = text.empty() || text.back() == '\n';
+            std::string line = (ended ? "" : "\n") + package + " " + std::to_string(next) + "\n";
+            if (lseek(fd, 0, SEEK_END) >= 0 && writeAllTo(fd, line) && fsync(fd) == 0) {
+                id = next;
+                LOGI("[WESTLAKE-REGISTRY] %s gets app id %d", package.c_str(), next);
+            }
+        }
+    }
+    close(fd);   // and with it the lock
+    return id;
+}
+
+// Answers WL_MSG_APPID: the app id of the package the header's processName names. Any process that
+// reaches the socket may ask; none can choose an id.
+static void answerAppId(int clientFd, const OhAppSpawnMsgHeader& request) {
+    size_t length = strnlen(request.processName, OH_APP_LEN_PROC_NAME);
+    int id = validPackageName(request.processName, length)
+            ? registryAppId(std::string(request.processName, length)) : -1;
+    OhAppSpawnResponseMsg resp{};
+    resp.msgHdr.magic = OH_SPAWN_MSG_MAGIC;
+    resp.msgHdr.msgType = WL_MSG_APPID;
+    resp.msgHdr.msgLen = static_cast<uint32_t>(sizeof(resp));
+    resp.msgHdr.msgId = request.msgId;
+    memcpy(resp.msgHdr.processName, request.processName, length);
+    resp.result.result = id > 0 ? 0 : -1;
+    resp.result.pid = id;
+    if (send(clientFd, &resp, sizeof(resp), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(resp))) {
+        LOGE("[WESTLAKE-REGISTRY] answer not sent: %s", strerror(errno));
+    }
+}
+
 void SpawnServer::handleConnection(int clientFd) {
     // Peek first 4 bytes to detect protocol: OH binary starts with
     // magic 0xEF201234; adapter-legacy starts with a network-order length prefix.
@@ -564,6 +733,10 @@ void SpawnServer::handleConnection(int clientFd) {
         memcpy(&hdr, buffer.data(), sizeof(hdr));
         if (hdr.msgType == WL_MSG_WHOIS) {
             answerWhois(clientFd, hdr);   // a question, not a spawn: no body, no fork
+            return;
+        }
+        if (hdr.msgType == WL_MSG_APPID) {
+            answerAppId(clientFd, hdr);   // likewise
             return;
         }
         uint32_t msgLen = hdr.msgLen;

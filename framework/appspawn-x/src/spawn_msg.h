@@ -58,6 +58,10 @@ constexpr int MSG_DUMP = 3;
 // holds the pid in decimal; the answer's result is 0 when the spawner vouches for it, and its
 // processName holds the package (ASX_LAUNCH_PKG) it runs. Nothing is spawned. ("WLWI")
 constexpr uint32_t WL_MSG_WHOIS = 0x574C5749u;
+// Westlake's own: "which app id does this package have?" The header's processName holds the package;
+// the answer's result is 0 and its pid field holds the app id from the registry the spawners keep
+// (spawn_server.cpp), which gives the package the next free id if it has none. Nothing is spawned. ("WLAI")
+constexpr uint32_t WL_MSG_APPID = 0x574C4149u;
 
 // OH binary TLV spawn protocol constants
 // Source: base/startup/appspawn/modules/module_engine/include/appspawn_msg.h

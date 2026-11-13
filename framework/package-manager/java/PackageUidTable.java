@@ -13,22 +13,40 @@ import java.util.Map;
  * gave at install (packages.xml): one text file with a line "<package> <app id>" for each package, in the
  * order they were first seen. A process adds a package while it holds an exclusive lock on the file, so
  * two processes that meet a new app at the same moment give it one id. An id, once given, never changes.
+ *
+ * That file is in the host app's files, which every Westlake app can write. The registry the spawners keep
+ * where only root can enter (SpawnerRegistry, ADR-0003 decision 1) answers first; it started from this file,
+ * so the ids are the same. The file serves only a process whose spawner predates the registry.
  */
 final class PackageUidTable {
     private final File mFile;
     private final int mFirst;
-    /** What this process has read from the file so far. */
+    /** What this process has read from the registry or the file so far. */
     private final Map<String, Integer> mIds = new HashMap<>();
+    private boolean mOldTableLogged;
 
     PackageUidTable(File file, int firstAppId) {
         mFile = file;
         mFirst = firstAppId;
     }
 
-    /** The package's app id: the one the file holds, or the next free one, added to the file now. */
+    /**
+     * The package's app id: the registry's, or else the one the file holds, or the next free one, added to the
+     * file now.
+     */
     synchronized int appId(String packageName) throws IOException {
         Integer known = mIds.get(packageName);
         if (known != null) return known;
+        int registered = SpawnerRegistry.appId(packageName);
+        if (registered >= mFirst) {
+            mIds.put(packageName, registered);
+            return registered;
+        }
+        if (!mOldTableLogged) {
+            mOldTableLogged = true;
+            System.err.println("[WL-PLAY] no spawner registry answered for " + packageName
+                    + "; app ids come from the host's table");
+        }
         File dir = mFile.getParentFile();
         if (dir != null && !dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
             throw new IOException("cannot create " + dir);
