@@ -114,8 +114,16 @@ The spike must answer these questions before any work is scheduled:
    name in AppMgr, plus an init service and socket for appspawn-x. It is a host change, but a contained
    one. The spike still evaluates the alternative in the baseline's note: run ART inside the process AMS
    starts for the ability, or adopt that process's ability token.
-3. **Declared processes.** Check whether AppMgr can represent, for an ordinary bundle, the named
-   processes an APK declares. Play services declares eight. If it cannot, that is another host change.
+3. **Declared processes (answered 2026-11-13).** AppMgr names processes per ability, per module and
+   per application, and it also tracks child processes. BMS honors those names only for a bundle that
+   holds the `AllowAppMultiProcess` privilege. The privilege comes from the bundle's signing profile or
+   the device's pre-install capability list. Without it, BMS sets every process name to the bundle name
+   (`BundleInstallChecker::ProcessBundleInfoByPrivilegeCapability`, OpenHarmony-v6.1-Release).
+   - Each APK bundle therefore needs that privilege to keep the processes it declares; Play services
+     declares eight.
+   - Android services and providers that are not abilities map to named extension abilities or to
+     AppMgr child processes.
+   - On the test board the privilege is configurable. For a product it is a signing decision.
 4. **Per-APK bundles.** Each APK needs a signed OH bundle. Debug signing is enough on the board; product
    signing is a separate decision. The earlier per-APK install path
    (`framework/package-manager/jni/apk_installer.cpp`, with its template entry HAP) is a starting point.
