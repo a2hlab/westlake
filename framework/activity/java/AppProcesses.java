@@ -175,11 +175,12 @@ public final class AppProcesses {
             sStarted.put(process, pid);
             long deadline = System.currentTimeMillis() + START_TIMEOUT_MS;
             while (!serving(socket)) {
-                String failure = !alive(pid) ? " ended before it served"
+                String failure = !spawnedAlive(pid) ? " ended before it served"
                         : System.currentTimeMillis() > deadline ? " did not serve on " + socket : null;
                 if (failure != null) {
                     sFailed.put(process, System.currentTimeMillis() + RETRY_AFTER_MS);
-                    if (alive(pid)) kill(pid);
+                    int parent = parentOf(pid);
+                    if (spawnedAlive(pid) && parent > 0 && parent == parentOf(Os.getpid())) kill(pid);
                     throw new IOException(process + " (pid " + pid + ")" + failure);
                 }
                 try {
@@ -207,6 +208,20 @@ public final class AppProcesses {
         }
     }
 
+    /**
+     * Whether pid is still the process this app's zygote spawned. A pid is free again once its process is
+     * gone, and every Westlake process shares the kernel's 32768 ids with all threads, so within the
+     * start timeout a dead process's pid can be another app's. The app's processes all have the zygote that
+     * spawned this one as their parent; a pid whose parent can't be read yet (right after the fork the child
+     * is root's) counts as spawned while it lives.
+     */
+    private static boolean spawnedAlive(int pid) {
+        if (!alive(pid)) return false;
+        int parent = parentOf(pid);
+        return parent <= 0 || parent == parentOf(Os.getpid());
+    }
+
+    /** SIGKILL, for a process this app spawned (see spawnedAlive): never by pid alone. */
     private static void kill(int pid) {
         try {
             Os.kill(pid, OsConstants.SIGKILL);
