@@ -1,6 +1,12 @@
 # ADR-0001: Run unmodified Play services as one shared, unprivileged Westlake process
 
 - **Status:** accepted (transport and design; the legal questions below remain open)
+- **Amended 2026-11-13:** decision 2 no longer holds for Play services' own processes. With
+  `:persistent` and `.unstable` folded into one process, 13 of the 15 API families that apps reach
+  through Play services' broker answered SERVICE_INVALID (measurement: 0 of 300 apps connected,
+  build 225). Running its declared processes as [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
+  describes connected every family the first samples reached (measurement: 15 of 15 apps, builds 230
+  and 231, [PR #157](https://github.com/a2hlab/westlake/pull/157), open). Full-corpus results follow.
 - **Date:** 2026-11-03
 - **Extends:** [the microG integration design](../MICROG-INTEGRATION-DESIGN-2026-10-24.md), whose "gmsd" this makes the target
 
