@@ -1,13 +1,13 @@
 # ADR-0009: Back Android system services with the OH services that HAPs use
 
-- **Status:** proposed 2026-11-13
+- **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
 - **Depends on:**
   - [ADR-0003](0003-authenticated-app-identity-and-isolation.md) for authenticated caller identity
   - [ADR-0004](0004-scoped-play-compatibility-and-permissions.md) for permission grants
   - [ADR-0008](0008-one-oh-process-model-for-apks-and-haps.md) for the shared process and security model
 - **Implementation baseline:** experimental `play-processes` at `d1dcb27760fc59ccc6f3af8ed8e24302e795b497`. The mappings
-  below are proposed; none of them is a claim of implemented parity.
+  below are decided, not implemented; none of them is a claim of implemented parity.
 
 ## Context
 
@@ -71,8 +71,11 @@ answer that does not do what the API promises is worse than a defined failure.
    APIs cannot supply the behavior, use a trusted platform service.
 5. **Keep what works.** The Java libraries, ART and the UI framework stay as they are. Replace the
    process-local answers one service at a time.
-6. **Fail honestly until a service is backed.** An operation that is not implemented returns a defined
-   failure or "unavailable". It never returns a success that does nothing.
+6. **Fail honestly in new adapters.** When an adapter cannot carry out an operation for which Android
+   defines a failure or an "unavailable" answer, it returns that answer, never a success that does
+   nothing. Today's process-local answers stay until their OH-backed replacements land (decision 5),
+   because applications already depend on them. A call for which Android defines no failure, such as
+   acquiring a wake lock, is never made to fail.
 
 ## Acceptance criteria
 
@@ -88,8 +91,9 @@ Test each service on its own:
   - text copied in one pastes in the other;
   - they share volume levels;
   - audio interruptions work between them.
-- **Power.** Measure wakeups and idle consumption instead of inferring them from API success. On the test
-  board, which has a dummy battery, this needs an external meter.
+- **Power.** Measure wakeups and idle consumption instead of inferring them from API success. The test
+  board has a dummy battery, so this is measured on an OH phone with a real battery. That test is
+  postponed (decided 2026-11-13).
 - **Status.** Record each service as implemented, exercised or passed.
 
 ## Consequences and alternatives

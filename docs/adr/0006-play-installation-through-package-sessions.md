@@ -2,7 +2,7 @@
 
 - **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
-- **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md), [ADR-0004](0004-scoped-play-compatibility-and-permissions.md), and [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
+- **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md), [ADR-0004](0004-scoped-play-compatibility-and-permissions.md), and [ADR-0002](0002-app-secondary-processes.md)
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md)
 
 ## Context

@@ -2,7 +2,7 @@
 
 - **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
-- **Extends:** [ADR-0001](0001-shared-play-services-process.md) and [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
+- **Extends:** [ADR-0001](0001-shared-play-services-process.md) and [ADR-0002](0002-app-secondary-processes.md)
 - **Implementation baseline:** experimental `play-processes` at `d1dcb27760fc59ccc6f3af8ed8e24302e795b497`; this proposal is not an implementation claim
 
 ## Context
@@ -117,7 +117,9 @@ makes OH registration the source of per-application identities, so stages 3 and 
 instead of using a Westlake-reserved uid range. Stages 1 and 2 apply to the direct-launch path until
 ADR-0008 replaces it. If stage 3 is attempted earlier, with a reserved range, its spike's first
 question is whether OH's window, input, rendering, audio and sensor services serve a process whose uid
-BMS did not allocate. The netsys socket permission is already granted per uid at spawn.
+BMS did not allocate. The netsys socket permission is already granted per uid at spawn. Giving the
+spawner its own SELinux domain changes OH's policy, which is allowed on the test board (decided
+2026-11-13, under the conditions in ADR-0008).
 
 ## Acceptance criteria
 

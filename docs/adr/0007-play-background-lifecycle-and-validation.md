@@ -2,7 +2,7 @@
 
 - **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
-- **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md), [ADR-0004](0004-scoped-play-compatibility-and-permissions.md), and [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
+- **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md), [ADR-0004](0004-scoped-play-compatibility-and-permissions.md), and [ADR-0002](0002-app-secondary-processes.md)
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md), milestones 1, 6 and 7
 
 ## Context
@@ -63,8 +63,8 @@ Android CE/DE security semantics, and include them in the lifecycle test matrix 
   impersonation, losing final callbacks or repeatedly spawning failed components.
 - Run the ADR-0001 24-hour host-stability test with periodic exercised APIs. Measure idle and active
   RSS/PSS, CPU time, wakeups and API latency against the same workload on the existing backend. The
-  test board has a dummy battery, so energy needs an external meter or another device. Set regression
-  budgets before interpreting the run.
+  test board has a dummy battery, so energy is measured on an OH phone with a real battery, in a test
+  postponed on 2026-11-13. Set regression budgets before interpreting the run.
 - Validate sign-in/token use, location with grant/revocation, background notifications and any claimed
   billing/Store capability independently. Do not infer billing or integrity success from app drawing.
 - Run the app corpus with healthy hosts and a windowless Store during screenshot measurement. Exclude

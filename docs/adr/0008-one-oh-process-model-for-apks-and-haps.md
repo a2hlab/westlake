@@ -5,7 +5,7 @@
 - **Date:** 2026-11-13
 - **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md) for identity and confinement,
   [ADR-0004](0004-scoped-play-compatibility-and-permissions.md) for Android permissions
-- **Extends:** [ADR-0001](0001-shared-play-services-process.md), [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
+- **Extends:** [ADR-0001](0001-shared-play-services-process.md), [ADR-0002](0002-app-secondary-processes.md)
   and [ADR-0007](0007-play-background-lifecycle-and-validation.md)
 - **Implementation baseline:** experimental `play-processes` at `d1dcb27760fc59ccc6f3af8ed8e24302e795b497`
 
@@ -67,7 +67,7 @@ and contain no `AttachApplication`. The code at the baseline shows four gaps:
    (ADR-0004). Activities, tasks, the back stack and services get defined compatibility semantics,
    because Activities and UIAbilities have no universal one-to-one mapping. OH sees accurate
    visible-task and process ownership. [ADR-0009](0009-android-system-services-on-oh-services.md)
-   (proposed) applies the same rule to system services.
+   applies the same rule to system services.
 6. **Comparable boundaries are not equal assurance.** The model aims for isolation boundaries comparable
    to a HAP's. That alone does not give equal security assurance: ART and the adapters must preserve
    authenticated caller identity and enforce permissions and token ownership. Confinement rules may
@@ -127,6 +127,11 @@ The spike must answer these questions before any work is scheduled:
 4. **Per-APK bundles.** Each APK needs a signed OH bundle. Debug signing is enough on the board; product
    signing is a separate decision. The earlier per-APK install path
    (`framework/package-manager/jni/apk_installer.cpp`, with its template entry HAP) is a starting point.
+
+OH itself may be changed on the test board for this work (decided 2026-11-13). That covers AppMgr's
+runtime selection, an init service for appspawn-x, the multi-process privilege and SELinux policy.
+Every change keeps the original files so that they can be restored, and none is made while a test round
+runs. A product still needs the platform owner's agreement.
 
 ## Implementation order
 
