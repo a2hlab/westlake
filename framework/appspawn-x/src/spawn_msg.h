@@ -54,6 +54,10 @@ constexpr int MSG_APP_SPAWN = 0;
 constexpr int MSG_GET_RENDER_TERMINATION_STATUS = 1;
 constexpr int MSG_SPAWN_NATIVE_PROCESS = 2;
 constexpr int MSG_DUMP = 3;
+// Westlake's own: "is this pid a process you started, and of which package?" The header's processName
+// holds the pid in decimal; the answer's result is 0 when the spawner vouches for it, and its
+// processName holds the package (ASX_LAUNCH_PKG) it runs. Nothing is spawned. ("WLWI")
+constexpr uint32_t WL_MSG_WHOIS = 0x574C5749u;
 
 // OH binary TLV spawn protocol constants
 // Source: base/startup/appspawn/modules/module_engine/include/appspawn_msg.h

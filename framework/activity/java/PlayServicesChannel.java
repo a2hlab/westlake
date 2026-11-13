@@ -545,6 +545,9 @@ public final class PlayServicesChannel {
             data.writeTypedObject(own, 0);
             data.writeStrongBinder(sCallback);
             writeApks(data, own.applicationInfo);
+            // The spawner that started this process, which the host asks whether this is the package it
+            // says it is (SpawnerIdentity). A host that predates it stops reading after the APKs.
+            data.writeString(System.getenv("WESTLAKE_SPAWN_SOCKET"));
             root.transact(HELLO, data, reply, 0);
             reply.readException();
             c.remoteRoot = reply.readString();
@@ -1538,15 +1541,19 @@ public final class PlayServicesChannel {
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
             }
+            android.os.ParcelFileDescriptor[] apkFiles = readApks(data);
+            String spawner = data.dataAvail() > 0 ? data.readString() : null;
+            checkIdentity(this, claimed, spawner, apkFiles);
             if (claimed.equals(application().getPackageName())) {
                 // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
+                closeAll(apkFiles);
                 int uid = Process.myUid();
                 mChannel.setCaller(uid, mPeerPid);
                 mIdentified = true;
                 System.err.println(TAG + "process of this app pid=" + mPeerPid + " uid=" + uid);
                 return uid;
             }
-            ClientApks apks = exposeApks(claimed, info.applicationInfo, readApks(data));
+            ClientApks apks = exposeApks(claimed, info.applicationInfo, apkFiles);
             if (apks != null && callback != null) {
                 try {
                     callback.linkToDeath(() -> releaseApks(claimed, apks), 0);
@@ -1564,6 +1571,24 @@ public final class PlayServicesChannel {
             mIdentified = true;
             System.err.println(TAG + "client " + claimed + " pid=" + mPeerPid + " uid=" + uid);
             return uid;
+        }
+    }
+
+    /**
+     * Whether the client is the package it says it is, asked of the spawner that started it (SpawnerIdentity,
+     * ADR-0003 decision 3). With WESTLAKE_CHANNEL_IDENTITY=enforce an introduction the spawner does not vouch
+     * for is refused; otherwise the answer is logged ([WL-CHANNEL-IDENTITY]), so a round can show that every
+     * real client is vouched for before refusing is switched on.
+     */
+    private static void checkIdentity(Root root, String claimed, String spawner,
+            android.os.ParcelFileDescriptor[] apkFiles) {
+        String vouched = SpawnerIdentity.packageOf(spawner, root.mPeerPid);
+        String verdict = vouched == null ? "unverified" : vouched.equals(claimed) ? "match" : "mismatch";
+        System.err.println("[WL-CHANNEL-IDENTITY] pid=" + root.mPeerPid + " claims " + claimed + "; spawner says "
+                + vouched + " (" + verdict + ")");
+        if (!"match".equals(verdict) && "enforce".equals(System.getenv("WESTLAKE_CHANNEL_IDENTITY"))) {
+            closeAll(apkFiles);
+            throw new SecurityException("introduction as " + claimed + " not vouched for by its spawner");
         }
     }
 
