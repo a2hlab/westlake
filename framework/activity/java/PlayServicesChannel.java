@@ -89,6 +89,8 @@ public final class PlayServicesChannel {
     private static final int ENSURE_PROCESS = 14;
     /** To another process of the same app: a broadcast for one of its manifest receivers declared there. */
     private static final int RECEIVER = 15;
+    /** To an app's launched process, from another of its processes: start one of its activities declared there. */
+    private static final int ACTIVITY = 16;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -206,6 +208,43 @@ public final class PlayServicesChannel {
         } catch (IOException | RemoteException | RuntimeException e) {
             System.err.println(TAG + "process " + process + " unavailable: " + e);
             return null;
+        }
+    }
+
+    /**
+     * One of this app's activities declared for its launched process, started from another of its processes
+     * (ADR-0002): the activity manager starts an activity in the process it is declared for, so the start goes to
+     * the launched process, which starts it there. Started here, it ran without its own process's objects: the
+     * Play Store's :background process sent an app's PendingIntent for the store's MainActivity, which failed in
+     * :background on that process's own Dagger component (ClassCastException). The caller asks this only for a
+     * start without a result. False leaves the start to this process, as before; an activity declared for
+     * another secondary process still starts where it is started.
+     */
+    public static boolean startInHome(Intent intent) {
+        if (!AppProcesses.isSecondary() || intent == null || intent.getComponent() == null) return false;
+        Application app = application();
+        if (app == null || !app.getPackageName().equals(intent.getComponent().getPackageName())) return false;
+        String process;
+        try {
+            process = AppProcesses.processOf(app.getPackageManager().getActivityInfo(intent.getComponent(), 0));
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return false;
+        }
+        if (process == null || !process.equals(AppProcesses.home())) return false;
+        Channel home = ownProcess(process);
+        IBinder root = home == null ? null : root(home);
+        if (root == null) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0);
+            root.transact(ACTIVITY, data, null, IBinder.FLAG_ONEWAY);
+            System.err.println(TAG + "activity " + intent.getComponent().flattenToShortString() + " started in " + process);
+            return true;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "activity start in " + process + " failed: " + e);
+            return false;
+        } finally {
+            data.recycle();
         }
     }
 
@@ -1215,14 +1254,50 @@ public final class PlayServicesChannel {
 
     /**
      * What the activity manager knows of a PendingIntent an app handed to this process: Play services
-     * asks who made it, and that is how it knows which app it is working for. The channel it arrived on
-     * says. Whether it is immutable stays with the app, so this answers as a mutable broadcast sender.
+     * asks who made it, and that is how it knows which app it is working for. The sender says, from the
+     * process that made it, however many processes it passed through: an app's sender that Play services'
+     * main process passed on to its persistent one arrives there on the main process's channel, which is
+     * Play services' own. Its uid is the one the maker has in every Westlake process (RemotePackages).
+     * A sender that can't be asked is answered from the channel it arrived on, as a mutable broadcast
+     * sender.
      */
     public static android.app.ActivityManager.PendingIntentInfo remoteSenderInfo(android.content.IIntentSender sender) {
+        LocalIntentSenders.Facts facts = LocalIntentSenders.ask(sender);
+        if (facts != null) {
+            Application app = application();
+            int uid = RemotePackages.uidForPackage(facts.packageName, Process.myUid(),
+                    app == null ? null : app.getPackageName());
+            if (uid != -1) {
+                return new android.app.ActivityManager.PendingIntentInfo(facts.packageName, uid, facts.immutable,
+                        facts.type);
+            }
+        }
         int uid = sender == null ? 0 : SocketBinder.ownerUid(sender.asBinder());
         String name = uid == 0 ? null : RemotePackages.packageForUid(uid);
         return name == null ? null : new android.app.ActivityManager.PendingIntentInfo(
                 name, uid, false, android.app.ActivityManager.INTENT_SENDER_BROADCAST);
+    }
+
+    /**
+     * Sends a sender this process holds only through another process (an app's, given to Play services'
+     * persistent process by its main one): the call goes to the sender's own binder, which relays it back to
+     * the process that made it (LocalIntentSenders.SEND_TRANSACTION). False if the binder can't be reached.
+     */
+    private static boolean sendThroughSender(android.content.IIntentSender sender, int code, Intent fillIn, String type) {
+        IBinder binder = sender == null ? null : sender.asBinder();
+        if (binder == null || !binder.isBinderAlive()) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeInterfaceToken("android.content.IIntentSender");
+            data.writeInt(code);
+            data.writeTypedObject(fillIn, 0);
+            data.writeString(type);
+            return binder.transact(LocalIntentSenders.SEND_TRANSACTION, data, null, IBinder.FLAG_ONEWAY);
+        } catch (RemoteException | RuntimeException e) {
+            return false;
+        } finally {
+            data.recycle();
+        }
     }
 
     /** Sends an app's PendingIntent in that app. False if it isn't a connected app's. */
@@ -1230,7 +1305,7 @@ public final class PlayServicesChannel {
         int uid = sender == null ? 0 : SocketBinder.ownerUid(sender.asBinder());
         String name = uid == 0 ? null : RemotePackages.packageForUid(uid);
         IBinder callback = name == null ? null : sClientCallbacks.get(name);
-        if (callback == null) return false;
+        if (callback == null) return sendThroughSender(sender, code, fillIn, type);
         Parcel data = Parcel.obtain();
         try {
             data.writeStrongBinder(sender.asBinder());
@@ -1403,6 +1478,20 @@ public final class PlayServicesChannel {
                 }
                 case SERVICE: {
                     reply.writeStrongBinder(hostService(data.readString()));
+                    return true;
+                }
+                case ACTIVITY: {
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    if (Binder.getCallingUid() != Process.myUid()) {
+                        throw new SecurityException("only this app's own processes start its activities here");
+                    }
+                    if (intent != null) {
+                        final Intent start = new Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            Application app = application();
+                            if (app != null) app.startActivity(start);
+                        });
+                    }
                     return true;
                 }
                 case RECEIVER: {

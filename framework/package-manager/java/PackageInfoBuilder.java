@@ -204,7 +204,7 @@ public class PackageInfoBuilder {
         // Replaces AppSchedulerBridge Fix A.ii dataDir backup-fill block.
         String dataDir = ohApp.optString("dataDir", "");
         ai.dataDir = dataDir.isEmpty() ? probeDataDir(packageName, ai.uid) : dataDir;
-        ai.deviceProtectedDataDir = ai.dataDir;
+        ai.deviceProtectedDataDir = DataDirs.deviceProtected(ai.dataDir);
         ai.credentialProtectedDataDir = ai.dataDir;
 
         String ohCpuAbi = ohApp.optString("cpuAbi", "");

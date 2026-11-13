@@ -194,7 +194,7 @@ public class AppSchedulerBridge {
             ai.nativeLibraryDir = nativeDirectory == null || nativeDirectory.isEmpty()
                     ? apkDir + "/lib/arm64" : nativeDirectory;
             ai.dataDir = "/data/data/" + pkg;
-            ai.deviceProtectedDataDir = ai.dataDir;
+            ai.deviceProtectedDataDir = adapter.packagemanager.DataDirs.deviceProtected(ai.dataDir);
             ai.credentialProtectedDataDir = ai.dataDir;
             // /data/data is drwxrwx--x system:system, so an app uid cannot create its own
             // directory there; the launcher stages it. Swallowing the failure here cost several
@@ -211,6 +211,7 @@ public class AppSchedulerBridge {
                 System.err.println("[DIRECT-LAUNCH] WARNING data dir check failed: " + ai.dataDir
                         + ": " + t);
             }
+            adapter.packagemanager.DataDirs.ensure(ai.deviceProtectedDataDir);
             ai.flags |= android.content.pm.ApplicationInfo.FLAG_HAS_CODE
                      |  android.content.pm.ApplicationInfo.FLAG_INSTALLED
                      |  android.content.pm.ApplicationInfo.FLAG_ALLOW_CLEAR_USER_DATA
@@ -1776,8 +1777,9 @@ public class AppSchedulerBridge {
             }
             if (realDataDir != null) {
                 ai.dataDir = realDataDir;
-                ai.deviceProtectedDataDir = realDataDir;
+                ai.deviceProtectedDataDir = adapter.packagemanager.DataDirs.deviceProtected(realDataDir);
                 ai.credentialProtectedDataDir = realDataDir;
+                adapter.packagemanager.DataDirs.ensure(ai.deviceProtectedDataDir);
                 System.err.println("[B43-BIND][FIX-AII] dataDir overridden: " + realDataDir);
             } else {
                 System.err.println("[B43-BIND][FIX-AII] no real dataDir found, leaving "
