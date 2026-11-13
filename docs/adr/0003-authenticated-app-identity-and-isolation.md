@@ -1,6 +1,6 @@
 # ADR-0003: Authenticate app identity and enforce isolation between applications
 
-- **Status:** proposed
+- **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md) and [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
 - **Implementation baseline:** experimental `play-processes` at `d1dcb27760fc59ccc6f3af8ed8e24302e795b497`; this proposal is not an implementation claim
@@ -112,9 +112,12 @@ Stage the work so that each step is useful on its own:
    path (`framework/package-manager/jni/apk_installer.cpp` with its template entry HAP) is a starting
    point.
 
-The feasibility spike's first question is whether OH's window, input, rendering, audio and sensor
-services serve a process whose uid BMS did not allocate. The netsys socket permission is already
-granted per uid at spawn.
+Stage 1 is the next work item (decided 2026-11-13). [ADR-0008](0008-one-oh-process-model-for-apks-and-haps.md)
+makes OH registration the source of per-application identities, so stages 3 and 4 follow that ADR
+instead of using a Westlake-reserved uid range. Stages 1 and 2 apply to the direct-launch path until
+ADR-0008 replaces it. If stage 3 is attempted earlier, with a reserved range, its spike's first
+question is whether OH's window, input, rendering, audio and sensor services serve a process whose uid
+BMS did not allocate. The netsys socket permission is already granted per uid at spawn.
 
 ## Acceptance criteria
 

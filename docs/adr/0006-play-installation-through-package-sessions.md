@@ -1,6 +1,6 @@
 # ADR-0006: Complete Play installation through verified package sessions
 
-- **Status:** proposed
+- **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
 - **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md), [ADR-0004](0004-scoped-play-compatibility-and-permissions.md), and [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md)
@@ -36,11 +36,10 @@ application is sideloaded.
    Westlake supplies the confirmation UI as its own activity, because its notifications do not reach
    OH's notification centre and OH refuses activity starts from Westlake processes.
 4. **Record what actually happened.** Publish installed packages, splits, versions, signing identity,
-   installer attribution and update ownership from committed transactions. Replacing today's
-   unconditional installer answer with these records revisits the earlier project decision: it needs
-   that decision changed, and an A/B corpus round showing the effect on sideloaded applications. Report
-   Google account entitlement only through Google's genuine responses; local package metadata cannot
-   manufacture it.
+   installer attribution and update ownership from committed transactions. Today's unconditional
+   installer answer stays (decided 2026-11-13). Once real installs work, measure the corpus with both
+   answers before changing it. Report Google account entitlement only through Google's genuine
+   responses; local package metadata cannot manufacture it.
 5. **Complete component and result routing.** Route the Store's download/install services, jobs,
    receivers and PendingIntents to their declared processes. Deliver package changes and session
    status to authorized recipients, including callbacks after a process restart. Use the lifecycle
@@ -53,7 +52,7 @@ application is sideloaded.
 ## Implementation boundaries
 
 Begin with one free application acquired through the genuine Store using the existing disposable
-test account, once that account action is authorized. Establish its real install record and usable
+test account; that acquisition was authorized on 2026-11-13. Establish its real install record and usable
 first launch. Then cover update, dynamic-feature splits and Play Asset Delivery separately: an asset
 pack is not automatically an APK session, and a download callback is not evidence that an asset or
 split became usable.

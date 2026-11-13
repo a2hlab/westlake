@@ -1,6 +1,6 @@
 # ADR-0005: Share approved Dynamite modules through read-only file descriptors
 
-- **Status:** proposed
+- **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
 - **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md) and the hook scoping in [ADR-0004](0004-scoped-play-compatibility-and-permissions.md)
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md)

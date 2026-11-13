@@ -1,6 +1,6 @@
 # ADR-0007: Supervise Play processes and validate background delivery end to end
 
-- **Status:** proposed
+- **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
 - **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md), [ADR-0004](0004-scoped-play-compatibility-and-permissions.md), and [ADR-0002](https://github.com/a2hlab/westlake/pull/107)
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md), milestones 1, 6 and 7
@@ -23,7 +23,9 @@ for a wake lock does not by itself keep a process or connection alive.
 1. **Give a trusted supervisor responsibility for process lifetime.** Track authenticated app/process
    records, launch generations, bindings and death. Start only declared, authorized components through
    the spawner. Restart eligible services with bounded backoff, reconnect clients and propagate Binder
-   death/disconnection correctly. Prevent restart storms and PID-reuse signals.
+   death/disconnection correctly. Prevent restart storms and PID-reuse signals. Under
+   [ADR-0008](0008-one-oh-process-model-for-apks-and-haps.md), OH's AppMgr is that supervisor, and
+   Westlake translates Android's service and restart semantics onto it.
 2. **Implement Android background semantics through real host mechanisms.** Map necessary alarms,
    jobs, foreground services, notification delivery and permitted temporary execution windows to OH.
    Make user-visible background exceptions explicit and revocable. Keep the helper's authority narrow;

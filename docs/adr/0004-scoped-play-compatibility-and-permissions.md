@@ -1,6 +1,6 @@
 # ADR-0004: Scope Play compatibility hooks and enforce real permission grants
 
-- **Status:** proposed
+- **Status:** accepted 2026-11-13 (proposed the same day); not implemented
 - **Date:** 2026-11-13
 - **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md) for trusted caller identity and grant ownership
 - **Extends:** [ADR-0001](0001-shared-play-services-process.md)
