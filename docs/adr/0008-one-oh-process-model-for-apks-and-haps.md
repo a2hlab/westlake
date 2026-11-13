@@ -103,10 +103,17 @@ The spike must answer these questions before any work is scheduled:
 
    With them, all 50 sources compile, and the linked `liboh_adapter_bridge.so` is byte-identical to the
    deployed library. The bridge can be changed again.
-2. **Runtime selection in AppMgr.** OH's `AppSpawnClient` supports several spawning service types, but
-   nothing upstream selects appspawn-x for ART bundles; adding that is a host change. The spike also
-   evaluates the alternative in the baseline's note: run ART inside the process AMS starts for the
-   ability, or adopt that process's ability token.
+2. **Runtime selection in AppMgr (answered 2026-11-13).** OpenHarmony-v6.1-Release's AppMgr already
+   picks a spawner from installed bundle metadata (`AppMgrServiceInner` at process start):
+   - Cangjie bundles go to cjappspawn;
+   - ArkTS 1.2 and hybrid bundles go to hybridspawn;
+   - every other bundle goes to appspawn.
+
+   `AppSpawnClient` accepts only those service names, plus nwebspawn and nativespawn, and the test
+   board's init provides all their sockets. ART is a fourth case: one runtime check and one spawner
+   name in AppMgr, plus an init service and socket for appspawn-x. It is a host change, but a contained
+   one. The spike still evaluates the alternative in the baseline's note: run ART inside the process AMS
+   starts for the ability, or adopt that process's ability token.
 3. **Declared processes.** Check whether AppMgr can represent, for an ordinary bundle, the named
    processes an APK declares. Play services declares eight. If it cannot, that is another host change.
 4. **Per-APK bundles.** Each APK needs a signed OH bundle. Debug signing is enough on the board; product
