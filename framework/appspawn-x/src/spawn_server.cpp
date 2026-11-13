@@ -442,6 +442,33 @@ bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinar
     return true;
 }
 
+// Answers WL_MSG_WHOIS: whether pid is a process this spawner started, and the package this
+// spawner launches. A Play services or Play Store host asks it for each client that introduces
+// itself (ADR-0003 decision 3): the kernel says which spawner is the client's parent, only root
+// can create a socket in /dev/unix/socket, and a spawner vouches only for its own children.
+static void answerWhois(int clientFd, const OhAppSpawnMsgHeader& request) {
+    char digits[16] = {};
+    memcpy(digits, request.processName, sizeof(digits) - 1);
+    char* end = nullptr;
+    long pid = strtol(digits, &end, 10);
+    const char* package = getenv("ASX_LAUNCH_PKG");
+    bool ours = end != digits && *end == '\0' && pid > 0 && pid < INT32_MAX
+            && parentOf(static_cast<pid_t>(pid)) == getpid() && package != nullptr && *package != '\0';
+    OhAppSpawnResponseMsg resp{};
+    resp.msgHdr.magic = OH_SPAWN_MSG_MAGIC;
+    resp.msgHdr.msgType = WL_MSG_WHOIS;
+    resp.msgHdr.msgLen = static_cast<uint32_t>(sizeof(resp));
+    resp.msgHdr.msgId = request.msgId;
+    if (ours) {
+        strncpy(resp.msgHdr.processName, package, OH_APP_LEN_PROC_NAME - 1);
+    }
+    resp.result.result = ours ? 0 : -1;
+    resp.result.pid = static_cast<int32_t>(pid > 0 && pid < INT32_MAX ? pid : -1);
+    if (send(clientFd, &resp, sizeof(resp), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(resp))) {
+        LOGE("[WESTLAKE-SPAWN] whois answer not sent: %s", strerror(errno));
+    }
+}
+
 void SpawnServer::handleConnection(int clientFd) {
     // Peek first 4 bytes to detect protocol: OH binary starts with
     // magic 0xEF201234; adapter-legacy starts with a network-order length prefix.
@@ -471,6 +498,10 @@ void SpawnServer::handleConnection(int clientFd) {
         // Keep the header by value: receiving the body may reallocate buffer.
         OhAppSpawnMsgHeader hdr;
         memcpy(&hdr, buffer.data(), sizeof(hdr));
+        if (hdr.msgType == WL_MSG_WHOIS) {
+            answerWhois(clientFd, hdr);   // a question, not a spawn: no body, no fork
+            return;
+        }
         uint32_t msgLen = hdr.msgLen;
         uint32_t msgId = hdr.msgId;
         if (msgLen < sizeof(OhAppSpawnMsgHeader) || msgLen > kMaxMessageSize) {
