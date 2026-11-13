@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -442,10 +443,71 @@ bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinar
     return true;
 }
 
+// At most this many APK files go with a WHOIS answer: a base APK and its splits.
+constexpr size_t kMaxWhoisApks = 32;
+
+// The APK files of this launch, opened read-only: the base APK (ASX_APK_PATH) first, then its
+// splits (ASX_SPLIT_APK_PATHS, separated by ':') in the order the launcher staged them. Only
+// regular files; none at all without a base APK. The launcher sets both, as root.
+static std::vector<int> openLaunchApks() {
+    std::vector<int> fds;
+    auto add = [&fds](const std::string& path) {
+        if (path.empty() || fds.size() >= kMaxWhoisApks) return;
+        int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (fd < 0) return;
+        struct stat st {};
+        if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+            close(fd);
+            return;
+        }
+        fds.push_back(fd);
+    };
+    const char* base = getenv("ASX_APK_PATH");
+    if (base == nullptr || *base == '\0') return fds;
+    add(base);
+    const char* splits = getenv("ASX_SPLIT_APK_PATHS");
+    if (fds.empty() || splits == nullptr) return fds;
+    std::string all(splits);
+    for (size_t start = 0; start <= all.size();) {
+        size_t end = all.find(':', start);
+        if (end == std::string::npos) end = all.size();
+        add(all.substr(start, end - start));
+        start = end + 1;
+    }
+    return fds;
+}
+
+// Sends one message with descriptors attached (SCM_RIGHTS); true when all of it went.
+static bool sendWithFds(int socketFd, const void* data, size_t length, const std::vector<int>& fds) {
+    struct iovec iov {const_cast<void*>(data), length};
+    struct msghdr message {};
+    message.msg_iov = &iov;
+    message.msg_iovlen = 1;
+    alignas(struct cmsghdr) char control[CMSG_SPACE(sizeof(int) * kMaxWhoisApks)];
+    if (!fds.empty()) {
+        size_t bytes = sizeof(int) * fds.size();
+        memset(control, 0, sizeof(control));
+        message.msg_control = control;
+        message.msg_controllen = CMSG_SPACE(bytes);
+        struct cmsghdr* header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = SOL_SOCKET;
+        header->cmsg_type = SCM_RIGHTS;
+        header->cmsg_len = CMSG_LEN(bytes);
+        memcpy(CMSG_DATA(header), fds.data(), bytes);
+    }
+    ssize_t sent;
+    do {
+        sent = sendmsg(socketFd, &message, MSG_NOSIGNAL);
+    } while (sent < 0 && errno == EINTR);
+    return sent == static_cast<ssize_t>(length);
+}
+
 // Answers WL_MSG_WHOIS: whether pid is a process this spawner started, and the package this
 // spawner launches. A Play services or Play Store host asks it for each client that introduces
 // itself (ADR-0003 decision 3): the kernel says which spawner is the client's parent, only root
 // can create a socket in /dev/unix/socket, and a spawner vouches only for its own children.
+// With a positive answer go the launch's APK files, read-only, so that the host reads the
+// package's certificates from what was launched rather than from what the client says.
 static void answerWhois(int clientFd, const OhAppSpawnMsgHeader& request) {
     char digits[16] = {};
     memcpy(digits, request.processName, sizeof(digits) - 1);
@@ -464,9 +526,11 @@ static void answerWhois(int clientFd, const OhAppSpawnMsgHeader& request) {
     }
     resp.result.result = ours ? 0 : -1;
     resp.result.pid = static_cast<int32_t>(pid > 0 && pid < INT32_MAX ? pid : -1);
-    if (send(clientFd, &resp, sizeof(resp), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(resp))) {
+    std::vector<int> apks = ours ? openLaunchApks() : std::vector<int>();
+    if (!sendWithFds(clientFd, &resp, sizeof(resp), apks)) {
         LOGE("[WESTLAKE-SPAWN] whois answer not sent: %s", strerror(errno));
     }
+    for (int fd : apks) close(fd);
 }
 
 void SpawnServer::handleConnection(int clientFd) {
