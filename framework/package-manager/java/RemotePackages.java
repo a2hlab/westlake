@@ -184,4 +184,18 @@ public final class RemotePackages {
     public static synchronized String packageForUid(int uid) {
         return sPackages.get(uid);
     }
+
+    /**
+     * The uid an app has in every Westlake process, whether or not it has connected to this one: a PendingIntent
+     * can reach this process from an app that never did, passed on by another of this app's processes. Its id
+     * comes from the shared table, as registerClient's does; this app's own package has this process's uid, as
+     * its other processes do. -1 for no package.
+     */
+    public static synchronized int uidForPackage(String packageName, int ownUid, String ownPackage) {
+        if (packageName == null) return -1;
+        if (packageName.equals(ownPackage)) return ownUid;
+        Integer known = sUids.get(packageName);
+        if (known != null) return known;
+        return (ownUid / PER_USER_RANGE) * PER_USER_RANGE + appId(packageName);
+    }
 }

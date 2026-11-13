@@ -1215,10 +1215,24 @@ public final class PlayServicesChannel {
 
     /**
      * What the activity manager knows of a PendingIntent an app handed to this process: Play services
-     * asks who made it, and that is how it knows which app it is working for. The channel it arrived on
-     * says. Whether it is immutable stays with the app, so this answers as a mutable broadcast sender.
+     * asks who made it, and that is how it knows which app it is working for. The sender says, from the
+     * process that made it, however many processes it passed through: an app's sender that Play services'
+     * main process passed on to its persistent one arrives there on the main process's channel, which is
+     * Play services' own. Its uid is the one the maker has in every Westlake process (RemotePackages).
+     * A sender that can't be asked is answered from the channel it arrived on, as a mutable broadcast
+     * sender.
      */
     public static android.app.ActivityManager.PendingIntentInfo remoteSenderInfo(android.content.IIntentSender sender) {
+        LocalIntentSenders.Facts facts = LocalIntentSenders.ask(sender);
+        if (facts != null) {
+            Application app = application();
+            int uid = RemotePackages.uidForPackage(facts.packageName, Process.myUid(),
+                    app == null ? null : app.getPackageName());
+            if (uid != -1) {
+                return new android.app.ActivityManager.PendingIntentInfo(facts.packageName, uid, facts.immutable,
+                        facts.type);
+            }
+        }
         int uid = sender == null ? 0 : SocketBinder.ownerUid(sender.asBinder());
         String name = uid == 0 ? null : RemotePackages.packageForUid(uid);
         return name == null ? null : new android.app.ActivityManager.PendingIntentInfo(
