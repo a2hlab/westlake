@@ -89,6 +89,8 @@ public final class PlayServicesChannel {
     private static final int ENSURE_PROCESS = 14;
     /** To another process of the same app: a broadcast for one of its manifest receivers declared there. */
     private static final int RECEIVER = 15;
+    /** To an app's launched process, from another of its processes: start one of its activities declared there. */
+    private static final int ACTIVITY = 16;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -206,6 +208,43 @@ public final class PlayServicesChannel {
         } catch (IOException | RemoteException | RuntimeException e) {
             System.err.println(TAG + "process " + process + " unavailable: " + e);
             return null;
+        }
+    }
+
+    /**
+     * One of this app's activities declared for its launched process, started from another of its processes
+     * (ADR-0002): the activity manager starts an activity in the process it is declared for, so the start goes to
+     * the launched process, which starts it there. Started here, it ran without its own process's objects: the
+     * Play Store's :background process sent an app's PendingIntent for the store's MainActivity, which failed in
+     * :background on that process's own Dagger component (ClassCastException). The caller asks this only for a
+     * start without a result. False leaves the start to this process, as before; an activity declared for
+     * another secondary process still starts where it is started.
+     */
+    public static boolean startInHome(Intent intent) {
+        if (!AppProcesses.isSecondary() || intent == null || intent.getComponent() == null) return false;
+        Application app = application();
+        if (app == null || !app.getPackageName().equals(intent.getComponent().getPackageName())) return false;
+        String process;
+        try {
+            process = AppProcesses.processOf(app.getPackageManager().getActivityInfo(intent.getComponent(), 0));
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return false;
+        }
+        if (process == null || !process.equals(AppProcesses.home())) return false;
+        Channel home = ownProcess(process);
+        IBinder root = home == null ? null : root(home);
+        if (root == null) return false;
+        Parcel data = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0);
+            root.transact(ACTIVITY, data, null, IBinder.FLAG_ONEWAY);
+            System.err.println(TAG + "activity " + intent.getComponent().flattenToShortString() + " started in " + process);
+            return true;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "activity start in " + process + " failed: " + e);
+            return false;
+        } finally {
+            data.recycle();
         }
     }
 
@@ -1439,6 +1478,20 @@ public final class PlayServicesChannel {
                 }
                 case SERVICE: {
                     reply.writeStrongBinder(hostService(data.readString()));
+                    return true;
+                }
+                case ACTIVITY: {
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    if (Binder.getCallingUid() != Process.myUid()) {
+                        throw new SecurityException("only this app's own processes start its activities here");
+                    }
+                    if (intent != null) {
+                        final Intent start = new Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        new Handler(Looper.getMainLooper()).post(() -> {
+                            Application app = application();
+                            if (app != null) app.startActivity(start);
+                        });
+                    }
                     return true;
                 }
                 case RECEIVER: {
