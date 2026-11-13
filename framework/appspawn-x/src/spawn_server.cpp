@@ -9,9 +9,12 @@
 
 #include "spawn_server.h"
 
+#include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -354,6 +357,91 @@ static void sendOhBinaryResponse(int clientFd, uint32_t reqMsgId,
     }
 }
 
+// The parent of a process, from /proc/<pid>/stat; -1 when it cannot be read.
+static pid_t parentOf(pid_t pid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/stat", static_cast<int>(pid));
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    char line[512];
+    ssize_t n = read(fd, line, sizeof(line) - 1);
+    close(fd);
+    if (n <= 0) return -1;
+    line[n] = '\0';
+    // Field 2, the command name, is in parentheses and may itself hold spaces or ')': the
+    // fields after it start after the last ')'.
+    const char* end = strrchr(line, ')');
+    char state = 0;
+    int parent = -1;
+    if (end == nullptr || sscanf(end + 1, " %c %d", &state, &parent) != 2) return -1;
+    return parent;
+}
+
+// A process name an application may ask for: the characters of a package or android:process
+// name, and nothing that could read as a path or another log line.
+static bool validProcessName(const char* name, size_t length) {
+    if (length == 0 || length >= OH_APP_LEN_PROC_NAME) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = static_cast<unsigned char>(name[i]);
+        if (!isalnum(c) && c != '.' && c != '_' && c != ':' && c != '-') return false;
+    }
+    return true;
+}
+
+// Who may ask for a process (ADR-0003 decision 2). The socket is reachable by every
+// application process, because a launched application asks here for its other processes
+// (ADR-0002), and before this every request chose its own uid, groups, APL and access token.
+// Now only the launcher, which runs as root, chooses credentials. Any other peer must be a
+// process this spawner started, running as the launched uid; it names a process, and the
+// request is rebuilt from the launch request around that name, as AppProcesses builds it.
+bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher) {
+    fromLauncher = false;
+    struct ucred peer{};
+    socklen_t length = sizeof(peer);
+    if (getsockopt(clientFd, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 || length != sizeof(peer)) {
+        LOGE("[WESTLAKE-SPAWN] refused a request without peer credentials: %s", strerror(errno));
+        return false;
+    }
+    if (peer.uid == 0) {
+        fromLauncher = true;
+        return true;
+    }
+    const char* why = nullptr;
+    const OhAppSpawnMsgHeader* header = nullptr;
+    size_t nameLength = 0;
+    if (!isBinary || buffer.size() < sizeof(OhAppSpawnMsgHeader)) {
+        why = "not an OH binary request";
+    } else if (launchRequest_.empty()) {
+        why = "nothing was launched here";
+    } else if (static_cast<int32_t>(peer.uid) != launchUid_) {
+        why = "not the launched application's uid";
+    } else if (parentOf(peer.pid) != getpid()) {
+        why = "not a process this spawner started";
+    } else {
+        header = reinterpret_cast<const OhAppSpawnMsgHeader*>(buffer.data());
+        nameLength = strnlen(header->processName, OH_APP_LEN_PROC_NAME);
+        if (!validProcessName(header->processName, nameLength)) {
+            why = "not a valid process name";
+        }
+    }
+    if (why != nullptr) {
+        LOGE("[WESTLAKE-SPAWN] refused a request from pid %d uid %u: %s",
+             static_cast<int>(peer.pid), static_cast<unsigned>(peer.uid), why);
+        return false;
+    }
+    std::string name(header->processName, nameLength);
+    uint32_t msgId = header->msgId;
+    std::vector<uint8_t> request = launchRequest_;
+    auto* rebuilt = reinterpret_cast<OhAppSpawnMsgHeader*>(request.data());
+    memset(rebuilt->processName, 0, OH_APP_LEN_PROC_NAME);
+    memcpy(rebuilt->processName, name.data(), name.size());
+    rebuilt->msgId = msgId;
+    buffer.swap(request);
+    LOGI("[WESTLAKE-SPAWN] pid %d asks for process %s; credentials from the launch request",
+         static_cast<int>(peer.pid), name.c_str());
+    return true;
+}
+
 void SpawnServer::handleConnection(int clientFd) {
     // Peek first 4 bytes to detect protocol: OH binary starts with
     // magic 0xEF201234; adapter-legacy starts with a network-order length prefix.
@@ -420,6 +508,18 @@ void SpawnServer::handleConnection(int clientFd) {
         }
     }
 
+    bool fromLauncher = false;
+    if (!admit(clientFd, buffer, isBinary, fromLauncher)) {
+        if (isBinary) {
+            sendOhBinaryResponse(clientFd, reinterpret_cast<const OhAppSpawnMsgHeader*>(
+                buffer.data())->msgId, "", -1, -1);
+        } else {
+            SpawnResult err = {-1, -1};
+            sendResult(clientFd, err);
+        }
+        return;
+    }
+
     // Parse the message (binary or text — parseMessage dispatches on magic).
     SpawnMsg msg;
     if (!parseMessage(buffer.data(), buffer.size(), msg)) {
@@ -439,12 +539,20 @@ void SpawnServer::handleConnection(int clientFd) {
          msg.code, msg.procName.c_str(), msg.bundleName.c_str(), msg.uid,
          msg.isOhBinary);
 
-    // Dispatch to the spawn handler
+    // Every request forks, and a child given no uid would keep root: refuse it here, whoever
+    // sent it, rather than in the child.
     int pid = -1;
     int rc = -1;
-    if (spawnHandler_) {
+    if (msg.uid <= 0) {
+        LOGE("[WESTLAKE-SPAWN] refused %s: it would run with uid %d",
+             msg.procName.c_str(), msg.uid);
+    } else if (spawnHandler_) {
         pid = spawnHandler_(msg);
         rc = (pid > 0) ? 0 : -1;
+        if (pid > 0 && fromLauncher && isBinary) {
+            launchRequest_ = buffer;
+            launchUid_ = msg.uid;
+        }
     } else {
         LOGE("No spawn handler registered");
     }
