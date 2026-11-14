@@ -1111,10 +1111,21 @@ public final class PlayServicesChannel {
     }
 
     /** Appends the base and split APKs of this app, as open read-only files. */
+    /**
+     * The most APK files a HELLO carries: the socket binder sends at most 64 descriptors with one message
+     * (socketbinder_natives.c MAX_FDS). An app with more, such as a game with dozens of asset-pack splits, hands
+     * over none: all or none, since a host maps them by position.
+     */
+    private static final int MAX_HELLO_APKS = 64;
+
     private static void writeApks(Parcel data, ApplicationInfo app) {
         List<String> paths = new ArrayList<>();
         if (app != null && app.sourceDir != null) paths.add(app.sourceDir);
         if (app != null && app.splitSourceDirs != null) paths.addAll(Arrays.asList(app.splitSourceDirs));
+        if (paths.size() > MAX_HELLO_APKS) {
+            System.err.println(TAG + paths.size() + " APK files are more than a HELLO carries; handing over none");
+            paths.clear();
+        }
         List<android.os.ParcelFileDescriptor> apks = new ArrayList<>();
         for (String path : paths) {
             try {
@@ -1135,7 +1146,11 @@ public final class PlayServicesChannel {
     private static android.os.ParcelFileDescriptor[] readApks(Parcel data) {
         if (data.dataAvail() < 4) return new android.os.ParcelFileDescriptor[0];
         int count = data.readInt();
-        if (count < 0 || count > 32) return new android.os.ParcelFileDescriptor[0];
+        // Returning early would leave the entries unread, and the spawner socket after them would be read from the
+        // middle of them: one Unity game with 48 asset-pack splits was "unverified" that way in every round.
+        if (count < 0 || count > MAX_HELLO_APKS) {
+            throw new SecurityException("malformed introduction: " + count + " APK files");
+        }
         android.os.ParcelFileDescriptor[] apks = new android.os.ParcelFileDescriptor[count];
         for (int i = 0; i < count; i++) apks[i] = data.readTypedObject(android.os.ParcelFileDescriptor.CREATOR);
         return apks;
