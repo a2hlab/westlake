@@ -57,7 +57,9 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
         if (permission == null) return "denied: no permission named";
         Application app = ActivityThread.currentApplication();
         PackageManager manager = app != null ? app.getPackageManager() : null;
-        boolean own = uid == android.os.Process.myUid();
+        // A check made outside a binder call names the kernel uid, which every Westlake process shares; in this
+        // process it means the process itself.
+        boolean own = uid == android.os.Process.myUid() || uid == android.system.Os.getuid();
         String pkg = own ? (app != null ? app.getPackageName() : null) : RemotePackages.packageForUid(uid);
         if (pkg == null || manager == null) return "denied: no package for the uid";
         if (!requestsOrDefines(manager, pkg, permission, own)) return "denied: not requested by " + pkg;

@@ -2,11 +2,15 @@ package adapter.core;
 
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageParser;
 import android.content.pm.PermissionInfo;
 import android.content.pm.Signature;
+import android.content.res.ApkAssets;
+import android.content.res.XmlResourceParser;
 
-import java.io.File;
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
+
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -28,6 +32,7 @@ import java.util.concurrent.Executors;
  */
 public final class PermissionLevels {
     private static final String TAG = "[WL-PERM] ";
+    private static final String ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android";
     /** Packages whose declared permissions a Play host or an app is likely to meet besides its own. */
     private static final String[] PLAY_PACKAGES = {
             "com.google.android.gms", "com.google.android.gsf", "com.android.vending"};
@@ -166,19 +171,38 @@ public final class PermissionLevels {
         Map<String, PermissionInfo> permissions = new HashMap<>();
         String path = System.getenv("WESTLAKE_FRAMEWORK_RES_PATH");
         try {
-            if (path != null) {
-                PackageParser.Package parsed = new PackageParser().parsePackage(new File(path), 0);
-                for (PackageParser.Permission permission : parsed.permissions) {
-                    if (permission != null && permission.info != null) {
-                        permissions.put(permission.info.name, permission.info);
-                    }
-                }
-            }
+            if (path != null) readDeclared(path, "android", permissions);
             System.err.println(TAG + permissions.size() + " platform permissions read from framework-res");
-        } catch (PackageParser.PackageParserException | RuntimeException e) {
+        } catch (IOException | XmlPullParserException | RuntimeException e) {
             System.err.println(TAG + "platform permissions unread: " + e);
         }
         sPlatform = permissions;
         return permissions;
+    }
+
+    /**
+     * The permissions an APK's manifest declares, read straight from its binary XML. PackageParser cannot
+     * read framework-res: its manifest asks for SDK 35, and Westlake reports 34, so the parser refuses it
+     * before reaching a permission.
+     */
+    private static void readDeclared(String apk, String packageName, Map<String, PermissionInfo> out)
+            throws IOException, XmlPullParserException {
+        ApkAssets assets = ApkAssets.loadFromPath(apk);
+        try (XmlResourceParser parser = assets.openXml("AndroidManifest.xml")) {
+            for (int type = parser.next(); type != XmlPullParser.END_DOCUMENT; type = parser.next()) {
+                if (type != XmlPullParser.START_TAG || !"permission".equals(parser.getName())) continue;
+                String name = parser.getAttributeValue(ANDROID_NAMESPACE, "name");
+                if (name == null) continue;
+                PermissionInfo info = new PermissionInfo();
+                info.name = name;
+                info.packageName = packageName;
+                info.group = parser.getAttributeValue(ANDROID_NAMESPACE, "permissionGroup");
+                info.protectionLevel = PermissionInfo.fixProtectionLevel(parser.getAttributeIntValue(
+                        ANDROID_NAMESPACE, "protectionLevel", PermissionInfo.PROTECTION_NORMAL));
+                out.put(name, info);
+            }
+        } finally {
+            assets.close();
+        }
     }
 }
