@@ -1044,6 +1044,14 @@ public class AppSchedulerBridge {
             if (target.applicationInfo != null && appTheme != 0) target.applicationInfo.theme = appTheme;
             for (android.content.pm.ActivityInfo declared : info.activities) {
                 if (!declared.name.equals(target.name)) continue;
+                // An <activity-alias> names no class: ActivityThread instantiates its targetActivity, as Android
+                // does for every alias. Built from the OH record, the info named the alias as the class, so the
+                // Play Store's MainActivityPrivate (an alias of MainActivity, which its background process asks for
+                // with a client's license hand-off) failed with ClassNotFoundException.
+                if (declared.targetActivity != null && !declared.targetActivity.equals(target.targetActivity)) {
+                    System.err.println("[B47-SLA] " + target.name + " is an alias of " + declared.targetActivity);
+                    target.targetActivity = declared.targetActivity;
+                }
                 int theme = declared.theme != 0 ? declared.theme : appTheme;
                 if (theme != 0 && theme != target.theme) {
                     System.err.println("[B47-SLA] theme from the manifest: 0x" + Integer.toHexString(theme)
