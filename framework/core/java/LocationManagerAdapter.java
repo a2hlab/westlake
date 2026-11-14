@@ -171,10 +171,18 @@ public final class LocationManagerAdapter {
         }
     }
 
-    private static int powerScene(LocationRequest request) {
-        if (request == null) return OH_LOW_POWER;
-        if (request.getIntervalMillis() == LocationRequest.PASSIVE_INTERVAL) return OH_NO_POWER;
-        return request.getQuality() == LocationRequest.QUALITY_HIGH_ACCURACY ? OH_HIGH_POWER : OH_LOW_POWER;
+    /**
+     * OH's power scene for a request: GNSS (high power) for the gps provider, as Android's gps provider is GNSS, and
+     * for a high-accuracy request; passive for the passive provider or interval; otherwise OH's low-power scene,
+     * network positioning. On a device without a network location service (this board: OH's NetworkAbility finds
+     * none) OH files a low-power request as passive and it gets fixes only while someone else locates.
+     */
+    private static int powerScene(String provider, LocationRequest request) {
+        if (LocationManager.PASSIVE_PROVIDER.equals(provider)) return OH_NO_POWER;
+        if (request != null && request.getIntervalMillis() == LocationRequest.PASSIVE_INTERVAL) return OH_NO_POWER;
+        if (LocationManager.GPS_PROVIDER.equals(provider)) return OH_HIGH_POWER;
+        return request != null && request.getQuality() == LocationRequest.QUALITY_HIGH_ACCURACY
+                ? OH_HIGH_POWER : OH_LOW_POWER;
     }
 
     private static int intervalSeconds(LocationRequest request) {
@@ -201,7 +209,7 @@ public final class LocationManagerAdapter {
         }
         long handle;
         try {
-            handle = nativeStart(r.id, intervalSeconds(r.request), powerScene(r.request));
+            handle = nativeStart(r.id, intervalSeconds(r.request), powerScene(r.provider, r.request));
         } catch (UnsatisfiedLinkError e) {
             sNoNatives = true;
             handle = -1;
@@ -215,7 +223,7 @@ public final class LocationManagerAdapter {
         }
         r.handle = handle;
         System.err.println("[" + TAG + "] " + how + " " + r.id + " for " + r.provider + ": OH request started, every "
-                + intervalSeconds(r.request) + " s, power scene 0x" + Integer.toHexString(powerScene(r.request)));
+                + intervalSeconds(r.request) + " s, power scene 0x" + Integer.toHexString(powerScene(r.provider, r.request)));
         return true;
     }
 
