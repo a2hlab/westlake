@@ -83,7 +83,13 @@ public final class PermissionLevels {
             case PermissionInfo.PROTECTION_DANGEROUS:
                 return "dangerous";
             case PermissionInfo.PROTECTION_SIGNATURE:
-                if ("android".equals(info.packageName)) return "deny platform signature" + flagText(flags);
+                if ("android".equals(info.packageName)) {
+                    // pre23: granted to an app targeting API 22 or lower, as at install on Android.
+                    if ((flags & PermissionInfo.PROTECTION_FLAG_PRE23) != 0 && targetSdk(manager, requester) < 23) {
+                        return "normal";
+                    }
+                    return "deny platform signature" + flagText(flags);
+                }
                 return sameSigner(manager, info.packageName, requester)
                         ? "signature" : "deny signature of " + info.packageName + flagText(flags);
             case PermissionInfo.PROTECTION_INTERNAL:
@@ -91,6 +97,23 @@ public final class PermissionLevels {
             default:
                 return "undefined level " + info.getProtection();
         }
+    }
+
+    /**
+     * Android's answer to any app Westlake runs for a platform permission that such an app cannot hold whatever it
+     * requests: a platform signature or internal permission, since no Westlake app is platform-signed. Null when the
+     * answer depends on the app: not a platform permission, a normal or dangerous one, or one with the pre23 flag,
+     * which Android grants to an app targeting API 22 or lower.
+     */
+    public static String platformDenial(String permission) {
+        PermissionInfo info = platform().get(permission);
+        if (info == null) return null;
+        int protection = info.getProtection();
+        int flags = info.getProtectionFlags();
+        if ((flags & PermissionInfo.PROTECTION_FLAG_PRE23) != 0) return null;
+        if (protection == PermissionInfo.PROTECTION_SIGNATURE) return "deny platform signature" + flagText(flags);
+        if (protection == PermissionInfo.PROTECTION_INTERNAL) return "deny internal" + flagText(flags);
+        return null;
     }
 
     private static String verdict(PackageManager manager, String permission, String requester, String self) {
@@ -116,6 +139,15 @@ public final class PermissionLevels {
         }
     }
 
+    /** The package's target SDK, or a current one when this process cannot read it (no pre23 grant). */
+    private static int targetSdk(PackageManager manager, String packageName) {
+        try {
+            return manager.getApplicationInfo(packageName, 0).targetSdkVersion;
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return 10000;
+        }
+    }
+
     private static String flagText(int flags) {
         StringBuilder text = new StringBuilder();
         if ((flags & PermissionInfo.PROTECTION_FLAG_PRIVILEGED) != 0) text.append("|privileged");
@@ -123,6 +155,7 @@ public final class PermissionLevels {
         if ((flags & PermissionInfo.PROTECTION_FLAG_APPOP) != 0) text.append("|appop");
         if ((flags & PermissionInfo.PROTECTION_FLAG_INSTALLER) != 0) text.append("|installer");
         if ((flags & PermissionInfo.PROTECTION_FLAG_ROLE) != 0) text.append("|role");
+        if ((flags & PermissionInfo.PROTECTION_FLAG_PRE23) != 0) text.append("|pre23");
         return text.toString();
     }
 

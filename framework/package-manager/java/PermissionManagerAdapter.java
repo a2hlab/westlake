@@ -55,14 +55,20 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
      */
     static String rule(String permission, int uid) {
         if (permission == null) return "denied: no permission named";
+        // No Westlake app is platform-signed: a platform signature or internal permission is denied whoever asks,
+        // before the application or its package is readable (ContextImpl asks for STATUS_BAR_SERVICE that early).
+        String platform = adapter.core.PermissionLevels.platformDenial(permission);
+        if (platform != null) return "denied: " + platform;
         Application app = ActivityThread.currentApplication();
         PackageManager manager = app != null ? app.getPackageManager() : null;
         // A check made outside a binder call names the kernel uid, which every Westlake process shares; in this
         // process it means the process itself.
         boolean own = uid == android.os.Process.myUid() || uid == android.system.Os.getuid();
         String pkg = own ? (app != null ? app.getPackageName() : null) : RemotePackages.packageForUid(uid);
-        if (pkg == null || manager == null) return "denied: no package for the uid";
-        if (!requestsOrDefines(manager, pkg, permission, own)) return "denied: not requested by " + pkg;
+        if (pkg == null || manager == null) return "unknown: no package for the uid";
+        Boolean requested = requestsOrDefines(manager, pkg, permission, own);
+        if (requested == null) return "unknown: " + pkg + " unreadable";
+        if (!requested) return "denied: not requested by " + pkg;
         if (POST_NOTIFICATIONS.equals(permission)) {
             return postNotifications() == PackageManager.PERMISSION_GRANTED
                     ? "granted: notification switch on" : "denied: notification switch off";
@@ -82,7 +88,8 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     }
 
     /** Whether pkg requests or defines permission: this process's own package, or another one Westlake knows. */
-    private static boolean requestsOrDefines(PackageManager manager, String pkg, String permission, boolean own) {
+    /** Whether pkg requests or defines permission; null when this process cannot read its own package. */
+    private static Boolean requestsOrDefines(PackageManager manager, String pkg, String permission, boolean own) {
         if (!own) return RemotePackages.holdsPermission(pkg, permission);
         try {
             PackageInfo info = manager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS);
@@ -97,7 +104,7 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
                 }
             }
         } catch (PackageManager.NameNotFoundException | RuntimeException e) {
-            // not a package this process can read
+            return null;   // not a package this process can read: no answer, rather than "not requested"
         }
         return false;
     }
@@ -115,7 +122,39 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
      * Logs a check once per API, permission and uid, with the rule's answer where it differs ("[WL-PERM-CHECK]"),
      * and returns the answer unchanged. The rule is worked out on its own thread.
      */
-    static int trace(String api, String permission, int uid, int answer) {
+    /**
+     * WESTLAKE_PERMISSION_LEVELS=enforce: phase A of ADR-0004 decision 1. A check gets the rule's answer where the
+     * rule reaches one Android gives whatever the user does: normal, signature, not requested, platform or foreign
+     * signature, internal, undefined. A dangerous permission and the notification switch keep today's answer until
+     * a runtime request reaches OH's dialog; so does a check the rule cannot answer ("unknown"). Unset, checks are
+     * only traced.
+     */
+    private static final boolean ENFORCE = "enforce".equals(System.getenv("WESTLAKE_PERMISSION_LEVELS"));
+    /** The rule's reason per permission and uid, once known; non-dangerous answers do not change while a process runs. */
+    private static final java.util.Map<String, String> RULES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The answer phase A gives, or null to keep today's. Worked out on the checking thread, then cached. */
+    private static Integer enforced(String permission, int uid) {
+        String key = permission + " " + uid;
+        String rule = RULES.get(key);
+        if (rule == null) {
+            try {
+                rule = rule(permission, uid);
+            } catch (RuntimeException | LinkageError e) {
+                return null;
+            }
+            if (rule.startsWith("unknown")) return null;   // perhaps readable later: not cached
+            RULES.put(key, rule);
+        }
+        if (rule.contains("dangerous") || rule.contains("notification switch")) return null;
+        if (rule.startsWith("granted:")) return PackageManager.PERMISSION_GRANTED;
+        if (rule.startsWith("denied:")) return PackageManager.PERMISSION_DENIED;
+        return null;
+    }
+
+    static int trace(String api, String permission, int uid, int today) {
+        Integer phaseA = ENFORCE && permission != null ? enforced(permission, uid) : null;
+        int answer = phaseA != null ? phaseA : today;
         if (permission != null && TRACED.add(api + " " + permission + " " + uid)) {
             Throwable caller = new Throwable();   // where the check came from, printed where the rule differs
             TRACER.execute(() -> {
@@ -127,7 +166,9 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
                 } catch (RuntimeException | LinkageError e) {
                     rule = given + ": rule failed, " + e.getClass().getSimpleName();
                 }
+                String was = today == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
                 System.err.println("[WL-PERM-CHECK] " + api + " " + permission + " uid " + uid + ": " + given
+                        + (was.equals(given) ? "" : " (enforced; was " + was + ")")
                         + (rule.startsWith(given + ":") ? "" : " (one rule: " + rule + ")" + callers(caller)));
             });
         }
