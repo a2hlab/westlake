@@ -600,6 +600,7 @@ public final class InstallerSessions {
     }
 
     private static void abandon(Session session) {
+        boolean wasFinished = session.finished;
         session.finished = true;
         for (FileBridge bridge : session.bridges) bridge.forceClose();
         File[] files = session.dir.listFiles();
@@ -608,6 +609,12 @@ public final class InstallerSessions {
         }
         session.dir.delete();
         SESSIONS.remove(session.id);
+        if (wasFinished) {
+            // As PackageInstallerSession.abandon returns for a session in a terminal state: the Play Store abandons
+            // its session after a successful install, which must not read as a second, failed outcome.
+            System.err.println(TAG + "session " + session.id + " closed after it finished");
+            return;
+        }
         System.err.println(TAG + "session " + session.id + " abandoned");
         for (IPackageInstallerCallback callback : CALLBACKS) {
             try {
