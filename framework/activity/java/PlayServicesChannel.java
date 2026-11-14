@@ -68,6 +68,8 @@ public final class PlayServicesChannel {
     private static final String RUNTIME_ROOT = "WESTLAKE_RUNTIME_ROOT";
     private static final String REAL_ROOT = "WESTLAKE_RUNTIME_REAL_ROOT";
     private static final String TAG = "[WL-PLAY] ";
+    /** Whether hello() has said this process has no WESTLAKE_SPAWN_SOCKET (once per process). */
+    private static volatile boolean sNoSpawnSocketLogged;
     /** Set to a number of seconds to report, that long after launch, how the channel looks from this app. */
     private static final String CHECK = "WESTLAKE_PLAY_SERVICES_CHECK";
 
@@ -547,7 +549,17 @@ public final class PlayServicesChannel {
             writeApks(data, own.applicationInfo);
             // The spawner that started this process, which the host asks whether this is the package it
             // says it is (SpawnerIdentity). A host that predates it stops reading after the APKs.
-            data.writeString(System.getenv("WESTLAKE_SPAWN_SOCKET"));
+            String spawnSocket = System.getenv("WESTLAKE_SPAWN_SOCKET");
+            if (spawnSocket == null && !sNoSpawnSocketLogged) {
+                // The launcher gives every app's spawner this variable, which the app inherits. An app's
+                // native code can rewrite the environment; say what is left, so its host's "unverified" has
+                // a cause.
+                sNoSpawnSocketLogged = true;
+                System.err.println(TAG + "no WESTLAKE_SPAWN_SOCKET in this process's environment ("
+                        + System.getenv().size() + " variables; WESTLAKE_RUNTIME_ROOT "
+                        + (System.getenv("WESTLAKE_RUNTIME_ROOT") != null ? "present" : "absent") + ")");
+            }
+            data.writeString(spawnSocket);
             root.transact(HELLO, data, reply, 0);
             reply.readException();
             c.remoteRoot = reply.readString();
