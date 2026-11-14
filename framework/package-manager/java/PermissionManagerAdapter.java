@@ -43,18 +43,61 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     }
 
     /**
-     * What one rule would answer, whatever API asked (ADR-0004 decision 1): this process's uid holds what OH
-     * granted the host app; another uid holds what the package Westlake gave that uid requests or defines, as an
-     * installed app holds its manifest's permissions where nothing else is installed; any other uid holds nothing.
-     * Today the activity manager's checkPermission denies every other uid, its checkPermissionForDevice grants
-     * everything, and the package manager answers by the package: trace() logs where they differ from this.
+     * What one rule, Android's protection levels, would answer whatever API asked (ADR-0004 decision 1), and why:
+     * "granted: <why>" or "denied: <why>". The uid's package (this process's own, or the one Westlake gave a
+     * client's uid) must request or define the permission. Then a normal permission, and a signature permission
+     * whose declarer shares the package's signer, is granted; a dangerous one is what OH granted the host app,
+     * the user's runtime grant, which every Westlake process shares; a platform-signature, internal or foreign
+     * signature permission is denied, as for any app Android installs; and so is one no package this process
+     * knows defines. Today the activity manager's checkPermission denies every other uid, its
+     * checkPermissionForDevice grants everything, and the package manager answers by request alone: trace()
+     * logs where they differ from this.
      */
-    static int rule(String permission, int uid) {
-        if (permission == null) return PackageManager.PERMISSION_DENIED;
-        if (uid == android.os.Process.myUid()) return checkProcessPermission(permission, -1, uid);
-        String remote = RemotePackages.packageForUid(uid);
-        return remote != null && RemotePackages.holdsPermission(remote, permission)
-                ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+    static String rule(String permission, int uid) {
+        if (permission == null) return "denied: no permission named";
+        Application app = ActivityThread.currentApplication();
+        PackageManager manager = app != null ? app.getPackageManager() : null;
+        boolean own = uid == android.os.Process.myUid();
+        String pkg = own ? (app != null ? app.getPackageName() : null) : RemotePackages.packageForUid(uid);
+        if (pkg == null || manager == null) return "denied: no package for the uid";
+        if (!requestsOrDefines(manager, pkg, permission, own)) return "denied: not requested by " + pkg;
+        if (POST_NOTIFICATIONS.equals(permission)) {
+            return postNotifications() == PackageManager.PERMISSION_GRANTED
+                    ? "granted: notification switch on" : "denied: notification switch off";
+        }
+        String level = adapter.core.PermissionLevels.classify(manager, permission, pkg);
+        switch (level) {
+            case "normal":
+                return "granted: normal";
+            case "signature":
+                return "granted: signature shared";
+            case "dangerous":
+                return Native.granted(PermissionMapper.mapToOH(permission))
+                        ? "granted: dangerous, granted on OH" : "denied: dangerous, not granted on OH";
+            default:
+                return "denied: " + level;
+        }
+    }
+
+    /** Whether pkg requests or defines permission: this process's own package, or another one Westlake knows. */
+    private static boolean requestsOrDefines(PackageManager manager, String pkg, String permission, boolean own) {
+        if (!own) return RemotePackages.holdsPermission(pkg, permission);
+        try {
+            PackageInfo info = manager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions != null) {
+                for (String requested : info.requestedPermissions) {
+                    if (permission.equals(requested)) return true;
+                }
+            }
+            if (info.permissions != null) {
+                for (PermissionInfo defined : info.permissions) {
+                    if (defined != null && permission.equals(defined.name)) return true;
+                }
+            }
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            // not a package this process can read
+        }
+        return false;
     }
 
     private static final java.util.Set<String> TRACED = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -73,16 +116,15 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     static int trace(String api, String permission, int uid, int answer) {
         if (permission != null && TRACED.add(api + " " + permission + " " + uid)) {
             TRACER.execute(() -> {
-                int rule;
+                String given = answer == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
+                String rule;
                 try {
                     rule = rule(permission, uid);
-                } catch (RuntimeException e) {
-                    rule = answer;
+                } catch (RuntimeException | LinkageError e) {
+                    rule = given + ": rule failed, " + e.getClass().getSimpleName();
                 }
-                System.err.println("[WL-PERM-CHECK] " + api + " " + permission + " uid " + uid + ": "
-                        + (answer == PackageManager.PERMISSION_GRANTED ? "granted" : "denied")
-                        + (rule == answer ? "" : rule == PackageManager.PERMISSION_GRANTED
-                                ? " (one rule: granted)" : " (one rule: denied)"));
+                System.err.println("[WL-PERM-CHECK] " + api + " " + permission + " uid " + uid + ": " + given
+                        + (rule.startsWith(given + ":") ? "" : " (one rule: " + rule + ")"));
             });
         }
         return answer;

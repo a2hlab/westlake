@@ -26,7 +26,7 @@ import java.util.concurrent.Executors;
  * request the levels would deny or a permission whose definition this process does not know, so that a
  * round shows what enforcing them would change. It works off the binder thread that asked.
  */
-final class PermissionLevels {
+public final class PermissionLevels {
     private static final String TAG = "[WL-PERM] ";
     /** Packages whose declared permissions a Play host or an app is likely to meet besides its own. */
     private static final String[] PLAY_PACKAGES = {
@@ -60,6 +60,32 @@ final class PermissionLevels {
                         + "; Westlake grants it as requested");
             }
         });
+    }
+
+    /**
+     * The protection class Android would apply to permission for requester: "normal", "dangerous",
+     * "signature" (granted: the requester shares the declarer's signer), "deny <why>" (platform signature,
+     * another package's signature, internal) or "undefined" (no definition this process knows).
+     */
+    public static String classify(PackageManager manager, String permission, String requester) {
+        PermissionInfo info = platform().get(permission);
+        if (info == null) info = declared(manager, permission, requester, null);
+        if (info == null) return "undefined";
+        int flags = info.getProtectionFlags();
+        switch (info.getProtection()) {
+            case PermissionInfo.PROTECTION_NORMAL:
+                return "normal";
+            case PermissionInfo.PROTECTION_DANGEROUS:
+                return "dangerous";
+            case PermissionInfo.PROTECTION_SIGNATURE:
+                if ("android".equals(info.packageName)) return "deny platform signature" + flagText(flags);
+                return sameSigner(manager, info.packageName, requester)
+                        ? "signature" : "deny signature of " + info.packageName + flagText(flags);
+            case PermissionInfo.PROTECTION_INTERNAL:
+                return "deny internal" + flagText(flags);
+            default:
+                return "undefined level " + info.getProtection();
+        }
     }
 
     private static String verdict(PackageManager manager, String permission, String requester, String self) {
