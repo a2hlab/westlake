@@ -1691,6 +1691,9 @@ public final class PlayServicesChannel {
         return service[0];
     }
 
+    /** authority/uid pairs already logged as a provider handed out that Android would refuse. */
+    private static final java.util.Set<String> UNEXPORTED_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     private static IBinder localProvider(String authority) throws RemoteException {
         if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
             ContentProviderHolder holder = LocalGservices.holder();
@@ -1698,6 +1701,13 @@ public final class PlayServicesChannel {
         }
         ProviderInfo info = ActivityThread.getPackageManager().resolveContentProvider(authority, 0, UserHandle.myUserId());
         if (info == null || !runsHere(info.packageName)) return null;
+        // Android's activity manager hands a provider that is not exported only to its own app. Logged, not
+        // refused, until ProviderInfo.exported is known to be right here for every package (ADR-0004).
+        int caller = Binder.getCallingUid();
+        if (!info.exported && caller != Process.myUid() && UNEXPORTED_LOGGED.add(authority + "/" + caller)) {
+            System.err.println("[WL-PERM] provider:" + authority + " for uid " + caller
+                    + ": would deny (not exported); Westlake hands it out");
+        }
         IContentProvider provider = ActivityThread.currentActivityThread().acquireProvider(
                 application(), authority, UserHandle.myUserId(), true);
         return provider == null ? null : provider.asBinder();
