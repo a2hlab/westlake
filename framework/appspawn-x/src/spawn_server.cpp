@@ -447,8 +447,10 @@ bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinar
     return true;
 }
 
-// At most this many APK files go with a WHOIS answer: a base APK and its splits.
-constexpr size_t kMaxWhoisApks = 32;
+// At most this many APK files go with a WHOIS answer: a base APK and its splits. 64, as many as a
+// client's introduction carries (PlayServicesChannel MAX_HELLO_APKS) and the socket binder sends with
+// one message; with 32, a game with 48 asset-pack splits had its last 17 files reported as not launched.
+constexpr size_t kMaxWhoisApks = 64;
 
 // The APK files of this launch, opened read-only: the base APK (ASX_APK_PATH) first, then its
 // splits (ASX_SPLIT_APK_PATHS, separated by ':') in the order the launcher staged them. Only
