@@ -62,15 +62,33 @@ static int in_app_library_dir(const char *path)
     return length > 1 && strncmp(path, dir, length) == 0 && path[length] == '/';
 }
 
+/*
+ * A library mapped from inside an APK: the loader names the APK itself or "<apk>!/lib/<abi>/<lib>".
+ * OH installs no native code inside APKs, so such a library was built against bionic. Play
+ * services' Dynamite modules run that way in every client: libcronet from
+ * split_CronetDynamite_installtime.apk asked sysconf(96), bionic's _SC_NPROCESSORS_CONF, which
+ * reached musl untranslated; musl answered -1, and Chromium's NumberOfProcessors() hit NOTREACHED,
+ * fatal in Cronet 129, so the module took AllTrails and Magic Tiles down with it.
+ */
+static int in_apk(const char *path)
+{
+    const char *apk = strstr(path, ".apk");
+    while (apk != NULL) {
+        if (apk[4] == '\0' || apk[4] == '!' || apk[4] == '/') return 1;
+        apk = strstr(apk + 4, ".apk");
+    }
+    return 0;
+}
+
 /* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
 /*
  * An Android-built (bionic ABI) caller: the WebView, a library the app packages
- * (/data/local/tmp/asx/lib/, or its library directory at an install path), or one the
- * app wrote and loads from its own storage (/data/data/<pkg>/..., including the
- * code_cache/wl-exec copies this shim makes of them). WhatsApp's superpack libraries run
- * from those copies; its Breakpad setup passed a 32-byte bionic old-action to OH's
- * sigaction untranslated, musl wrote 152 bytes into it, and the clobbered stack crashed
- * the app four seconds in.
+ * (/data/local/tmp/asx/lib/, or its library directory at an install path), one mapped from
+ * inside an APK (in_apk), or one the app wrote and loads from its own storage
+ * (/data/data/<pkg>/..., including the code_cache/wl-exec copies this shim makes of them).
+ * WhatsApp's superpack libraries run from those copies; its Breakpad setup passed a 32-byte
+ * bionic old-action to OH's sigaction untranslated, musl wrote 152 bytes into it, and the
+ * clobbered stack crashed the app four seconds in.
  */
 static int caller_is_android_dso(void *return_address, const char **caller_path)
 {
@@ -81,6 +99,7 @@ static int caller_is_android_dso(void *return_address, const char **caller_path)
     if (strstr(caller.dli_fname, "libwebviewchromium.so") == NULL &&
         strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL &&
         !in_app_library_dir(caller.dli_fname) &&
+        !in_apk(caller.dli_fname) &&
         strncmp(caller.dli_fname, "/data/data/", 11) != 0 &&
         strncmp(caller.dli_fname, "/data/user/", 11) != 0) {
         return 0;
