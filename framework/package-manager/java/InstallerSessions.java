@@ -50,6 +50,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class InstallerSessions {
     private static final String TAG = "[WL-INSTALL] ";
+    /** PackageInstallerSession's name for the installer's app metadata (PersistableBundle). */
+    private static final String APP_METADATA = "app.metadata";
     /** The answer for an IPackageInstaller call this class does not take: the caller's default. */
     public static final Object UNANSWERED = new Object();
     private static final Map<Integer, Session> SESSIONS = new ConcurrentHashMap<>();
@@ -242,7 +244,8 @@ public final class InstallerSessions {
                 return null;
             case "requestUserPreapproval":
                 System.err.println(TAG + "session " + session.id + " asks for the user's pre-approval");
-                send((IntentSender) args[1], session, PackageInstaller.STATUS_FAILURE,
+                // What the API defines for an installer whose pre-approval request is not available.
+                send((IntentSender) args[1], session, PackageInstaller.STATUS_FAILURE_BLOCKED,
                         "user pre-approval is not supported yet");
                 return null;
             case "isMultiPackage":
@@ -262,6 +265,17 @@ public final class InstallerSessions {
             case "setChecksums":
                 System.err.println(TAG + "session " + session.id + " checksums for " + args[0]);
                 return null;
+            case "openWriteAppMetadata":
+                // The client writes through a FileBridge here too (PackageInstaller.Session.setAppMetadata).
+                return openWrite(session, APP_METADATA, 0, -1);
+            case "removeAppMetadata":
+                staged(session, APP_METADATA).delete();
+                return null;
+            case "getAppMetadataFd": {
+                File metadata = staged(session, APP_METADATA);
+                return metadata.isFile()
+                        ? ParcelFileDescriptor.open(metadata, ParcelFileDescriptor.MODE_READ_ONLY) : null;
+            }
             default:
                 return UNANSWERED;
         }
@@ -363,6 +377,8 @@ public final class InstallerSessions {
             if (out.length() > 0) out.append("; ");
             out.append(file.getName()).append(' ').append(file.length()).append(" bytes sha256 ")
                     .append(digest(file));
+            // Dex metadata and the app metadata are not APKs; splits often have no .apk extension.
+            if (file.getName().endsWith(".dm") || file.getName().equals(APP_METADATA)) continue;
             ParseResult<ApkLite> lite = ApkLiteParseUtils.parseApkLite(
                     ParseTypeImpl.forParsingWithoutPlatformCompat().reset(), file, 0);
             if (lite.isError()) {
