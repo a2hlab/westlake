@@ -117,7 +117,9 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
      */
     static int trace(String api, String permission, int uid, int answer) {
         if (permission != null && TRACED.add(api + " " + permission + " " + uid)) {
+            Throwable caller = new Throwable();   // where the check came from, printed where the rule differs
             TRACER.execute(() -> {
+                awaitApplication(uid);
                 String given = answer == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
                 String rule;
                 try {
@@ -126,10 +128,42 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
                     rule = given + ": rule failed, " + e.getClass().getSimpleName();
                 }
                 System.err.println("[WL-PERM-CHECK] " + api + " " + permission + " uid " + uid + ": " + given
-                        + (rule.startsWith(given + ":") ? "" : " (one rule: " + rule + ")"));
+                        + (rule.startsWith(given + ":") ? "" : " (one rule: " + rule + ")" + callers(caller)));
             });
         }
         return answer;
+    }
+
+    /**
+     * A check this process makes about itself can come before its application exists (ContextImpl asks for
+     * STATUS_BAR_SERVICE during start-up), when the rule cannot name the package yet: wait for it, up to 10 s.
+     */
+    private static void awaitApplication(int uid) {
+        if (uid != android.os.Process.myUid() && uid != android.system.Os.getuid()) return;
+        for (int i = 0; i < 100 && ActivityThread.currentApplication() == null; i++) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+    }
+
+    /** The frames that asked, past this class and reflection: " from A.m:1 < B.n:2 ...", at most 10. */
+    private static String callers(Throwable caller) {
+        StringBuilder out = new StringBuilder();
+        int shown = 0;
+        for (StackTraceElement frame : caller.getStackTrace()) {
+            String cls = frame.getClassName();
+            if (cls.equals(PermissionManagerAdapter.class.getName()) || cls.startsWith("java.lang.reflect.")
+                    || cls.startsWith("$Proxy") || cls.startsWith("jdk.internal.")) {
+                continue;
+            }
+            out.append(shown == 0 ? " from " : " < ").append(cls.substring(cls.lastIndexOf('.') + 1))
+                    .append('.').append(frame.getMethodName()).append(':').append(frame.getLineNumber());
+            if (++shown == 10) break;
+        }
+        return out.toString();
     }
     public static int checkProcessPermission(String permission, int pid, int uid) {
         if (permission == null || uid != android.os.Process.myUid()
