@@ -1898,15 +1898,32 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * PackageManager.deletePackage (DELETE_PACKAGES, which no Westlake app holds): an uninstall the user confirms, of a
+     * package an installer published here (InstallerSessions.uninstall). The outcome goes to the observer.
+     */
     @Override
-    public void deletePackageAsUser(java.lang.String arg0, int arg1, android.content.pm.IPackageDeleteObserver arg2, int arg3, int arg4) throws android.os.RemoteException {
-        logStub("deletePackageAsUser", "");
+    public void deletePackageAsUser(java.lang.String packageName, int versionCode, android.content.pm.IPackageDeleteObserver observer, int userId, int flags) throws android.os.RemoteException {
+        logBridged("deletePackageAsUser", packageName);
+        InstallerSessions.uninstall(packageName, versionCode, android.app.ActivityThread.currentPackageName(), (code, message) -> {
+            try {
+                if (observer != null) observer.packageDeleted(packageName, code);
+            } catch (android.os.RemoteException | RuntimeException ignored) {
+            }
+        });
     }
 
 
     @Override
-    public void deletePackageVersioned(android.content.pm.VersionedPackage arg0, android.content.pm.IPackageDeleteObserver2 arg1, int arg2, int arg3) throws android.os.RemoteException {
-        logStub("deletePackageVersioned", "");
+    public void deletePackageVersioned(android.content.pm.VersionedPackage target, android.content.pm.IPackageDeleteObserver2 observer, int userId, int flags) throws android.os.RemoteException {
+        logBridged("deletePackageVersioned", target.getPackageName());
+        InstallerSessions.uninstall(target.getPackageName(), target.getLongVersionCode(),
+                android.app.ActivityThread.currentPackageName(), (code, message) -> {
+            try {
+                if (observer != null) observer.onPackageDeleted(target.getPackageName(), code, message);
+            } catch (android.os.RemoteException | RuntimeException ignored) {
+            }
+        });
     }
 
 
