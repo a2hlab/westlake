@@ -70,6 +70,8 @@ public final class PlayServicesChannel {
     private static final String TAG = "[WL-PLAY] ";
     /** Whether hello() has said this process has no WESTLAKE_SPAWN_SOCKET (once per process). */
     private static volatile boolean sNoSpawnSocketLogged;
+    /** Whether hello() has logged where its fields end (once per process). */
+    private static volatile boolean sHelloLayoutLogged;
     /** Set to a number of seconds to report, that long after launch, how the channel looks from this app. */
     private static final String CHECK = "WESTLAKE_PLAY_SERVICES_CHECK";
 
@@ -545,8 +547,10 @@ public final class PlayServicesChannel {
         try {
             data.writeString(packageName);
             data.writeTypedObject(own, 0);
+            int afterInfo = data.dataPosition();
             data.writeStrongBinder(sCallback);
             writeApks(data, own.applicationInfo);
+            int afterApks = data.dataPosition();
             // The spawner that started this process, which the host asks whether this is the package it
             // says it is (SpawnerIdentity). A host that predates it stops reading after the APKs.
             String spawnSocket = System.getenv("WESTLAKE_SPAWN_SOCKET");
@@ -560,6 +564,12 @@ public final class PlayServicesChannel {
                         + (System.getenv("WESTLAKE_RUNTIME_ROOT") != null ? "present" : "absent") + ")");
             }
             data.writeString(spawnSocket);
+            if (!sHelloLayoutLogged) {
+                // A host that reads a field from the wrong place says "spawner says null"; compare with its line.
+                sHelloLayoutLogged = true;
+                System.err.println(TAG + "HELLO layout " + packageName + ": package info ends at " + afterInfo
+                        + ", APKs end at " + afterApks + ", " + data.dataSize() + " bytes");
+            }
             root.transact(HELLO, data, reply, 0);
             reply.readException();
             c.remoteRoot = reply.readString();
@@ -1553,8 +1563,15 @@ public final class PlayServicesChannel {
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
             }
+            int afterCallback = data.dataPosition();
             android.os.ParcelFileDescriptor[] apkFiles = readApks(data);
+            int afterApks = data.dataPosition();
             String spawner = data.dataAvail() > 0 ? data.readString() : null;
+            if (spawner == null) {
+                System.err.println(TAG + "HELLO layout " + claimed + " as read: callback ends at " + afterCallback
+                        + ", APKs (" + apkFiles.length + ") end at " + afterApks + ", " + data.dataSize()
+                        + " bytes; no spawner socket");
+            }
             checkIdentity(this, claimed, info, spawner, apkFiles);
             if (claimed.equals(application().getPackageName())) {
                 // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
