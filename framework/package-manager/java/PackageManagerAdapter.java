@@ -891,6 +891,10 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (RemotePackages.contains(packageName)) {
             return RemotePackages.packageInfo(packageName, flags);
         }
+        if (InstalledPackages.contains(packageName)) {   // published by an installer's session (ADR-0006)
+            sAbsentPackages.remove(packageName);
+            return InstalledPackages.packageInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
                     + System.getenv("ASX_WEBVIEW_APK"));
@@ -952,6 +956,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (RemotePackages.contains(packageName)) {
             return GuestPackages.besideDefaults(packageName, RemotePackages.applicationInfo(packageName, flags));
         }
+        if (InstalledPackages.contains(packageName)) {
+            return InstalledPackages.applicationInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
         }
@@ -994,6 +1001,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         String self = SourcePackageRegistry.packageName();
         if (self != null) answered.add(self);
         answered.addAll(GuestPackages.names());
+        answered.addAll(InstalledPackages.names());
         for (String play : PLAY_PACKAGES) {
             if (RemotePackages.contains(play)) answered.add(play);
         }

@@ -695,19 +695,23 @@ public final class LocalServiceBinders {
     /**
      * PackageManager.getPackageInstaller(): PackageInstaller's constructor rejects a null
      * IPackageInstaller, so the null the adapter used to return threw inside the framework (Aurora
-     * Store's Application.onCreate). This installer has no sessions, and installing is refused
-     * with a reason: this platform installs nothing on an app's behalf.
+     * Store's Application.onCreate). Sessions are adapter.packagemanager.InstallerSessions (ADR-0006,
+     * first step): an installer's writes are staged and verified, and commit reports that nothing
+     * can be installed yet.
      */
     public static synchronized IInterface packageInstaller() {
         IBinder binder = sBinders.get("package-installer");
         if (binder == null) {
             try {
                 binder = proxy("package-installer", "android.content.pm.IPackageInstaller", (method, args) -> {
-                    if ("createSession".equals(method)) {
-                        throw new IllegalStateException("package installation is not available on this platform");
+                    Object answer;
+                    try {
+                        answer = adapter.packagemanager.InstallerSessions.installer(method, args);
+                    } catch (java.io.IOException e) {
+                        throw new android.os.ParcelableException(e);   // as the platform's installer wraps it
                     }
-                    return DEFAULT;
-                });
+                    return answer == adapter.packagemanager.InstallerSessions.UNANSWERED ? DEFAULT : answer;
+                }, false);
             } catch (ClassNotFoundException e) {
                 return null;
             }
