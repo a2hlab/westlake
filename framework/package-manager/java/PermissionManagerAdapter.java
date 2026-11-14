@@ -26,11 +26,66 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public static Integer proxyPermissionResult(java.lang.reflect.Method method, Object[] args) {
         if ("checkPermission".equals(method.getName()) && args != null && args.length == 3
                 && args[1] instanceof Integer && args[2] instanceof Integer) {
-            return checkProcessPermission((String) args[0], (Integer) args[1], (Integer) args[2]);
+            return trace("am.checkPermission", (String) args[0], (Integer) args[2],
+                    checkProcessPermission((String) args[0], (Integer) args[1], (Integer) args[2]));
         }
         if ("checkUidPermission".equals(method.getName()) && args != null && args.length == 2)
-            return checkProcessPermission((String) args[0], -1, (Integer) args[1]);
+            return trace("am.checkUidPermission", (String) args[0], (Integer) args[1],
+                    checkProcessPermission((String) args[0], -1, (Integer) args[1]));
+        // Android 15's Context.checkPermission asks this one. Unhandled, it fell to the stub's int default, 0:
+        // granted, for every permission and uid. Kept until one rule replaces all three answers (see rule).
+        if ("checkPermissionForDevice".equals(method.getName()) && args != null && args.length == 4
+                && args[2] instanceof Integer) {
+            return trace("am.checkPermissionForDevice", (String) args[0], (Integer) args[2],
+                    PackageManager.PERMISSION_GRANTED);
+        }
         return null;
+    }
+
+    /**
+     * What one rule would answer, whatever API asked (ADR-0004 decision 1): this process's uid holds what OH
+     * granted the host app; another uid holds what the package Westlake gave that uid requests or defines, as an
+     * installed app holds its manifest's permissions where nothing else is installed; any other uid holds nothing.
+     * Today the activity manager's checkPermission denies every other uid, its checkPermissionForDevice grants
+     * everything, and the package manager answers by the package: trace() logs where they differ from this.
+     */
+    static int rule(String permission, int uid) {
+        if (permission == null) return PackageManager.PERMISSION_DENIED;
+        if (uid == android.os.Process.myUid()) return checkProcessPermission(permission, -1, uid);
+        String remote = RemotePackages.packageForUid(uid);
+        return remote != null && RemotePackages.holdsPermission(remote, permission)
+                ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+    }
+
+    private static final java.util.Set<String> TRACED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // The rule may ask another process about a package, so it never runs on the checking thread.
+    private static final java.util.concurrent.ExecutorService TRACER =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "permission-check-trace");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * Logs a check once per API, permission and uid, with the rule's answer where it differs ("[WL-PERM-CHECK]"),
+     * and returns the answer unchanged. The rule is worked out on its own thread.
+     */
+    static int trace(String api, String permission, int uid, int answer) {
+        if (permission != null && TRACED.add(api + " " + permission + " " + uid)) {
+            TRACER.execute(() -> {
+                int rule;
+                try {
+                    rule = rule(permission, uid);
+                } catch (RuntimeException e) {
+                    rule = answer;
+                }
+                System.err.println("[WL-PERM-CHECK] " + api + " " + permission + " uid " + uid + ": "
+                        + (answer == PackageManager.PERMISSION_GRANTED ? "granted" : "denied")
+                        + (rule == answer ? "" : rule == PackageManager.PERMISSION_GRANTED
+                                ? " (one rule: granted)" : " (one rule: denied)"));
+            });
+        }
+        return answer;
     }
     public static int checkProcessPermission(String permission, int pid, int uid) {
         if (permission == null || uid != android.os.Process.myUid()
@@ -143,10 +198,11 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public int checkUidPermission(int uid, java.lang.String permissionName, int deviceId) throws android.os.RemoteException {
         String remote = RemotePackages.packageForUid(uid);
         if (remote != null) {
-            return RemotePackages.holdsPermission(remote, permissionName)
-                    ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+            return trace("pm.checkUidPermission", permissionName, uid, RemotePackages.holdsPermission(remote, permissionName)
+                    ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED);
         }
-        return deviceId == 0 ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED;
+        return trace("pm.checkUidPermission", permissionName, uid,
+                deviceId == 0 ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED);
     }
 
     @Override
