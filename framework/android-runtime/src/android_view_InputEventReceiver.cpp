@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <mutex>
 #include <new>
 #include <poll.h>
@@ -674,7 +675,13 @@ jlong IER_nativeInit(JNIEnv* env, jclass /*clazz*/,
         jfieldID mPtrField = env->GetFieldID(channelCls, "mPtr", "J");
         if (mPtrField != nullptr) {
             jlong mPtr = env->GetLongField(inputChannel, mPtrField);
-            r->clientFd = oh_input_channel_get_fd(mPtr);
+            // The InputChannel owns its descriptor and closes it when disposed, which
+            // InputEventReceiver.dispose() does right after nativeDispose. The receiver
+            // keeps a duplicate of its own, so each side closes only what it owns: closing
+            // the channel's number here let the channel close it a second time, after
+            // another thread could have been given the same number.
+            int channelFd = oh_input_channel_get_fd(mPtr);
+            r->clientFd = channelFd >= 0 ? ::fcntl(channelFd, F_DUPFD_CLOEXEC, 0) : -1;
         } else {
             if (env->ExceptionCheck()) env->ExceptionClear();
         }
