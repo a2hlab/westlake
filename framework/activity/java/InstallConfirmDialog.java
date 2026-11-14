@@ -48,6 +48,8 @@ public final class InstallConfirmDialog {
     public static final String APK = "apk";
     /** The installer that asked, by package name. */
     public static final String INSTALLER = "installer";
+    /** For an update: the package's update owner, when another installer asks (Android's ownership reminder). */
+    public static final String UPDATE_OWNER = "updateOwner";
 
     private InstallConfirmDialog() {}
 
@@ -125,6 +127,17 @@ public final class InstallConfirmDialog {
             }
             String message = question + (installer != null && !"uninstall".equals(kind)
                     ? "\n\nAsked by " + installer + "." : "");
+            String owner = request.getString(UPDATE_OWNER);
+            if (owner != null) {
+                CharSequence ownerLabel = owner;
+                try {
+                    ownerLabel = pm.getApplicationLabel(pm.getApplicationInfo(owner, 0));
+                } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+                    // the package name, then
+                }
+                message += "\n\nThis app normally gets its updates from " + ownerLabel
+                        + ". If you update it from another source, its future updates may come from any source.";
+            }
             AlertDialog.Builder builder = new AlertDialog.Builder(activity)
                     .setTitle(label)
                     .setMessage(message)

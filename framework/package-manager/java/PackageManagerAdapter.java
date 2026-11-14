@@ -1954,6 +1954,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.lang.String getInstallerPackageName(java.lang.String arg0) throws android.os.RemoteException {
+        // A package an installer published here: what its install record says (ADR-0006 decision 4).
+        if (arg0 != null && InstalledPackages.contains(arg0)) return InstalledPackages.recorded(arg0, "installer");
         if (installedByPlayStore(arg0)) return PLAY_STORE_PACKAGE;
         logStub("getInstallerPackageName", arg0 == null ? "" : arg0);
         return null;
@@ -1968,6 +1970,16 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         // reports what PackageManagerService records for a Play Store install on Android 14 and
         // later: the Play Store initiated and installed it, owns its updates, and the source is a
         // store. Its signing info stays unknown (null), which Android also reports when it has none.
+        // A package an installer published here answers from its install record instead: the installer that
+        // committed the session initiated and installed it, the update owner is the one the commit settled, and the
+        // source is what the installer declared (ADR-0006 decision 4).
+        if (arg0 != null && InstalledPackages.contains(arg0)) {
+            String installer = InstalledPackages.recorded(arg0, "installer");
+            String source = InstalledPackages.recorded(arg0, "packageSource");
+            return new android.content.pm.InstallSourceInfo(installer, null, null, installer,
+                    InstalledPackages.recorded(arg0, InstallerSessions.UPDATE_OWNER),
+                    source != null ? Integer.parseInt(source) : android.content.pm.PackageInstaller.PACKAGE_SOURCE_UNSPECIFIED);
+        }
         if (installedByPlayStore(arg0)) {
             return new android.content.pm.InstallSourceInfo(PLAY_STORE_PACKAGE, null, null, PLAY_STORE_PACKAGE,
                     PLAY_STORE_PACKAGE, android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE);
