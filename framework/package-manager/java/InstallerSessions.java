@@ -137,6 +137,18 @@ public final class InstallerSessions {
             throws IOException {
         Application app = ActivityThread.currentApplication();
         if (app == null) throw new IllegalStateException("no application to stage a session in");
+        // Only a full install of one package is completed here. Anything else is refused when it is asked for, as an
+        // IOException the installer gets from PackageInstaller.createSession, rather than staged and failed at commit.
+        String unsupported = params.mode != PackageInstaller.SessionParams.MODE_FULL_INSTALL
+                ? "mode " + params.mode + " (only full installs: no splits added to an installed package yet)"
+                : params.isMultiPackage ? "multi-package sessions"
+                : params.isStaged ? "staged installs"
+                : params.dataLoaderParams != null ? "incremental or streamed installs" : null;
+        if (unsupported != null) {
+            System.err.println(TAG + "createSession by " + installer + " for " + params.appPackageName + " refused: "
+                    + unsupported + " are not supported");
+            throw new IOException("Westlake does not support " + unsupported + " yet");
+        }
         int id;
         do {
             id = RANDOM.nextInt(Integer.MAX_VALUE - 1) + 1;
@@ -391,6 +403,10 @@ public final class InstallerSessions {
         boolean replacing;
         final List<File> splits = new ArrayList<>();
         final List<String> splitNames = new ArrayList<>();
+        boolean splitRequired;
+        final java.util.Set<String> requiredSplitTypes = new java.util.TreeSet<>();
+        final java.util.Set<String> stagedSplitTypes = new java.util.TreeSet<>();
+        final java.util.Set<String> nativeAbis = new java.util.TreeSet<>();
 
         void fail(int status, String problem) {
             if (this.problem == null) {
@@ -433,6 +449,9 @@ public final class InstallerSessions {
             }
             ApkLite apk = lite.getResult();
             out.summary.append(' ').append(apk.getPackageName()).append(" v").append(apk.getLongVersionCode());
+            if (apk.getRequiredSplitTypes() != null) out.requiredSplitTypes.addAll(apk.getRequiredSplitTypes());
+            if (apk.getSplitTypes() != null) out.stagedSplitTypes.addAll(apk.getSplitTypes());
+            nativeAbis(file, out.nativeAbis);
             if (apk.getSplitName() != null) out.summary.append(" split ").append(apk.getSplitName());
             ParseResult<SigningDetails> signing = ApkSignatureVerifier.verify(
                     ParseTypeImpl.forParsingWithoutPlatformCompat().reset(), file.getPath(),
@@ -468,6 +487,7 @@ public final class InstallerSessions {
                     out.fail(PackageInstaller.STATUS_FAILURE_INVALID, "more than one base APK");
                 }
                 out.base = file;
+                out.splitRequired = apk.isSplitRequired();
             } else {
                 out.splits.add(file);
                 out.splitNames.add(apk.getSplitName());
@@ -476,12 +496,43 @@ public final class InstallerSessions {
         if (out.problem == null && out.base == null) {
             out.fail(PackageInstaller.STATUS_FAILURE_INVALID, "no base APK");
         }
+        out.summary.append("; split types required ").append(out.requiredSplitTypes).append(", present ")
+                .append(out.stagedSplitTypes).append("; native code for ").append(out.nativeAbis);
+        // As PackageInstallerSession.validateApkInstallLocked: a base that requires splits (isSplitRequired, or the
+        // split types it names in requiredSplitTypes) needs them in the session. Luminar's base requires its ABI and
+        // density splits; without the ABI split it has no native code at all.
+        if (out.problem == null && out.splitRequired
+                && (out.splits.isEmpty() || !out.stagedSplitTypes.containsAll(out.requiredSplitTypes))) {
+            out.fail(PackageInstaller.STATUS_FAILURE_INCOMPATIBLE, "INSTALL_FAILED_MISSING_SPLIT: " + out.packageName
+                    + " requires split types " + out.requiredSplitTypes + "; the session has " + out.stagedSplitTypes);
+        }
+        // As NativeLibraryHelper.findSupportedAbi: native code only for ABIs this device does not run cannot load.
+        java.util.List<String> supported = java.util.Arrays.asList(android.os.Build.SUPPORTED_ABIS);
+        if (out.problem == null && !out.nativeAbis.isEmpty() && java.util.Collections.disjoint(out.nativeAbis, supported)) {
+            out.fail(PackageInstaller.STATUS_FAILURE_INCOMPATIBLE, "INSTALL_FAILED_NO_MATCHING_ABIS: native code for "
+                    + out.nativeAbis + " only; this device runs " + supported);
+        }
         if (out.problem == null && session.params.appPackageName != null
                 && !session.params.appPackageName.equals(out.packageName)) {
             out.fail(PackageInstaller.STATUS_FAILURE_INVALID, "the session is for " + session.params.appPackageName
                     + ", not " + out.packageName);
         }
         return out;
+    }
+
+    /** The ABIs an APK has native libraries for: its lib/<abi>/<name>.so entries, as NativeLibraryHelper reads them. */
+    private static void nativeAbis(File apk, java.util.Set<String> abis) {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(apk)) {
+            java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement().getName();
+                if (!name.startsWith("lib/") || !name.endsWith(".so")) continue;
+                int slash = name.indexOf('/', 4);
+                if (slash > 4 && name.indexOf('/', slash + 1) < 0) abis.add(name.substring(4, slash));
+            }
+        } catch (IOException e) {
+            // parseApkLite read it: an archive this cannot open has failed verification already
+        }
     }
 
     /** Packages Westlake pins at the versions its framework runs (ADR-0006 decision 6). */
