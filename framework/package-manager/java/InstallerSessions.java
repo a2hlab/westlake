@@ -117,6 +117,14 @@ public final class InstallerSessions {
                 return null;
             case "updateSessionAppIcon":
                 return null;
+            case "uninstall": {
+                // uninstall(VersionedPackage, String callerPackageName, int flags, IntentSender statusReceiver, int userId)
+                android.content.pm.VersionedPackage target = (android.content.pm.VersionedPackage) args[0];
+                IntentSender receiver = (IntentSender) args[3];
+                uninstall(target.getPackageName(), target.getLongVersionCode(), (String) args[1],
+                        (code, message) -> sendUninstall(receiver, target.getPackageName(), code, message));
+                return null;
+            }
             default:
                 return UNANSWERED;
         }
@@ -367,9 +375,19 @@ public final class InstallerSessions {
                 System.err.println(TAG + "session " + session.id + " committed with a write still open");
             }
         }
+        // As on Android, commit returns at once and the outcome comes on statusReceiver: it may wait for the user.
+        new Thread(() -> finishCommit(session, statusReceiver, forTransferred), "wl-install-" + session.id).start();
+    }
+
+    private static void finishCommit(Session session, IntentSender statusReceiver, boolean forTransferred) {
         Verified verified = verify(session);
         System.err.println(TAG + "session " + session.id + " commit (transferred=" + forTransferred + "): "
                 + verified.summary);
+        if (verified.problem == null) confirm(session, verified);
+        if (verified.problem == null && !SESSIONS.containsKey(session.id)) {
+            System.err.println(TAG + "session " + session.id + " was abandoned while the user was asked");
+            return;
+        }
         if (verified.problem == null) publish(session, verified);
         session.finished = true;
         boolean installed = verified.problem == null;
@@ -404,6 +422,7 @@ public final class InstallerSessions {
         final List<File> splits = new ArrayList<>();
         final List<String> splitNames = new ArrayList<>();
         boolean splitRequired;
+        int targetSdk;
         final java.util.Set<String> requiredSplitTypes = new java.util.TreeSet<>();
         final java.util.Set<String> stagedSplitTypes = new java.util.TreeSet<>();
         final java.util.Set<String> nativeAbis = new java.util.TreeSet<>();
@@ -488,6 +507,7 @@ public final class InstallerSessions {
                 }
                 out.base = file;
                 out.splitRequired = apk.isSplitRequired();
+                out.targetSdk = apk.getTargetSdkVersion();
             } else {
                 out.splits.add(file);
                 out.splitNames.add(apk.getSplitName());
@@ -532,6 +552,157 @@ public final class InstallerSessions {
             }
         } catch (IOException e) {
             // parseApkLite read it: an archive this cannot open has failed verification already
+        }
+    }
+
+    /** How long an install or uninstall waits for the user's answer before it is aborted. */
+    private static final long CONFIRM_MINUTES = 10;
+    /** PackageInstallerSession's SILENT_INSTALL_ALLOWED: enabled since Android 13 (TIRAMISU) targets. */
+    private static final int SILENT_UPDATE_MIN_TARGET_SDK = 33;
+    /** SilentUpdatePolicy's throttle: one silent update of a package by the same installer per 30 seconds. */
+    private static final long SILENT_UPDATE_THROTTLE_MS = 30_000;
+    private static final Map<String, Long> SILENT_UPDATES = new ConcurrentHashMap<>();
+
+    /**
+     * Why the user must confirm this install, or null when the installer may install without asking: as
+     * PackageInstallerSession.computeUserActionRequirement decides for an installer that holds neither
+     * INSTALL_PACKAGES nor INSTALL_PACKAGE_UPDATES. No Westlake app holds them: both are platform signature
+     * permissions, and no Westlake app is platform-signed. The Play Store requests both and is an ordinary app here,
+     * as on GrapheneOS. What remains is the unattended update: an update by the installer of record that asks for no
+     * user action (SessionParams.setRequireUserAction), from an installer requesting
+     * UPDATE_PACKAGES_WITHOUT_USER_ACTION, of an app targeting Android 13 or later, once per package in 30 seconds.
+     */
+    private static String userActionReason(Session session, Verified verified) {
+        if (!verified.replacing) return "a new install";
+        if (session.params.requireUserAction != PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED) {
+            return "an update the installer did not ask to make without the user";
+        }
+        if (!java.util.Objects.equals(InstalledPackages.recorded(verified.packageName, "installer"), session.installer)) {
+            return "an update by an installer other than the one that installed it";
+        }
+        if (!requests(session.installer, android.Manifest.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION)) {
+            return "an update by an installer without UPDATE_PACKAGES_WITHOUT_USER_ACTION";
+        }
+        if (verified.targetSdk < SILENT_UPDATE_MIN_TARGET_SDK) return "an update of an app targeting API " + verified.targetSdk;
+        String key = session.installer + " " + verified.packageName;
+        Long last = SILENT_UPDATES.get(key);
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (last != null && now - last < SILENT_UPDATE_THROTTLE_MS) return "a repeated update within 30 seconds";
+        SILENT_UPDATES.put(key, now);
+        return null;
+    }
+
+    private static boolean requests(String packageName, String permission) {
+        Application app = ActivityThread.currentApplication();
+        try {
+            android.content.pm.PackageInfo info = app == null ? null
+                    : app.getPackageManager().getPackageInfo(packageName, android.content.pm.PackageManager.GET_PERMISSIONS);
+            return info != null && info.requestedPermissions != null
+                    && java.util.Arrays.asList(info.requestedPermissions).contains(permission);
+        } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** Asks the user when the install needs it (userActionReason); a refusal or no answer fails the install. */
+    private static void confirm(Session session, Verified verified) {
+        String reason = userActionReason(session, verified);
+        if (reason == null) {
+            System.err.println(TAG + "session " + session.id + " updates " + verified.packageName
+                    + " without the user, as its installer of record asked");
+            return;
+        }
+        System.err.println(TAG + "session " + session.id + " asks the user: " + reason);
+        Boolean accepted = askUser(session.id, verified.packageName, verified.replacing ? "update" : "install",
+                verified.base.getPath(), session.installer);
+        if (accepted == null) {
+            verified.fail(PackageInstaller.STATUS_FAILURE_BLOCKED, "the user could not be asked or did not answer");
+        } else if (!accepted) {
+            // PackageInstallerSession.setPermissionsResult(false): INSTALL_FAILED_ABORTED.
+            verified.fail(PackageInstaller.STATUS_FAILURE_ABORTED, "User rejected permissions");
+        }
+    }
+
+    /** The user's answer (InstallConfirmDialog), or null when nobody could be asked or nobody answered in time. */
+    private static Boolean askUser(int session, String packageName, String kind, String apk, String installer) {
+        android.os.Bundle request = new android.os.Bundle();
+        request.putInt(adapter.activity.InstallConfirmDialog.SESSION, session);
+        request.putString(adapter.activity.InstallConfirmDialog.PACKAGE, packageName);
+        request.putString(adapter.activity.InstallConfirmDialog.KIND, kind);
+        request.putString(adapter.activity.InstallConfirmDialog.APK, apk);
+        request.putString(adapter.activity.InstallConfirmDialog.INSTALLER, installer);
+        adapter.activity.InstallConfirmDialog.Answer answer = new adapter.activity.InstallConfirmDialog.Answer();
+        if (!adapter.activity.InstallConfirmDialog.ask(request, answer)) {
+            System.err.println(TAG + kind + " of " + packageName + ": the user could not be asked");
+            return null;
+        }
+        Boolean accepted = answer.await(CONFIRM_MINUTES);
+        if (accepted == null) System.err.println(TAG + kind + " of " + packageName + ": no answer in " + CONFIRM_MINUTES + " minutes");
+        return accepted;
+    }
+
+    /**
+     * IPackageInstaller.uninstall, and the package manager's deletePackage: removes a package an installer published
+     * here, after the user confirms, as Android asks the user for any caller without DELETE_PACKAGES (no Westlake app
+     * holds it: a platform signature permission). The Play packages Westlake pins cannot go. The outcome comes as
+     * PackageManager's DELETE_ codes, to result. The package's data stays where its launches keep it.
+     */
+    public static void uninstall(final String packageName, final long versionCode, final String caller,
+            final java.util.function.BiConsumer<Integer, String> result) {
+        new Thread(() -> {
+            int code;
+            String message;
+            String installed = InstalledPackages.recorded(packageName, "versionCode");
+            if (PINNED.contains(packageName)) {
+                code = android.content.pm.PackageManager.DELETE_FAILED_APP_PINNED;
+                message = packageName + " is pinned at the version Westlake runs";
+            } else if (installed == null) {
+                code = android.content.pm.PackageManager.DELETE_FAILED_INTERNAL_ERROR;
+                message = packageName + " is not installed";
+            } else if (versionCode != android.content.pm.PackageManager.VERSION_CODE_HIGHEST
+                    && versionCode != Long.parseLong(installed)) {
+                code = android.content.pm.PackageManager.DELETE_FAILED_INTERNAL_ERROR;
+                message = packageName + " is installed at version " + installed + ", not " + versionCode;
+            } else {
+                System.err.println(TAG + caller + " asks to uninstall " + packageName + " v" + installed);
+                File dir = new File(InstalledPackages.DIR, packageName);
+                Boolean accepted = askUser(0, packageName, "uninstall", new File(dir, "base.apk").getPath(), caller);
+                if (accepted == null || !accepted) {
+                    code = android.content.pm.PackageManager.DELETE_FAILED_ABORTED;
+                    message = accepted == null ? "the user could not be asked or did not answer" : "the user declined";
+                } else {
+                    File gone = new File(InstalledPackages.DIR, ".removed-" + RANDOM.nextInt(Integer.MAX_VALUE));
+                    if (dir.renameTo(gone)) {
+                        deleteTree(gone);
+                        code = android.content.pm.PackageManager.DELETE_SUCCEEDED;
+                        message = "DELETE_SUCCEEDED";
+                        packageRemoved(packageName);
+                    } else {
+                        code = android.content.pm.PackageManager.DELETE_FAILED_INTERNAL_ERROR;
+                        message = "cannot remove " + dir;
+                    }
+                }
+            }
+            System.err.println(TAG + "uninstall " + packageName + ": " + message + " (" + code + ")");
+            result.accept(code, message);
+        }, "wl-uninstall-" + packageName).start();
+    }
+
+    /** ACTION_PACKAGE_REMOVED and ACTION_PACKAGE_FULLY_REMOVED, as the package manager sends them for an uninstall. */
+    private static void packageRemoved(String packageName) {
+        Application app = ActivityThread.currentApplication();
+        if (app == null) return;
+        try {
+            int uid = RemotePackages.installedUid(packageName);
+            android.net.Uri data = android.net.Uri.fromParts("package", packageName, null);
+            for (String action : new String[] {Intent.ACTION_PACKAGE_REMOVED, Intent.ACTION_PACKAGE_FULLY_REMOVED}) {
+                Intent removed = new Intent(action, data);
+                removed.putExtra(Intent.EXTRA_UID, uid);
+                removed.putExtra(Intent.EXTRA_DATA_REMOVED, true);
+                app.sendBroadcast(removed);
+            }
+        } catch (RuntimeException e) {
+            System.err.println(TAG + "package-removed broadcast for " + packageName + " not sent: " + e);
         }
     }
 
@@ -672,6 +843,22 @@ public final class InstallerSessions {
                 callback.onSessionFinished(session.id, false);
             } catch (RemoteException ignored) {
             }
+        }
+    }
+
+    /** An uninstall's outcome to its IntentSender, as PackageInstallerService's PackageDeleteObserverAdapter sends it. */
+    private static void sendUninstall(IntentSender receiver, String packageName, int code, String message) {
+        if (receiver == null) return;
+        Intent fillIn = new Intent();
+        fillIn.putExtra(PackageInstaller.EXTRA_PACKAGE_NAME, packageName);
+        fillIn.putExtra(PackageInstaller.EXTRA_STATUS, android.content.pm.PackageManager.deleteStatusToPublicStatus(code));
+        fillIn.putExtra(PackageInstaller.EXTRA_STATUS_MESSAGE,
+                android.content.pm.PackageManager.deleteStatusToString(code, message));
+        fillIn.putExtra(PackageInstaller.EXTRA_LEGACY_STATUS, code);
+        try {
+            receiver.sendIntent(ActivityThread.currentApplication(), 0, fillIn, null, null);
+        } catch (IntentSender.SendIntentException | RuntimeException e) {
+            System.err.println(TAG + "uninstall result for " + packageName + " not delivered: " + e);
         }
     }
 
