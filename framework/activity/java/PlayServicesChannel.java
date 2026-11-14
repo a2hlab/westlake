@@ -871,7 +871,17 @@ public final class PlayServicesChannel {
         if (!isClient() || authority == null) return null;
         ProviderInfo info = RemotePackages.resolveProvider(authority, PackageManager.GET_META_DATA);
         if (info == null) return null;
-        IBinder root = root(channelFor(info.packageName));
+        // A provider the host declares for another of its processes runs there (ADR-0002), and this app asks that
+        // process for it with its own identity, as Android hands a client the provider of the provider's own
+        // process. Asked through the host's launched process, the call reached the provider as that process,
+        // whose uid is not the one in the AttributionSource this app sends: Play services' GmsModuleProvider
+        // (:persistent) refused every client ("Calling uid: <Play services> doesn't match source uid: <app>"),
+        // so no client found a Dynamite module and the apps that wait for one stopped.
+        Channel channel = channelFor(info.packageName);
+        String process = AppProcesses.processOf(info);
+        Channel own = remoteProcess(channel, info.packageName, process);
+        if (own != null) channel = own;
+        IBinder root = root(channel);
         if (root == null) return null;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -882,9 +892,10 @@ public final class PlayServicesChannel {
             IBinder binder = reply.readStrongBinder();
             if (binder == null) return null;
             ContentProviderHolder holder = new ContentProviderHolder(info);
-            holder.provider = attributed(channelFor(info.packageName), ContentProviderNative.asInterface(binder));
+            holder.provider = attributed(channel, ContentProviderNative.asInterface(binder));
             holder.noReleaseNeeded = true;
-            System.err.println(TAG + "provider " + authority + " -> " + info.packageName + "/" + info.name);
+            System.err.println(TAG + "provider " + authority + " -> " + info.packageName + "/" + info.name
+                    + (own != null ? " in " + process : ""));
             return holder;
         } catch (RemoteException | RuntimeException e) {
             System.err.println(TAG + "provider " + authority + " failed: " + e);
