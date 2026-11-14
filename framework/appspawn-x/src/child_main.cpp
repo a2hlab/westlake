@@ -228,8 +228,24 @@ static bool wl_join_process_cgroup(const char* path) {
 // app UID and SELinux domain are installed, a normal app must not need write
 // access to the system-owned cgroup controls.  That access can disappear on
 // reboot even when a previous development session happened to allow it.
+// Development bypasses for dev-board bring-up (WL_NO_DROP_UID keeps the spawner's root uid;
+// WESTLAKE_SPAWN_ALLOW_INHERITED_TOKEN=1 lets a child without a token keep the spawner's). Only the
+// launcher can set them, through the spawner's environment, and a production launch must not have
+// them (ADR-0003 decision 6): a build without WESTLAKE_DEV_BYPASSES ignores them and says so.
+static bool devBypass(const char* name, const char* required = nullptr) {
+    const char* value = getenv(name);
+    if (value == nullptr || (required != nullptr && strcmp(value, required) != 0)) return false;
+#ifdef WESTLAKE_DEV_BYPASSES
+    return true;
+#else
+    fprintf(stderr, "[WESTLAKE-SPAWN] %s ignored: this build has no development bypasses\n", name);
+    fflush(stderr);
+    return false;
+#endif
+}
+
 static int wl_prepare_app_cpu_profile() {
-    if (getenv("WL_NO_DROP_UID") != nullptr) return 0;
+    if (devBypass("WL_NO_DROP_UID")) return 0;
     if (!wl_join_process_cgroup("/dev/cpuset/top-app/cgroup.procs") ||
         !wl_join_process_cgroup("/dev/cpuctl/top-app/cgroup.procs")) {
         fflush(stderr);
@@ -269,7 +285,7 @@ static int wl_drop_capability_bounding_set() {
 }
 
 static int wl_finalize_app_privileges() {
-    if (getenv("WL_NO_DROP_UID") != nullptr) {
+    if (devBypass("WL_NO_DROP_UID")) {
         fprintf(stderr,
                 "[WESTLAKE-APP-PRIV] skipped because WL_NO_DROP_UID is set\n");
         fflush(stderr);
@@ -1576,6 +1592,13 @@ int ChildMain::applyDac(const SpawnMsg& msg) {
     LOGI("Applying DAC: uid=%d gid=%d gids_count=%zu",
          msg.uid, msg.gid, msg.gids.size());
 
+    // A child given no uid, or uid 0, would keep root. The spawn server refuses such requests;
+    // this is the last check before application code runs (ADR-0003: fail closed).
+    if (msg.uid <= 0) {
+        LOGE("Refusing to start a child with uid %d", msg.uid);
+        return -1;
+    }
+
     // [NET-FIX 2026-07-04] Grant internet at the spawn boundary, the OHOS-native
     // way. Adapter (Android) apps never enter OHOS's permission system — they
     // install from an APK with no OHOS bundle config, so their access-token holds
@@ -1639,7 +1662,7 @@ int ChildMain::applyDac(const SpawnMsg& msg) {
     // RS's CheckCreateNodeAndSurface both branch on IsSystemCalling()/isNonSystemAppCalling, so with
     // a native token we can ask for an APP_MAIN_WINDOW that owns its own WindowScene.
     // Dev-board bring-up aid, opt-in only.
-    if (getenv("WL_NO_DROP_UID") != nullptr) {
+    if (devBypass("WL_NO_DROP_UID")) {
         LOGI("[WESTLAKE-§364] WL_NO_DROP_UID set - keeping privileged uid/gid (uid=%d)", getuid());
         fprintf(stderr, "[WESTLAKE-KEEPUID] staying uid=%d gid=%d\n", getuid(), getgid());
         fflush(stderr);
@@ -1674,12 +1697,10 @@ int ChildMain::applyDac(const SpawnMsg& msg) {
         return -1;
     }
 
-    // Disable ability to regain root via setuid binaries
-    if (msg.uid > 0) {
-        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) {
-            LOGW("prctl(PR_SET_NO_NEW_PRIVS) failed: %s", strerror(errno));
-            // Non-fatal
-        }
+    // Disable ability to regain root via setuid binaries. Required, like the uid change.
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) {
+        LOGE("prctl(PR_SET_NO_NEW_PRIVS) failed: %s", strerror(errno));
+        return -1;
     }
 
     LOGI("DAC applied: running as uid=%d gid=%d", getuid(), getgid());
@@ -1824,10 +1845,17 @@ int ChildMain::applyAccessToken(const SpawnMsg& msg) {
     // For HelloWorld baseline, "both 0" is acceptable — JudgeSelfCalled
     // passes; OH services that gate by specific permissions still deny but
     // the lifecycle path is unblocked.
+    // Without a token the child would keep the spawner's own, which is not an application's
+    // (ADR-0003: fail closed). Only the launcher, through the spawner's environment, can allow
+    // that, for a bring-up launch; nothing an application sends can.
     if (msg.accessTokenIdEx == 0) {
-        LOGW("applyAccessToken: accessTokenIdEx==0 in TLV — kernel will reject SetSelfTokenID; skipping "
-             "(child keeps parent's inherited token; libbms v3 + AppMS bundleInfo override patch should fix)");
-        return 0;
+        if (devBypass("WESTLAKE_SPAWN_ALLOW_INHERITED_TOKEN", "1")) {
+            LOGW("applyAccessToken: accessTokenIdEx==0 in TLV — kernel will reject SetSelfTokenID; skipping "
+                 "(child keeps parent's inherited token; WESTLAKE_SPAWN_ALLOW_INHERITED_TOKEN=1)");
+            return 0;
+        }
+        LOGE("applyAccessToken: the request carries no access token; refusing to keep the spawner's");
+        return -1;
     }
 
     LOGI("applyAccessToken: id=0x%llx apl=%s",
@@ -1838,7 +1866,7 @@ int ChildMain::applyAccessToken(const SpawnMsg& msg) {
     if (rc != 0) {
         LOGE("SetSelfTokenID(0x%llx) failed rc=%d",
              static_cast<unsigned long long>(msg.accessTokenIdEx), rc);
-        return 0;
+        return -1;
     }
     LOGI("applyAccessToken: SetSelfTokenID(0x%llx) OK",
          static_cast<unsigned long long>(msg.accessTokenIdEx));

@@ -9,14 +9,22 @@
 
 #include "spawn_server.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
+#include <map>
 #include <poll.h>
 #include <signal.h>
+#include <string>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -354,6 +362,348 @@ static void sendOhBinaryResponse(int clientFd, uint32_t reqMsgId,
     }
 }
 
+// The parent of a process, from /proc/<pid>/stat; -1 when it cannot be read.
+static pid_t parentOf(pid_t pid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/stat", static_cast<int>(pid));
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    char line[512];
+    ssize_t n = read(fd, line, sizeof(line) - 1);
+    close(fd);
+    if (n <= 0) return -1;
+    line[n] = '\0';
+    // Field 2, the command name, is in parentheses and may itself hold spaces or ')': the
+    // fields after it start after the last ')'.
+    const char* end = strrchr(line, ')');
+    char state = 0;
+    int parent = -1;
+    if (end == nullptr || sscanf(end + 1, " %c %d", &state, &parent) != 2) return -1;
+    return parent;
+}
+
+// A process name an application may ask for: the characters of a package or android:process
+// name, and nothing that could read as a path or another log line.
+static bool validProcessName(const char* name, size_t length) {
+    if (length == 0 || length >= OH_APP_LEN_PROC_NAME) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = static_cast<unsigned char>(name[i]);
+        if (!isalnum(c) && c != '.' && c != '_' && c != ':' && c != '-') return false;
+    }
+    return true;
+}
+
+// Who may ask for a process (ADR-0003 decision 2). The socket is reachable by every
+// application process, because a launched application asks here for its other processes
+// (ADR-0002), and before this every request chose its own uid, groups, APL and access token.
+// Now only the launcher, which runs as root, chooses credentials. Any other peer must be a
+// process this spawner started, running as the launched uid; it names a process, and the
+// request is rebuilt from the launch request around that name, as AppProcesses builds it.
+bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher) {
+    fromLauncher = false;
+    struct ucred peer{};
+    socklen_t length = sizeof(peer);
+    if (getsockopt(clientFd, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 || length != sizeof(peer)) {
+        LOGE("[WESTLAKE-SPAWN] refused a request without peer credentials: %s", strerror(errno));
+        return false;
+    }
+    if (peer.uid == 0) {
+        fromLauncher = true;
+        return true;
+    }
+    const char* why = nullptr;
+    const OhAppSpawnMsgHeader* header = nullptr;
+    size_t nameLength = 0;
+    if (!isBinary || buffer.size() < sizeof(OhAppSpawnMsgHeader)) {
+        why = "not an OH binary request";
+    } else if (launchRequest_.empty()) {
+        why = "nothing was launched here";
+    } else if (static_cast<int32_t>(peer.uid) != launchUid_) {
+        why = "not the launched application's uid";
+    } else if (parentOf(peer.pid) != getpid()) {
+        why = "not a process this spawner started";
+    } else {
+        header = reinterpret_cast<const OhAppSpawnMsgHeader*>(buffer.data());
+        nameLength = strnlen(header->processName, OH_APP_LEN_PROC_NAME);
+        if (!validProcessName(header->processName, nameLength)) {
+            why = "not a valid process name";
+        }
+    }
+    if (why != nullptr) {
+        LOGE("[WESTLAKE-SPAWN] refused a request from pid %d uid %u: %s",
+             static_cast<int>(peer.pid), static_cast<unsigned>(peer.uid), why);
+        return false;
+    }
+    std::string name(header->processName, nameLength);
+    uint32_t msgId = header->msgId;
+    std::vector<uint8_t> request = launchRequest_;
+    auto* rebuilt = reinterpret_cast<OhAppSpawnMsgHeader*>(request.data());
+    memset(rebuilt->processName, 0, OH_APP_LEN_PROC_NAME);
+    memcpy(rebuilt->processName, name.data(), name.size());
+    rebuilt->msgId = msgId;
+    buffer.swap(request);
+    LOGI("[WESTLAKE-SPAWN] pid %d asks for process %s; credentials from the launch request",
+         static_cast<int>(peer.pid), name.c_str());
+    return true;
+}
+
+// At most this many APK files go with a WHOIS answer: a base APK and its splits. 64, as many as a
+// client's introduction carries (PlayServicesChannel MAX_HELLO_APKS) and the socket binder sends with
+// one message; with 32, a game with 48 asset-pack splits had its last 17 files reported as not launched.
+constexpr size_t kMaxWhoisApks = 64;
+
+// The APK files of this launch, opened read-only: the base APK (ASX_APK_PATH) first, then its
+// splits (ASX_SPLIT_APK_PATHS, separated by ':') in the order the launcher staged them. Only
+// regular files; none at all without a base APK. The launcher sets both, as root.
+static std::vector<int> openLaunchApks() {
+    std::vector<int> fds;
+    auto add = [&fds](const std::string& path) {
+        if (path.empty() || fds.size() >= kMaxWhoisApks) return;
+        // The app owns its install directory: never block on a FIFO it might have put in an APK's place.
+        int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+        if (fd < 0) return;
+        struct stat st {};
+        if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+            close(fd);
+            return;
+        }
+        int flags = fcntl(fd, F_GETFL);
+        if (flags >= 0) fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);   // the host gets an ordinary file
+        fds.push_back(fd);
+    };
+    const char* base = getenv("ASX_APK_PATH");
+    if (base == nullptr || *base == '\0') return fds;
+    add(base);
+    const char* splits = getenv("ASX_SPLIT_APK_PATHS");
+    if (fds.empty() || splits == nullptr) return fds;
+    std::string all(splits);
+    for (size_t start = 0; start <= all.size();) {
+        size_t end = all.find(':', start);
+        if (end == std::string::npos) end = all.size();
+        add(all.substr(start, end - start));
+        start = end + 1;
+    }
+    return fds;
+}
+
+// Sends one message with descriptors attached (SCM_RIGHTS); true when all of it went.
+static bool sendWithFds(int socketFd, const void* data, size_t length, const std::vector<int>& fds) {
+    struct iovec iov {const_cast<void*>(data), length};
+    struct msghdr message {};
+    message.msg_iov = &iov;
+    message.msg_iovlen = 1;
+    alignas(struct cmsghdr) char control[CMSG_SPACE(sizeof(int) * kMaxWhoisApks)];
+    if (!fds.empty()) {
+        size_t bytes = sizeof(int) * fds.size();
+        memset(control, 0, sizeof(control));
+        message.msg_control = control;
+        message.msg_controllen = CMSG_SPACE(bytes);
+        struct cmsghdr* header = CMSG_FIRSTHDR(&message);
+        header->cmsg_level = SOL_SOCKET;
+        header->cmsg_type = SCM_RIGHTS;
+        header->cmsg_len = CMSG_LEN(bytes);
+        memcpy(CMSG_DATA(header), fds.data(), bytes);
+    }
+    ssize_t sent;
+    do {
+        sent = sendmsg(socketFd, &message, MSG_NOSIGNAL);
+    } while (sent < 0 && errno == EINTR);
+    return sent == static_cast<ssize_t>(length);
+}
+
+// Answers WL_MSG_WHOIS: whether pid is a process this spawner started, and the package this
+// spawner launches. A Play services or Play Store host asks it for each client that introduces
+// itself (ADR-0003 decision 3): the kernel says which spawner is the client's parent, only root
+// can create a socket in /dev/unix/socket, and a spawner vouches only for its own children.
+// With a positive answer go the launch's APK files, read-only, so that the host reads the
+// package's certificates from what was launched rather than from what the client says.
+static void answerWhois(int clientFd, const OhAppSpawnMsgHeader& request) {
+    char digits[16] = {};
+    memcpy(digits, request.processName, sizeof(digits) - 1);
+    char* end = nullptr;
+    long pid = strtol(digits, &end, 10);
+    const char* package = getenv("ASX_LAUNCH_PKG");
+    bool ours = end != digits && *end == '\0' && pid > 0 && pid < INT32_MAX
+            && parentOf(static_cast<pid_t>(pid)) == getpid() && package != nullptr && *package != '\0';
+    OhAppSpawnResponseMsg resp{};
+    resp.msgHdr.magic = OH_SPAWN_MSG_MAGIC;
+    resp.msgHdr.msgType = WL_MSG_WHOIS;
+    resp.msgHdr.msgLen = static_cast<uint32_t>(sizeof(resp));
+    resp.msgHdr.msgId = request.msgId;
+    if (ours) {
+        strncpy(resp.msgHdr.processName, package, OH_APP_LEN_PROC_NAME - 1);
+    }
+    resp.result.result = ours ? 0 : -1;
+    resp.result.pid = static_cast<int32_t>(pid > 0 && pid < INT32_MAX ? pid : -1);
+    std::vector<int> apks = ours ? openLaunchApks() : std::vector<int>();
+    if (!sendWithFds(clientFd, &resp, sizeof(resp), apks)) {
+        LOGE("[WESTLAKE-SPAWN] whois answer not sent: %s", strerror(errno));
+    }
+    for (int fd : apks) close(fd);
+}
+
+// ---------------------------------------------------------------------------
+// The app-id registry (ADR-0003 decision 1)
+// ---------------------------------------------------------------------------
+// Every Westlake process gives a package the same app id (RemotePackages). The ids were kept in a
+// table in the host app's files, which every Westlake app can write: an app could have given itself
+// Play services' id, and Play services would then have taken the app's calls for its own. The table
+// now lives in a directory only root can enter, spawners alone write it, and every process asks its
+// own spawner (WL_MSG_APPID). The first time, it starts from the old table, so that no id changes.
+static const char kRegistryDir[] = "/data/service/el1/public/westlake-registry";
+static const char kRegistryTable[] = "/data/service/el1/public/westlake-registry/package-uids";
+constexpr int kFirstAppId = 10200;                 // RemotePackages.FIRST_APP_ID
+constexpr size_t kMaxRegistryBytes = 4u << 20;
+
+// A package name as a registry line holds it: letters, digits, '.' and '_'.
+static bool validPackageName(const char* name, size_t length) {
+    if (length == 0 || length >= OH_APP_LEN_PROC_NAME) return false;
+    for (size_t i = 0; i < length; ++i) {
+        unsigned char c = static_cast<unsigned char>(name[i]);
+        if (!isalnum(c) && c != '.' && c != '_') return false;
+    }
+    return true;
+}
+
+// The whole of a small file; false on an error or past kMaxRegistryBytes.
+static bool readSmallFile(int fd, std::string& text) {
+    text.clear();
+    if (lseek(fd, 0, SEEK_SET) < 0) return false;
+    char chunk[4096];
+    for (;;) {
+        ssize_t n = read(fd, chunk, sizeof(chunk));
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) return false;
+        if (n == 0) return true;
+        text.append(chunk, static_cast<size_t>(n));
+        if (text.size() > kMaxRegistryBytes) return false;
+    }
+}
+
+static bool writeAllTo(int fd, const std::string& text) {
+    size_t done = 0;
+    while (done < text.size()) {
+        ssize_t n = write(fd, text.data() + done, text.size() - done);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return false;
+        done += static_cast<size_t>(n);
+    }
+    return true;
+}
+
+// The "<package> <app id>" lines of text, as PackageUidTable reads them: the first id a package got,
+// from kFirstAppId on. A line a killed writer cut short is passed over.
+static void parseRegistry(const std::string& text, std::map<std::string, int>& ids) {
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        std::string line = text.substr(start, end - start);
+        start = end + 1;
+        size_t space = line.find(' ');
+        if (space == std::string::npos || space == 0 || space + 1 >= line.size()) continue;
+        std::string name = line.substr(0, space);
+        std::string number = line.substr(space + 1);
+        if (!validPackageName(name.c_str(), name.size()) || number.size() > 9) continue;
+        bool digits = true;
+        for (char c : number) digits = digits && isdigit(static_cast<unsigned char>(c)) != 0;
+        if (!digits) continue;
+        int id = atoi(number.c_str());
+        if (id >= kFirstAppId) ids.emplace(name, id);
+    }
+}
+
+// The old table: PackageUidTable's file beside every launch's runtime, <runtime>/../westlake-system.
+static std::string oldTableText() {
+    const char* runtime = getenv("WESTLAKE_RUNTIME_REAL_ROOT");
+    if (runtime == nullptr || *runtime == '\0') return "";
+    std::string path(runtime);
+    size_t slash = path.find_last_of('/');
+    if (slash == std::string::npos || slash == 0) return "";
+    path = path.substr(0, slash) + "/westlake-system/package-uids";
+    // Apps can write that directory: never block on what they put there, and read only a regular file.
+    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return "";
+    struct stat st {};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        return "";
+    }
+    std::string text;
+    bool ok = readSmallFile(fd, text);
+    close(fd);
+    return ok ? text : "";
+}
+
+// The package's app id, given now if it has none; -1 when the registry cannot be used.
+static int registryAppId(const std::string& package) {
+    if (mkdir(kRegistryDir, 0700) != 0 && errno != EEXIST) {
+        LOGE("[WESTLAKE-REGISTRY] cannot make %s: %s", kRegistryDir, strerror(errno));
+        return -1;
+    }
+    struct stat dir {};
+    if (lstat(kRegistryDir, &dir) != 0 || !S_ISDIR(dir.st_mode) || dir.st_uid != 0 || (dir.st_mode & 077) != 0) {
+        LOGE("[WESTLAKE-REGISTRY] %s is not a directory only root can enter", kRegistryDir);
+        return -1;
+    }
+    int fd = open(kRegistryTable, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) {
+        LOGE("[WESTLAKE-REGISTRY] cannot open %s: %s", kRegistryTable, strerror(errno));
+        return -1;
+    }
+    int id = -1;
+    std::string text;
+    if (flock(fd, LOCK_EX) == 0 && readSmallFile(fd, text)) {
+        if (text.empty()) {
+            // First use: every id the old table gave stays the package's.
+            std::map<std::string, int> old;
+            parseRegistry(oldTableText(), old);
+            std::string lines;
+            for (const auto& entry : old) lines += entry.first + " " + std::to_string(entry.second) + "\n";
+            if (!lines.empty() && writeAllTo(fd, lines) && fsync(fd) == 0) {
+                text = lines;
+                LOGI("[WESTLAKE-REGISTRY] started from the old table: %zu packages", old.size());
+            }
+        }
+        std::map<std::string, int> ids;
+        parseRegistry(text, ids);
+        auto found = ids.find(package);
+        if (found != ids.end()) {
+            id = found->second;
+        } else {
+            int next = kFirstAppId;
+            for (const auto& entry : ids) next = std::max(next, entry.second + 1);
+            bool ended = text.empty() || text.back() == '\n';
+            std::string line = (ended ? "" : "\n") + package + " " + std::to_string(next) + "\n";
+            if (lseek(fd, 0, SEEK_END) >= 0 && writeAllTo(fd, line) && fsync(fd) == 0) {
+                id = next;
+                LOGI("[WESTLAKE-REGISTRY] %s gets app id %d", package.c_str(), next);
+            }
+        }
+    }
+    close(fd);   // and with it the lock
+    return id;
+}
+
+// Answers WL_MSG_APPID: the app id of the package the header's processName names. Any process that
+// reaches the socket may ask; none can choose an id.
+static void answerAppId(int clientFd, const OhAppSpawnMsgHeader& request) {
+    size_t length = strnlen(request.processName, OH_APP_LEN_PROC_NAME);
+    int id = validPackageName(request.processName, length)
+            ? registryAppId(std::string(request.processName, length)) : -1;
+    OhAppSpawnResponseMsg resp{};
+    resp.msgHdr.magic = OH_SPAWN_MSG_MAGIC;
+    resp.msgHdr.msgType = WL_MSG_APPID;
+    resp.msgHdr.msgLen = static_cast<uint32_t>(sizeof(resp));
+    resp.msgHdr.msgId = request.msgId;
+    memcpy(resp.msgHdr.processName, request.processName, length);
+    resp.result.result = id > 0 ? 0 : -1;
+    resp.result.pid = id;
+    if (send(clientFd, &resp, sizeof(resp), MSG_NOSIGNAL) != static_cast<ssize_t>(sizeof(resp))) {
+        LOGE("[WESTLAKE-REGISTRY] answer not sent: %s", strerror(errno));
+    }
+}
+
 void SpawnServer::handleConnection(int clientFd) {
     // Peek first 4 bytes to detect protocol: OH binary starts with
     // magic 0xEF201234; adapter-legacy starts with a network-order length prefix.
@@ -383,6 +733,14 @@ void SpawnServer::handleConnection(int clientFd) {
         // Keep the header by value: receiving the body may reallocate buffer.
         OhAppSpawnMsgHeader hdr;
         memcpy(&hdr, buffer.data(), sizeof(hdr));
+        if (hdr.msgType == WL_MSG_WHOIS) {
+            answerWhois(clientFd, hdr);   // a question, not a spawn: no body, no fork
+            return;
+        }
+        if (hdr.msgType == WL_MSG_APPID) {
+            answerAppId(clientFd, hdr);   // likewise
+            return;
+        }
         uint32_t msgLen = hdr.msgLen;
         uint32_t msgId = hdr.msgId;
         if (msgLen < sizeof(OhAppSpawnMsgHeader) || msgLen > kMaxMessageSize) {
@@ -420,6 +778,18 @@ void SpawnServer::handleConnection(int clientFd) {
         }
     }
 
+    bool fromLauncher = false;
+    if (!admit(clientFd, buffer, isBinary, fromLauncher)) {
+        if (isBinary) {
+            sendOhBinaryResponse(clientFd, reinterpret_cast<const OhAppSpawnMsgHeader*>(
+                buffer.data())->msgId, "", -1, -1);
+        } else {
+            SpawnResult err = {-1, -1};
+            sendResult(clientFd, err);
+        }
+        return;
+    }
+
     // Parse the message (binary or text — parseMessage dispatches on magic).
     SpawnMsg msg;
     if (!parseMessage(buffer.data(), buffer.size(), msg)) {
@@ -439,12 +809,20 @@ void SpawnServer::handleConnection(int clientFd) {
          msg.code, msg.procName.c_str(), msg.bundleName.c_str(), msg.uid,
          msg.isOhBinary);
 
-    // Dispatch to the spawn handler
+    // Every request forks, and a child given no uid would keep root: refuse it here, whoever
+    // sent it, rather than in the child.
     int pid = -1;
     int rc = -1;
-    if (spawnHandler_) {
+    if (msg.uid <= 0) {
+        LOGE("[WESTLAKE-SPAWN] refused %s: it would run with uid %d",
+             msg.procName.c_str(), msg.uid);
+    } else if (spawnHandler_) {
         pid = spawnHandler_(msg);
         rc = (pid > 0) ? 0 : -1;
+        if (pid > 0 && fromLauncher && isBinary) {
+            launchRequest_ = buffer;
+            launchUid_ = msg.uid;
+        }
     } else {
         LOGE("No spawn handler registered");
     }
