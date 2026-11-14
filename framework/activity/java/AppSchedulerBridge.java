@@ -1004,6 +1004,31 @@ public class AppSchedulerBridge {
      * non-null again, then clear it. The watcher does not fire twice, so nothing re-pins after.
      * Apps with no content providers never reach this hook and keep the previous behaviour.
      */
+    /**
+     * An <activity-alias> names no class: ActivityThread instantiates its targetActivity, as Android does for every
+     * alias. Built from the OH record, the info named the alias as the class, so the Play Store's MainActivityPrivate
+     * (an alias of MainActivity, which its background process asks for with a client's license hand-off) failed with
+     * ClassNotFoundException. Set before the LaunchActivityItem is made: it copies the info.
+     */
+    private static void resolveAlias(android.content.pm.ActivityInfo target) {
+        try {
+            if (target == null || target.packageName == null || target.targetActivity != null
+                    || !adapter.packagemanager.SourcePackageRegistry.contains(target.packageName)) return;
+            android.content.pm.PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
+                    target.packageName, android.content.pm.PackageManager.GET_ACTIVITIES);
+            if (info == null || info.activities == null) return;
+            for (android.content.pm.ActivityInfo declared : info.activities) {
+                if (declared.name.equals(target.name) && declared.targetActivity != null) {
+                    System.err.println("[B47-SLA] " + target.name + " is an alias of " + declared.targetActivity);
+                    target.targetActivity = declared.targetActivity;
+                    return;
+                }
+            }
+        } catch (RuntimeException e) {
+            System.err.println("[B47-SLA] alias lookup failed for " + target.name + ": " + e);
+        }
+    }
+
     /** The theme the APK's manifest gives this activity (or its application), over the ability record's. */
     private static void fillFromManifest(android.content.pm.ActivityInfo target) {
         try {
@@ -1993,6 +2018,7 @@ public class AppSchedulerBridge {
             // §1.2.4.2: build complete ActivityInfo from OH AbilityInfo JSON.
             android.content.pm.ActivityInfo activityInfo =
                     buildActivityInfoFromAbility(packageName, abilityName, appInfo, abilityJson);
+            resolveAlias(activityInfo);
 
             // §1.2.4.1: build Intent from OH Want JSON (component + action + categories
             // + data + type + flags + extras).
