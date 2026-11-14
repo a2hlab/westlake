@@ -1894,6 +1894,22 @@ public class AppSchedulerBridge {
      * ScheduleLaunchAbility, and we must translate it into an Android
      * activity launch.
      */
+    /** A want for the log: its action and its link without the query, but with the app the link names (id=). */
+    private static String describeWant(String wantJson) {
+        try {
+            org.json.JSONObject want = new org.json.JSONObject(wantJson == null ? "{}" : wantJson);
+            String action = want.optString("action", "");
+            String uri = want.optString("uri", "");
+            if (uri.isEmpty()) return action.isEmpty() ? "a want without a link" : action;
+            android.net.Uri link = android.net.Uri.parse(uri);
+            String id = link.isHierarchical() ? link.getQueryParameter("id") : null;
+            return (action.isEmpty() ? "" : action + " ") + link.getScheme() + "://" + link.getAuthority()
+                    + link.getPath() + (id != null ? " id=" + id : "");
+        } catch (org.json.JSONException | RuntimeException e) {
+            return "an unreadable want";
+        }
+    }
+
     /**
      * B.47 (2026-04-30, P2 §1.2 ScheduleLaunchAbility): full adapter from
      * OH AbilityInfo + Want + IRemoteObject token to Android LaunchActivityItem.
@@ -1921,6 +1937,16 @@ public class AppSchedulerBridge {
                 + " ohTokenAddr=0x" + Long.toHexString(ohTokenAddr));
         Log.i(TAG, "nativeOnScheduleLaunchAbility v2: bundle=" + bundleName
                 + ", ability=" + abilityName + ", recordId=" + abilityRecordId);
+
+        // A host started without an activity of its own (WESTLAKE_NO_ACTIVITY=1: the shared Play services and
+        // Play Store processes in a round) shows none later either. A client's license check had the Play Store
+        // open its paywall, and that page stayed above every app launched after it (ADR-0007: a windowless Store
+        // while screenshots are measured). The start is logged instead, with the app the link names.
+        if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))) {
+            System.err.println("[WL-PLAY] windowless host: not showing " + abilityName + " for "
+                    + describeWant(wantJson));
+            return;
+        }
 
         try {
             ActivityThread activityThread = ActivityThread.currentActivityThread();
