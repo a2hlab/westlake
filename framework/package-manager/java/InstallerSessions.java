@@ -555,6 +555,8 @@ public final class InstallerSessions {
         }
     }
 
+    /** The install record's update owner: the installer whose updates need no reminder (Android 14's update ownership). */
+    static final String UPDATE_OWNER = "updateOwner";
     /** How long an install or uninstall waits for the user's answer before it is aborted. */
     private static final long CONFIRM_MINUTES = 10;
     /** PackageInstallerSession's SILENT_INSTALL_ALLOWED: enabled since Android 13 (TIRAMISU) targets. */
@@ -574,10 +576,16 @@ public final class InstallerSessions {
      */
     private static String userActionReason(Session session, Verified verified) {
         if (!verified.replacing) return "a new install";
+        // USER_ACTION_REQUIRED_UPDATE_OWNER_REMINDER: an app whose updates an installer owns is updated by another one.
+        String owner = InstalledPackages.recorded(verified.packageName, UPDATE_OWNER);
+        if (owner != null && !owner.equals(session.installer)) {
+            return "an update by an installer other than its update owner, " + owner;
+        }
         if (session.params.requireUserAction != PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED) {
             return "an update the installer did not ask to make without the user";
         }
-        if (!java.util.Objects.equals(InstalledPackages.recorded(verified.packageName, "installer"), session.installer)) {
+        if (owner == null
+                && !java.util.Objects.equals(InstalledPackages.recorded(verified.packageName, "installer"), session.installer)) {
             return "an update by an installer other than the one that installed it";
         }
         if (!requests(session.installer, android.Manifest.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION)) {
@@ -613,8 +621,9 @@ public final class InstallerSessions {
             return;
         }
         System.err.println(TAG + "session " + session.id + " asks the user: " + reason);
+        String owner = verified.replacing ? InstalledPackages.recorded(verified.packageName, UPDATE_OWNER) : null;
         Boolean accepted = askUser(session.id, verified.packageName, verified.replacing ? "update" : "install",
-                verified.base.getPath(), session.installer);
+                verified.base.getPath(), session.installer, owner != null && !owner.equals(session.installer) ? owner : null);
         if (accepted == null) {
             verified.fail(PackageInstaller.STATUS_FAILURE_BLOCKED, "the user could not be asked or did not answer");
         } else if (!accepted) {
@@ -624,8 +633,10 @@ public final class InstallerSessions {
     }
 
     /** The user's answer (InstallConfirmDialog), or null when nobody could be asked or nobody answered in time. */
-    private static Boolean askUser(int session, String packageName, String kind, String apk, String installer) {
+    private static Boolean askUser(int session, String packageName, String kind, String apk, String installer,
+            String otherOwner) {
         android.os.Bundle request = new android.os.Bundle();
+        if (otherOwner != null) request.putString(adapter.activity.InstallConfirmDialog.UPDATE_OWNER, otherOwner);
         request.putInt(adapter.activity.InstallConfirmDialog.SESSION, session);
         request.putString(adapter.activity.InstallConfirmDialog.PACKAGE, packageName);
         request.putString(adapter.activity.InstallConfirmDialog.KIND, kind);
@@ -666,7 +677,7 @@ public final class InstallerSessions {
             } else {
                 System.err.println(TAG + caller + " asks to uninstall " + packageName + " v" + installed);
                 File dir = new File(InstalledPackages.DIR, packageName);
-                Boolean accepted = askUser(0, packageName, "uninstall", new File(dir, "base.apk").getPath(), caller);
+                Boolean accepted = askUser(0, packageName, "uninstall", new File(dir, "base.apk").getPath(), caller, null);
                 if (accepted == null || !accepted) {
                     code = android.content.pm.PackageManager.DELETE_FAILED_ABORTED;
                     message = accepted == null ? "the user could not be asked or did not answer" : "the user declined";
@@ -725,6 +736,19 @@ public final class InstallerSessions {
         String installedVersion = InstalledPackages.recorded(packageName, "versionCode");
         String installedSigners = InstalledPackages.recorded(packageName, "signers");
         String firstInstall = InstalledPackages.recorded(packageName, "firstInstallTime");
+        // Update ownership, as InstallPackageHelper settles it: a first install makes its installer the owner when the
+        // installer asked (INSTALL_REQUEST_UPDATE_OWNERSHIP) and holds ENFORCE_UPDATE_OWNERSHIP, which the platform
+        // otherwise strips from the request; an update keeps the owner only when the owner makes it, and any other
+        // installer's update (the user confirmed it) clears it.
+        String oldOwner = InstalledPackages.recorded(packageName, UPDATE_OWNER);
+        String owner;
+        if (installedVersion == null) {
+            owner = (session.params.installFlags & android.content.pm.PackageManager.INSTALL_REQUEST_UPDATE_OWNERSHIP) != 0
+                    && requests(session.installer, android.Manifest.permission.ENFORCE_UPDATE_OWNERSHIP)
+                    ? session.installer : null;
+        } else {
+            owner = oldOwner != null && oldOwner.equals(session.installer) ? oldOwner : null;
+        }
         if (installedVersion != null) {
             verified.replacing = true;
             if (Long.parseLong(installedVersion) > verified.versionCode) {
@@ -757,6 +781,7 @@ public final class InstallerSessions {
             record.setProperty("versionCode", Long.toString(verified.versionCode));
             record.setProperty("signers", verified.signers);
             record.setProperty("installer", String.valueOf(session.installer));
+            if (owner != null) record.setProperty(UPDATE_OWNER, owner);
             record.setProperty("installReason", Integer.toString(session.params.installReason));
             record.setProperty("packageSource", Integer.toString(session.params.packageSource));
             record.setProperty("sessionId", Integer.toString(session.id));
