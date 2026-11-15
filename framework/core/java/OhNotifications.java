@@ -127,12 +127,15 @@ final class OhNotifications {
         });
     }
 
+    /** OH's ERR_ANS_NOTIFICATION_NOT_EXISTS: Android's cancel of a notification that is not there does nothing. */
+    private static final int NOT_EXISTS = 0x4000010;
+
     static void cancel(String pkg, String tag, int id) {
         if (sUnbound) return;
         final String label = label(pkg, tag);
         QUEUE.execute(() -> {
             int rc = call(() -> nativeCancel(label, id));
-            if (rc != Integer.MIN_VALUE && rc != 0) {
+            if (rc != Integer.MIN_VALUE && rc != 0 && rc != NOT_EXISTS) {
                 System.err.println(TAG + " OH cancel of " + pkg + " id " + id + shortTag(tag) + ": " + rc);
             }
         });
