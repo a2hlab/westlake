@@ -980,6 +980,7 @@ public final class PlayServicesChannel {
                             }
                         }
                     }
+                    PlayModuleFiles.observeCall(authority, method.getName(), args);
                     try {
                         Object result = method.invoke(provider, args);
                         // A module loader in this app opens the files a host's provider names (ADR-0005).
