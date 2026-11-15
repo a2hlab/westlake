@@ -398,6 +398,15 @@ int AppSpawnXRuntime::startVm() {
     // ART's default unless explicitly selected for a controlled platform
     // bring-up, but expose its stock map/freelist/disabled modes without an
     // application-specific workaround.
+    // The collector a process uses once it is no longer perceptible (Heap::UpdateProcessState). With CMS in
+    // the foreground and no choice made, ART compacts the whole main space then (homogeneous space
+    // compaction, a moving collection). An app OH moves to the background (ADR-0008 managed launch) took
+    // that compaction and then faulted on objects in the protected old space; CMS keeps it non-moving,
+    // as the foreground is.
+    if (const char* v = getenv("APPSPAWNX_BACKGROUND_GC"); v && *v) {
+        addDynamicOption(std::string("-XX:BackgroundGC=") + v);
+        LOGW("ART background collector set to %s via APPSPAWNX_BACKGROUND_GC", v);
+    }
     if (const char* v = getenv("APPSPAWNX_LARGE_OBJECT_SPACE"); v && *v) {
         if (strcmp(v, "map") != 0 && strcmp(v, "freelist") != 0 && strcmp(v, "disabled") != 0) {
             LOGE("Invalid APPSPAWNX_LARGE_OBJECT_SPACE=%s", v);
