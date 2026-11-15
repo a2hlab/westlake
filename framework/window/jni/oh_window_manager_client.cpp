@@ -64,6 +64,9 @@ static std::atomic<int32_t> g_fgMainSession{-1};
 // ADR-0008 managed launch: the main window session of the OH ability that hosts this process's Android task, once
 // an activity window connected to it; every other window of the process is its sub-window.
 static std::atomic<int32_t> g_wlManagedMainId{0};
+// Its size: a managed sub-window gets an OH window this size, and its content is placed inside it (placeWindow).
+static std::atomic<int32_t> g_wlManagedMainWidth{0};
+static std::atomic<int32_t> g_wlManagedMainHeight{0};
 
 // 2026-06-26 IME-focus fix: set true while the adapter is summoning the OHOS
 // soft keyboard (input_method_bridge.cpp toggles it via oh_wm_set_ime_active).
@@ -988,6 +991,20 @@ OHWindowSession OHWindowManagerClient::createSession(
                 wl_managedParent);
         fflush(stderr);
     }
+    // Its OH window is the main window's size, as a direct launch gives a dialog the display-sized window:
+    // Android places the content inside it (placeWindow, applyPosition), which a window only as large as a
+    // fixed-size dialog clipped.
+    if (!wl_managedMain && wl_managedParent > 0 && subParentWinId != 0) {
+        const int32_t wl_w = g_wlManagedMainWidth.load();
+        const int32_t wl_h = g_wlManagedMainHeight.load();
+        if (wl_w > 0 && wl_h > 0 && (requestedWidth < wl_w || requestedHeight < wl_h)) {
+            fprintf(stderr, "[WL-MANAGED] %s: OH window %dx%d for content %dx%d\n", windowName.c_str(), wl_w, wl_h,
+                    requestedWidth, requestedHeight);
+            fflush(stderr);
+            requestedWidth = wl_w;
+            requestedHeight = wl_h;
+        }
+    }
     const bool asSubWindow = (subParentWinId != 0);
     if (asSubWindow) {
         ohType = OHOS::Rosen::WindowType::WINDOW_TYPE_APP_SUB_WINDOW;
@@ -1170,7 +1187,10 @@ OHWindowSession OHWindowManagerClient::createSession(
     // XComponent/video content.  So keep the APP_WINDOW_NODE as the window we hand to SSM, and hang a
     // SELF_DRAWING child under it that hwui actually renders into.
     std::shared_ptr<OHOS::Rosen::RSSurfaceNode> wl_contentNode;
-    if (getenv("WL_SUB_WINDOW") != nullptr && getenv("WL_NO_CONTENT_NODE") == nullptr) {
+    // ADR-0008: a managed sub-window (a dialog, another activity) is drawn and placed as a direct launch's
+    // sub-windows are: into a content node its window can move inside the display-sized OH window.
+    if ((getenv("WL_SUB_WINDOW") != nullptr || (asSubWindow && wl_managedParent > 0)) &&
+        getenv("WL_NO_CONTENT_NODE") == nullptr) {
         OHOS::Rosen::RSSurfaceNodeConfig contentCfg;
         contentCfg.SurfaceNodeName = windowName + "_content";
         wl_contentNode = OHOS::Rosen::RSSurfaceNode::Create(
@@ -1362,7 +1382,8 @@ OHWindowSession OHWindowManagerClient::createSession(
         // keyboard/panels. A client Z of 9000 overrides that ordering and paints
         // the Android buffer over the visible keyboard. Keep the historical
         // display-attached fallback unchanged until it has an owner as well.
-        if (getenv("WL_SUB_WINDOW") == nullptr) {
+        // A managed window has an ability owner too: SceneBoard orders it with its keyboard and panels.
+        if (getenv("WL_SUB_WINDOW") == nullptr && !wl_managedMain && !(asSubWindow && wl_managedParent > 0)) {
             surfaceNode->SetPositionZ(getenv("WL_Z_INVERT") != nullptr
                                           ? 9000.0f + static_cast<float>(16 - wl_zseq)
                                           : 9000.0f + static_cast<float>(wl_zseq));
@@ -1818,6 +1839,8 @@ OHWindowSession OHWindowManagerClient::createSession(
                     persistentId = wl_mId;
                     sessionObject = wl_mSession;
                     g_wlManagedMainId.store(wl_mId);
+                    g_wlManagedMainWidth.store(requestedWidth);
+                    g_wlManagedMainHeight.store(requestedHeight);
                 } else if (v7err == 0) {
                     v7err = wl_ret;
                 }
