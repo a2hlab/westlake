@@ -1517,6 +1517,36 @@ public class AppSpawnXInit {
                         "android.app.IActivityManager", hot);
             }
 
+            // ADR-0008 managed launch: OH's application manager knows the process, but the app's own
+            // components (services, broadcasts, providers, intent senders, the Play services channel) live
+            // in it, as in a direct launch: OH's abilities cannot stand in for them (a started service's
+            // Intent went through an OH Want and lost its Parcelable extras: WorkManager's Notification).
+            // The direct launch's activity manager serves them; only attachApplication goes to OH.
+            if ("1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))
+                    && iamImpl != null && !java.lang.reflect.Proxy.isProxyClass(iamImpl.getClass())) {
+                final Object realAdapter = iamImpl;
+                java.util.Set<String> hot = new java.util.HashSet<>();
+                hot.add("attachApplication");
+                final Object stub = makeProxyStub("AdapterIAM-stub", "android.app.IActivityManager", hot);
+                final java.lang.reflect.InvocationHandler local =
+                        java.lang.reflect.Proxy.getInvocationHandler(stub);
+                iamImpl = java.lang.reflect.Proxy.newProxyInstance(stub.getClass().getClassLoader(),
+                        stub.getClass().getInterfaces(), new java.lang.reflect.InvocationHandler() {
+                            public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args)
+                                    throws Throwable {
+                                if ("attachApplication".equals(method.getName())) {
+                                    try {
+                                        return method.invoke(realAdapter, args);
+                                    } catch (java.lang.reflect.InvocationTargetException e) {
+                                        throw e.getCause();
+                                    }
+                                }
+                                return local.invoke(proxy, method, args);
+                            }
+                        });
+                System.err.println("[AdapterIAM] managed launch: local activity manager, attach through OH");
+            }
+
             Class<?> amClass = Class.forName("android.app.ActivityManager");
             Class<?> singletonBase = Class.forName("android.util.Singleton");
             Field singletonField = amClass.getDeclaredField("IActivityManagerSingleton");
