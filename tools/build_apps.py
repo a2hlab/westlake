@@ -75,6 +75,12 @@ def main():
             module = json.loads((copied / 'module.json').read_text())
             module['app']['bundleName'] = package
             (copied / 'module.json').write_text(json.dumps(module, indent=2) + '\n')
+            # The pages register their route under the bundle name too; a route under another bundle's name
+            # leaves the host's window without its page.
+            for page in sorted(copied.glob('*.js')):
+                text = page.read_text()
+                if "'org.westlake.imehost'" in text:
+                    page.write_text(text.replace("'org.westlake.imehost'", "'" + package + "'"))
             source = copied
         resources = output / 'resources'
         resources.mkdir()
