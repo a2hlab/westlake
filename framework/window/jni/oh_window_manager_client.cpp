@@ -994,7 +994,9 @@ OHWindowSession OHWindowManagerClient::createSession(
     // Its OH window is the main window's size, as a direct launch gives a dialog the display-sized window:
     // Android places the content inside it (placeWindow, applyPosition), which a window only as large as a
     // fixed-size dialog clipped.
-    if (!wl_managedMain && wl_managedParent > 0 && subParentWinId != 0) {
+    // A SurfaceView's window keeps its own size: its buffer fills its node, and a display-sized one stretched it.
+    if (!wl_managedMain && wl_managedParent > 0 && subParentWinId != 0 &&
+        windowName.rfind("SurfaceView:", 0) != 0) {
         const int32_t wl_w = g_wlManagedMainWidth.load();
         const int32_t wl_h = g_wlManagedMainHeight.load();
         if (wl_w > 0 && wl_h > 0 && (requestedWidth < wl_w || requestedHeight < wl_h)) {
@@ -1383,6 +1385,15 @@ OHWindowSession OHWindowManagerClient::createSession(
         // the Android buffer over the visible keyboard. Keep the historical
         // display-attached fallback unchanged until it has an owner as well.
         // A managed window has an ability owner too: SceneBoard orders it with its keyboard and panels.
+        // ADR-0008: an ability's windows are siblings inside its window scene, drawn in order (RS sorts siblings by
+        // Z, then creation): the activity's window, then its other windows. A SurfaceView, created after the
+        // activity's window, painted over it whatever SceneBoard's z-level; Android keeps it below its window
+        // (sublayer -2) and shows it through the hole hwui leaves, so it goes below at Z -1. No other managed
+        // window gets a Z: RS also weighs a surface's Z against other scenes, and one above 0 painted over the
+        // keyboard.
+        if (asSubWindow && wl_managedParent > 0 && windowName.rfind("SurfaceView:", 0) == 0) {
+            surfaceNode->SetPositionZ(-1.0f);
+        }
         if (getenv("WL_SUB_WINDOW") == nullptr && !wl_managedMain && !(asSubWindow && wl_managedParent > 0)) {
             surfaceNode->SetPositionZ(getenv("WL_Z_INVERT") != nullptr
                                           ? 9000.0f + static_cast<float>(16 - wl_zseq)
@@ -1768,6 +1779,19 @@ OHWindowSession OHWindowManagerClient::createSession(
         if (asSubWindow && wl_managedParent > 0) {
             wl_prop->SetParentId(subParentWinId);
             wl_prop->SetParentPersistentId(static_cast<int32_t>(subParentWinId));
+            // A SurfaceView's window sits below its activity's window (Android sublayer -2) and never takes
+            // focus or input. Ordered at creation, as SceneBoard takes the z-level then: set afterwards, it
+            // stayed above the activity until the app went to the background and back. Focusable, it took
+            // OH's focus from the activity, whose views were then never served by the input method.
+            if (windowName.rfind("SurfaceView:", 0) == 0) {
+                wl_prop->SetSubWindowZLevel(-2);
+                wl_prop->SetFocusable(false);
+                wl_prop->SetFocusableOnShow(false);
+            } else {
+                wl_prop->SetSubWindowZLevel(0);
+                wl_prop->SetFocusable(true);
+                wl_prop->SetFocusableOnShow(true);
+            }
         }
 
         OHOS::sptr<oh_adapter::SessionStageAdapter> sessionStage =
@@ -2014,7 +2038,9 @@ OHWindowSession OHWindowManagerClient::createSession(
                             abilityName.c_str(), wl_only);
                     fflush(stderr);
                 }
-                if (!wl_skipRaise && getenv("WL_NO_RAISE") == nullptr) {
+                const bool wl_managedSurfaceView = asSubWindow && wl_managedParent > 0 &&
+                                                   windowName.rfind("SurfaceView:", 0) == 0;
+                if (!wl_skipRaise && !wl_managedSurfaceView && getenv("WL_NO_RAISE") == nullptr) {
                     OHOS::MessageParcel rdata;
                     OHOS::MessageParcel rreply;
                     OHOS::MessageOption roption;
