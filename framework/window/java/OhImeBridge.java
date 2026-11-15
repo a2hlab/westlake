@@ -70,6 +70,10 @@ public final class OhImeBridge {
     private static volatile int sSelectionEnd;
     private static volatile Session sSession;
     private static View sCreatingView; // UI-thread only
+    // Whether the OH keyboard is up for this process: set by a successful show, cleared by hide and by the helper's
+    // report of an empty keyboard area (closed from the keyboard itself, or by OH).
+    private static volatile boolean sKeyboardShown;
+    private static boolean sBackTaken; // UI-thread only
     private static long sNextGeneration;
 
     private static final class Session {
@@ -138,6 +142,7 @@ public final class OhImeBridge {
      * the keyboard from IME insets, so it is published as that window's IME insets source.
      */
     public static void nativeOnKeyboardArea(int windowId, int x, int y, int width, int height) {
+        sKeyboardShown = height > 0;
         try {
             for (View root : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
                 if (root == null || root.getWindowToken() == null) continue;
@@ -149,6 +154,24 @@ public final class OhImeBridge {
         } catch (Throwable t) {
             System.err.println("[OH_IME] keyboard area not applied: " + t);
         }
+    }
+
+    /**
+     * Android's input method sees each key before the app (ViewRootImpl's IME stage) and takes BACK while its
+     * keyboard is shown: it holds the DOWN, hides the keyboard on the UP, and the app gets neither
+     * (InputMethodService.handleBack). The OH keyboard has no Android input method behind it, so the app's key
+     * dispatch (SessionStageBridge.dispatchKey) asks here first. UI thread only.
+     */
+    static boolean takeBackKey(KeyEvent event) {
+        if (event.getKeyCode() != KeyEvent.KEYCODE_BACK) return false;
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (event.getRepeatCount() == 0) sBackTaken = sKeyboardShown;
+            return sBackTaken;
+        }
+        if (event.getAction() != KeyEvent.ACTION_UP || !sBackTaken) return false;
+        sBackTaken = false;
+        if (!event.isCanceled()) System.err.println("[" + TAG + "] back press hides the keyboard: " + hide());
+        return true;
     }
 
     /** Resolve the focused Android window's own OH session, never the last-created window. */
@@ -194,6 +217,7 @@ public final class OhImeBridge {
             boolean r = id > 0 && nativeShowKeyboardCapi(sSession.generation, id);
             if (!r) sSession = null;
             else updateSnapshot(connection);
+            sKeyboardShown = r;
             System.err.println("[" + TAG + "] show -> nativeShowKeyboard=" + r);
             return r;
         } catch (Throwable t) {
@@ -213,6 +237,7 @@ public final class OhImeBridge {
             sSession = null;
             if (previous != null) previous.connection.finishComposingText();
             boolean r = nativeHideKeyboardCapi();
+            if (r) sKeyboardShown = false;
             System.err.println("[" + TAG + "] hide -> nativeHideKeyboard=" + r);
             return r;
         } catch (Throwable t) {

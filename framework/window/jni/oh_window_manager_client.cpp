@@ -67,6 +67,9 @@ static std::atomic<int32_t> g_wlManagedMainId{0};
 // Its size: a managed sub-window gets an OH window this size, and its content is placed inside it (placeWindow).
 static std::atomic<int32_t> g_wlManagedMainWidth{0};
 static std::atomic<int32_t> g_wlManagedMainHeight{0};
+// The main window session itself, for the requests an ability makes of SceneBoard (RequestSessionBack).
+static std::mutex g_wlManagedMainSessionMutex;
+static OHOS::sptr<OHOS::IRemoteObject> g_wlManagedMainSession;
 
 // 2026-06-26 IME-focus fix: set true while the adapter is summoning the OHOS
 // soft keyboard (input_method_bridge.cpp toggles it via oh_wm_set_ime_active).
@@ -1865,6 +1868,10 @@ OHWindowSession OHWindowManagerClient::createSession(
                     g_wlManagedMainId.store(wl_mId);
                     g_wlManagedMainWidth.store(requestedWidth);
                     g_wlManagedMainHeight.store(requestedHeight);
+                    {
+                        std::lock_guard<std::mutex> wl_lock(g_wlManagedMainSessionMutex);
+                        g_wlManagedMainSession = wl_mSession;
+                    }
                 } else if (v7err == 0) {
                     v7err = wl_ret;
                 }
@@ -3446,3 +3453,25 @@ void* OHWindowManagerClient::getOhNativeWindow(int32_t sessionId) {
 }
 
 }  // namespace oh_adapter
+
+// ADR-0008: a back press at the root of the app's task moves the app to the background, as Android 12+ does
+// (ATMS moves the task to the back); for an OH ability SceneBoard does that on ISession::RequestSessionBack(true)
+// (SessionInterfaceCode TRANS_ID_BACKPRESSED, 103), as for an ArkTS ability whose onBackPressed asks for it.
+extern "C" JNIEXPORT jint JNICALL
+Java_adapter_activity_ActivityClientControllerAdapter_nativeMoveManagedTaskToBack(JNIEnv*, jclass) {
+    OHOS::sptr<OHOS::IRemoteObject> session;
+    {
+        std::lock_guard<std::mutex> lock(g_wlManagedMainSessionMutex);
+        session = g_wlManagedMainSession;
+    }
+    if (session == nullptr) return -1;
+    OHOS::MessageParcel data;
+    OHOS::MessageParcel reply;
+    OHOS::MessageOption option;
+    const bool wrote = data.WriteInterfaceToken(u"OHOS.ISession") && data.WriteBool(true);
+    const int32_t err = wrote ? session->SendRequest(103, data, reply, option) : -1;
+    const uint32_t ret = (err == 0) ? reply.ReadUint32() : UINT32_MAX;
+    fprintf(stderr, "[WL-MANAGED] RequestSessionBack(move to background) err=%d ret=%u\n", err, ret);
+    fflush(stderr);
+    return err == 0 ? static_cast<jint>(ret) : err;
+}

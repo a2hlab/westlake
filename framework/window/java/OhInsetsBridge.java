@@ -101,7 +101,7 @@ public final class OhInsetsBridge {
                 .setFrame(frame).setVisible(!frame.isEmpty());
     }
 
-    private static ViewRootImpl rootOf(IWindow window) throws ReflectiveOperationException {
+    static ViewRootImpl rootOf(IWindow window) throws ReflectiveOperationException {
         Class<?> globalClass = Class.forName("android.view.WindowManagerGlobal");
         Object global = globalClass.getMethod("getInstance").invoke(null);
         Field rootsField = globalClass.getDeclaredField("mRoots");

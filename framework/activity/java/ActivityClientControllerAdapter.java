@@ -351,7 +351,13 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     // ====================================================================
 
     @Override
-    public boolean moveActivityTaskToBack(IBinder token, boolean nonRoot) { return false; }
+    public boolean moveActivityTaskToBack(IBinder token, boolean nonRoot) {
+        // ADR-0008: OH holds a managed app's task; SceneBoard moves its ability to the background. A direct launch
+        // has no task to move.
+        if (!"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) return false;
+        if (!nonRoot && taskPosition(token) != 0) return false;
+        return nativeMoveManagedTaskToBack() == 0;
+    }
 
     @Override
     public boolean shouldUpRecreateTask(IBinder token, String destAffinity) { return false; }
@@ -701,7 +707,26 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     // ====================================================================
 
     @Override
-    public void onBackPressed(IBinder activityToken, IRequestFinishCallback callback) { /* no-op */ }
+    public void onBackPressed(IBinder activityToken, IRequestFinishCallback callback) {
+        // Android 12+ (ATMS): a back press the activity did not consume finishes it; at the root of a task the
+        // launcher started, the task moves to the back instead. In an ADR-0008 managed launch OH holds that task
+        // (OH's launcher started its ability): SceneBoard moves the ability to the background. A direct launch keeps
+        // its earlier behaviour (nothing happens).
+        if (!"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) return;
+        if (taskPosition(activityToken) == 0) {
+            int rc = nativeMoveManagedTaskToBack();
+            System.err.println("[WL-BACK] back at the task's root: the app moves to the background (rc=" + rc + ")");
+            return;
+        }
+        try {
+            if (callback != null) callback.requestFinish();
+            System.err.println("[WL-BACK] back press finishes the activity");
+        } catch (android.os.RemoteException e) {
+            Log.w(TAG, "onBackPressed: " + e);
+        }
+    }
+
+    private static native int nativeMoveManagedTaskToBack();
 
     @Override
     public void splashScreenAttached(IBinder token) { /* no-op */ }

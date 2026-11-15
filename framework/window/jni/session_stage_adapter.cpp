@@ -348,6 +348,8 @@ void SessionStageAdapter::NotifyOccupiedAreaChangeInfo(
 WSError SessionStageAdapter::HandleBackEvent()
 {
     OH_BR_IPC_SCOPE("SessionStage.HandleBackEvent", "");
+    fprintf(stderr, "[WL-BACK] OH back event\n");
+    fflush(stderr);
 
     std::lock_guard<std::mutex> lock(jniMutex_);
     callBridgeVoidMethod("onHandleBackEvent", "()V");
