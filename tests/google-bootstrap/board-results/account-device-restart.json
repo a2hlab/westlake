@@ -1,0 +1,41 @@
+{
+  "schema": "westlake-google-probe-v1",
+  "run": "bootstrap01",
+  "phase": "after-restart",
+  "time": 1794785303001,
+  "manufacturer": "HopeRun",
+  "model": "DAYU200",
+  "fingerprint": "OpenHarmony/rk3568/rk3568:14/oh-adapter:user/release-keys",
+  "sdk": 34,
+  "gmsVersion": 244034029,
+  "services": [
+    {
+      "serviceId": 51,
+      "action": "com.google.android.gms.phenotype.service.START",
+      "brokerStatus": 0,
+      "binderPresent": true,
+      "outcome": "broker_accepted"
+    },
+    {
+      "serviceId": 8,
+      "action": "com.google.android.gms.ads.service.START",
+      "brokerStatus": 0,
+      "binderPresent": true,
+      "outcome": "broker_accepted"
+    },
+    {
+      "serviceId": 93,
+      "action": "com.google.android.gms.measurement.START",
+      "brokerStatus": 0,
+      "binderPresent": true,
+      "outcome": "broker_accepted"
+    },
+    {
+      "serviceId": 300,
+      "action": "com.google.android.gms.appset.service.START",
+      "outcome": "bind_refused"
+    }
+  ],
+  "policyFreshness": "must_correlate_with_host_checkin_evidence",
+  "mapsLocationLoginTested": false
+}

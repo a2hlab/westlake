@@ -1,0 +1,4 @@
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-baseline time=1794784150235 start manufacturer=HopeRun model=DAYU200 android=14 sdk=34 profile=0271dc8fc3d77e6d3afb4e8e9d7d54db85fe25e812fcec08365d8efe7d256996 apk=1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-baseline time=1794784150259 baseline accounts=0 account_exchange=not_requested
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-baseline time=1794784150304 official_checkin=requested completion=unverified
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-baseline time=1794784165888 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=78645f4592fa0c22ff6a40088be046e3c015504c9348b730d92fd37d1bf1a268 freshness=provider_write_only

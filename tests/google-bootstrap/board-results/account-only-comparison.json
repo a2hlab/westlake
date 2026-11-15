@@ -1,0 +1,13 @@
+{
+  "schema": "westlake-google-comparison-v1",
+  "server_registration_proven": false,
+  "production_ready": false,
+  "refresh_verification": "requires_official_network_checkin_evidence",
+  "maps_location_signin": "not_tested",
+  "baseline_error9_services": [],
+  "after_error9_services": [],
+  "newly_accepted_brokers": [],
+  "app_set_api_success": false,
+  "restart_app_set_api_success": false,
+  "outcome": "baseline_did_not_reproduce_error9"
+}

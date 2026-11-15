@@ -10,6 +10,8 @@ import android.os.SystemClock;
 import android.text.Editable;
 import android.text.Selection;
 import android.widget.TextView;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
 
 /**
  * Posts OH-boundary touch injection onto the Android view hierarchy's owning thread.
@@ -75,7 +77,7 @@ public final class OHTouchInjector {
     }
 
     /**
-     * Commits text into the currently focused TextView on Android's main thread.
+     * Commits text into the currently focused editor on Android's main thread.
      *
      * The OH board has no attached IME and its synthetic virtual keyboard has no
      * resolvable KeyCharacterMap, so per-key KeyEvents carry unicode 0.  This is
@@ -101,14 +103,14 @@ public final class OHTouchInjector {
         }
     }
 
-    /** The focused TextView of the window that has input focus, as an IME would target. */
+    /** The focused editor of the window that has input focus, as an IME would target. */
     private static View focusedEditable() {
         View fallback = null;
         try {
             for (View root : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
                 if (root == null || !root.isAttachedToWindow()) continue;
                 View focus = root.findFocus();
-                if (!(focus instanceof TextView) || !((TextView) focus).onCheckIsTextEditor()) continue;
+                if (focus == null || !focus.onCheckIsTextEditor()) continue;
                 if (root.hasWindowFocus()) return focus;
                 fallback = focus;
             }
@@ -131,13 +133,44 @@ public final class OHTouchInjector {
         public void run() {
             try {
                 View focused = root.findFocus();
-                if (!(focused instanceof TextView) || !root.hasWindowFocus()) {
+                if (focused == null || !focused.onCheckIsTextEditor() || !root.hasWindowFocus()) {
                     View other = focusedEditable();
                     if (other != null) focused = other;
                 }
-                if (!(focused instanceof TextView)) {
+                if (focused == null || !focused.onCheckIsTextEditor()) {
                     lastTextCommit = "focused="
                             + (focused == null ? "null" : focused.getClass().getName());
+                    return;
+                }
+                // WebView and custom editors expose InputConnection, not Editable.
+                // Use the same editor contract as an IME, on the owning UI thread.
+                InputConnection connection = focused.onCreateInputConnection(new EditorInfo());
+                if (connection != null) {
+                    final String editor = focused.getClass().getName();
+                    Runnable commit = () -> {
+                        try {
+                            connection.beginBatchEdit();
+                            boolean accepted;
+                            try { accepted = connection.commitText(text, 1); }
+                            finally { connection.endBatchEdit(); }
+                            if (accepted) textCommitCount++;
+                            textStatus((accepted ? "ok:" : "rejected:") + editor);
+                        } catch (Throwable error) {
+                            textStatus("error:" + error.getClass().getName());
+                        }
+                    };
+                    // Chromium can request a dedicated editor thread. Android's
+                    // remote InputConnection dispatcher honors this handler too.
+                    Handler editorHandler = connection.getHandler();
+                    if (editorHandler != null && editorHandler.getLooper() != Looper.myLooper()) {
+                        if (!editorHandler.post(commit)) textStatus("editor-post-rejected");
+                    } else {
+                        commit.run();
+                    }
+                    return;
+                }
+                if (!(focused instanceof TextView)) {
+                    lastTextCommit = "no-input-connection:" + focused.getClass().getName();
                     return;
                 }
                 TextView target = (TextView) focused;
@@ -162,9 +195,17 @@ public final class OHTouchInjector {
                     target.setText(committed);
                 }
                 textCommitCount++;
-                lastTextCommit = "ok:" + target.getClass().getName() + ":" + committed;
+                // Diagnostics must never retain entered text (including passwords).
+                lastTextCommit = "ok:" + target.getClass().getName();
             } catch (Throwable throwable) {
-                lastTextCommit = String.valueOf(throwable);
+                textStatus("error:" + throwable.getClass().getName());
+            }
+        }
+
+        private static void textStatus(String status) {
+            lastTextCommit = status;
+            if ("1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) {
+                System.err.println("[WL-INPUT-COMMIT] " + status);
             }
         }
     }

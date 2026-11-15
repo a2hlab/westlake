@@ -1,0 +1,34 @@
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784937252 start manufacturer=HopeRun model=DAYU200 android=14 sdk=34 profile=0271dc8fc3d77e6d3afb4e8e9d7d54db85fe25e812fcec08365d8efe7d256996 apk=1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784937724 device_identity_file=matches_microg device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b official_consumption=unverified
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784937864 credential_import=complete device_identity_staged=true source_apk=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784938345 gservices_update=difference uncertified_status=1 policy_override=false device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b freshness=provider_write_only
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784938475 official_identity_read=matches_staged device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784991456 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784996737 token_initial=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997347 token_after_invalidation=present consent=false
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997354 official_checkin=requested completion=unverified
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785000299 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b freshness=provider_write_only
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785007138 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b freshness=provider_write_only
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785014374 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b freshness=provider_write_only
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784943056 credential_import=already_consumed
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784964651 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784972275 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784972924 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784973368 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784996607 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997598 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997705 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997901 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997911 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784997913 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784998106 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784999711 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785003442 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785003988 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785007893 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785008104 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785009723 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785009753 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785009922 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794785010059 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=official-import time=1794784983480 credential_import=already_consumed

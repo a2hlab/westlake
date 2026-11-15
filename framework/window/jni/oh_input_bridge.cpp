@@ -46,14 +46,19 @@ static std::atomic<int> g_rootIndex{-1};
 void wl_set_root_index(int idx) { g_rootIndex.store(idx); }
 
 #define LOG_TAG "OH_InputBridge"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+static bool wl_private_input_logs() {
+    const char* value = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
+    return value && std::strcmp(value, "1") == 0;
+}
+#define LOGI(...) do { if (!wl_private_input_logs()) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
+#define LOGD(...) do { if (!wl_private_input_logs()) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__); } while (0)
+#define LOGE(...) do { if (!wl_private_input_logs()) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__); } while (0)
 
 // Source-device probes preserve stderr as a content-addressed artifact.  Keep
 // view-tree diagnostics in Android logging for interactive use and mirror them
 // to stderr only when the source harness requests durable evidence.
 static void wl_view_log(int priority, const char* format, ...) {
+    if (wl_private_input_logs()) return;
     va_list args;
     va_start(args, format);
     va_list androidArgs;
@@ -1002,8 +1007,8 @@ int32_t OHInputBridge::dispatchCharactersViaViewRoot(const char* utf8) {
     if (commitM != nullptr && decorView != nullptr) {
         env->CallStaticVoidMethod(injectorCls, commitM, decorView, jchars);
         if (!env->ExceptionCheck()) {
-            LOGI("dispatchCharactersViaViewRoot: \"%s\" -> focused TextView main-thread commit posted (%s helper)",
-                 utf8, helperKind);
+            LOGI("dispatchCharactersViaViewRoot: focused TextView main-thread commit posted (%s helper)",
+                 helperKind);
             env->DeleteGlobalRef(decorView);
             env->DeleteLocalRef(keyEvent);
             if (needDetach) jvm_->DetachCurrentThread();
@@ -1022,7 +1027,7 @@ int32_t OHInputBridge::dispatchCharactersViaViewRoot(const char* utf8) {
     jint seq = s_txtSeq.fetch_add(1);
     env->CallStaticVoidMethod(iebCls, domt, receiver, seq, keyEvent);
     if (env->ExceptionCheck()) return fail("dispatchOnMainThread call");
-    LOGI("dispatchCharactersViaViewRoot: \"%s\" seq=%d -> ViewRootImpl OK", utf8, seq);
+    LOGI("dispatchCharactersViaViewRoot: seq=%d -> ViewRootImpl OK", seq);
     env->DeleteLocalRef(keyEvent);
     if (needDetach) jvm_->DetachCurrentThread();
     return 0;
@@ -5322,7 +5327,12 @@ void OHInputBridge::startTextControlChannel() {
     bool expected = false;
     if (!started.compare_exchange_strong(expected, true)) return;
     std::thread([this]() {
-        const char* path = "/data/local/tmp/noice_text";
+        // Credential entry must target exactly one process. Other hosted apps
+        // may share /data/local/tmp even when their private app-data is mounted
+        // separately. Keep the legacy mailbox only for ordinary diagnostics.
+        char privatePath[96];
+        snprintf(privatePath, sizeof(privatePath), "/data/local/tmp/noice_text.%d", getpid());
+        const char* path = wl_private_input_logs() ? privatePath : "/data/local/tmp/noice_text";
         auto tapKey = [this](int32_t code, int32_t meta) {
             int64_t t = (int64_t)0;  // downTime/eventTime relative; 0 is accepted
             dispatchKeyViaViewRoot(0 /*ACTION_DOWN*/, code, t, t, meta);
@@ -5362,7 +5372,7 @@ void OHInputBridge::startTextControlChannel() {
             // Plain text: commit through the focused TextView on Android's main
             // thread (KeyCharacterMap-independent). Falls back to per-key
             // dispatch only if the focused-text path reports failure.
-            LOGI("textControlChannel: type \"%s\" (%zu chars)", buf, n);
+            LOGI("textControlChannel: text input received");
             // §556: PER-KEY IS NOW THE DEFAULT. The string path builds one ACTION_MULTIPLE
             // KeyEvent carrying the characters — deprecated in API 29, and this runtime's
             // TextView/Editor never commits it. It nonetheless returned 0 and logged

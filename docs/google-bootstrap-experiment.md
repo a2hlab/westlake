@@ -10,6 +10,11 @@ implementations under one package simultaneously and is not the continuous
 microG token-provider architecture. All normal launches keep the official
 authenticator and existing behavior when the experiment variables are absent.
 
+Board results are recorded in [the board report](google-bootstrap-board-results.md).
+The tested microG login and official-GMS credential reuse worked; the official
+configuration still reported `uncertified_status=1`. This is not a demonstrated
+device-registration workaround or corpus-wide compatibility improvement.
+
 ## What the code tests
 
 1. microG's authenticator can be used by Westlake AccountManager. The old code
@@ -42,8 +47,11 @@ precedence, so every run records the actual Java Build identity.
 The microG interfaces were inspected at
 [`f686900c`](https://github.com/microg/GmsCore/tree/f686900c68aa84d1605b52304f6615f3593c6f50).
 Runtime reflection fails explicitly if the supplied microG APK lacks those
-interfaces. The local v0.3.17 APK is an available input, not yet a validated
-runtime match for the inspected source.
+interfaces. The board run validated the required runtime interfaces and native
+profile of microG `0.3.17.252432`, versionCode `252432034`, APK SHA-256
+`e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35`.
+This validates the exercised interfaces, not equivalence to the inspected
+newer source revision.
 
 Official GMS: versionCode `244034029`, SHA-256
 `1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1`.
@@ -87,12 +95,45 @@ configuration, with `WESTLAKE_PLAY_SERVICES_SERVE` set as usual:
 ```text
 WESTLAKE_GOOGLE_EXPERIMENT_RUN=bootstrap01
 WESTLAKE_GOOGLE_EXPERIMENT=official-baseline
+WESTLAKE_GOOGLE_PRIVATE_LOGS=1
 ```
 
 Accepted modes: `official-baseline`, `microg-export`, `official-import`,
 `official-recheck`. The run ID must contain 1–64 letters/digits/underscores/
 hyphens. No account name, password or token is passed as an environment variable
 or launch argument. Do not propagate these switches to ordinary client apps.
+
+For both microG and official GMS, deploy the same Bionic compatibility shim
+and native networking boundary. The current manifest launcher requires
+`--webview-input` together with `--bionic-shim-build` even for a headless GMS
+host: this payload also supplies the ABI boundary for GMS native libraries.
+The preliminary no-shim runs hit an unresolved GMS Conscrypt
+`NativeCrypto.SSL_CTX_new`; they are not valid native-runtime comparisons.
+
+Before entering credentials, use the rebuilt native runtime and input bridge
+with `WESTLAKE_GOOGLE_PRIVATE_LOGS=1`. This suppresses Android Java logging and
+input/view diagnostics in that process: microG logs token-bearing auth and
+check-in messages, and the previous input bridge printed typed text. The
+experiment's explicit stderr events remain available. This is a diagnostic
+precaution, not a general guarantee about every third-party native logger.
+Do not collect unrestricted logs, view dumps or credential-bearing screenshots.
+The text-control helper commits through the focused editor's `InputConnection`
+after locating it on Android's main thread and honoring its requested handler
+thread. This supports WebView as well as native editors. Its
+diagnostic result retains the editor class and outcome, never the entered text.
+Verify input using a non-secret marker first. The private input mailbox must be
+`/data/local/tmp/noice_text.<pid>` in this private mode, owned by the app UID
+with mode 0600 and emptied after consumption. HDC logs shell command strings,
+so transfer private input through a mode-0600 temporary file; never put a
+password or token in an HDC shell command.
+
+For `WESTLAKE_APP_PROCESSES=1`, the launcher must supply
+`WESTLAKE_SPAWN_SOCKET` and a private `WESTLAKE_SPAWN_REQUEST` file that the child
+can read inside its mount namespace. Merely enabling the switch does not prove
+secondary processes started. Verify their startup before interpreting API
+results. Local AF_UNIX appspawn connections temporarily permit network under
+StrictMode because BlockGuard also applies its network check to this local IPC;
+the previous thread policy is restored immediately after the connection.
 
 1. Start official GMS in a dedicated account-free target data directory using
    `official-baseline`. Keep its normal networking/check-in behavior. Start the

@@ -1,0 +1,227 @@
+{
+  "schema": "westlake-google-bootstrap-board-validation-v1",
+  "base_revision": "4bcc531f8a96fa4d922c51c0225dff7bc60f00d9",
+  "scope": "One account, one board, pinned microG and official GMS; sequential credential handoff",
+  "board": {
+    "os": "OpenHarmony 6.1.0.31",
+    "architecture": "aarch64",
+    "manufacturer": "HopeRun",
+    "model": "DAYU200",
+    "android_release": "14",
+    "sdk": 34,
+    "native_host_uid": 20010056
+  },
+  "host_checks": {
+    "transfer_and_staging": 17,
+    "classification": 6,
+    "status": "passed"
+  },
+  "board_deployed": true,
+  "google_account_used": true,
+  "google_registration_workaround_proven": false,
+  "certification_proven": false,
+  "continuous_microg_proxy_implemented": false,
+  "production_ready": false,
+  "framework_preload_passed": true,
+  "framework_report_sha256": "8a586f288d884811ce9203c271f0f715695c97f07ad75d0a2baebfdbe446d32e",
+  "runtime_artifacts": {
+    "fw/adapter-runtime-bcp.jar": {
+      "bytes": 358580,
+      "sha256": "d034244a87d30f5c1d288a426272c51c349262b99e34d327e911e20ede4da0ae"
+    },
+    "fw/framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    },
+    "libart.so": {
+      "bytes": 21543720,
+      "sha256": "6068b36cf229ae7e390d2717eeb7b8d54035f7753ad5f52fbb685560e60187b2"
+    },
+    "liboh_adapter_bridge.so": {
+      "bytes": 2034104,
+      "sha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923"
+    },
+    "liboh_android_runtime.so": {
+      "bytes": 2198800,
+      "sha256": "225d20504fa8c8a19d60f4076985cfdee0e3f871d17a0aa32df5bfbd9335625b"
+    }
+  },
+  "microg_apk_sha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+  "official_gms_apk_sha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "probe_apk_sha256": "551d6a18bbbbd7097690738d8ec2add8e0e413eaa65dd1b81eff953f17248957",
+  "bionic_shim_sha256": "ab8282f6d2cda34c49712b8d2c64d4d76eccf12cb4fd1af4c01e4416e55bad1c",
+  "source_hashes": {
+    "framework/activity/java/AppProcesses.java": "798102ae6ec6e342032102853c6fd358e38da79e4f4648909898820a903c715f",
+    "framework/window/java/OHTouchInjector.java": "a34b73e1191ce65b8f0f490822205a5eeaadff0a0b352c4b603293ca973d45db",
+    "framework/window/jni/oh_input_bridge.cpp": "2f94dbcfde0f878c247db34fdd0bd1d5d7fe5d6118e21bc8f84c881a5309d8d7",
+    "framework/android-runtime/src/android_util_Log.cpp": "08df22e10bc3781d0de141ae8fcecf845a1330824ab5e4069dd2a6b7d736474f",
+    "framework/core/java/GoogleBootstrapExperiment.java": "b8d529ce392163ee8e94dcb215d6358a7800501637a51efb1471c99d53db5c88",
+    "framework/core/java/LocalAccounts.java": "94ddffd065a7c6fbfb41f54670c8e24584a72900e11d8cd8b943d16f46c7ca15",
+    "framework/core/java/BootstrapTransfer.java": "ba161d8b0d08dd63d74d8600ecc82fcccb38e8f3e640a09c7764f169a954e02c"
+  },
+  "webview_input_test": {
+    "neutral_marker_visible": true,
+    "clear_verified": true,
+    "own_log_marker_matches": 0,
+    "system_log_marker_matches_excluding_hdc_command_echoes": 0,
+    "private_input_mailbox_consumed": true
+  },
+  "cases": {
+    "microg": {
+      "run_directory": "source-closure/verify/out/google-bootstrap-microg04",
+      "device_report_sha256": "cad3bd126789676fb4bb0a04e2a54699a7fd29a0d6728a319e04644301330616",
+      "parent_pid": 20677,
+      "primary_pid": 20698,
+      "start_epoch_ms": 1794782913220,
+      "profile_matches": true,
+      "evidence": "microg.events.txt",
+      "native_profile_verified": true,
+      "login_checkin_and_export_completed": true,
+      "primary_alive_at_planned_stop": true,
+      "stopped_pids": [
+        20698,
+        20735,
+        20816,
+        21104,
+        20677
+      ]
+    },
+    "baseline": {
+      "run_directory": "source-closure/verify/out/google-bootstrap-official-baseline03",
+      "device_report_sha256": "816b6c1d8bcca333a88af9f02bff2bb3f4469bc1f37c6a9249b9f0e8d22f5b4b",
+      "parent_pid": 30564,
+      "primary_pid": 30585,
+      "start_epoch_ms": 1794784150235,
+      "profile_matches": true,
+      "evidence": "baseline.events.txt",
+      "probe": "baseline.json",
+      "uncertified_status_observed": 1,
+      "policy_freshness": "provider_write_only",
+      "primary_alive_at_planned_stop": true,
+      "stopped_pids": [
+        30585,
+        30644,
+        30933,
+        30564
+      ]
+    },
+    "account-only-handoff": {
+      "run_directory": "source-closure/verify/out/google-bootstrap-account-only02",
+      "device_report_sha256": "dcc96cc92c19a16934723f2c010bb682dbf6d1c1e10e5d52e66e447b4e097034",
+      "parent_pid": 31756,
+      "primary_pid": 31778,
+      "start_epoch_ms": 1794784264082,
+      "profile_matches": true,
+      "evidence": "account-only-handoff.events.txt",
+      "probe": "account-only-handoff.json",
+      "uncertified_status_observed": 1,
+      "policy_freshness": "provider_write_only",
+      "primary_alive_at_planned_stop": true,
+      "stopped_pids": [
+        31778,
+        31838,
+        32011,
+        31756
+      ]
+    },
+    "account-only-restart": {
+      "run_directory": "source-closure/verify/out/google-bootstrap-account-only-restart02",
+      "device_report_sha256": "486fcdd8aba8facb4f4a4af1afe21ffa2aafe3e4a796bf965f8d3d6001371062",
+      "parent_pid": 871,
+      "primary_pid": 902,
+      "start_epoch_ms": 1794784419518,
+      "profile_matches": true,
+      "evidence": "account-only-restart.events.txt",
+      "probe": "account-only-restart.json",
+      "uncertified_status_observed": 1,
+      "policy_freshness": "provider_write_only",
+      "primary_alive_at_planned_stop": true,
+      "stopped_pids": [
+        902,
+        1047,
+        1592,
+        2002,
+        871
+      ]
+    },
+    "account-device-handoff": {
+      "run_directory": "source-closure/verify/out/google-bootstrap-account-device03",
+      "device_report_sha256": "d8029d6a415e753dee3dc2e144887e81f7a37f287159c126a1df850506dfbd90",
+      "parent_pid": 6944,
+      "primary_pid": 6966,
+      "start_epoch_ms": 1794784937252,
+      "profile_matches": true,
+      "evidence": "account-device-handoff.events.txt",
+      "probe": "account-device-handoff.json",
+      "uncertified_status_observed": 1,
+      "policy_freshness": "provider_write_only",
+      "primary_alive_at_planned_stop": true,
+      "stopped_pids": [
+        6966,
+        7027,
+        7183,
+        6944
+      ]
+    },
+    "account-device-restart": {
+      "run_directory": "source-closure/verify/out/google-bootstrap-account-device-restart03",
+      "device_report_sha256": "6696d5a2667e3d416b2ba7ee6b0daf5483cbe12f309fe112318ea5f3bd441187",
+      "parent_pid": 8101,
+      "primary_pid": 8116,
+      "start_epoch_ms": 1794785070541,
+      "profile_matches": true,
+      "evidence": "account-device-restart.events.txt",
+      "probe": "account-device-restart.json",
+      "uncertified_status_observed": 1,
+      "policy_freshness": "provider_write_only",
+      "primary_alive_at_planned_stop": true,
+      "stopped_pids": [
+        8116,
+        8160,
+        8406,
+        8949,
+        8101
+      ]
+    }
+  },
+  "comparisons": {
+    "account-only": {
+      "schema": "westlake-google-comparison-v1",
+      "server_registration_proven": false,
+      "production_ready": false,
+      "refresh_verification": "requires_official_network_checkin_evidence",
+      "maps_location_signin": "not_tested",
+      "baseline_error9_services": [],
+      "after_error9_services": [],
+      "newly_accepted_brokers": [],
+      "app_set_api_success": false,
+      "restart_app_set_api_success": false,
+      "outcome": "baseline_did_not_reproduce_error9"
+    },
+    "account-device": {
+      "schema": "westlake-google-comparison-v1",
+      "server_registration_proven": false,
+      "production_ready": false,
+      "refresh_verification": "requires_official_network_checkin_evidence",
+      "maps_location_signin": "not_tested",
+      "baseline_error9_services": [],
+      "after_error9_services": [],
+      "newly_accepted_brokers": [],
+      "app_set_api_success": false,
+      "restart_app_set_api_success": false,
+      "outcome": "baseline_did_not_reproduce_error9"
+    }
+  },
+  "limitations": [
+    "ac2dm token presence before and after invalidation is not an independently observed network refresh or a third-party Google Sign-In test.",
+    "No Play Store login/download, Maps, fused location, FCM delivery, Play Integrity, banking app or corpus acceptance test was completed.",
+    "Phenotype, Ads and Measurement results are broker handshakes, not completed functional APIs; App Set ID refused binding before an API call.",
+    "Baseline did not reproduce service error 9, so these probes cannot measure removal of that restriction.",
+    "Gservices events are provider writes, not independently captured Google policy responses; uncertified_status=1 does not by itself establish manual-registration status.",
+    "The probe and service processes used one native host UID; this experiment does not validate production app isolation, access control or GrapheneOS security parity.",
+    "WebView and some firmware inputs were device-captured; full source closure was not established.",
+    "Preliminary runs without secondary-process launch wiring or without the Bionic shim are excluded from the comparison.",
+    "Bounded launch/restart checks are not a long-duration stability or performance test.",
+    "Login was driven through private diagnostic input; physical keyboard and gesture acceptance was not tested."
+  ]
+}

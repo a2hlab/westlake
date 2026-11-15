@@ -1,0 +1,12 @@
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794782913220 start manufacturer=HopeRun model=DAYU200 android=14 sdk=34 profile=0271dc8fc3d77e6d3afb4e8e9d7d54db85fe25e812fcec08365d8efe7d256996 apk=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794782918669 microg_profile=matches_host serial_identity=not_transferred
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794782918706 login=required waiting_seconds=600
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783123108 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783123337 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783123745 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783125648 microg_checkin=complete device_id_hash=5804ea0670600f245bc9619cfb03a235272ee822aba318a7d75efa42a222a26b
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783125693 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783126914 token_initial=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783127000 token_after_invalidation=present consent=false
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783127000 account_password_read=present
+[WL-GOOGLE-EXPERIMENT] run=bootstrap01 mode=microg-export time=1794783127822 credential_export=complete checkin_identity_exported=true policy_exported=false

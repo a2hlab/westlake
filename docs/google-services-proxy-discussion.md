@@ -2,6 +2,12 @@
 
 Discussion snapshot: 2026-11-15. Audience: Westlake implementers and reviewers.
 
+Board follow-up: [credential-handoff results](google-bootstrap-board-results.md).
+microG login/check-in and official-GMS credential reuse succeeded in the tested
+prototype. The official configuration continued to report
+`uncertified_status=1`; the sampled API results did not establish an improvement.
+The continuous proxy and a solution to Google's device restrictions remain open.
+
 The intended direction is to keep **official Google Play services and Play
 Store running in a sandbox**, supported by a GrapheneOS-style compatibility
 layer, while investigating microG for authentication, check-in and selected
