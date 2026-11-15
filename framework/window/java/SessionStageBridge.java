@@ -243,9 +243,11 @@ public class SessionStageBridge {
      *
      * OH avoid area maps to Android insets.
      */
-    public void onUpdateAvoidArea(int type, int left, int top, int right, int bottom) {
-        logBridged("UpdateAvoidArea(type=" + type + ")",
-                "-> IWindow.insetsControlChanged");
+    public void onUpdateAvoidArea(int type, int topX, int topY, int topWidth, int topHeight,
+                                  int bottomX, int bottomY, int bottomWidth, int bottomHeight) {
+        OhInsetsBridge.systemBars(mAndroidWindow, type, new android.graphics.Rect(topX, topY,
+                topX + topWidth, topY + topHeight), new android.graphics.Rect(bottomX, bottomY,
+                bottomX + bottomWidth, bottomY + bottomHeight));
     }
 
     /**

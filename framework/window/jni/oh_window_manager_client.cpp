@@ -1863,6 +1863,33 @@ OHWindowSession OHWindowManagerClient::createSession(
                             persistentId, fwrote ? 1 : 0, ferr, fret);
                     fflush(stderr);
                 }
+                // ADR-0008: an OH main window learns its system bars from SceneBoard's avoid areas, pushed when
+                // they change; ask once now (ISession::GetAvoidAreaByType, code 108) and hand them to the stage
+                // as a push would be. On a thread of its own: the stage takes its JNI lock, which a SceneBoard
+                // callback can hold while it waits for this (UI) thread; asked from here, OH's foreground
+                // acknowledgement never came (LIFECYCLE_TIMEOUT).
+                if (wl_managedMain) {
+                    OHOS::sptr<OHOS::IRemoteObject> wl_areaSession = sessionObject;
+                    OHOS::sptr<oh_adapter::SessionStageAdapter> wl_areaStage = sessionStage;
+                    std::thread([wl_areaSession, wl_areaStage]() {
+                        for (uint32_t wl_t = 0; wl_t <= 4; wl_t += 4) {
+                            OHOS::MessageParcel adata;
+                            OHOS::MessageParcel areply;
+                            OHOS::MessageOption aoption;
+                            bool awrote = adata.WriteInterfaceToken(u"OHOS.ISession") && adata.WriteUint32(wl_t) &&
+                                          adata.WriteInt32(0) && adata.WriteInt32(0) && adata.WriteInt32(0) &&
+                                          adata.WriteInt32(0) && adata.WriteInt32(20);
+                            int32_t aerr = awrote ? wl_areaSession->SendRequest(108, adata, areply, aoption) : -1;
+                            OHOS::sptr<OHOS::Rosen::AvoidArea> wl_area =
+                                aerr == 0 ? areply.ReadParcelable<OHOS::Rosen::AvoidArea>() : nullptr;
+                            if (wl_area != nullptr) {
+                                wl_areaStage->UpdateAvoidArea(wl_area, static_cast<OHOS::Rosen::AvoidAreaType>(wl_t));
+                            } else {
+                                fprintf(stderr, "[WL-INSETS] avoid area type %u not read (err=%d)\n", wl_t, aerr);
+                            }
+                        }
+                    }).detach();
+                }
                 // WESTLAKE §345: tell the session the app has DRAWN, and drop the starting window.
                 // §343/§344 proved RS never presents our pixels: with an UNCONDITIONAL opaque-red
                 // clear in SkiaPipeline the screen stayed pure black, even though the session is real
