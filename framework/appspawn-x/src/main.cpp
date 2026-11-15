@@ -204,6 +204,7 @@ int main(int argc, char* argv[]) {
     const char* socketName = kDefaultSocketName;
     const char* sandboxConfig = kDefaultSandboxConfig;
     bool preloadTest = false;
+    bool route = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--socket-name") == 0 && i + 1 < argc) {
             socketName = argv[++i];
@@ -211,6 +212,8 @@ int main(int argc, char* argv[]) {
             sandboxConfig = argv[++i];
         } else if (strcmp(argv[i], "--preload-test") == 0) {
             preloadTest = true;
+        } else if (strcmp(argv[i], "--route") == 0) {
+            route = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             fprintf(stdout,
                     "Usage: %s [OPTIONS]\n"
@@ -219,6 +222,7 @@ int main(int argc, char* argv[]) {
                     "  --socket-name NAME       Unix socket name (default: %s)\n"
                     "  --sandbox-config PATH    Sandbox config JSON (default: %s)\n"
                     "  --preload-test           Initialize source framework and exit without listening\n"
+                    "  --route                  Route OH's spawns to each managed bundle's own spawner\n"
                     "  --help, -h               Show this help\n",
                     argv[0], kDefaultSocketName, kDefaultSandboxConfig);
             return 0;
@@ -251,6 +255,11 @@ int main(int argc, char* argv[]) {
     }
 
     fprintf(stderr, "[MAIN] >>> Phase 1 DONE <<<\n"); fflush(stderr);
+    if (route) {
+        // ADR-0008: route OH's spawns to each managed bundle's own spawner; no runtime here.
+        server.runRouter();
+        return 0;
+    }
     // ============ Phase 2: Android Runtime Init ============
     fprintf(stderr, "[MAIN] >>> Phase 2 START <<<\n"); fflush(stderr);
     LOGI("Phase 2: Initializing Android Runtime (ART VM)...");

@@ -38,6 +38,9 @@ public:
     // Listens for connections, reads spawn requests, calls handler
     void run();
 
+    // ADR-0008 managed launches: route OH's spawn requests on this socket to each bundle's own spawner.
+    void runRouter();
+
     // Close the listening socket (called in child after fork)
     void closeSocket();
 

@@ -29,6 +29,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <sys/xattr.h>
+#include <thread>
 #include <unistd.h>
 
 namespace appspawnx {
@@ -1197,6 +1198,138 @@ void SpawnServer::sendResult(int clientFd, const SpawnResult& result) {
              n, strerror(errno));
     } else {
         LOGD("Sent spawn result: pid=%d result=%d", result.pid, result.result);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// ADR-0008 managed launches: the spawn router.
+//
+// OH's application manager sends every managed bundle's spawn to one socket (CJAppSpawn), but each app runs
+// in a spawner of its own, staged for it. The router serves that socket: it accepts only OH's application
+// manager (foundation), reads each request, finds the bundle's spawner in a registry only root can write,
+// asks that spawner for the process as the launcher does (a root peer), and answers OH with the pid it
+// returns. OH keeps the connection for later spawns, so each connection gets a thread.
+// ---------------------------------------------------------------------------
+static const char kManagedRegistryDir[] = "/data/service/el1/public/westlake-registry/managed";
+
+// The spawner socket registered for bundle, or "" when none is.
+static std::string managedSpawnerFor(const std::string& bundle) {
+    if (bundle.empty() || bundle.size() > 255 || bundle[0] == '.') return "";
+    for (unsigned char c : bundle) {
+        if (!isalnum(c) && c != '.' && c != '_') return "";
+    }
+    std::string path = std::string(kManagedRegistryDir) + "/" + bundle;
+    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return "";
+    struct stat st{};
+    char text[256] = {};
+    ssize_t got = (fstat(fd, &st) == 0 && st.st_uid == 0 && (st.st_mode & 022) == 0)
+        ? read(fd, text, sizeof(text) - 1) : -1;
+    close(fd);
+    if (got <= 0) return "";
+    std::string socket(text, static_cast<size_t>(got));
+    while (!socket.empty() && (socket.back() == '\n' || socket.back() == ' ')) socket.pop_back();
+    static const std::string kPrefix = "/dev/unix/socket/";
+    if (socket.compare(0, kPrefix.size(), kPrefix) != 0 || socket.find('/', kPrefix.size()) != std::string::npos ||
+        socket.size() >= sizeof(sockaddr_un::sun_path)) {
+        return "";
+    }
+    return socket;
+}
+
+// Asks the spawner at socketPath for the process in request; returns its whole answer, or empty.
+static std::vector<uint8_t> askSpawner(const std::string& socketPath, const std::vector<uint8_t>& request) {
+    std::vector<uint8_t> answer;
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return answer;
+    struct sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
+    struct timeval timeout{10, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    if (connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0 &&
+        send(fd, request.data(), request.size(), MSG_NOSIGNAL) == static_cast<ssize_t>(request.size())) {
+        uint8_t buffer[sizeof(OhAppSpawnResponseMsg)];
+        size_t have = 0;
+        while (have < sizeof(buffer)) {
+            ssize_t n = recv(fd, buffer + have, sizeof(buffer) - have, 0);
+            if (n <= 0) break;
+            have += static_cast<size_t>(n);
+        }
+        answer.assign(buffer, buffer + have);
+    }
+    close(fd);
+    return answer;
+}
+
+static void routeConnection(int client) {
+    struct ucred peer{};
+    socklen_t length = sizeof(peer);
+    if (getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 || !peerIsAppMgr(client, peer)) {
+        LOGE("[WESTLAKE-ROUTER] refused a connection from pid %d uid %u: not OH's application manager",
+             static_cast<int>(peer.pid), static_cast<unsigned>(peer.uid));
+        return;
+    }
+    for (;;) {
+        OhAppSpawnMsgHeader header{};
+        if (!recvAll(client, reinterpret_cast<uint8_t*>(&header), sizeof(header))) return;  // OH closed it
+        if (header.magic != OH_SPAWN_MSG_MAGIC || header.msgLen < sizeof(header) || header.msgLen > kMaxMessageSize) {
+            LOGE("[WESTLAKE-ROUTER] malformed request (magic 0x%08x, length %u)", header.magic, header.msgLen);
+            return;
+        }
+        std::vector<uint8_t> request(header.msgLen);
+        memcpy(request.data(), &header, sizeof(header));
+        if (header.msgLen > sizeof(header) &&
+            !recvAll(client, request.data() + sizeof(header), header.msgLen - sizeof(header))) {
+            return;
+        }
+        // The bundle, from its TLV (OH's AppSpawnMsgBundleInfo: index, then the name).
+        std::string bundle;
+        size_t offset = sizeof(header);
+        for (uint32_t i = 0; i < header.tlvCount && offset + sizeof(OhAppSpawnTlv) <= request.size(); ++i) {
+            auto* tlv = reinterpret_cast<const OhAppSpawnTlv*>(request.data() + offset);
+            if (tlv->tlvLen < sizeof(OhAppSpawnTlv) || offset + tlv->tlvLen > request.size()) break;
+            if (tlv->tlvType == OH_TLV_BUNDLE_INFO && tlv->tlvLen > sizeof(OhAppSpawnTlv) + sizeof(uint32_t)) {
+                const char* name = reinterpret_cast<const char*>(request.data() + offset + sizeof(OhAppSpawnTlv) +
+                                                                 sizeof(uint32_t));
+                bundle.assign(name, strnlen(name, tlv->tlvLen - sizeof(OhAppSpawnTlv) - sizeof(uint32_t)));
+            }
+            offset += tlv->tlvLen;
+        }
+        std::string spawner = header.msgType == static_cast<uint32_t>(MSG_APP_SPAWN) ? managedSpawnerFor(bundle) : "";
+        std::vector<uint8_t> answer = spawner.empty() ? std::vector<uint8_t>() : askSpawner(spawner, request);
+        if (answer.size() < sizeof(OhAppSpawnMsgHeader) + sizeof(int32_t) * 2) {
+            LOGE("[WESTLAKE-ROUTER] no spawner answered for %s (type %u, spawner %s)", bundle.c_str(),
+                 header.msgType, spawner.empty() ? "none registered" : spawner.c_str());
+            sendOhBinaryResponse(client, header.msgId, header.processName, -1, -1);
+            continue;
+        }
+        auto* response = reinterpret_cast<const OhAppSpawnResponseMsg*>(answer.data());
+        LOGI("[WESTLAKE-ROUTER] OH asked for %.64s of %s: %s answered pid %d (result %d)", header.processName,
+             bundle.c_str(), spawner.c_str(), response->result.pid, response->result.result);
+        if (send(client, answer.data(), answer.size(), MSG_NOSIGNAL) != static_cast<ssize_t>(answer.size())) return;
+    }
+}
+
+void SpawnServer::runRouter() {
+    signal(SIGPIPE, SIG_IGN);
+    mkdir("/data/service/el1/public/westlake-registry", 0700);
+    mkdir(kManagedRegistryDir, 0700);
+    LOGI("[WESTLAKE-ROUTER] routing OH's spawns on %s by bundle (%s)", socketPath_.c_str(), kManagedRegistryDir);
+    for (;;) {
+        int client = accept4(listenFd_, nullptr, nullptr, SOCK_CLOEXEC);
+        if (client < 0) {
+            if (errno != EINTR) {
+                LOGE("[WESTLAKE-ROUTER] accept failed: %s", strerror(errno));
+                usleep(100 * 1000);
+            }
+            continue;
+        }
+        std::thread([client] {
+            routeConnection(client);
+            close(client);
+        }).detach();
     }
 }
 
