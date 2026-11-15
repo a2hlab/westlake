@@ -296,7 +296,10 @@ final class PlayModuleFiles {
                 for (java.io.File f : entries) {
                     try {
                         StructStat stat = Os.lstat(f.getPath());
-                        if (OsConstants.S_ISREG(stat.st_mode) && (stat.st_mode & OsConstants.S_IROTH) != 0) files.add(f);
+                        if (OsConstants.S_ISREG(stat.st_mode) && (stat.st_mode & OsConstants.S_IROTH) != 0
+                                && closedDirectory(dataDir, f.getPath()) == null) {
+                            files.add(f);
+                        }
                     } catch (ErrnoException ignored) {
                         // Gone while listing.
                     }
@@ -318,6 +321,25 @@ final class PlayModuleFiles {
      * Opens a file of this process's own storage for a client, read-only, or answers null with the reason in
      * refusal[0]. dataDir is this application's data directory as this process names it.
      */
+    /**
+     * The first directory between the storage root and path that other applications cannot search, relative to
+     * dataDir, or null. With the file's own world-readable bit this is GrapheneOS's FileProxyService rule: what
+     * Play services shares, it makes reachable, as it does its module directories. The roots are the data
+     * directory and its device-protected storage (.device_protected), as GrapheneOS's are the CE and DE
+     * directories; the roots themselves are not checked.
+     */
+    static String closedDirectory(String dataDir, String path) throws ErrnoException {
+        String deviceProtected = dataDir + "/.device_protected/";
+        String root = path.startsWith(deviceProtected) ? deviceProtected : dataDir + "/";
+        for (int i = path.indexOf('/', root.length()); i > 0; i = path.indexOf('/', i + 1)) {
+            StructStat stat = Os.stat(path.substring(0, i));
+            if (!OsConstants.S_ISDIR(stat.st_mode) || (stat.st_mode & OsConstants.S_IXOTH) == 0) {
+                return path.substring(dataDir.length() + 1, i);
+            }
+        }
+        return null;
+    }
+
     static ParcelFileDescriptor open(String dataDir, String path, String[] refusal) {
         if (path == null || dataDir == null || !path.startsWith(dataDir + "/")) {
             refusal[0] = "not in this application's storage";
@@ -349,6 +371,11 @@ final class PlayModuleFiles {
             String opened = Os.readlink("/proc/self/fd/" + fd.getInt$());
             if (!path.equals(opened)) {
                 refusal[0] = "opened another file (a symlink on the way)";
+                return null;
+            }
+            String closed = closedDirectory(dataDir, path);
+            if (closed != null) {
+                refusal[0] = "directory " + closed + " is not world-searchable (the host did not share it)";
                 return null;
             }
             return ParcelFileDescriptor.dup(fd);
