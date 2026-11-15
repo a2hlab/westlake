@@ -137,6 +137,12 @@ extern "C" struct ANativeWindow* oh_anw_wrap(OHNativeWindow* oh);
 // proxy and was the smoking gun.
 static constexpr int32_t SCENE_SESSION_MANAGER_ID = 4606;
 
+// ADR-0008 managed launch (activity/jni/ability_scheduler_adapter.cpp): the main window session OH created
+// for an ability it started in this process, taken once for that activity's window.
+bool wl_managed_take_session(jlong tokenAddr, OHOS::sptr<OHOS::IRemoteObject>& session,
+                             OHOS::sptr<OHOS::IRemoteObject>& token, int32_t& persistentId,
+                             std::string& identityToken);
+
 namespace oh_adapter {
 
 // §3.1.4.1 — Android LayoutParams.type → OH WindowType.
@@ -996,6 +1002,20 @@ OHWindowSession OHWindowManagerClient::createSession(
             static_cast<unsigned long long>(ohTokenAddr),
             connected_ ? 1 : 0, static_cast<void*>(ssmProxy_.GetRefPtr()));
     fflush(stderr);
+    // ADR-0008 managed launch: an activity's window (TYPE_BASE_APPLICATION) whose ability OH started in this
+    // process is that ability's main window. SceneBoard created its session; this process connects to it, as
+    // OH's WindowSceneSessionImpl does, and SceneBoard owns its placement, focus and input.
+    OHOS::sptr<OHOS::IRemoteObject> wl_mSession;
+    OHOS::sptr<OHOS::IRemoteObject> wl_mToken;
+    int32_t wl_mId = 0;
+    std::string wl_mIdentity;
+    const bool wl_managedMain = androidWindowType == 1 && ohTokenAddr != 0 &&
+        wl_managed_take_session(static_cast<jlong>(ohTokenAddr), wl_mSession, wl_mToken, wl_mId, wl_mIdentity);
+    if (wl_managedMain) {
+        ohType = OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW;
+        fprintf(stderr, "[WL-MANAGED] %s: the main window of OH session %d\n", windowName.c_str(), wl_mId);
+        fflush(stderr);
+    }
 
     LOGI("createSession: bundle=%{public}s ability=%{public}s name=%{public}s, "
          "androidType=%{public}d -> ohType=%{public}u, "
@@ -1369,8 +1389,8 @@ OHWindowSession OHWindowManagerClient::createSession(
         // SkiaPipeline (§343 WL_TEST_COLOR) the screen stayed pure black, i.e. none of our pixels are
         // presented, while `nodes=1 nothingToDraw=0` proves Android is drawing real content.
         // So on the session path let SceneBoard own placement entirely.
-        const bool wl_selfAttach =
-            (getenv("WL_SUB_WINDOW") == nullptr) || (getenv("WL_SELF_ATTACH") != nullptr);
+        const bool wl_selfAttach = !wl_managedMain &&
+            ((getenv("WL_SUB_WINDOW") == nullptr) || (getenv("WL_SELF_ATTACH") != nullptr));
         if (wl_selfAttach) {
             surfaceNode->AttachToDisplay(static_cast<uint64_t>(displayId));
             OHOS::Rosen::RSTransaction::FlushImplicitTransaction();
@@ -1731,17 +1751,66 @@ OHWindowSession OHWindowManagerClient::createSession(
             OHOS::MessageParcel reply;
             OHOS::MessageOption option;
             OHOS::sptr<OHOS::Rosen::WindowSessionProperty> wl_propSptr(wl_prop);
-            bool wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") &&
-                         data.WriteRemoteObject(sessionStage->AsObject()) &&
-                         data.WriteRemoteObject(eventChannel->AsObject()) &&
-                         surfaceNode->Marshalling(data) &&
-                         data.WriteStrongParcelable(wl_propSptr);
-            int32_t v7err = wrote ? sceneProxy_->SendRequest(0, data, reply, option) : -1;
+            bool wrote = false;
+            int32_t v7err = -1;
             int32_t persistentId = 0;
             OHOS::sptr<OHOS::IRemoteObject> sessionObject = nullptr;
-            if (v7err == 0) {
-                persistentId = reply.ReadInt32();
-                sessionObject = reply.ReadRemoteObject();
+            if (wl_managedMain) {
+                // ISession::Connect (SessionProxy::Connect, OpenHarmony-v6.1-Release): stage, event channel,
+                // surface node, the property, the ability token when the property says it has one, and the
+                // identity token OH gave the ability. SceneBoard accepts it from the process AMS started.
+                wl_prop->SetWindowType(OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW);
+                wl_prop->SetParentId(OHOS::Rosen::INVALID_WINDOW_ID);
+                wl_prop->SetParentPersistentId(OHOS::Rosen::INVALID_SESSION_ID);
+                wl_prop->SetPersistentId(wl_mId);
+                wl_prop->SetFocusable(true);
+                wl_prop->SetFocusableOnShow(true);
+                wl_prop->SetTokenState(wl_mToken != nullptr);
+                {
+                    OHOS::Rosen::SessionInfo wl_si;
+                    wl_si.bundleName_ = bundleName;
+                    wl_si.moduleName_ = "entry";
+                    wl_si.abilityName_ = abilityName;
+                    wl_si.windowType_ = static_cast<uint32_t>(OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW);
+                    wl_si.screenId_ = static_cast<uint64_t>(displayId);
+                    wl_si.persistentId_ = wl_mId;
+                    wl_prop->SetSessionInfo(wl_si);
+                }
+                wrote = data.WriteInterfaceToken(u"OHOS.ISession") &&
+                        data.WriteRemoteObject(sessionStage->AsObject()) &&
+                        data.WriteRemoteObject(eventChannel->AsObject()) &&
+                        surfaceNode->Marshalling(data) &&
+                        data.WriteBool(true) &&
+                        data.WriteStrongParcelable(wl_propSptr) &&
+                        (wl_mToken == nullptr || data.WriteRemoteObject(wl_mToken)) &&
+                        data.WriteString(wl_mIdentity);
+                v7err = wrote ? wl_mSession->SendRequest(0, data, reply, option) : -1;
+                // The reply ends with the result code, after the system config and the session's properties.
+                int32_t wl_ret = -1;
+                if (v7err == 0 && reply.GetDataSize() >= sizeof(int32_t)) {
+                    reply.RewindRead(reply.GetDataSize() - sizeof(int32_t));
+                    wl_ret = reply.ReadInt32();
+                }
+                fprintf(stderr, "[WL-MANAGED] Connect(session %d) wrote=%d err=%d ret=%d token=%s\n",
+                        wl_mId, wrote ? 1 : 0, v7err, wl_ret, wl_mToken != nullptr ? "yes" : "no");
+                fflush(stderr);
+                if (v7err == 0 && wl_ret == 0) {
+                    persistentId = wl_mId;
+                    sessionObject = wl_mSession;
+                } else if (v7err == 0) {
+                    v7err = wl_ret;
+                }
+            } else {
+                wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") &&
+                        data.WriteRemoteObject(sessionStage->AsObject()) &&
+                        data.WriteRemoteObject(eventChannel->AsObject()) &&
+                        surfaceNode->Marshalling(data) &&
+                        data.WriteStrongParcelable(wl_propSptr);
+                v7err = wrote ? sceneProxy_->SendRequest(0, data, reply, option) : -1;
+                if (v7err == 0) {
+                    persistentId = reply.ReadInt32();
+                    sessionObject = reply.ReadRemoteObject();
+                }
             }
             fprintf(stderr, "[WESTLAKE-WMC] V7 wrote=%d err=%d persistentId=%d session=%p\n",
                     wrote ? 1 : 0, v7err, persistentId,
@@ -1786,7 +1855,7 @@ OHWindowSession OHWindowManagerClient::createSession(
                                   fdata.WriteBool(true) &&
                                   fdata.WriteStrongParcelable(wl_propSptr) &&
                                   fdata.WriteBool(true) &&              // isFromClient
-                                  fdata.WriteString("");                // identityToken
+                                  fdata.WriteString(wl_managedMain ? wl_mIdentity : std::string(""));
                     int32_t ferr = fwrote ? sessionObject->SendRequest(1, fdata, freply, foption) : -1;
                     int32_t fret = (ferr == 0) ? freply.ReadInt32() : -1;
                     fprintf(stderr,
