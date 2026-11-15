@@ -28,15 +28,28 @@ import java.util.Set;
  * directory, so no directory on the way was a symlink out of it. Validation is of the opened object.
  *
  * Client side, {@link #view}: a cursor from a host's provider whose string names a file in the host's storage
- * logs it ([WL-MODULE]). With WESTLAKE_PLAY_MODULE_FILES=descriptor the client asks the host for that file and
- * reads /proc/self/fd/<n> instead: a read-only descriptor it keeps open for the process's life, since class
- * loaders and mappings keep using it. Without the switch the paths pass unchanged (observe only).
+ * logs it ([WL-MODULE]). WESTLAKE_PLAY_MODULE_FILES picks what the client does with such a file:
+ * - unset: nothing; the paths pass unchanged (observe only).
+ * - descriptor: the client asks the host for the file and reads /proc/self/fd/<n> instead, a read-only descriptor
+ *   kept open for the process's life, since class loaders and mappings keep using it.
+ * - copy: the client makes a private copy at the same path in its own view of /data/data, from the host's
+ *   read-only descriptor, checked by SHA-256 and made read-only (Android refuses writable dex) before it is renamed
+ *   into place; the path then works for every loader (dex, resources, native libraries) unchanged. ADR-0005
+ *   decision 3's integrity-checked copy in the receiving app's private storage: a client can change only its own
+ *   copy. Play services' module code running in the client also finds modules through its config, not only
+ *   through cursors, so the first time the client reaches Play services' module provider it copies every module
+ *   file the host lists ({@link #list}, MODULE_LIST).
  */
 final class PlayModuleFiles {
     private PlayModuleFiles() {}
 
     private static final String TAG = "[WL-MODULE] ";
-    static final boolean DESCRIPTORS = "descriptor".equals(System.getenv("WESTLAKE_PLAY_MODULE_FILES"));
+    private static final String MODE = System.getenv("WESTLAKE_PLAY_MODULE_FILES");
+    static final boolean DESCRIPTORS = "descriptor".equals(MODE);
+    static final boolean COPIES = "copy".equals(MODE);
+    /** Module files a host lists at most, and their total size: copies are per client. */
+    static final int MAX_LISTED = 32;
+    static final long MAX_LISTED_BYTES = 64L << 20;
 
     // ---- Client side ----
 
@@ -140,7 +153,9 @@ final class PlayModuleFiles {
     private static String named(String hostPackage, String where, String path) {
         String answer = path;
         String how = "observed";
-        if (DESCRIPTORS) {
+        if (COPIES) {
+            how = copy(hostPackage, path) ? "copied" : "not copied";
+        } else if (DESCRIPTORS) {
             ParcelFileDescriptor file;
             synchronized (sOpened) {
                 file = sOpened.get(path);
@@ -164,6 +179,96 @@ final class PlayModuleFiles {
         return answer;
     }
 
+    private static final Map<String, Boolean> sCopied = new HashMap<>();   // guarded by sCopied
+    private static final Set<String> sListed = new HashSet<>();            // guarded by sListed
+
+    /**
+     * Copies every module file the host lists, once per host, the first time this app reaches its module provider:
+     * Play services' module code in this app finds modules through its config as well as through cursors.
+     */
+    static void copyListed(String hostPackage) {
+        if (!COPIES) return;
+        synchronized (sListed) {
+            if (!sListed.add(hostPackage)) return;
+        }
+        String[] paths = PlayServicesChannel.moduleList(hostPackage);
+        int copied = 0;
+        for (String path : paths) {
+            if (inStorage(hostPackage, path) && copy(hostPackage, path)) copied++;
+        }
+        System.err.println(TAG + hostPackage + " lists " + paths.length + " module files; " + copied + " copied");
+    }
+
+    /** A private, read-only copy of a host's file at the same path in this app's view, made once; false if not. */
+    static boolean copy(String hostPackage, String path) {
+        if (!inStorage(hostPackage, path)) return false;
+        for (String part : path.substring(1).split("/", -1)) {
+            if (part.isEmpty() || part.equals(".") || part.equals("..")) return false;   // only a plain path
+        }
+        synchronized (sCopied) {
+            Boolean done = sCopied.get(path);
+            if (done == null) {
+                done = makeCopy(hostPackage, path);
+                sCopied.put(path, done);
+            }
+            return done;
+        }
+    }
+
+    private static boolean makeCopy(String hostPackage, String path) {
+        ParcelFileDescriptor file = PlayServicesChannel.moduleFile(hostPackage, path);
+        if (file == null) return false;
+        java.io.File target = new java.io.File(path);
+        java.io.File temp = new java.io.File(target.getParentFile(), "." + target.getName() + ".wl-" + android.os.Process.myPid());
+        try (java.io.InputStream in = new ParcelFileDescriptor.AutoCloseInputStream(file)) {
+            java.io.File dir = target.getParentFile();
+            if (!dir.isDirectory() && !dir.mkdirs()) throw new java.io.IOException("cannot create " + relative(hostPackage, dir.getPath()));
+            java.security.MessageDigest streamed = java.security.MessageDigest.getInstance("SHA-256");
+            long bytes = 0;
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                byte[] buffer = new byte[1 << 16];
+                for (int n; (n = in.read(buffer)) > 0; bytes += n) {
+                    streamed.update(buffer, 0, n);
+                    out.write(buffer, 0, n);
+                }
+                out.getFD().sync();
+            }
+            byte[] wanted = streamed.digest();
+            Os.chmod(temp.getPath(), 0444);
+            if (!java.util.Arrays.equals(wanted, digest(temp))) throw new java.io.IOException("the copy differs from what was read");
+            if (target.exists()) {
+                if (java.util.Arrays.equals(wanted, digest(target))) {
+                    temp.delete();
+                    return true;
+                }
+                Os.chmod(target.getPath(), 0644);
+            }
+            Os.rename(temp.getPath(), target.getPath());
+            System.err.println(TAG + "copied " + hostPackage + "'s " + relative(hostPackage, path) + " (" + bytes
+                    + " bytes, sha256 " + hex(wanted).substring(0, 12) + "...) read-only");
+            return true;
+        } catch (Exception e) {
+            temp.delete();
+            System.err.println(TAG + "no copy of " + hostPackage + "'s " + relative(hostPackage, path) + ": " + e);
+            return false;
+        }
+    }
+
+    private static byte[] digest(java.io.File file) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[1 << 16];
+            for (int n; (n = in.read(buffer)) > 0; ) md.update(buffer, 0, n);
+        }
+        return md.digest();
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder out = new StringBuilder();
+        for (byte b : bytes) out.append(String.format("%02x", b & 0xff));
+        return out.toString();
+    }
+
     static String relative(String hostPackage, String path) {
         if (path == null) return "null";
         for (String prefix : storage(hostPackage)) {
@@ -173,6 +278,41 @@ final class PlayModuleFiles {
     }
 
     // ---- Host side ----
+
+    /**
+     * The module files this host shares, as it names them: the regular, world-readable files under its Chimera
+     * module directories (app_chimera/m, in credential and device-protected storage), at most MAX_LISTED files and
+     * MAX_LISTED_BYTES bytes, smallest first.
+     */
+    static String[] list(String dataDir) {
+        if (dataDir == null) return new String[0];
+        java.util.List<java.io.File> files = new java.util.ArrayList<>();
+        for (String root : new String[] {dataDir + "/app_chimera/m", dataDir + "/.device_protected/app_chimera/m"}) {
+            java.io.File[] modules = new java.io.File(root).listFiles();
+            if (modules == null) continue;
+            for (java.io.File module : modules) {
+                java.io.File[] entries = module.listFiles();
+                if (entries == null) continue;
+                for (java.io.File f : entries) {
+                    try {
+                        StructStat stat = Os.lstat(f.getPath());
+                        if (OsConstants.S_ISREG(stat.st_mode) && (stat.st_mode & OsConstants.S_IROTH) != 0) files.add(f);
+                    } catch (ErrnoException ignored) {
+                        // Gone while listing.
+                    }
+                }
+            }
+        }
+        files.sort(java.util.Comparator.comparingLong(java.io.File::length));
+        java.util.List<String> out = new java.util.ArrayList<>();
+        long total = 0;
+        for (java.io.File f : files) {
+            if (out.size() == MAX_LISTED || total + f.length() > MAX_LISTED_BYTES) break;
+            total += f.length();
+            out.add(f.getPath());
+        }
+        return out.toArray(new String[0]);
+    }
 
     /**
      * Opens a file of this process's own storage for a client, read-only, or answers null with the reason in
