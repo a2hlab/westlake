@@ -46,8 +46,6 @@ import java.util.concurrent.Executors;
 final class LocalAccounts {
     private static final String TAG = "WL_Accounts";
     private static final String TYPE = "com.google";
-    private static final String AUTHENTICATOR =
-            "com.google.android.gms.auth.account.authenticator.GoogleAccountAuthenticatorService";
 
     private static final Object LOCK = new Object();
     private static final ExecutorService REQUESTS = Executors.newCachedThreadPool();
@@ -64,20 +62,31 @@ final class LocalAccounts {
     }
 
     private static Properties store() {
-        if (sStore != null) return sStore;
-        sStore = new Properties();
-        File file = file();
-        if (file.isFile()) {
-            try (FileInputStream in = new FileInputStream(file)) {
-                sStore.load(in);
-            } catch (IOException e) {
-                Log.e(TAG, "cannot read the account store: " + e.getClass().getName());
+        synchronized (LOCK) {
+            if (sStore != null) return sStore;
+            Properties loaded = new Properties();
+            File file = file();
+            if (file.isFile()) {
+                try (FileInputStream in = new FileInputStream(file)) {
+                    loaded.load(in);
+                } catch (IOException e) {
+                    if (GoogleBootstrapExperiment.enabled()) throw new IllegalStateException("account store unreadable", e);
+                    Log.e(TAG, "cannot read the account store: " + e.getClass().getName());
+                }
             }
+            // Publish only after a successful import; a failed first access must not make a later
+            // caller observe an empty, apparently initialized store.
+            sStore = GoogleBootstrapExperiment.importIfRequested(ActivityThread.currentApplication(), file, loaded);
+            return sStore;
         }
-        return sStore;
     }
 
     private static void save() {
+        if (GoogleBootstrapExperiment.enabled()) {
+            try { BootstrapTransfer.writePrivate(file().toPath(), store()); }
+            catch (IOException e) { throw new IllegalStateException("experiment account write failed", e); }
+            return;
+        }
         try (FileOutputStream out = new FileOutputStream(file())) {
             store().store(out, null);
         } catch (IOException e) {
@@ -181,13 +190,17 @@ final class LocalAccounts {
                     + " on accounts of type " + TYPE);
         }
         switch (method) {
-            case "getPassword":
-                return exists((Account) args[0]) ? store().getProperty(key("password", (Account) args[0])) : null;
+            case "getPassword": {
+                String credential = exists((Account) args[0]) ? store().getProperty(key("password", (Account) args[0])) : null;
+                GoogleBootstrapExperiment.event("account_password_read=" + (credential != null ? "present" : "missing"));
+                return credential;
+            }
             case "getUserData":
                 return store().getProperty(key("data", (Account) args[0]) + "/" + args[1]);
             case "getAuthenticatorTypes":
                 return new AuthenticatorDescription[] {
-                    new AuthenticatorDescription(TYPE, ActivityThread.currentPackageName(), 0, 0, 0, 0)};
+                    new AuthenticatorDescription(TYPE, ActivityThread.currentPackageName(), 0, 0, 0, 0,
+                            GoogleBootstrapExperiment.microg())};
             case "getAccountsForPackage":
                 return accounts(null).toArray(new Account[0]);
             case "getAccountsByTypeForPackage":
@@ -348,7 +361,9 @@ final class LocalAccounts {
             @Override
             public void onResult(Bundle value) throws RemoteException {
                 String token = value == null ? null : value.getString(AccountManager.KEY_AUTHTOKEN);
-                if (token != null) put(key("token", account) + "/" + tokenType, token);
+                // microG owns its caller/package/signature-aware custom-token cache. Do not collapse
+                // its results into the ordinary account/token-type cache.
+                if (token != null && !GoogleBootstrapExperiment.microg()) put(key("token", account) + "/" + tokenType, token);
                 // The outcome only, never the token.
                 System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + " uid="
                         + request.getInt(AccountManager.KEY_CALLER_UID) + ": "
@@ -389,12 +404,12 @@ final class LocalAccounts {
 
             @Override
             public void onError(int code, String message) throws RemoteException {
-                Log.w(TAG, "authenticator error " + code + ": " + message);
+                Log.w(TAG, "authenticator error " + code);
                 if (caller != null) caller.onError(code, message);
             }
         };
         Intent intent = new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT)
-                .setComponent(new ComponentName(app.getPackageName(), AUTHENTICATOR));
+                .setComponent(new ComponentName(app.getPackageName(), GoogleBootstrapExperiment.authenticator()));
         boolean bound = app.bindService(intent, new ServiceConnection() {
             @Override
             public void onServiceConnected(ComponentName name, IBinder binder) {

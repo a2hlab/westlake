@@ -1,0 +1,76 @@
+{
+  "schema": "westlake-google-bootstrap-host-validation-v1",
+  "base_revision": "3761f42b3ba7f3f2c91ab883f2f92d485e2e1883",
+  "branch": "experiment/microg-bootstrap",
+  "host_checks": {
+    "transfer_and_staging": 17,
+    "evidence_classification": 6,
+    "status": "passed"
+  },
+  "adapter_classes": 246,
+  "java_build": {
+    "report": "/home/dspfac/a2hlab/source-closure/verify/out/westlake-microg-bootstrap-03/artifacts.json",
+    "artifacts": {
+      "westlake-unrelocated.classes.jar": {
+        "bytes": 649437,
+        "sha256": "5909607d914379f1d20eb75a09d38755a0f9a13fa9d80a57b8c50a8cba0ea495"
+      }
+    }
+  },
+  "runtime_build": {
+    "report": "/home/dspfac/a2hlab/source-closure/verify/out/framework-runtime-google-bootstrap-02/artifacts.json",
+    "artifacts": {
+      "adapter-runtime-bcp.classes.jar": {
+        "bytes": 649437,
+        "sha256": "5909607d914379f1d20eb75a09d38755a0f9a13fa9d80a57b8c50a8cba0ea495"
+      },
+      "adapter-runtime-bcp.jar": {
+        "bytes": 357716,
+        "sha256": "dd3b167bbe3edff3f2637f2f436810d91323986d2d6053ea9c59c6aa98061262"
+      },
+      "framework.classes.jar": {
+        "bytes": 48623168,
+        "sha256": "428a3410775f7ca450fee2c3f9ac0738260c4b528411fd5e53ac0492c8ea2c61"
+      },
+      "framework.jar": {
+        "bytes": 18119362,
+        "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+      }
+    }
+  },
+  "probe_build": {
+    "schema": "westlake-google-probe-build-v1",
+    "device_tested": false,
+    "apk": "/home/dspfac/a2hlab/source-closure/verify/out/google-bootstrap-probe-04/google-bootstrap-probe.apk",
+    "apk_sha256": "551d6a18bbbbd7097690738d8ec2add8e0e413eaa65dd1b81eff953f17248957",
+    "sources": {
+      "tests/google-bootstrap/ProbeActivity.java": "2aef82111039e1e15d71f2dd1f8ec2bf728830b17e47516d8efbc721a6d715e3",
+      "tests/google-bootstrap/AndroidManifest.xml": "d26c9ac6aab4bacd42fee7d9daa61c6b633e8ce3a14bc2fb84ef688e3dfd29ea"
+    }
+  },
+  "source_hashes": {
+    "framework/core/java/BootstrapTransfer.java": "ba161d8b0d08dd63d74d8600ecc82fcccb38e8f3e640a09c7764f169a954e02c",
+    "framework/core/java/GoogleBootstrapExperiment.java": "b8d529ce392163ee8e94dcb215d6358a7800501637a51efb1471c99d53db5c88",
+    "framework/core/java/LocalAccounts.java": "94ddffd065a7c6fbfb41f54670c8e24584a72900e11d8cd8b943d16f46c7ca15",
+    "framework/activity/java/AppSchedulerBridge.java": "0703452950b489f0820b821e50d743f724dba3db3273aad1eee6aba53f96d9ed",
+    "framework/activity/java/LocalGservices.java": "df1ac21dd9cf2164d499e2349d83953b6f85848b7df1868422fdb28dc8437497",
+    "framework/android-runtime/src/android_os_SystemProperties.cpp": "2d220fde2cf7b823c46f63d1ab7aed08ed771d530aa675ba35c9eeabe22886ed",
+    "tests/google-bootstrap/ProbeActivity.java": "2aef82111039e1e15d71f2dd1f8ec2bf728830b17e47516d8efbc721a6d715e3",
+    "tests/google-bootstrap/BootstrapStage.java": "f0f7ee85433966572120f21daf612659f34a74eff37961b87f0e95949fe72320",
+    "tests/google-bootstrap/BootstrapTransferTest.java": "7ca9d48d6f1c07acae84799a87dd7483ab00535a1d924fddecd8741d3637d9c2",
+    "tests/google-bootstrap/AndroidManifest.xml": "d26c9ac6aab4bacd42fee7d9daa61c6b633e8ce3a14bc2fb84ef688e3dfd29ea",
+    "tools/build_google_bootstrap_probe.py": "29a0c90a38d8158190a5fe2aba1f9f28bb2e6cf007074b99c87f4284623d5d4a",
+    "tools/summarize_google_bootstrap.py": "eb01c8e5c3c7116b69bf9175e39d675ac7d10405709dcacd18330746a2b12287",
+    "tests/test_google_bootstrap.py": "fa4bb472e54f1679d317738f0a94323b298c10b6f8462b90b318c07bb8bc7385"
+  },
+  "board_deployed": false,
+  "google_account_used": false,
+  "google_server_acceptance_tested": false,
+  "manufacturer_native_binary_rebuilt": false,
+  "limitations": [
+    "Runtime boot-image rebuild/deployment must match the connected board.",
+    "Host checks do not validate microG login or official service acceptance.",
+    "Device identity handoff is pinned to GMS version 244034029.",
+    "Existing D8 reports min-api 35 unsupported and a framework CharSequence.compare backport warning."
+  ]
+}

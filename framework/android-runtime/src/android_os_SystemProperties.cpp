@@ -91,7 +91,7 @@ static const AdapterPropFallback kAdapterPropFallbacks[] = {
     // Build product / model — used by Build static fields. Empty string is
     // safe but feels nicer to populate.
     { "ro.product.brand",             "OpenHarmony" },
-    { "ro.product.manufacturer",      "OpenHarmony" },
+    { "ro.product.manufacturer",      "HopeRun" },
     { "ro.product.model",             "DAYU200" },
     { "ro.product.device",            "rk3568" },
     { "ro.product.name",              "rk3568" },

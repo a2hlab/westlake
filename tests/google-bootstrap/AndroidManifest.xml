@@ -1,0 +1,13 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.westlake.googlebootstrap.probe">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="28" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <queries><package android:name="com.google.android.gms" /></queries>
+    <application android:label="Westlake Google experiment" android:allowBackup="false">
+        <activity android:name=".ProbeActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

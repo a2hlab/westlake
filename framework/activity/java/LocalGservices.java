@@ -148,6 +148,18 @@ final class LocalGservices extends ContentProvider {
             save(mValues, file("values.properties"));
         }
         Log.i(TAG, "stored " + count + " values (" + (table != null ? table : "authority") + ")");
+        if (adapter.core.GoogleBootstrapExperiment.enabled()) {
+            String status = value("uncertified_status");
+            // Only a bounded numeric policy field; never dump a server settings table or android_id.
+            if (status != null && !status.matches("[0-9]{1,3}")) status = "unrecognized";
+            adapter.core.GoogleBootstrapExperiment.event("gservices_update="
+                    + ("main".equals(table) ? "full" : "difference")
+                    + " uncertified_status=" + (status == null ? "absent" : status)
+                    + " policy_override=" + mOverrides.containsKey("uncertified_status")
+                    + " device_id_hash=" + (value("android_id") == null ? "absent"
+                        : adapter.core.GoogleBootstrapExperiment.deviceIdHash(value("android_id")))
+                    + " freshness=provider_write_only");
+        }
         // Readers cache values until told otherwise, so without this they keep what they read first:
         // an Android ID of 0, read before check-in finished.
         android.app.Application app = ActivityThread.currentApplication();

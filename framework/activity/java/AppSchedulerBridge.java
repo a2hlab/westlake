@@ -264,6 +264,7 @@ public class AppSchedulerBridge {
                 System.err.println("[DIRECT-LAUNCH] " + AppProcesses.self() + " started: no activity");
                 return;
             }
+            adapter.core.GoogleBootstrapExperiment.start(android.app.ActivityThread.currentApplication());
             // The shared Play services process runs with no activity (ADR-0001).
             if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))) {
                 System.err.println("[DIRECT-LAUNCH] no activity for " + pkg);

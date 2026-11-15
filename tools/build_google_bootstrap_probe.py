@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Build and sign the external Google API probe. Credentials and device data are never inputs."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def build(sdk, out, jdk):
+    sdk, out = sdk.resolve(), out.absolute()
+    out.mkdir(parents=True, exist_ok=False)
+    source = ROOT / 'tests/google-bootstrap'
+    api = sdk / 'platforms/android-34/android.jar'
+    bt = sdk / 'build-tools/34.0.0'
+    classes = out / 'classes'
+    classes.mkdir()
+
+    def run(*args):
+        env = dict(os.environ, JAVA_HOME=str(jdk), PATH=str(jdk / 'bin') + os.pathsep + os.environ['PATH'])
+        subprocess.run(list(map(str, args)), check=True, env=env)
+
+    run('javac', '--release', '8', '-encoding', 'UTF-8', '-classpath', api, '-d', classes, source / 'ProbeActivity.java')
+    run(sys.executable, ROOT / 'tools/strip_method_parameters.py', classes)
+    run(bt / 'd8', '--min-api', '28', '--lib', api, '--output', out, *sorted(classes.rglob('*.class')))
+    run(bt / 'aapt2', 'link', '-I', api, '--manifest', source / 'AndroidManifest.xml', '-o', out / 'unsigned.apk')
+    with zipfile.ZipFile(out / 'unsigned.apk', 'a') as archive:
+        archive.write(out / 'classes.dex', 'classes.dex')
+    run(bt / 'zipalign', '-p', '4', out / 'unsigned.apk', out / 'aligned.apk')
+    # Throwaway development signing key; keep the same built APK across all compared phases.
+    key = out / 'probe-debug.p12'
+    run('keytool', '-genkeypair', '-keystore', key, '-storetype', 'PKCS12', '-storepass', 'android',
+        '-alias', 'probe', '-keyalg', 'RSA', '-keysize', '2048', '-validity', '365', '-dname', 'CN=Westlake experiment')
+    key.chmod(0o600)
+    apk = out / 'google-bootstrap-probe.apk'
+    run(bt / 'apksigner', 'sign', '--ks', key, '--ks-pass', 'pass:android', '--out', apk, out / 'aligned.apk')
+    run(bt / 'apksigner', 'verify', apk)
+    report = {'schema': 'westlake-google-probe-build-v1', 'device_tested': False,
+              'apk': str(apk), 'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
+              'sources': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+                          for p in [source / 'ProbeActivity.java', source / 'AndroidManifest.xml']}}
+    (out / 'artifacts.json').write_text(json.dumps(report, indent=2) + '\n')
+    print('GOOGLE_BOOTSTRAP_PROBE_BUILT', apk)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sdk', type=Path, required=True)
+    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--jdk', type=Path, required=True, help='JDK 17 or 21 home, used for javac and D8')
+    args = parser.parse_args()
+    build(args.sdk, args.out, args.jdk.resolve())
