@@ -57,10 +57,70 @@ final class PlayModuleFiles {
         return false;
     }
 
+    private static final Set<String> sCalls = new HashSet<>();
+
+    /** Play services' module provider, whose answers make the module inventory ADR-0005 asks for. */
+    static boolean modules(String authority) {
+        return authority != null && authority.endsWith(".chimera");
+    }
+
+    /** A client's call to a host's module provider: the method and the URI's path, once each (inventory). */
+    static void observeCall(String authority, String method, Object[] args) {
+        if (!modules(authority)) return;
+        String uri = null;
+        if (args != null) {
+            for (Object arg : args) {
+                if (arg instanceof android.net.Uri) {
+                    uri = ((android.net.Uri) arg).getPath();
+                    break;
+                }
+            }
+        }
+        synchronized (sCalls) {
+            if (!sCalls.add(method + " " + uri)) return;
+        }
+        System.err.println(TAG + authority + " " + method + " " + uri);
+    }
+
     /** A cursor from a host's provider, whose strings naming the host's files are logged and, if switched on, served. */
     static Cursor view(Cursor cursor, String hostPackage, String authority) {
         if (cursor == null || hostPackage == null) return cursor;
+        if (modules(authority)) {
+            synchronized (sCalls) {
+                if (sCalls.add("columns " + java.util.Arrays.toString(cursor.getColumnNames()))) {
+                    System.err.println(TAG + authority + " columns " + java.util.Arrays.toString(cursor.getColumnNames()));
+                }
+            }
+        }
         return new CursorWrapper(cursor) {
+            @Override
+            public int getInt(int column) {
+                int value = super.getInt(column);
+                number(column, value);
+                return value;
+            }
+
+            @Override
+            public long getLong(int column) {
+                long value = super.getLong(column);
+                number(column, value);
+                return value;
+            }
+
+            private void number(int column, long value) {
+                if (!modules(authority)) return;
+                String name;
+                try {
+                    name = getColumnName(column);
+                } catch (RuntimeException e) {
+                    name = String.valueOf(column);
+                }
+                synchronized (sCalls) {
+                    if (!sCalls.add("value " + name + " " + value)) return;
+                }
+                System.err.println(TAG + authority + " " + name + " = " + value);
+            }
+
             @Override
             public String getString(int column) {
                 String value = super.getString(column);
