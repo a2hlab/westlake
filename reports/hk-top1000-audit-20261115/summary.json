@@ -1,0 +1,497 @@
+{
+  "generated_utc": "2026-11-15T18:19:08.790703+00:00",
+  "ranked_apps": 1000,
+  "archive_scanned": 982,
+  "archive_unavailable": 18,
+  "latest_saved_launch": {
+    "drawing": 785,
+    "view": 56,
+    "runtime-init": 119,
+    "activity": 2,
+    "bound": 16,
+    "unscored": 22
+  },
+  "ever_drawing": 829,
+  "exploration_latest": {
+    "survived-exploration": 315,
+    "ended-during-exploration": 176,
+    "mostly-empty-view-trees": 24,
+    "not-tested": 485
+  },
+  "exploration_records": 1277,
+  "scripted_check_apps": 6,
+  "scripted_check_records": 17,
+  "latest_scripted_assertions_passed": 16,
+  "latest_scripted_assertions_total": 16,
+  "post_cutoff_logged_apps": 27,
+  "post_cutoff_logs": 65,
+  "post_cutoff_play_trace_apps": 27,
+  "post_cutoff_status9_apps": 26,
+  "post_cutoff_status9_also_drawing": 23,
+  "google_raw_logs_parsed": 1043,
+  "source_reads": 4621,
+  "l8f_nonallowlisted_service_request_apps": 320,
+  "historical_candidate_rows": 38030,
+  "historical_candidate_unique_ids": 553,
+  "blocker_categories": {
+    "native-crash": 124,
+    "app-framework": 12,
+    "stall": 16,
+    "unclassified": 14,
+    "no-frame": 9,
+    "native-upcalls": 1,
+    "self-exit": 10,
+    "native-loading": 2,
+    "self-finish": 2,
+    "self-kill": 2,
+    "native-symbols": 1
+  },
+  "features": [
+    {
+      "family": "gms:sign-in",
+      "feature": "Google sign-in / identity",
+      "static_type_presence_apps": 953,
+      "broker_service_ids": [
+        91,
+        212,
+        343,
+        381
+      ],
+      "l8f_requested_apps": 37,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "family": "gms:location",
+      "feature": "Google location",
+      "static_type_presence_apps": 816,
+      "broker_service_ids": [
+        23
+      ],
+      "l8f_requested_apps": 35,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "family": "gms:maps",
+      "feature": "Google Maps SDK",
+      "static_type_presence_apps": 182,
+      "broker_service_ids": [],
+      "l8f_requested_apps": null,
+      "post_cutoff_status9_apps": null
+    },
+    {
+      "family": "gms:ads-api-excluding-identifier",
+      "feature": "Ads API types excluding Advertising ID",
+      "static_type_presence_apps": 542,
+      "broker_service_ids": [
+        8,
+        116
+      ],
+      "l8f_requested_apps": 72,
+      "post_cutoff_status9_apps": 21
+    },
+    {
+      "family": "gms:ads-identifier",
+      "feature": "Advertising ID",
+      "static_type_presence_apps": 785,
+      "broker_service_ids": [],
+      "l8f_requested_apps": null,
+      "post_cutoff_status9_apps": null
+    },
+    {
+      "family": "play:integrity",
+      "feature": "Play Integrity",
+      "static_type_presence_apps": 535,
+      "broker_service_ids": [],
+      "l8f_requested_apps": null,
+      "post_cutoff_status9_apps": null
+    },
+    {
+      "family": "gms:safetynet",
+      "feature": "Legacy SafetyNet",
+      "static_type_presence_apps": 26,
+      "broker_service_ids": [
+        45
+      ],
+      "l8f_requested_apps": 2,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "family": "gms:wallet-pay",
+      "feature": "Google Wallet / Pay",
+      "static_type_presence_apps": 70,
+      "broker_service_ids": [
+        4,
+        198
+      ],
+      "l8f_requested_apps": 1,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "family": "play:billing",
+      "feature": "Play Billing",
+      "static_type_presence_apps": 880,
+      "broker_service_ids": [],
+      "l8f_requested_apps": null,
+      "post_cutoff_status9_apps": null
+    },
+    {
+      "family": "fcm",
+      "feature": "Firebase Cloud Messaging",
+      "static_type_presence_apps": 864,
+      "broker_service_ids": [],
+      "l8f_requested_apps": null,
+      "post_cutoff_status9_apps": null
+    },
+    {
+      "family": "recaptcha",
+      "feature": "reCAPTCHA",
+      "static_type_presence_apps": 202,
+      "broker_service_ids": [
+        380
+      ],
+      "l8f_requested_apps": 6,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "family": "gms:games",
+      "feature": "Play Games",
+      "static_type_presence_apps": 173,
+      "broker_service_ids": [
+        1
+      ],
+      "l8f_requested_apps": 60,
+      "post_cutoff_status9_apps": 2
+    }
+  ],
+  "broker_services": [
+    {
+      "id": 1,
+      "name": "GAMES",
+      "l8f_requested_apps": 60,
+      "l8f_status0_apps": 0,
+      "l8f_nonzero_apps": 41,
+      "post_cutoff_status9_apps": 2
+    },
+    {
+      "id": 4,
+      "name": "WALLET",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 5,
+      "name": "PEOPLE",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 8,
+      "name": "ADMOB",
+      "l8f_requested_apps": 31,
+      "l8f_status0_apps": 27,
+      "l8f_nonzero_apps": 1,
+      "post_cutoff_status9_apps": 17
+    },
+    {
+      "id": 14,
+      "name": "WEAR",
+      "l8f_requested_apps": 12,
+      "l8f_status0_apps": 0,
+      "l8f_nonzero_apps": 11,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 16,
+      "name": "AUTH_PROXY",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 23,
+      "name": "GOOGLE_LOCATION_MANAGER",
+      "l8f_requested_apps": 35,
+      "l8f_status0_apps": 34,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 29,
+      "name": "FEEDBACK",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 38,
+      "name": "PSEUDONYMOUS_ID",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 40,
+      "name": "CLEARCUT_LOGGER",
+      "l8f_requested_apps": 12,
+      "l8f_status0_apps": 12,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 41,
+      "name": "USAGE_REPORTING",
+      "l8f_requested_apps": 10,
+      "l8f_status0_apps": 10,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 45,
+      "name": "SAFETY_NET",
+      "l8f_requested_apps": 2,
+      "l8f_status0_apps": 2,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 51,
+      "name": "PHENOTYPE",
+      "l8f_requested_apps": 139,
+      "l8f_status0_apps": 139,
+      "l8f_nonzero_apps": 3,
+      "post_cutoff_status9_apps": 2
+    },
+    {
+      "id": 56,
+      "name": "FIT_RECORDING",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 0,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 57,
+      "name": "FIT_HISTORY",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 0,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 68,
+      "name": "AUTH_CREDENTIALS",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 91,
+      "name": "AUTH_GOOGLE_SIGN_IN",
+      "l8f_requested_apps": 27,
+      "l8f_status0_apps": 27,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 93,
+      "name": "MEASUREMENT",
+      "l8f_requested_apps": 305,
+      "l8f_status0_apps": 303,
+      "l8f_nonzero_apps": 22,
+      "post_cutoff_status9_apps": 26
+    },
+    {
+      "id": 116,
+      "name": "GASS",
+      "l8f_requested_apps": 72,
+      "l8f_status0_apps": 69,
+      "l8f_nonzero_apps": 4,
+      "post_cutoff_status9_apps": 20
+    },
+    {
+      "id": 126,
+      "name": "SMS_RETRIEVER",
+      "l8f_requested_apps": 3,
+      "l8f_status0_apps": 3,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 128,
+      "name": "AUTH_ACCOUNT_TRANSFER",
+      "l8f_requested_apps": 2,
+      "l8f_status0_apps": 2,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 131,
+      "name": "DYNAMIC_LINKS_API",
+      "l8f_requested_apps": 8,
+      "l8f_status0_apps": 8,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 160,
+      "name": "MOBSTORE_FILE",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 161,
+      "name": "CAST_API",
+      "l8f_requested_apps": 13,
+      "l8f_status0_apps": 11,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 198,
+      "name": "PAY",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 202,
+      "name": "FACS_CACHE",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 212,
+      "name": "AUTH_API_IDENTITY_SIGNIN",
+      "l8f_requested_apps": 9,
+      "l8f_status0_apps": 9,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 215,
+      "name": "MDI_SYNC",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 258,
+      "name": "AUTH_BLOCKSTORE",
+      "l8f_requested_apps": 36,
+      "l8f_status0_apps": 36,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 4
+    },
+    {
+      "id": 265,
+      "name": "NEARBY_FAST_PAIR",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 270,
+      "name": "CLIENT_TELEMETRY",
+      "l8f_requested_apps": 172,
+      "l8f_status0_apps": 5,
+      "l8f_nonzero_apps": 172,
+      "post_cutoff_status9_apps": 10
+    },
+    {
+      "id": 277,
+      "name": "LOCATION_SHARING_REPORTER",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 284,
+      "name": "FIND_MY_DEVICE_SPOT",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 300,
+      "name": "APP_SET_ID",
+      "l8f_requested_apps": 207,
+      "l8f_status0_apps": 205,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 26
+    },
+    {
+      "id": 308,
+      "name": "MODULE_INSTALL",
+      "l8f_requested_apps": 2,
+      "l8f_status0_apps": 2,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 315,
+      "name": "INAPP_REACH",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 1,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 322,
+      "name": "DEVICE_PERFORMANCE",
+      "l8f_requested_apps": 6,
+      "l8f_status0_apps": 6,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 326,
+      "name": "TIME",
+      "l8f_requested_apps": 4,
+      "l8f_status0_apps": 4,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 343,
+      "name": "GOOGLE_AUTH_AANG",
+      "l8f_requested_apps": 2,
+      "l8f_status0_apps": 2,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 0
+    },
+    {
+      "id": 380,
+      "name": "RECAPTCHABASE",
+      "l8f_requested_apps": 6,
+      "l8f_status0_apps": 6,
+      "l8f_nonzero_apps": 0,
+      "post_cutoff_status9_apps": 1
+    },
+    {
+      "id": 381,
+      "name": "AUTH_RESTORE_CREDENTIAL",
+      "l8f_requested_apps": 1,
+      "l8f_status0_apps": 0,
+      "l8f_nonzero_apps": 1,
+      "post_cutoff_status9_apps": 0
+    }
+  ],
+  "full_business_flow_acceptance_established": false
+}

@@ -1,0 +1,13 @@
+family,feature,static_type_presence_apps,broker_service_ids,l8f_requested_apps,post_cutoff_status9_apps
+gms:sign-in,Google sign-in / identity,953,"[91, 212, 343, 381]",37,1
+gms:location,Google location,816,[23],35,0
+gms:maps,Google Maps SDK,182,[],,
+gms:ads-api-excluding-identifier,Ads API types excluding Advertising ID,542,"[8, 116]",72,21
+gms:ads-identifier,Advertising ID,785,[],,
+play:integrity,Play Integrity,535,[],,
+gms:safetynet,Legacy SafetyNet,26,[45],2,0
+gms:wallet-pay,Google Wallet / Pay,70,"[4, 198]",1,0
+play:billing,Play Billing,880,[],,
+fcm,Firebase Cloud Messaging,864,[],,
+recaptcha,reCAPTCHA,202,[380],6,1
+gms:games,Play Games,173,[1],60,2

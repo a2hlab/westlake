@@ -22,6 +22,14 @@ Full source-stack reproduction and general native performance parity remain
 open in the manifest workstream. The repository-built components and the
 historical device-validated payload have separately recorded provenance.
 
+The [HK top-1,000 app audit (2026-11-15)](reports/hk-top1000-audit-20261115/README.md)
+records every app's historical launch result, interaction coverage, Google service
+observations and remaining gaps. It includes a searchable offline HTML report,
+CSV/JSON evidence and a fresh dependency scan of 982 available APK archives.
+The saved runtime results span multiple builds; this is not a fresh full-corpus
+board run or an end-to-end compatibility certification. The snapshot retains
+local source-path references; APKs and raw device logs are not included.
+
 Component license headers and third-party attribution apply. `third_party/jni`
 contains the Apache-2.0 AOSP libnativehelper JNI header, unchanged from the
 recorded source input. No APK, signing key or private app data is distributed.

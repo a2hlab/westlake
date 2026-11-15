@@ -1,0 +1,25 @@
+{
+  "rank_unique": 1000,
+  "package_unique": 1000,
+  "archive_scans_ok": 982,
+  "missing_archives": 18,
+  "stable_source_reads": true,
+  "fresh_scan_matches_every_ledger_row": true,
+  "generated_utc": "2026-11-15T18:19:09.200171+00:00",
+  "csv_markdown_html_json_rows": 1000,
+  "all_descriptions_present": true,
+  "privacy_pattern_check": "pass",
+  "browser": {
+    "browser": "Chromium 1254",
+    "initial_rows": 50,
+    "refusal_filter": 26,
+    "unscored_filter": 22,
+    "no_exploration_filter": 485,
+    "package_search": "pass",
+    "detail_dialog": "pass",
+    "pagination": "pass",
+    "mobile_page_overflow": false,
+    "javascript_errors": 0,
+    "external_requests": 0
+  }
+}
