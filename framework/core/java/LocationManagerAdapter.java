@@ -176,14 +176,22 @@ public final class LocationManagerAdapter {
      * for a high-accuracy request; passive for the passive provider or interval; otherwise OH's low-power scene,
      * network positioning. On a device without a network location service (this board: OH's NetworkAbility finds
      * none) OH files a low-power request as passive and it gets fixes only while someone else locates.
+     *
+     * WESTLAKE_LOCATION_GNSS=0 keeps every request off GNSS (low power instead), for a device where starting GNSS
+     * does harm. On the test board OH's GNSS start fails, and about two minutes later its WiFi driver fails every
+     * scan and WiFi stays down until a reboot (seen twice; the radio is likely shared). A HAP asking for GNSS does
+     * the same there; the switch keeps Westlake's apps from doing it.
      */
     private static int powerScene(String provider, LocationRequest request) {
         if (LocationManager.PASSIVE_PROVIDER.equals(provider)) return OH_NO_POWER;
         if (request != null && request.getIntervalMillis() == LocationRequest.PASSIVE_INTERVAL) return OH_NO_POWER;
+        if (!GNSS) return OH_LOW_POWER;
         if (LocationManager.GPS_PROVIDER.equals(provider)) return OH_HIGH_POWER;
         return request != null && request.getQuality() == LocationRequest.QUALITY_HIGH_ACCURACY
                 ? OH_HIGH_POWER : OH_LOW_POWER;
     }
+
+    private static final boolean GNSS = !"0".equals(System.getenv("WESTLAKE_LOCATION_GNSS"));
 
     private static int intervalSeconds(LocationRequest request) {
         long millis = request != null ? request.getIntervalMillis() : 1000;
