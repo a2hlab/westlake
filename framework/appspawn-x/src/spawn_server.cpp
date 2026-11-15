@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <map>
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 #include <string>
 #include <sys/file.h>
@@ -27,6 +28,7 @@
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 namespace appspawnx {
@@ -93,6 +95,27 @@ SpawnServer::SpawnServer(const std::string& socketName)
     // Build the socket filesystem path.
     // On OH, appspawn sockets live under /dev/unix/socket/
     socketPath_ = std::string("/dev/unix/socket/") + socketName_;
+    if (const char* bundle = getenv("WESTLAKE_SPAWN_MANAGED_BUNDLE"); bundle != nullptr && *bundle != '\0') {
+        managedBundle_ = bundle;
+        LOGI("[WESTLAKE-SPAWN] managed launch: OH's application manager may ask for %s", bundle);
+    }
+}
+
+// The SELinux context the next socket this thread creates gets ("" restores the default), as
+// libselinux's setsockcreatecon sets it.
+static bool setSocketCreateContext(const char* context) {
+    int fd = open("/proc/thread-self/attr/sockcreate", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+        LOGE("[WESTLAKE-SPAWN] cannot set the socket context: %s", strerror(errno));
+        return false;
+    }
+    size_t length = *context != '\0' ? strlen(context) + 1 : 0;
+    bool written = write(fd, context, length) == static_cast<ssize_t>(length);
+    if (!written) {
+        LOGE("[WESTLAKE-SPAWN] socket context %s refused: %s", context, strerror(errno));
+    }
+    close(fd);
+    return written;
 }
 
 SpawnServer::~SpawnServer() {
@@ -186,10 +209,24 @@ int SpawnServer::createListenSocket() {
     // Fallback: manual create + bind + listen (standalone, Permissive only)
     LOGI("Creating listen socket manually: %s", socketPath_.c_str());
 
+    // ADR-0008 managed launch: OH's application manager (foundation) may connect only to a spawner whose
+    // socket has a context its policy lets it reach (appspawn's), not the root shell's that the launcher
+    // starts this spawner in. Create the socket under the context WESTLAKE_SPAWN_SOCKET_CONTEXT names, as
+    // init does for the spawners it starts.
+    const char* socketContext = getenv("WESTLAKE_SPAWN_SOCKET_CONTEXT");
+    bool contextSet = socketContext != nullptr && *socketContext != '\0' && setSocketCreateContext(socketContext);
     listenFd_ = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (contextSet) {
+        setSocketCreateContext("");  // the sockets the spawner makes later keep its own context
+    }
     if (listenFd_ < 0) {
         LOGE("socket(AF_UNIX) failed: %s", strerror(errno));
         return -1;
+    }
+    if (contextSet) {
+        char label[128] = {};
+        ssize_t got = fgetxattr(listenFd_, "security.selinux", label, sizeof(label) - 1);
+        LOGI("[WESTLAKE-SPAWN] listen socket context %s", got > 0 ? label : "unread");
     }
 
     unlink(socketPath_.c_str());
@@ -399,8 +436,26 @@ static bool validProcessName(const char* name, size_t length) {
 // Now only the launcher, which runs as root, chooses credentials. Any other peer must be a
 // process this spawner started, running as the launched uid; it names a process, and the
 // request is rebuilt from the launch request around that name, as AppProcesses builds it.
-bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher) {
+// Is the peer OH's application manager: the foundation process, by uid and SELinux context?
+static bool peerIsAppMgr(int clientFd, const struct ucred& peer) {
+    static const uid_t foundationUid = [] {
+        struct passwd* entry = getpwnam("foundation");
+        return entry != nullptr ? entry->pw_uid : static_cast<uid_t>(5523);
+    }();
+    if (peer.uid != foundationUid) return false;
+    char context[128] = {};
+    socklen_t length = sizeof(context) - 1;
+    if (getsockopt(clientFd, SOL_SOCKET, SO_PEERSEC, context, &length) != 0) {
+        LOGE("[WESTLAKE-SPAWN] no SELinux context for pid %d: %s", static_cast<int>(peer.pid), strerror(errno));
+        return false;
+    }
+    return strcmp(context, "u:r:foundation:s0") == 0;
+}
+
+bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher,
+                        bool& fromAppMgr) {
     fromLauncher = false;
+    fromAppMgr = false;
     struct ucred peer{};
     socklen_t length = sizeof(peer);
     if (getsockopt(clientFd, SOL_SOCKET, SO_PEERCRED, &peer, &length) != 0 || length != sizeof(peer)) {
@@ -409,6 +464,21 @@ bool SpawnServer::admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinar
     }
     if (peer.uid == 0) {
         fromLauncher = true;
+        return true;
+    }
+    // ADR-0008 decision 3: in a managed launch OH's application manager creates the process record and asks
+    // for the process. It alone chooses the credentials, from the bundle's installation record; it may ask
+    // only for a process of the bundle this spawner runs (checked once the request is parsed), and only for
+    // a spawn.
+    if (!managedBundle_.empty() && peerIsAppMgr(clientFd, peer)) {
+        uint32_t type = isBinary && buffer.size() >= sizeof(OhAppSpawnMsgHeader)
+            ? reinterpret_cast<const OhAppSpawnMsgHeader*>(buffer.data())->msgType : UINT32_MAX;
+        if (type != static_cast<uint32_t>(MSG_APP_SPAWN)) {
+            LOGE("[WESTLAKE-SPAWN] refused OH's application manager message type %u: only spawns are served",
+                 type);
+            return false;
+        }
+        fromAppMgr = true;
         return true;
     }
     const char* why = nullptr;
@@ -779,7 +849,8 @@ void SpawnServer::handleConnection(int clientFd) {
     }
 
     bool fromLauncher = false;
-    if (!admit(clientFd, buffer, isBinary, fromLauncher)) {
+    bool fromAppMgr = false;
+    if (!admit(clientFd, buffer, isBinary, fromLauncher, fromAppMgr)) {
         if (isBinary) {
             sendOhBinaryResponse(clientFd, reinterpret_cast<const OhAppSpawnMsgHeader*>(
                 buffer.data())->msgId, "", -1, -1);
@@ -808,6 +879,16 @@ void SpawnServer::handleConnection(int clientFd) {
     LOGI("Parsed spawn request: code=%d proc=%s bundle=%s uid=%d isOhBinary=%d",
          msg.code, msg.procName.c_str(), msg.bundleName.c_str(), msg.uid,
          msg.isOhBinary);
+    if (fromAppMgr) {
+        if (msg.bundleName != managedBundle_) {
+            LOGE("[WESTLAKE-SPAWN] refused OH's request for a process of %s: this spawner runs %s",
+                 msg.bundleName.c_str(), managedBundle_.c_str());
+            sendOhBinaryResponse(clientFd, msg.ohMsgId, msg.procName.c_str(), -1, -1);
+            return;
+        }
+        LOGI("[WESTLAKE-SPAWN] OH's application manager asks for process %s of %s (uid %d, %zu groups, apl %s)",
+             msg.procName.c_str(), msg.bundleName.c_str(), msg.uid, msg.gids.size(), msg.apl.c_str());
+    }
 
     // Every request forks, and a child given no uid would keep root: refuse it here, whoever
     // sent it, rather than in the child.
@@ -819,7 +900,7 @@ void SpawnServer::handleConnection(int clientFd) {
     } else if (spawnHandler_) {
         pid = spawnHandler_(msg);
         rc = (pid > 0) ? 0 : -1;
-        if (pid > 0 && fromLauncher && isBinary) {
+        if (pid > 0 && (fromLauncher || fromAppMgr) && isBinary) {
             launchRequest_ = buffer;
             launchUid_ = msg.uid;
         }
