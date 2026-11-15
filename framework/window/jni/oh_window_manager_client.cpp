@@ -1410,7 +1410,12 @@ OHWindowSession OHWindowManagerClient::createSession(
         // ★MarkUiFrameAvailable(true) does NOT exist on this board's RSSurfaceNode (it is at
         // rs_surface_node.h:293 but not public here) -- using it fails the TU, which the link
         // then silently drops (§77i).  Only the public notify flag is used.
-        surfaceNode->SetIsNotifyUIBufferAvailable(true);
+        // ADR-0008: not for an OH main window. SceneBoard removes the ability's starting window when RS reports the
+        // window's first buffer, and RS reports it only while this flag is false: set, the white starting window
+        // stayed over the activity.
+        if (!wl_managedMain) {
+            surfaceNode->SetIsNotifyUIBufferAvailable(true);
+        }
         // §284q TESTED AND REVERTED: `SetBootAnimation(true)` (rs_surface_node.h:223) looked
         // like the session-less compositing path the boot animation uses, but it REGRESSED --
         // noice nodes in the RS tree dropped from 3-5 to 1, `VisibleRegion` went to [Empty], and
@@ -1871,6 +1876,23 @@ OHWindowSession OHWindowManagerClient::createSession(
                     {
                         std::lock_guard<std::mutex> wl_lock(g_wlManagedMainSessionMutex);
                         g_wlManagedMainSession = wl_mSession;
+                    }
+                    // SceneBoard removes the ability's starting window once RS has the window's first buffer and the
+                    // window scene's frame matches the session's layout rect (ArkUI WindowScene: IsWindowSizeEqual),
+                    // which is what the client last reported laid out, as OH's own window client does after its first
+                    // layout (ISession::NotifyFrameLayoutFinishFromApp, code 135). Unreported, the sizes differed at
+                    // the first buffer and the white starting window stayed over the activity.
+                    {
+                        OHOS::MessageParcel ldata;
+                        OHOS::MessageParcel lreply;
+                        OHOS::MessageOption loption;
+                        const bool lwrote = ldata.WriteInterfaceToken(u"OHOS.ISession") && ldata.WriteBool(true) &&
+                                            ldata.WriteInt32(0) && ldata.WriteInt32(0) &&
+                                            ldata.WriteInt32(requestedWidth) && ldata.WriteInt32(requestedHeight);
+                        const int32_t lerr = lwrote ? wl_mSession->SendRequest(135, ldata, lreply, loption) : -1;
+                        fprintf(stderr, "[WL-MANAGED] NotifyFrameLayoutFinish(0,0,%dx%d) err=%d\n", requestedWidth,
+                                requestedHeight, lerr);
+                        fflush(stderr);
                     }
                 } else if (v7err == 0) {
                     v7err = wl_ret;
