@@ -39,6 +39,11 @@ public final class OhInsetsBridge {
     // OH avoid area types (wm_common.h AvoidAreaType) that are Android system bars.
     private static final int OH_AVOID_SYSTEM = 0;
     private static final int OH_AVOID_NAVIGATION_INDICATOR = 4;
+    // The last status bar and navigation area OH reported for any of this app's windows. They belong to the
+    // screen: SceneBoard reports no status bar for a sub-window (another activity of the task), which covers
+    // the screen as the main window does.
+    private static final Rect sStatusBar = new Rect();
+    private static final Rect sNavigationBar = new Rect();
 
     /**
      * OH's system bar areas for a window it manages (ADR-0008): SceneBoard reports the status bar as the
@@ -60,17 +65,30 @@ public final class OhInsetsBridge {
                     Rect display = new Rect(0, 0, size[0], size[1]);
                     InsetsState state = new InsetsState(root.getInsetsController().getState(), true);
                     state.setDisplayFrame(display);
-                    if (type == OH_AVOID_SYSTEM) {
-                        source(state, WindowInsets.Type.statusBars(), top);
+                    // Android makes a system bar an inset only when its frame spans the window's width
+                    // (InsetsSource.calculateInsets); OH's gesture indicator is a narrow area at the bottom.
+                    Rect status = top.isEmpty() ? new Rect() : new Rect(display.left, display.top, display.right,
+                            Math.min(top.bottom, display.bottom));
+                    Rect navigation = bottom.isEmpty() ? new Rect() : new Rect(display.left,
+                            Math.max(bottom.top, display.top), display.right, display.bottom);
+                    synchronized (sStatusBar) {
+                        if (type == OH_AVOID_SYSTEM) {
+                            if (status.isEmpty()) status.set(sStatusBar); else sStatusBar.set(status);
+                        }
+                        if (!navigation.isEmpty()) sNavigationBar.set(navigation);
                     }
-                    if (type == OH_AVOID_NAVIGATION_INDICATOR || !bottom.isEmpty()) {
-                        source(state, WindowInsets.Type.navigationBars(), bottom);
+                    if (type == OH_AVOID_SYSTEM) {
+                        source(state, WindowInsets.Type.statusBars(), status);
+                    }
+                    if (type == OH_AVOID_NAVIGATION_INDICATOR || !navigation.isEmpty()) {
+                        source(state, WindowInsets.Type.navigationBars(), navigation);
                     }
                     synchronized (STATES) { STATES.put(window.asBinder(), new InsetsState(state, true)); }
                     root.getInsetsController().onStateChanged(state);
                     root.requestFitSystemWindows();
                     root.requestLayout();
-                    System.err.println("[OH_INSETS] system bars type=" + type + " top=" + top + " bottom=" + bottom);
+                    System.err.println("[OH_INSETS] system bars type=" + type + " status=" + status
+                            + " navigation=" + navigation);
                 } catch (ReflectiveOperationException | RuntimeException failure) {
                     System.err.println("[OH_INSETS] system bars failed: " + failure);
                 }

@@ -1350,7 +1350,11 @@ jint nativeStartAbility_impl(JNIEnv* env, jclass,
     {
         const char* dl  = getenv("ASX_DIRECT_LAUNCH");
         const char* pkg = getenv("ASX_LAUNCH_PKG");
-        if (dl != nullptr && pkg != nullptr && !want.abilityName.empty() &&
+        // ADR-0008 managed launch: one OH ability hosts the app's Android task, as its back stack lives in the
+        // app. The app's own activities start in this process too (their windows become sub-windows of the
+        // ability's main window), not as OH abilities the bundle does not declare.
+        const char* managed = getenv("WESTLAKE_MANAGED_LAUNCH");
+        if ((dl != nullptr || managed != nullptr) && pkg != nullptr && !want.abilityName.empty() &&
             (want.bundleName == pkg || want.bundleName.empty())) {
             wl_restore_direct_launch_main_looper(env);
             // §686: the target Activity may instantiate WebView in onCreate.
