@@ -147,15 +147,84 @@ public class AppSchedulerBridge {
                 + ", process=" + processName + ", pid=" + pid);
 
         try {
-            ActivityThread activityThread = ActivityThread.currentActivityThread();
+            final ActivityThread activityThread = ActivityThread.currentActivityThread();
             if (activityThread == null) {
                 System.err.println("[B43-LA] ActivityThread.currentActivityThread() == null");
                 return;
             }
-            ensureBindApplication(activityThread, bundleName, ohConfigKv);
+            // Android binds an application on its main thread (ActivityThread.H BIND_APPLICATION): the
+            // providers it installs and Application.onCreate expect the main looper (androidx.startup's
+            // InitializationProvider threw "The current thread must have a looper!"). OH delivers
+            // ScheduleLaunchApplication one-way on an IPC thread, so the bind is posted to the main thread,
+            // and this thread waits for it; a launch that follows waits for it too (awaitManagedBind).
+            runOnMainThread(new Runnable() {
+                public void run() {
+                    try {
+                        // The launcher staged this package (an ADR-0008 managed launch): its APK answers for it,
+                        // as in a direct launch, rather than OH's record of the bundle that carries it.
+                        String stagedPackage = System.getenv("ASX_LAUNCH_PKG");
+                        String stagedApk = System.getenv("ASX_APK_PATH");
+                        if (sInjectedAppInfo == null && bundleName.equals(stagedPackage) && stagedApk != null) {
+                            try {
+                                prepareSourceApplication(bundleName, stagedApk,
+                                        System.getenv("ASX_LAUNCH_ACTIVITY"), android.os.Process.myUid(), 0);
+                            } catch (Exception e) {
+                                System.err.println("[WL-MANAGED] preparing " + bundleName + " failed: " + e);
+                            }
+                        }
+                        ensureBindApplication(activityThread, bundleName, ohConfigKv);
+                    } finally {
+                        sManagedBind.countDown();
+                    }
+                }
+            }, "bind " + bundleName);
         } catch (Throwable t) {
+            sManagedBind.countDown();
             System.err.println("[B43-LA] FAILED: " + t);
             t.printStackTrace(System.err);
+        }
+    }
+
+    // ADR-0008 managed launch: counted down once OH's ScheduleLaunchApplication has bound the application.
+    private static final java.util.concurrent.CountDownLatch sManagedBind =
+            new java.util.concurrent.CountDownLatch(1);
+
+    // A managed launch's first ability waits for the bind OH asked for just before it: OH sends both one-way,
+    // and they may arrive on two IPC threads in either order. Direct launches bind in their own task.
+    private static void awaitManagedBind() {
+        if ("1".equals(System.getenv("ASX_DIRECT_LAUNCH"))) return;
+        try {
+            if (!sManagedBind.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
+                System.err.println("[WL-MANAGED] no application bind within 30 s; launching anyway");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // Runs task on the main thread and waits for it (at most 60 s), or runs it here if this is the main thread.
+    private static void runOnMainThread(final Runnable task, String what) throws InterruptedException {
+        android.os.Looper main = android.os.Looper.getMainLooper();
+        while (main == null) {
+            Thread.sleep(5);
+            main = android.os.Looper.getMainLooper();
+        }
+        if (main.getThread() == Thread.currentThread()) {
+            task.run();
+            return;
+        }
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        new android.os.Handler(main).post(new Runnable() {
+            public void run() {
+                try {
+                    task.run();
+                } finally {
+                    done.countDown();
+                }
+            }
+        });
+        if (!done.await(60, java.util.concurrent.TimeUnit.SECONDS)) {
+            System.err.println("[WL-MANAGED] " + what + " still running on the main thread after 60 s");
         }
     }
 
@@ -170,6 +239,89 @@ public class AppSchedulerBridge {
     public static volatile android.content.pm.ApplicationInfo sInjectedAppInfo = null;
 
     /**
+     * Builds the launched app's ApplicationInfo from its staged APK (the launcher's ASX_* environment), makes the
+     * APK the package manager's source for the package, connects the Play services client channel and names the
+     * process, as a launch must before it binds the application. Direct launches call it, and so does an ADR-0008
+     * managed launch when OH asks it to bind. Must run on the main thread.
+     */
+    private static android.app.ActivityThread prepareSourceApplication(String pkg, String apkPath,
+            String activityFqn, int uid, int targetSdk) throws Exception {
+        // 1. Hand-build ApplicationInfo (bypass BMS).
+        android.content.pm.ApplicationInfo ai = new android.content.pm.ApplicationInfo();
+        ai.packageName = pkg;
+        ai.processName = pkg;
+        ai.uid = uid;
+        ai.sourceDir = apkPath;
+        ai.publicSourceDir = apkPath;
+        String apkDir = new java.io.File(apkPath).getParent();
+        String nativeDirectory = System.getenv("ASX_NATIVE_LIB_DIR");
+        ai.nativeLibraryDir = nativeDirectory == null || nativeDirectory.isEmpty()
+                ? apkDir + "/lib/arm64" : nativeDirectory;
+        ai.dataDir = "/data/data/" + pkg;
+        ai.deviceProtectedDataDir = adapter.packagemanager.DataDirs.deviceProtected(ai.dataDir);
+        ai.credentialProtectedDataDir = ai.dataDir;
+        // /data/data is drwxrwx--x system:system, so an app uid cannot create its own
+        // directory there; the launcher stages it. Swallowing the failure here cost several
+        // launches to diagnose, because the first symptom is Realm's mkfifo reporting EACCES
+        // from inside onResume. Say so plainly instead.
+        try {
+            java.io.File dataDir = new java.io.File(ai.dataDir);
+            if (!dataDir.isDirectory() && !dataDir.mkdirs()) {
+                System.err.println("[DIRECT-LAUNCH] WARNING data dir missing and not creatable: "
+                        + ai.dataDir + " — storage-backed startup (Realm, SQLite, keystore)"
+                        + " will fail later; the launcher should have staged it");
+            }
+        } catch (Throwable t) {
+            System.err.println("[DIRECT-LAUNCH] WARNING data dir check failed: " + ai.dataDir
+                    + ": " + t);
+        }
+        adapter.packagemanager.DataDirs.ensure(ai.deviceProtectedDataDir);
+        ai.flags |= android.content.pm.ApplicationInfo.FLAG_HAS_CODE
+                 |  android.content.pm.ApplicationInfo.FLAG_INSTALLED
+                 |  android.content.pm.ApplicationInfo.FLAG_ALLOW_CLEAR_USER_DATA
+                 |  android.content.pm.ApplicationInfo.FLAG_HARDWARE_ACCELERATED;
+        ai.targetSdkVersion = targetSdk > 0 ? targetSdk : 33;
+        // 2026-08-12 §611: apps read getApplicationInfo().metaData unconditionally
+        // (Material Catalog overrideApplicationComponent NPEs on null). An empty
+        // Bundle is the documented-sufficient fix (arm32 metaData recipe).
+        ai.metaData = new android.os.Bundle();
+        // Custom Application class (Hilt/DI). noice declares NoiceApplication;
+        // without className the default android.app.Application is used and DI
+        // never inits → MainActivity NPEs. (General apps: parse from manifest.)
+        if ("com.github.ashutoshgngwr.noice".equals(pkg)) {
+            ai.className = "com.github.ashutoshgngwr.noice.NoiceApplication";
+        }
+        if ("1".equals(System.getenv("WESTLAKE_SOURCE_PACKAGE"))) {
+            adapter.packagemanager.OHUserManager.install();
+            ai = adapter.packagemanager.SourcePackageRegistry.register(ai);
+        }
+        // Direct launch builds ApplicationInfo here rather than through
+        // PackageInfoBuilder, so the split resolver that runs there never sees it. Without
+        // splitSourceDirs the AssetManager opens only the base APK, and an app whose
+        // resources live in a density or language split cannot inflate its own layouts:
+        // McDonald's died in SplashActivity.onCreate with
+        // "Unable to find resource ID #0x7f080108", a drawable from split_config.xxxhdpi.
+        adapter.packagemanager.SplitApkResolver.populate(ai);
+        sInjectedAppInfo = ai;
+        System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir
+                + " splits=" + (ai.splitSourceDirs == null ? 0 : ai.splitSourceDirs.length));
+
+        PlayServicesChannel.installClient();
+        PlayServicesChannel.readRestrictedSettingsAsUnset();
+
+        // 2. Bind the application (builds the app ClassLoader from sourceDir).
+        sLaunchProcessName = declaredProcess(pkg, activityFqn);
+        // One of the app's other processes, which its launched process started (ADR-0002), binds the
+        // application under its own name.
+        AppProcesses.identify(pkg, sLaunchProcessName);
+        if (AppProcesses.isSecondary()) sLaunchProcessName = AppProcesses.self();
+        if (!AppProcesses.isSecondary()) adapter.core.GoogleIdentityServiceConfig.prepare(ai);
+        android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
+        MainThreadGuards.install(at);
+        return at;
+    }
+
+    /**
      * Launch an app's Activity WITHOUT OH AMS/BMS — for the direct-TLV-spawn path.
      * Builds ApplicationInfo by hand (sourceDir=apkPath, FLAG_HAS_CODE|INSTALLED so
      * LoadedApk adds the APK to the DexPathList), binds the application (stock
@@ -182,78 +334,7 @@ public class AppSchedulerBridge {
         try {
             System.err.println("[DIRECT-LAUNCH] START pkg=" + pkg + " apk=" + apkPath
                     + " act=" + activityFqn + " uid=" + uid + " sdk=" + targetSdk);
-            // 1. Hand-build ApplicationInfo (bypass BMS).
-            android.content.pm.ApplicationInfo ai = new android.content.pm.ApplicationInfo();
-            ai.packageName = pkg;
-            ai.processName = pkg;
-            ai.uid = uid;
-            ai.sourceDir = apkPath;
-            ai.publicSourceDir = apkPath;
-            String apkDir = new java.io.File(apkPath).getParent();
-            String nativeDirectory = System.getenv("ASX_NATIVE_LIB_DIR");
-            ai.nativeLibraryDir = nativeDirectory == null || nativeDirectory.isEmpty()
-                    ? apkDir + "/lib/arm64" : nativeDirectory;
-            ai.dataDir = "/data/data/" + pkg;
-            ai.deviceProtectedDataDir = adapter.packagemanager.DataDirs.deviceProtected(ai.dataDir);
-            ai.credentialProtectedDataDir = ai.dataDir;
-            // /data/data is drwxrwx--x system:system, so an app uid cannot create its own
-            // directory there; the launcher stages it. Swallowing the failure here cost several
-            // launches to diagnose, because the first symptom is Realm's mkfifo reporting EACCES
-            // from inside onResume. Say so plainly instead.
-            try {
-                java.io.File dataDir = new java.io.File(ai.dataDir);
-                if (!dataDir.isDirectory() && !dataDir.mkdirs()) {
-                    System.err.println("[DIRECT-LAUNCH] WARNING data dir missing and not creatable: "
-                            + ai.dataDir + " — storage-backed startup (Realm, SQLite, keystore)"
-                            + " will fail later; the launcher should have staged it");
-                }
-            } catch (Throwable t) {
-                System.err.println("[DIRECT-LAUNCH] WARNING data dir check failed: " + ai.dataDir
-                        + ": " + t);
-            }
-            adapter.packagemanager.DataDirs.ensure(ai.deviceProtectedDataDir);
-            ai.flags |= android.content.pm.ApplicationInfo.FLAG_HAS_CODE
-                     |  android.content.pm.ApplicationInfo.FLAG_INSTALLED
-                     |  android.content.pm.ApplicationInfo.FLAG_ALLOW_CLEAR_USER_DATA
-                     |  android.content.pm.ApplicationInfo.FLAG_HARDWARE_ACCELERATED;
-            ai.targetSdkVersion = targetSdk > 0 ? targetSdk : 33;
-            // 2026-08-12 §611: apps read getApplicationInfo().metaData unconditionally
-            // (Material Catalog overrideApplicationComponent NPEs on null). An empty
-            // Bundle is the documented-sufficient fix (arm32 metaData recipe).
-            ai.metaData = new android.os.Bundle();
-            // Custom Application class (Hilt/DI). noice declares NoiceApplication;
-            // without className the default android.app.Application is used and DI
-            // never inits → MainActivity NPEs. (General apps: parse from manifest.)
-            if ("com.github.ashutoshgngwr.noice".equals(pkg)) {
-                ai.className = "com.github.ashutoshgngwr.noice.NoiceApplication";
-            }
-            if ("1".equals(System.getenv("WESTLAKE_SOURCE_PACKAGE"))) {
-                adapter.packagemanager.OHUserManager.install();
-                ai = adapter.packagemanager.SourcePackageRegistry.register(ai);
-            }
-            // Direct launch builds ApplicationInfo here rather than through
-            // PackageInfoBuilder, so the split resolver that runs there never sees it. Without
-            // splitSourceDirs the AssetManager opens only the base APK, and an app whose
-            // resources live in a density or language split cannot inflate its own layouts:
-            // McDonald's died in SplashActivity.onCreate with
-            // "Unable to find resource ID #0x7f080108", a drawable from split_config.xxxhdpi.
-            adapter.packagemanager.SplitApkResolver.populate(ai);
-            sInjectedAppInfo = ai;
-            System.err.println("[DIRECT-LAUNCH] ApplicationInfo built, sourceDir=" + ai.sourceDir
-                    + " splits=" + (ai.splitSourceDirs == null ? 0 : ai.splitSourceDirs.length));
-
-            PlayServicesChannel.installClient();
-            PlayServicesChannel.readRestrictedSettingsAsUnset();
-
-            // 2. Bind the application (builds the app ClassLoader from sourceDir).
-            sLaunchProcessName = declaredProcess(pkg, activityFqn);
-            // One of the app's other processes, which its launched process started (ADR-0002), binds the
-            // application under its own name.
-            AppProcesses.identify(pkg, sLaunchProcessName);
-            if (AppProcesses.isSecondary()) sLaunchProcessName = AppProcesses.self();
-            if (!AppProcesses.isSecondary()) adapter.core.GoogleIdentityServiceConfig.prepare(ai);
-            android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
-            MainThreadGuards.install(at);
+            android.app.ActivityThread at = prepareSourceApplication(pkg, apkPath, activityFqn, uid, targetSdk);
             ensureBindApplication(at, pkg, null);
             System.err.println("[DIRECT-LAUNCH] bind done sBindAppDone=" + sBindAppDone);
             if (!sBindAppDone) {
@@ -1799,7 +1880,10 @@ public class AppSchedulerBridge {
         // "No data directory found for package".
         try {
             int userId = android.os.UserHandle.getUserId(ai.uid);
+            // /data/data/<pkg> first: a launcher-staged app (direct or ADR-0008 managed) has it in its namespace,
+            // labelled for the app; a managed bundle named after the package also has the OH directories.
             String[] dataCandidates = {
+                "/data/data/" + pkg,
                 "/data/app/el2/" + userId + "/base/" + pkg,
                 "/data/app/el1/" + userId + "/base/" + pkg,
                 "/data/app/el2/100/base/" + pkg,
@@ -2003,6 +2087,7 @@ public class AppSchedulerBridge {
 
         ActivityResults.Request launchRequest = remoteRequest;
         try {
+            awaitManagedBind();
             ActivityThread activityThread = ActivityThread.currentActivityThread();
             if (activityThread == null) {
                 System.err.println("[B47-SLA] ActivityThread.currentActivityThread() == null");
