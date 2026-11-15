@@ -2542,6 +2542,20 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
         sendSessionCall(3, "Disconnect");
     }
 
+    // ADR-0008: SceneBoard removes a sub-window it created for this client, and moves focus on, when the client
+    // destroys it (ISceneSessionManager::DestroyAndDisconnectSpecificSession, code 1), as WindowSessionImpl does.
+    // Only disconnected, a closed dialog kept OH's focus, and BACK went to a window that no longer existed.
+    if (g_wlManagedMainId.load() > 0 && sceneProxy_ != nullptr) {
+        OHOS::MessageParcel data;
+        OHOS::MessageParcel reply;
+        OHOS::MessageOption option;
+        const bool wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") && data.WriteInt32(sessionId);
+        const int32_t err = wrote ? sceneProxy_->SendRequest(1, data, reply, option) : -1;
+        const int32_t ret = (err == 0) ? reply.ReadInt32() : -1;
+        fprintf(stderr, "[WL-MANAGED] DestroyAndDisconnectSpecificSession(%d) err=%d ret=%d\n", sessionId, err, ret);
+        fflush(stderr);
+    }
+
     // G2.14c — legacy path uses IWindowManager.RemoveWindow + DestroyWindow.
     // sessionProxy is null in legacy path (V7-only field); skip Disconnect().
     if (connected_ && ssmProxy_ != nullptr) {
