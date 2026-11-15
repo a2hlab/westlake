@@ -631,6 +631,8 @@ static void reg(JNIEnv* env, const char* cls, const char* name, const char* sig,
 extern "C" int register_AudioTrack_shim(JNIEnv* env);
 // [FIX-AUDIO 2026-07-02] MediaCodec (MP3 decode) -> OH_AudioCodec shim (oh_mediacodec_shim.cpp)
 extern "C" int register_MediaCodec_shim(JNIEnv* env);
+// ADR-0009: notifications shown in OH's notification centre (oh_notification_client.cpp)
+extern int register_OhNotifications(JNIEnv* env);
 static int register_Audio_fixup(JNIEnv* env) {
     reg(env, "android/media/AudioSystem", "native_getMaxChannelCount", "()I", (void*)AS_maxChan);
     reg(env, "android/media/AudioSystem", "native_getMaxSampleRate", "()I", (void*)AS_maxRate);
@@ -808,6 +810,10 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /*reserved*/) {
     if (register_InputManagerAdapter(env) != JNI_OK) return JNI_ERR;
     register_Audio_fixup(env);
     register_MediaCodec_shim(env);
+    // A framework without adapter.core.OhNotifications keeps its notifications in process.
+    if (register_OhNotifications(env) != JNI_OK) {
+        ZYG_LOG_INFO("OhNotifications not registered: notifications stay in process");
+    }
 
     oh_set_proxy_props(env);
 

@@ -15,7 +15,8 @@ import java.util.Map;
 
 /**
  * The in-process notification service: the app's channels and its posted notifications, and the
- * sound a post makes. NotificationManagerService plays a notification's sound when it is posted
+ * sound a post makes. What is posted is also shown in OH's notification centre (OhNotifications),
+ * silently there, since the sound is played here. NotificationManagerService plays a notification's sound when it is posted
  * (buzzBeepBlink): the channel's sound and audio attributes from Android 8 (the notification's own
  * before), at the channel's importance DEFAULT or above, an update only when it changes what the user
  * sees and never with ONLY_ALERT_ONCE, at most one alert a second,
@@ -23,8 +24,9 @@ import java.util.Map;
  * way: Fossify Clock posts its expired timer on a channel whose sound is the alarm.
  *
  * Posts are kept only when the user lets the app post notifications (NotificationSwitch, the OH
- * per-application switch): Android drops the rest, sound included. Nothing is shown in OH's
- * notification centre; that is the OH notification service's, not bridged here. Toasts, which go
+ * per-application switch): Android drops the rest, sound included. Channels are kept per process: a
+ * notification on a channel this process has not created is still shown in OH, at the default
+ * importance, because another of the app's processes may have created it. Toasts, which go
  * through the same service, are shown in process (LocalToasts).
  */
 final class LocalNotifications {
@@ -63,9 +65,15 @@ final class LocalNotifications {
                 post((String) args[0], (String) args[2], (Integer) args[3], (Notification) args[4]);
                 return LocalServiceBinders.DEFAULT;
             case "cancelNotificationWithTag":
+                OhNotifications.cancel((String) args[0], (String) args[2], (Integer) args[3]);
                 cancel(key((String) args[2], (Integer) args[3]));
                 return LocalServiceBinders.DEFAULT;
             case "cancelAllNotifications":
+                synchronized (sActive) {
+                    for (StatusBarNotification record : sActive.values()) {
+                        OhNotifications.cancel(record.getPackageName(), record.getTag(), record.getId());
+                    }
+                }
                 cancel(null);
                 return LocalServiceBinders.DEFAULT;
             case "getAppActiveNotifications":
@@ -122,6 +130,14 @@ final class LocalNotifications {
         synchronized (sActive) {
             previous = sActive.put(key, record);
         }
+        String channelId = notification.getChannelId();
+        NotificationChannel channel = null;
+        if (channelId != null) {
+            synchronized (sChannels) {
+                channel = sChannels.get(channelId);
+            }
+        }
+        OhNotifications.publish(pkg, tag, id, notification, channel, appLabel());
         boolean update = previous != null;
         if (update && (notification.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0) return;
         // As NotificationManagerService.shouldMuteNotificationLocked: an update that changes nothing the user
@@ -137,12 +153,7 @@ final class LocalNotifications {
         }
         Uri sound;
         AudioAttributes attributes;
-        String channelId = notification.getChannelId();
         if (channelId != null) {
-            NotificationChannel channel;
-            synchronized (sChannels) {
-                channel = sChannels.get(channelId);
-            }
             if (channel == null || channel.getImportance() < NotificationManager.IMPORTANCE_DEFAULT) return;
             sound = channel.getSound();
             attributes = channel.getAudioAttributes();
@@ -156,6 +167,21 @@ final class LocalNotifications {
             sLastAlert = now;
         }
         play(key, sound, attributes, (notification.flags & Notification.FLAG_INSISTENT) != 0);
+    }
+
+    private static CharSequence sAppLabel;   // guarded by the class
+
+    /** The application's label: OH shows it as the title of a notification without one. */
+    private static synchronized CharSequence appLabel() {
+        if (sAppLabel == null) {
+            try {
+                android.app.Application app = android.app.ActivityThread.currentApplication();
+                sAppLabel = app.getApplicationInfo().loadLabel(app.getPackageManager());
+            } catch (Throwable t) {
+                sAppLabel = "";
+            }
+        }
+        return sAppLabel;
     }
 
     /** AlertRateLimiter's interval: one alert a second per app. */

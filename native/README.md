@@ -35,3 +35,22 @@ reference PNG pixels, Unicode word boundaries, Chinese font rasterization and
 shaping, and the unchanged Toutiao APK's resource table. The manifest's
 `probe_android_native.py` compiles it and hash-checks all transfers into a fresh
 device stage. Passing this probe is distinct from launching Toutiao's UI.
+
+## OH notification client headers (`bridge15-sources.json`)
+
+`framework/core/jni/oh_notification_client.cpp` calls OH's notification client
+(`libans_innerkits.z.so`, declared in `oh61-firmware-abi.json`). It compiles with
+two include directories of its own (`includes_by_source`), which no other bridge
+source sees, because their names (`pixel_map.h`, `want_agent.h`) would shadow
+the headers the window and surface sources use:
+
+- `native/include/oh-notification-standin`: declarations only. The
+  notification headers hold pixel maps, want agents and button resources
+  through `std::shared_ptr` and need no definitions. `wl_notification_helper.h`
+  declares the two `NotificationHelper` members the bridge calls, as
+  `notification_helper.h` declares them; the real header includes headers
+  OpenHarmony generates from IDL.
+- `android-source/oh61-notification-headers/include`: unmodified copies of
+  `interfaces/inner_api/*.h` and `frameworks/core/common/include/*.h` from
+  [notification_distributed_notification_service](https://github.com/openharmony/notification_distributed_notification_service) at tag
+  `OpenHarmony-v6.1-Release` (commit `0836199f2bcd106295d125943aaf45c91f454fc3`).
