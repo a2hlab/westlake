@@ -272,6 +272,147 @@ background work. Returning `true` from the existing picker witness after the pic
 exporting a reusable Google account credential, would not satisfy this boundary. Additional
 request-option and backend failures may emerge once the refresh path is implemented.
 
+### Silent-token failure: traced diagnosis, build 27
+
+Build 27 adds opt-in, value-free diagnostics and repeats the authorized FotMob flow on
+the preserved policy-1 identity. It does **not** implement a new authorization path.
+The original signed FotMob 239.17834.20261016 and official GMS 24.40.34 are unchanged.
+The chooser displays the account automatically; selection again returns `RESULT_OK`.
+The new ID token passes local Google-JWKS signature, issuer, approved-audience,
+expiry, subject and verified-email checks. At the post-flow inspection it is only
+29 seconds old, yet FotMob has set `user_must_re_authenticate=true`.
+
+The [sanitized trace result](../tests/google-auth/refresh-diagnosis27/fotmob-policy1.json)
+records this sequence, relative to the Google activity result:
+
+| Offset | Observed event |
+|---|---|
+| -1,072 ms | microG returns an audience-bound ID token with expiry; no new consent required. |
+| 0 ms | Official Google UI sends `RESULT_OK`; FotMob receives it. |
+| +455 ms | The GMS UI broker reports `no_selection=true live_requests=0` for a token read. |
+| +458 ms | GMS's reusable-credential read returns `withheld`. |
+| +477 ms | FotMob receives `Error=BadAuthentication` from `IAuthManagerService`, transaction 5. No token is returned; a recovery Intent is present. |
+| +881 to +2,267 ms | Four further client replies carry the same error. |
+
+These offsets come from device timestamps across the cooperating processes. The
+trace has no end-to-end request identifier, so temporal association alone is not
+the whole proof: the source lifecycle, matching GMS stack, client response, and
+repeated sequence corroborate it. Other GMS background requests occur concurrently
+and must not be counted as FotMob requests. The first five-error burst before the
+interactive replay independently shows the same failure after carrying app data
+into a new process.
+
+The silent request is an audience-bound token request with `include_email=1`, no
+profile option, no opaque request options, and no other options. It reaches
+`readDelegatedAuth` and fails its selection lookup. Unsupported-service rejections
+also appear for unrelated background requests; those are not the reason this
+FotMob request fails. There are three successful FotMob provider token events
+during the interactive flow (two OAuth and one ID token) and none after its result
+through the recorded observation window.
+
+#### The authorization ends before the client can use the result
+
+`RemoteActivities.Incoming.complete()` first marks the request done, removes it
+from `INCOMING`, clears its issued-token/expiry map, and clears interactive account
+visibility. Only then does it send the result callback. Its `selected()` witness
+also requires `!done`, a live callback, the selected account and an unexpired UI
+deadline. The ordering makes the post-result denial deterministic; it is not a
+race against token expiry or an unexpectedly short picker timeout.
+
+`RemoteActivities.readDelegatedAuth()` can authorize only a selected `Incoming`.
+With no such object, it returns null before contacting microG. The durable operator
+allowlist and microG account credential still exist; neither is a substitute for
+the live selection witness required by the current provider contract. Merely
+preserving the token cache would leave this authorization check unsatisfied.
+
+`PlayServicesChannel.readDelegatedAuth()` forwards only method, account and cache
+key to the verified GMS UI process. The original app's verified package/signatures,
+PID and spawner belonged to the now-completed interactive request. The current
+silent-read relay does not supply an independently verified original-app operation.
+A package/signature string embedded in a cache key is input, not caller proof.
+Keeping the UI process alive, extending its timeout, or pretending a completed
+picker is still selected does not supply the missing authorization contract.
+
+#### Why official GMS reports BadAuthentication
+
+The pinned GMS implementation tries its cached token, then its long-lived account
+credential. In the inspected build, `tic.h(Account)` checks its account data store
+and falls back to `AccountManager.getPassword()`. Westlake deliberately returns
+null for that operation: the reusable Google credential stays with microG.
+Here `getPassword()` is being used as GMS's long-lived credential slot; the failure
+does not demonstrate that the user entered an incorrect password.
+
+In `uao.a`, an empty long-lived credential takes a local error branch before the
+authenticated token request is constructed. The branch's `ywx.i` value maps to
+`BadAuthentication`. Build 27 captures that exact error in FotMob's Binder reply,
+with both token fields absent. This supports a local credential-boundary failure,
+not a fresh Google registration rejection. This is not a network packet capture
+and does not claim that unrelated GMS background traffic stopped.
+
+Proprietary DEX inspection was used locally to identify these call paths. The
+repository contains the conclusions and APK hashes, not disassembly, credentials,
+tokens or raw logs. The diagnostic response parser preserves the Parcel position
+and prints only allowlisted error labels and field-presence booleans. Unknown
+error strings become `other`.
+
+#### Why a valid token and a reauthentication warning coexist
+
+FotMob calls the legacy `GoogleAuthUtil.getToken(Context, Account, audience, Bundle)`
+again during its own token/sync path. This is silent token re-acquisition; it need
+not wait for expiry and is not an app-held OAuth `refresh_token` exchange. The
+original app's `kqc` coroutine handles auth failures and its caller updates the
+reauthentication flag. The client SDK decodes the error/recovery fields rather
+than receiving a new token. See the public
+[GoogleAuthUtil contract](https://developers.google.com/android/reference/com/google/android/gms/auth/GoogleAuthUtil).
+
+There is a further distinction: `pqc.i()` attempts token acquisition and can fall
+back to the saved `google_id_token` when the login method is Google. The app can
+therefore retain a usable-looking token while reporting that the session needs
+reauthentication. This warning alone proves neither backend rejection nor that
+the backend was never contacted. We have not measured FotMob backend acceptance;
+cryptographic token verification is not a replacement for that test.
+
+#### Required implementation boundary
+
+The missing component is an account/token lifecycle, not another claim patch:
+
+1. Separate persistent authorization of an app/account/client/scopes from each
+   temporary operation capability. Retain the existing operator allowlist and
+   Google's consent decisions; do not retain a completed picker witness forever.
+2. Establish caller identity at the verified app-to-GMS auth-service boundary.
+   Bind each silent operation to the actual app signer, live process/spawner,
+   selected account, approved client ID, scopes and allowed request options.
+   Propagate an explicit capability across process and asynchronous work; a
+   thread-local caller or an app-supplied cache key is insufficient.
+3. Let the microG broker satisfy only that authorized operation while keeping its
+   reusable credential private. Recheck revocation and liveness before delivery.
+   Return the expected token/expiry/error contract through the auth integration;
+   keep official GMS available for the other service APIs.
+4. Define cache reuse, invalidation and expiry consistently across interactive and
+   silent requests. The two request option sets differ; claim normalization must
+   preserve audience, approved scopes and security-sensitive options such as a
+   nonce. Do not alias arbitrary cache keys or ignore opaque options.
+5. Validate immediate silent retrieval, actual expiry/invalidation, process restart,
+   logout/revocation, caller death, concurrent apps and rejection of the wrong
+   app/signer/client/scope/account. Then measure backend session acceptance.
+
+This preserves the two-path design, but it is additional Westlake engineering.
+[GrapheneOS sandboxed Google Play](https://grapheneos.org/usage#sandboxed-google-play)
+adapts official Play to a normal application sandbox; its documentation does not
+establish this microG/official-GMS split or solve the split credential lifecycle.
+
+The broader goal also needs an explicit policy for legitimate authenticated GMS
+background services. This run observes withheld background reads; it does not
+establish that all official services work after an app-specific token handoff.
+Fixing FotMob's silent path alone would not accept Maps, FCM, Store, location
+replacement, or the whole corpus.
+
+Finally, the policy-3 control is separate: build 17 recorded identity-service 212
+status 9 before any picker launch. Build 27 does not replay or resolve that refusal.
+It uses policy 1, preserves the original identity and grant-file hash, and leaves
+certification overrides absent. The product-target restricted identity must pass
+its own service-availability gate after the lifecycle work.
+
 ## Remaining product boundaries
 
 - The official GMS and test applications still share OH UIDs within host bundles. Verified Java channels

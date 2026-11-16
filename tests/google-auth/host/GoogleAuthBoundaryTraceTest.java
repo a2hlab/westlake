@@ -18,6 +18,13 @@ public final class GoogleAuthBoundaryTraceTest {
             require(!result.contains(secret) && !result.contains(signer));
         }
         require(GoogleAuthBoundaryTrace.describe("getUserData", null).equals("key_kind=null"));
+        String options = GoogleAuthBoundaryTrace.describe("peekAuthToken", prefix
+                + "audience:server:client_id:123.apps.googleusercontent.com?include_email=0&include_profile=1&token_request_options=private-value");
+        require(options.contains("include_email=0") && options.contains("include_profile=1")
+                && options.contains("opaque_options=true") && !options.contains("private-value"));
+        require(GoogleAuthBoundaryTrace.responseError("BadAuthentication").equals("BadAuthentication"));
+        require(GoogleAuthBoundaryTrace.responseError("private@example.invalid\nINJECT").equals("other"));
+        require(GoogleAuthBoundaryTrace.responseError(null).equals("absent"));
         System.out.println("GOOGLE_AUTH_BOUNDARY_TRACE_TEST_PASS");
     }
     private static void require(boolean ok) { if (!ok) throw new AssertionError(); }

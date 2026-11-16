@@ -39,7 +39,11 @@ public final class GoogleAuthDelegation {
         try {
             GoogleAuthDelegationPolicy.parse(method.equals("peekAuthToken") ? key
                     : key.substring(key.startsWith("EXP:") ? 4 : 7));
-        } catch (SecurityException unsupported) { return null; }
+        } catch (SecurityException unsupported) {
+            if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE")))
+                event("cache_key_rejected=true " + failure(unsupported));
+            return null;
+        }
         try {
             return (String) Class.forName("adapter.activity.PlayServicesChannel")
                     .getMethod("readDelegatedAuth", String.class, Account.class, String.class)

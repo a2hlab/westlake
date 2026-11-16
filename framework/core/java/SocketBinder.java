@@ -418,11 +418,36 @@ public final class SocketBinder {
             try {
                 boolean known = channel.call(id, code, data, reply, flags);
                 traceOutbound(code, data, known ? firstInt(reply) : "unknown-code");
+                if (known && code == 5) traceAuthReply(reply);
                 return known;
             } catch (RemoteException | RuntimeException e) {
                 traceOutbound(code, data, e.getClass().getSimpleName());
                 throw e;
             }
+        }
+
+        /** Diagnose the legacy getTokenWithAccount result without recording any credential values. */
+        private void traceAuthReply(Parcel reply) {
+            if (reply == null || !"1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))
+                    || !"1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) return;
+            int position = reply.dataPosition();
+            String summary;
+            try {
+                if (!"com.google.android.auth.IAuthManagerService".equals(getInterfaceDescriptor())) return;
+                reply.setDataPosition(0);
+                reply.readException();
+                android.os.Bundle result = reply.readInt() == 0 ? null : android.os.Bundle.CREATOR.createFromParcel(reply);
+                if (result == null) summary = "bundle_present=false";
+                else {
+                    result.setClassLoader(android.app.ActivityThread.currentApplication().getClassLoader());
+                    summary = "bundle_present=true error=" + GoogleAuthBoundaryTrace.responseError(result.getString("Error"))
+                            + " token_details_present=" + result.containsKey("tokenDetails")
+                            + " auth_token_present=" + result.containsKey("authtoken")
+                            + " recovery_intent_present=" + result.containsKey("userRecoveryIntent");
+                }
+            } catch (Exception error) { summary = "reply_parse_failed=true"; }
+            finally { reply.setDataPosition(position); }
+            System.err.println("[WL-AUTH-REPLY] time=" + System.currentTimeMillis() + " code=5 " + summary);
         }
 
         /** Asked after the call, so that the question can't change what the call found. */

@@ -235,7 +235,14 @@ public final class RemoteActivities {
                     }
                 }
             }
-            if (selected == null) return null;
+            if (selected == null) {
+                if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))) {
+                    int live;
+                    synchronized (INCOMING) { live = INCOMING.size(); }
+                    GoogleAuthDelegation.event("no_selection=true live_requests=" + live + " method=" + method);
+                }
+                return null;
+            }
             if (!request.signer.equals(GoogleAuthProxy.digest(selected.origin.signatures[0].toByteArray(), "SHA-1")))
                 throw new SecurityException("cache signer differs from origin");
             if (!tokenRead) {

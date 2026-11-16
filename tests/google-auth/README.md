@@ -134,6 +134,29 @@ run. Enable `WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS=1` together with private logs
 in a rebuilt adapter to reproduce the value-free activity diagnostics; this
 flag does not implement activity/result transport or change authentication.
 
+## Silent-token diagnosis, build 27
+
+[`refresh-diagnosis27/fotmob-policy1.json`](refresh-diagnosis27/fotmob-policy1.json)
+records a successful Google activity result followed 477 ms later by an actual
+`BadAuthentication` reply to the original signed FotMob client. The broker had
+already lost its active selection; the corresponding GMS credential read was
+withheld. This result diagnoses the existing interactive-only authorization
+boundary. It does not implement silent authorization or accept the policy-3
+identity. See [the lifecycle analysis](../../docs/google-two-path-continuation.md#silent-token-failure-traced-diagnosis-build-27).
+
+For the value-free reply trace, rebuild and enable
+`WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE=1`, `WESTLAKE_GOOGLE_PRIVATE_LOGS=1`
+and `WESTLAKE_PLAY_TRACE=1` on the client. Enable the same diagnostics on official
+GMS with its existing delegation/identity guards. `[WL-AUTH-REPLY]` decodes only
+transaction 5 of `com.google.android.auth.IAuthManagerService`, restores the
+Parcel position, and records allowlisted errors and field-presence booleans.
+Unknown response text is redacted. Boundary classifications are deduplicated;
+their absence on a repeated request is not evidence that the method was skipped.
+
+The general Play trace may contain private data. Keep raw traces, screenshots,
+account data and proprietary disassembly outside the repository. The checked-in
+record contains only reviewed metadata, relative timing and artifact hashes.
+
 ## Host tests
 
 The broker's policies and file handling are plain Java. From the repository root:
