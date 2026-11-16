@@ -25,9 +25,17 @@ public final class CallerProcess {
         String packageName = ActivityThread.currentPackageName();
         String processName = ActivityThread.currentProcessName();
         if (processName == null) processName = packageName != null ? packageName : "";
+        // The process's packages: its own and, in the shared Play services process, those whose
+        // code also runs there (GuestPackages.codePackages), as AMS lists a process's packages.
+        java.util.List<String> packages = new ArrayList<>();
+        if (packageName != null) {
+            packages.add(packageName);
+            for (String name : adapter.packagemanager.GuestPackages.codePackages()) {
+                if (!packages.contains(name)) packages.add(name);
+            }
+        }
         ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo(
-                processName, Process.myPid(),
-                packageName != null ? new String[] { packageName } : new String[0]);
+                processName, Process.myPid(), packages.toArray(new String[0]));
         info.uid = Process.myUid();
         // The process has just been started to show its launcher activity: AMS ranks it top.
         info.importance = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
