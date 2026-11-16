@@ -97,6 +97,10 @@ public final class PlayServicesChannel {
     private static final int ACTIVITY = 16;
     /** To an app's launched process, from another of its processes: ask the user to confirm a package change. */
     private static final int CONFIRM = 17;
+    /** To a host, from a client: a read-only descriptor of a module file the host shares (ADR-0005, PlayModuleFiles). */
+    private static final int MODULE_FILE = 18;
+    /** To a host, from a client: the module files the host shares (ADR-0005, PlayModuleFiles.list). */
+    private static final int MODULE_LIST = 19;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -945,7 +949,10 @@ public final class PlayServicesChannel {
             IBinder binder = reply.readStrongBinder();
             if (binder == null) return null;
             ContentProviderHolder holder = new ContentProviderHolder(info);
-            holder.provider = attributed(channel, ContentProviderNative.asInterface(binder));
+            holder.provider = attributed(channel, ContentProviderNative.asInterface(binder), info.packageName, authority);
+            // Play services' module code in this app opens module files at their paths in Play services' storage
+            // (ADR-0005): with WESTLAKE_PLAY_MODULE_FILES=copy they are copied here before it can ask.
+            if (PlayModuleFiles.modules(authority)) PlayModuleFiles.copyListed(info.packageName);
             holder.noReleaseNeeded = true;
             System.err.println(TAG + "provider " + authority + " -> " + info.packageName + "/" + info.name
                     + (own != null ? " in " + process : ""));
@@ -965,7 +972,8 @@ public final class PlayServicesChannel {
      * caller's (enforceCallingUid); this process's own uid is the one every Westlake process shares, and
      * the host knows this app by the uid it gave the channel. Package, pid and tag stay as they are.
      */
-    private static IContentProvider attributed(Channel c, IContentProvider provider) {
+    private static IContentProvider attributed(Channel c, IContentProvider provider, String hostPackage,
+            String authority) {
         final int uid = c.uid;
         if (provider == null || uid == 0) return provider;
         return (IContentProvider) java.lang.reflect.Proxy.newProxyInstance(PlayServicesChannel.class.getClassLoader(),
@@ -977,12 +985,65 @@ public final class PlayServicesChannel {
                             }
                         }
                     }
+                    PlayModuleFiles.observeCall(authority, method.getName(), args);
                     try {
-                        return method.invoke(provider, args);
+                        Object result = method.invoke(provider, args);
+                        // A module loader in this app opens the files a host's provider names (ADR-0005).
+                        return result instanceof android.database.Cursor
+                                ? PlayModuleFiles.view((android.database.Cursor) result, hostPackage, authority) : result;
                     } catch (java.lang.reflect.InvocationTargetException e) {
                         throw e.getCause();
                     }
                 });
+    }
+
+    /**
+     * A file of the host's storage that the host shares with clients, read-only (ADR-0005), or null when the host
+     * refuses it (its reason logged) or cannot be reached.
+     */
+    /** The module files the host shares, as it names them (ADR-0005), or none when it cannot be reached. */
+    static String[] moduleList(String hostPackage) {
+        IBinder root = root(channelFor(hostPackage));
+        if (root == null) return new String[0];
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            root.transact(MODULE_LIST, data, reply, 0);
+            reply.readException();
+            String[] files = reply.createStringArray();
+            return files != null ? files : new String[0];
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "module list of " + hostPackage + " failed: " + e);
+            return new String[0];
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    static android.os.ParcelFileDescriptor moduleFile(String hostPackage, String path) {
+        IBinder root = root(channelFor(hostPackage));
+        if (root == null) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeString(path);
+            root.transact(MODULE_FILE, data, reply, 0);
+            reply.readException();
+            android.os.ParcelFileDescriptor file = reply.readTypedObject(android.os.ParcelFileDescriptor.CREATOR);
+            String refusal = reply.readString();
+            if (file == null) {
+                System.err.println(TAG + "module file " + PlayModuleFiles.relative(hostPackage, path) + " refused by "
+                        + hostPackage + ": " + refusal);
+            }
+            return file;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "module file " + PlayModuleFiles.relative(hostPackage, path) + " failed: " + e);
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
     }
 
     private static android.content.AttributionSource withUid(android.content.AttributionSource source, int uid) {
@@ -1571,6 +1632,26 @@ public final class PlayServicesChannel {
                             if (app != null) app.startActivity(start);
                         });
                     }
+                    return true;
+                }
+                case MODULE_FILE: {
+                    String path = data.readString();
+                    Application app = application();
+                    String dataDir = app != null ? app.getApplicationInfo().dataDir : null;
+                    String[] refusal = new String[1];
+                    android.os.ParcelFileDescriptor file = PlayModuleFiles.open(dataDir, path, refusal);
+                    String name = app != null ? PlayModuleFiles.relative(app.getPackageName(), path) : path;
+                    System.err.println(TAG + "module file " + name + " for " + describeCaller() + ": "
+                            + (file != null ? "served read-only" : "refused (" + refusal[0] + ")"));
+                    reply.writeTypedObject(file, Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
+                    reply.writeString(refusal[0]);
+                    return true;
+                }
+                case MODULE_LIST: {
+                    Application app = application();
+                    String[] files = PlayModuleFiles.list(app != null ? app.getApplicationInfo().dataDir : null);
+                    System.err.println(TAG + "module list (" + files.length + " files) for " + describeCaller());
+                    reply.writeStringArray(files);
                     return true;
                 }
                 case CONFIRM: {
