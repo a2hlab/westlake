@@ -1,0 +1,12 @@
+{
+  "schema": "westlake-official-auth-build-v1",
+  "device_tested": false,
+  "apk_sha256": "138b216a551f7587d08795a191d84e9193d89d90b2288c1f441ce81c9ede864b",
+  "sdk_root": "com.google.android.gms:play-services-auth-base:18.1.0",
+  "sdk_artifact_count": 21,
+  "sources": {
+    "tests/google-auth/OfficialAuthActivity.java": "60d270c4e234e2c8162b62ad2ddb19a5c378b4ab3983676ae2d468c10e1d8a15",
+    "tests/google-auth/AndroidManifest.xml": "ae2f9a88978e2e1b18d7c694190528890367f0d850d7d8700a992c8e1d59f0d1",
+    "tests/google-auth/sdk-dependencies.json": "5ea7edc352766f7ba1acf1fe00bf5a919cbb9e5866fa530ec9f4f7427807de18"
+  }
+}

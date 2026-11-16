@@ -33,6 +33,7 @@ public final class GoogleAuthProxy {
     private static final AtomicLong IDS = new AtomicLong();
     private static final Object TOKEN_LOCK = new Object();
     private static final java.util.Map<Account, java.util.Map<String, Integer>> VISIBILITY = new java.util.HashMap<>();
+    private static final java.util.Set<String> BOUNDARY_EVENTS = new java.util.HashSet<>();
 
     private GoogleAuthProxy() {}
     public static boolean provider() { return "microg".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_PROVIDER")); }
@@ -352,6 +353,36 @@ public final class GoogleAuthProxy {
         }
     }
 
+    /** Diagnostic only: no raw account, key, scope, token, message, or credential is emitted. */
+    private static void traceBoundary(String method, Object[] args) {
+        if (!"1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))
+                || !"1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) return;
+        try {
+            String key = args.length > 1 && args[1] instanceof String ? (String) args[1] : null;
+            String detail = "method=" + method + " " + GoogleAuthBoundaryTrace.describe(method, key)
+                    + " pid=" + android.os.Process.myPid() + " binder_pid=" + Binder.getCallingPid()
+                    + " binder_uid=" + Binder.getCallingUid()
+                    + " peer_present=" + (SocketBinder.callingPeer() != null)
+                    + " peer_same_app=" + SocketBinder.isCallingSameApp();
+            StringBuilder stack = new StringBuilder();
+            int count = 0;
+            for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+                String type = frame.getClassName(), name = frame.getMethodName();
+                if (type.startsWith("adapter.") || type.startsWith("android.")
+                        || type.startsWith("java.") || type.startsWith("dalvik.")) continue;
+                if (!type.matches("[A-Za-z0-9_.$]+") || !name.matches("[A-Za-z0-9_$<>]+")) continue;
+                if (count++ != 0) stack.append(',');
+                stack.append(type).append('.').append(name);
+                if (count == 8) break;
+            }
+            detail += " stack=" + (stack.length() == 0 ? "none" : stack.toString());
+            synchronized (BOUNDARY_EVENTS) {
+                if (BOUNDARY_EVENTS.size() >= 512 || !BOUNDARY_EVENTS.add(detail)) return;
+            }
+            System.err.println("[WL-AUTH-BOUNDARY] time=" + System.currentTimeMillis() + " " + detail);
+        } catch (RuntimeException ignored) { /* Diagnostics must not change auth behavior. */ }
+    }
+
     /** Adapter entry point. Never falls through to the official reusable-credential store. */
     static Object answer(String method, Object[] args) {
         if (AccountManagerStub.callerPid() != android.os.Process.myPid()) {
@@ -362,6 +393,7 @@ public final class GoogleAuthProxy {
                 case "getPassword":
                 case "peekAuthToken":
                 case "getUserData":
+                    traceBoundary(method, args);
                     event("client_credential_read=" + method + " result=withheld"); return null;
                 case "getAuthenticatorTypes":
                     return new AuthenticatorDescription[] {new AuthenticatorDescription("com.google", "com.google.android.gms", 0, 0, 0, 0, true)};

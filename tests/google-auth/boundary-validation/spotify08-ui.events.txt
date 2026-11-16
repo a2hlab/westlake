@@ -1,0 +1,20 @@
+[WL-REMOTE-ACTIVITY] time=1794804816149 launch_received caller=com.spotify.music process=com.google.android.gms.ui class=com.google.android.gms.auth.api.signin.ui.SignInActivity
+[WL-REMOTE-ACTIVITY] time=1794804826099 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.signin.activity.SignInActivity
+[WL-AUTH-PROXY] time=1794804879310 account_visibility_read target=com.spotify.music visibility=4
+[WL-AUTH-PROXY] time=1794804879377 account_visibility_changed target=com.spotify.music visibility=2 token_grant=false
+[WL-AUTH-PROXY] time=1794804879440 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794804879874 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794804880241 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794804880310 account_visibility_read target=com.spotify.music visibility=2
+[WL-REMOTE-ACTIVITY] time=1794804881606 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.auth.uiflows.common.FilteringRedirectActivity
+[WL-REMOTE-ACTIVITY] time=1794804881606 result_forwarded present=true
+[WL-REMOTE-ACTIVITY] time=1794804882488 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.auth.uiflows.controller.ControllerLauncherActivity
+[WL-REMOTE-ACTIVITY] time=1794804883736 result_forwarded present=true
+[WL-AUTH-BOUNDARY] time=1794804886104 method=getUserData key_kind=metadata metadata=hasUsername pid=4361 binder_pid=4361 binder_uid=20010056 peer_present=false peer_same_app=false stack=bkkw.e,tic.g,abbf.d,abbf.b,abbf.a,com.google.android.gms.auth.uiflows.gettoken.GetTokenController.a,abgu.gN,com.google.android.gms.auth.uiflows.gettoken.GetTokenChimeraActivity.b
+[WL-AUTH-PROXY] time=1794804886104 client_credential_read=getUserData result=withheld
+[WL-REMOTE-ACTIVITY] time=1794804886404 result_forwarded present=true
+[WL-AUTH-BOUNDARY] time=1794804906073 method=getUserData key_kind=metadata metadata=firstName pid=4361 binder_pid=4361 binder_uid=20010056 peer_present=false peer_same_app=false stack=bkkw.e,tic.f,abju.b,gwr.eJ,gsj.kc,gsj.f,gsj.l,gwq.l
+[WL-AUTH-PROXY] time=1794804906073 client_credential_read=getUserData result=withheld
+[WL-AUTH-BOUNDARY] time=1794804906204 method=getUserData key_kind=metadata metadata=GoogleUserId pid=4361 binder_pid=4361 binder_uid=20010056 peer_present=false peer_same_app=false stack=bkkw.e,tic.f,abju.b,gwr.eJ,gsj.kc,gsj.f,gsj.l,gwq.l
+[WL-AUTH-PROXY] time=1794804906204 client_credential_read=getUserData result=withheld
+[WL-REMOTE-ACTIVITY] time=1794804957903 result_sent caller=com.spotify.music result_code=0

@@ -5,6 +5,18 @@ microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](../../docs/google-official-auth-validation.md) and
 [validation.json](validation.json).
 
+Latest run: [auth-boundary validation](../../docs/google-auth-boundary-validation.md),
+with results under `boundary-validation/`. The build-04 setup and preserved
+results below describe the historical baseline; the latest diagnostic host uses
+the current adapter build with the additional trace flag described below.
+
+The current source adds a fourth `spoof-package` button. It calls the official
+token Binder with `com.spotify.music` in both package options while retaining
+the probe's actual APK, signer and verified channel identity. This is a negative
+identity test, not a Spotify login or a delegated token grant. The manifest
+input key for this source is `google-official-auth-probe-v3`; earlier build
+records below retain their original v1/v2 identities.
+
 ## Build
 
 Prerequisites: Android SDK platform/build-tools 34, JDK 21, Python 3, the exact
@@ -73,6 +85,17 @@ action; a stale report is not a result. Compare provider request IDs and event
 timestamps, including GMS's persistent process. The probe only writes token
 presence, counts, numeric IDs, class names and allowlisted public error codes;
 it never writes account/token values or arbitrary exception messages.
+
+For cache-boundary diagnosis, enable `WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE=1`
+with `WESTLAKE_GOOGLE_PRIVATE_LOGS=1` on the official GMS host. The adapter emits
+`[WL-AUTH-BOUNDARY]` records for withheld credential/cache reads. Each record
+contains fixed cache/metadata categories, Binder PID/UID, whether a SocketBinder
+peer is active, and class/method stack frames. Raw account names, cache keys,
+OAuth client IDs, scopes, tokens and metadata values are omitted. Records are
+deduplicated and capped at 512 per process; absence of a duplicate line is not
+absence of a repeated call. Classification is diagnostic and never authorizes
+a request. A separate host Java test exercises redaction with synthetic private
+strings in malformed keys and OAuth parameters.
 
 A control success with an SDK failure is an experiment result, not a test-suite
 pass for the hybrid. A recovery Intent's presence does not prove its activity

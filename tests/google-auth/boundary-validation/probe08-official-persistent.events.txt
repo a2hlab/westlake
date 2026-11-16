@@ -1,0 +1,6 @@
+[WL-AUTH-BOUNDARY] time=1794805005263 method=peekAuthToken key_kind=token cache_shape=package_signer_scope owner=probe signer_sha1_shape=true scope_kind=ac2dm options_present=false pid=3469 binder_pid=3469 binder_uid=20010056 peer_present=true peer_same_app=false stack=tku.a,uas.a,uar.b,oaf.e,oaf.h,oaf.fx,nud.onTransact,bklj.onTransact
+[WL-AUTH-PROXY] time=1794805005263 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-BOUNDARY] time=1794805005264 method=getPassword key_kind=none pid=3469 binder_pid=3469 binder_uid=20010056 peer_present=true peer_same_app=false stack=bkkw.c,tic.h,uao.a,uau.b,uas.a,uar.b,oaf.e,oaf.h
+[WL-AUTH-PROXY] time=1794805005264 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794805010892 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794805010893 client_credential_read=getPassword result=withheld

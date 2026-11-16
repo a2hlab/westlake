@@ -1,0 +1,3 @@
+[WL-CHANNEL-IDENTITY] pid=5992 claims org.westlake.googlebootstrap.probe; spawner says org.westlake.googlebootstrap.probe (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=5992 org.westlake.googlebootstrap.probe certificates match (65 ms)
+[WL-AUTH-PROXY] time=1794805000228 client_verified owner=org.westlake.googlebootstrap.probe certificate_sha256=77e047c82dd1571e2f1b1e745cddc6e35dae8e7a3fcde358a3f79c4d185653ab pid=5992

@@ -1,5 +1,9 @@
 # Cross-process activity results for the Google sign-in experiment
 
+The subsequent [auth-boundary validation](google-auth-boundary-validation.md)
+repeats this flow after a GMS host restart, traces Spotify's OAuth cache reads,
+and tests rejection of a probe claiming Spotify's package.
+
 **Board result:** Spotify now opens official GMS's account picker, accepts the
 existing authorized account, and passes Google's PendingIntent and
 result-forwarding redirects. The original start error `-91` / Google status 17,

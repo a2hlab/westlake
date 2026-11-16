@@ -1,0 +1,34 @@
+{
+  "schema": "westlake-microg-auth-capability-inspection-v1",
+  "apk_sha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+  "static_inspection_only": true,
+  "spotify_token_exchange_tested": false,
+  "classes": {
+    "Lorg/microg/gms/auth/AuthManager;": {
+      "dex": "classes5.dex",
+      "fields_present": [
+        "forceRefreshToken",
+        "includeEmail",
+        "includeGrantedScopes",
+        "includeProfile"
+      ],
+      "methods_present": [
+        "getExpiry",
+        "invalidateAuthToken",
+        "putDynamicFiled",
+        "requestAuth",
+        "setItCaveatTypes",
+        "setOauth2Prompt",
+        "setPackageSignature",
+        "setTokenRequestOptions"
+      ]
+    }
+  },
+  "server_auth_code_helper": {
+    "class": "Lorg/microg/gms/auth/signin/ExtensionsKt;",
+    "dex": "classes5.dex",
+    "present": true,
+    "force_refresh_field_write": true,
+    "server_client_scope_literal_present": true
+  }
+}

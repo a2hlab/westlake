@@ -1,0 +1,16 @@
+{
+  "schema": "westlake-official-auth-v1",
+  "mode": "sdk",
+  "scope": "ac2dm",
+  "startTime": 1794805004929,
+  "gmsVersion": 244034029,
+  "accountCount": 1,
+  "operation": {
+    "outcome": "failed",
+    "errorType": "UserRecoverableAuthException",
+    "errorCode": "BadAuthentication",
+    "recoveryIntentPresent": true,
+    "entry": "GoogleAuthUtil.getToken"
+  },
+  "endTime": 1794805005296
+}

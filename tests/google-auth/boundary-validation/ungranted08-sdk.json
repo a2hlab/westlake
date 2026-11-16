@@ -1,0 +1,13 @@
+{
+  "schema": "westlake-official-auth-v1",
+  "mode": "sdk",
+  "scope": "ac2dm",
+  "startTime": 1794804731036,
+  "gmsVersion": 244034029,
+  "operation": {
+    "outcome": "failed",
+    "errorType": "SecurityException",
+    "errorCode": "unclassified"
+  },
+  "endTime": 1794804731049
+}

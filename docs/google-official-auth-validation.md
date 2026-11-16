@@ -1,5 +1,9 @@
 # Official GMS token and Spotify Google Sign-In follow-up
 
+The latest [auth-boundary validation](google-auth-boundary-validation.md)
+reproduces the SDK/Binder failure on the activity-fixed build and records
+caller-identity and package-spoof checks.
+
 **Historical baseline:** the subsequent [activity/result implementation and board
 replay](remote-activity-results.md) fix the Spotify activity-resolution failure
 and reach Google's account picker and credential-recovery screen. The token

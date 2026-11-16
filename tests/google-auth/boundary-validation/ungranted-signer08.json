@@ -1,0 +1,11 @@
+{
+  "case": "first diagnostic probe launch",
+  "classification": "invalid positive-control setup: wrong development signer",
+  "expected_signer_sha256": "77e047c82dd1571e2f1b1e745cddc6e35dae8e7a3fcde358a3f79c4d185653ab",
+  "observed_signer_sha256": "4b6e51e1f66813c9a35fa890539bcfff19416c8ce9cefd20647199653036c708",
+  "accounts_rejected": true,
+  "reached_official_token_operation": false,
+  "spoof_test_result_valid": false,
+  "provider_grants_changed": false,
+  "correction": "Rebuild with the existing approved probe signing key; retain rejection evidence separately"
+}

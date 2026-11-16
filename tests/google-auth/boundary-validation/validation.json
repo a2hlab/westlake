@@ -1,0 +1,31 @@
+{
+  "schema": "westlake-auth-boundary-validation-v1",
+  "status": "local_auth_contract_gap_confirmed",
+  "baseline07": {
+    "direct_microg_control": "token_received",
+    "official_sdk": "BadAuthentication",
+    "official_binder": "BadAuthentication"
+  },
+  "diagnostic08": {
+    "direct_microg_control": "token_received",
+    "official_sdk": "BadAuthentication",
+    "official_binder": "BadAuthentication",
+    "spoofed_package": "SecurityException",
+    "approved_probe_pid": 5992,
+    "approved_probe_stopped": true
+  },
+  "spotify_replay": {
+    "account_picker_and_redirects": true,
+    "oauth2_and_server_client_cache_reads": true,
+    "cache_immediate_caller": "official GMS main process",
+    "observed_screen": "Verify it is you; please sign in again",
+    "explicit_back_returned_one_cancel": true,
+    "authenticated": false
+  },
+  "wrong_signer_setup_attempt_excluded_from_spoof_test": true,
+  "provider_grants_changed": false,
+  "token_mediation_implemented": false,
+  "production_isolation_proven": false,
+  "microg_server_code_capability_static_only": true,
+  "public_evidence_contains_account_or_token_values": false
+}

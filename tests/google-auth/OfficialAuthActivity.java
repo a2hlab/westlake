@@ -35,7 +35,7 @@ public final class OfficialAuthActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
-        for (String mode : new String[] {"sdk", "binder", "control"}) {
+        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package"}) {
             Button button = new Button(this); button.setText("Official GMS token: " + mode);
             button.setOnClickListener(v -> run(mode)); layout.addView(button);
         }
@@ -57,7 +57,8 @@ public final class OfficialAuthActivity extends Activity {
                 if (accounts.length != 1) result.put("outcome", "account_unavailable");
                 else {
                     Future<JSONObject> request = requests.submit(() -> "sdk".equals(mode)
-                            ? sdk(accounts[0]) : "binder".equals(mode) ? binder(accounts[0]) : control(accounts[0]));
+                            ? sdk(accounts[0]) : "control".equals(mode) ? control(accounts[0])
+                            : binder(accounts[0], "spoof-package".equals(mode)));
                     try { result.put("operation", request.get(100, TimeUnit.SECONDS)); }
                     catch (Exception error) { request.cancel(true); result.put("operation", failure(error)); }
                 }
@@ -100,8 +101,9 @@ public final class OfficialAuthActivity extends Activity {
                 .put("outcome", token != null && !token.isEmpty() ? "token_received" : "empty_token");
     }
 
-    private JSONObject binder(Account account) throws Exception {
+    private JSONObject binder(Account account, boolean spoofPackage) throws Exception {
         JSONObject result = new JSONObject().put("entry", "IAuthManagerService.getTokenWithAccount");
+        result.put("spoofPackageTest", spoofPackage);
         CountDownLatch connected = new CountDownLatch(1); IBinder[] service = new IBinder[1];
         ServiceConnection connection = new ServiceConnection() {
             @Override public void onServiceConnected(ComponentName name, IBinder value) { service[0] = value; connected.countDown(); }
@@ -119,8 +121,10 @@ public final class OfficialAuthActivity extends Activity {
             boolean expected = "com.google.android.auth.IAuthManagerService".equals(descriptor);
             result.put("expectedDescriptor", expected);
             if (!expected) return result.put("outcome", "unexpected_descriptor");
-            Bundle extras = new Bundle(); extras.putString("androidPackageName", getPackageName());
-            extras.putString("clientPackageName", getPackageName());
+            // Negative identity test only. The probe's signed APK and channel identity stay unchanged.
+            String claimedPackage = spoofPackage ? "com.spotify.music" : getPackageName();
+            Bundle extras = new Bundle(); extras.putString("androidPackageName", claimedPackage);
+            extras.putString("clientPackageName", claimedPackage);
             Parcel data = Parcel.obtain(), reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(descriptor); data.writeInt(1); account.writeToParcel(data, 0);
@@ -136,7 +140,10 @@ public final class OfficialAuthActivity extends Activity {
                         .put("tokenPresent", present).put("errorCode", safeError(response.getString("Error")))
                         .put("recoveryIntentPresent", response.containsKey("userRecoveryIntent"));
             } finally { data.recycle(); reply.recycle(); }
-        } catch (Exception error) { return failure(error).put("entry", "IAuthManagerService.getTokenWithAccount"); }
+        } catch (Exception error) {
+            return failure(error).put("entry", "IAuthManagerService.getTokenWithAccount")
+                    .put("spoofPackageTest", spoofPackage);
+        }
         finally { if (bound) unbindService(connection); }
     }
 

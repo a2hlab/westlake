@@ -1,0 +1,18 @@
+{
+  "schema": "westlake-official-auth-v1",
+  "mode": "binder",
+  "scope": "ac2dm",
+  "startTime": 1794805010833,
+  "gmsVersion": 244034029,
+  "accountCount": 1,
+  "operation": {
+    "entry": "IAuthManagerService.getTokenWithAccount",
+    "spoofPackageTest": false,
+    "expectedDescriptor": true,
+    "outcome": "token_not_returned",
+    "tokenPresent": false,
+    "errorCode": "BadAuthentication",
+    "recoveryIntentPresent": true
+  },
+  "endTime": 1794805010902
+}
