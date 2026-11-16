@@ -91,3 +91,10 @@ GMS/Store connections, with no direct microG auth connection. The reviewed
 public error screenshot contains no account data. The source-confirmed
 activity/result transport gap and the measured official token failure remain
 separate findings; no unpublished Google status code is inferred for Spotify.
+
+The subsequent [Spotify diagnostic replay](../../docs/spotify-google-signin-diagnosis.md)
+records the actual numeric Google status 17 after external activity start error
+-91. Its evidence lives in `spotify-diagnosis/`, separately from the initial
+run. Enable `WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS=1` together with private logs
+in a rebuilt adapter to reproduce the value-free activity diagnostics; this
+flag does not implement activity/result transport or change authentication.

@@ -1,0 +1,13 @@
+{
+  "apk_sha256": "8ae192315399a972623f56c7e9322fd2fb625720f3167137655a1b9c29e202c7",
+  "dex": "classes3.dex",
+  "class": "com.google.android.gms.auth.api.signin.internal.SignInHubActivity",
+  "method": "onCreate",
+  "handlers": [
+    {
+      "exception": "Landroid/content/ActivityNotFoundException;",
+      "handler_address": 148
+    }
+  ],
+  "handler_effect": "m0(17) constructs Status(17), sets RESULT_CANCELED with googleSignInStatus and finishes; no proprietary bytecode published."
+}

@@ -40,7 +40,7 @@
   },
   "confirmed_token_gap": "Official GMS requests peekAuthToken and getPassword; current proxy withholds both. No provider token request follows either official token attempt.",
   "source_confirmed_activity_gap": "External Google activities and their results are not transported through the current service channel; local results and same-app no-result home launches are insufficient.",
-  "spotify_cause_limit": "Observed hub launch, cancelled result and generic error. Google status not captured; sole cause not proven.",
+  "spotify_cause_limit": "Initial run did not capture the Google status. The later diagnostic replay confirmed external activity resolution failure (-91, Status 17); subsequent interactive authentication remains untested.",
   "full_oauth_flow_passed": false,
   "account_signup_performed": false,
   "production_isolation_proven": false,
@@ -74,5 +74,12 @@
     "results/spotify-window-auth.events.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
     "results/spotify.events.json": "e4d4a178ca53f9179e8b1bec3f89b7763348cc2f1bd190181be6bba11ee45b72",
     "results/spotify.json": "1f24d7f5442a0380ef139ff74efc9524761b8abc58dac25ebdb9f3f029f7c454"
+  },
+  "spotify_diagnostic_followup": {
+    "status": "confirmed_local_activity_resolution_failure",
+    "source": "spotify-diagnosis/result.json",
+    "android_start_result": -91,
+    "google_status": 17,
+    "authentication_stage_reached": false
   }
 }

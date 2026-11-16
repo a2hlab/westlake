@@ -1,0 +1,32 @@
+{
+  "baseline_commit": "cd0293b6e00ecf05c8a422554b6bd67b06dd773e",
+  "changed_source_inputs": {
+    "framework/activity/java/ActivityResults.java": "6fdaad607886adea6581a699efb96c25ab471ffb3412aee8d06c71b4d6b6396b",
+    "framework/activity/java/ActivityTaskManagerAdapter.java": "e8044e32d7e12f2bacf671f7e70ec6650d0077390a0a9e996aaf3a9eb4cb5006",
+    "framework/activity/java/GoogleSignInDiagnostics.java": "ce02e6e18a5493cc358522de3e0cf9bb38bf8391cc6b9adeaa11603bd542d670"
+  },
+  "adapter_source_input_count": 121,
+  "adapter_class_count": 251,
+  "all_adapter_source_inputs_match": true,
+  "runtime_artifacts": {
+    "adapter-runtime-bcp.classes.jar": {
+      "bytes": 667082,
+      "sha256": "b334936a0ba80c8a928fc85cf329da18606a9bba8c7dc87ca1844711188253e2"
+    },
+    "adapter-runtime-bcp.jar": {
+      "bytes": 367139,
+      "sha256": "34765e242db41693b6efcba45be778ae300cf0cf5a2dfa1237d805536790e618"
+    },
+    "framework.classes.jar": {
+      "bytes": 48623168,
+      "sha256": "428a3410775f7ca450fee2c3f9ac0738260c4b528411fd5e53ac0492c8ea2c61"
+    },
+    "framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    }
+  },
+  "base_framework_jar_unchanged": true,
+  "framework_preload_passed": true,
+  "diagnostic_only_no_routing_fix": true
+}

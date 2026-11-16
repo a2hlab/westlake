@@ -1,0 +1,13 @@
+[
+  {
+    "name": "com.google.android.gms.auth.api.signin.ui.SignInActivity",
+    "targetActivity": null,
+    "exported": "true",
+    "permission": null,
+    "process": "@7F1507B8",
+    "actions": [
+      "com.google.android.gms.auth.GOOGLE_SIGN_IN"
+    ],
+    "resolved_process": "com.google.android.gms.ui"
+  }
+]

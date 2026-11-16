@@ -94,6 +94,7 @@ final class ActivityResults {
                         + " is finishing or gone; result dropped");
                 return;
             }
+            GoogleSignInDiagnostics.result(caller, data, requestCode, resultCode);
             IApplicationThread app = thread.getApplicationThread();
             ClientTransaction transaction = ClientTransaction.obtain(app);
             transaction.addTransactionItem(ActivityResultItem.obtain(resultTo, Collections.singletonList(

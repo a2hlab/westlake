@@ -1,5 +1,10 @@
 # Official GMS token and Spotify Google Sign-In follow-up
 
+**Spotify root cause is now confirmed:** a [diagnostic replay](spotify-google-signin-diagnosis.md)
+recorded no matching OH activity, start error `-91`, and Google `Status(17)`.
+The immediate blocker is external Google activity resolution. The initial run
+below did not capture that status; its records are preserved as collected.
+
 **Result: the current hybrid does not complete these flows.** On 2026-11-15
 Pacific / 2026-11-16 UTC, the official Google SDK and official GMS token Binder
 both returned `BadAuthentication`. A forced microG token request from the same
@@ -115,11 +120,12 @@ Source inspection identifies another missing contract:
   results between local activities. The cross-process/cross-package caller
   relationship needed for this sign-in flow is not implemented by that path.
 
-These are source-confirmed limitations, consistent with the observed failure.
-The Google status inside Spotify's returned data was not captured, so this
-report does not assign a specific Google status or claim the UI gap is the sole
-cause. It also does not attribute Spotify's failure to the SDK probe's
-`BadAuthentication`: Spotify did not establish that token-service path.
+These were initially source-confirmed limitations, consistent with the observed
+failure. The initial run did not capture the returned Google status. The later
+[instrumented replay](spotify-google-signin-diagnosis.md) captured status 17
+following start error -91, confirming activity resolution as the immediate
+cause. Spotify did not reach the independent SDK probe's `BadAuthentication`
+path. The initial machine-readable records remain unchanged.
 
 Input needed the harness's explicit main-queue click and DOWN/UP injection;
 some earlier clicks left the login page visible. The eventual activity and

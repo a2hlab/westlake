@@ -200,7 +200,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      */
     private int startOutside(Intent intent, int flags, IBinder resultTo, ActivityResults.Request request) {
         if (Intent.ACTION_CHOOSER.equals(intent.getAction())) return startChooser(intent, flags, resultTo, request);
-        if (!adapter.packagemanager.PackageManagerAdapter.ohHandles(intent) && !sharesText(intent)) {
+        boolean ohHandler = adapter.packagemanager.PackageManagerAdapter.ohHandles(intent);
+        GoogleSignInDiagnostics.externalResolution(intent, ohHandler, request == null ? -1 : request.requestCode);
+        if (!ohHandler && !sharesText(intent)) {
             if (alwaysOnAndroid(intent)) {
                 // Apps start these screens unguarded: aat asks for all-files access in Settings as it
                 // starts, socks5 for VPN consent, viewer for a document. Each died when the start
@@ -215,6 +217,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
                 return ActivityManager.START_SUCCESS;
             }
             Log.i(TAG, "startActivity: nothing handles " + intent);
+            GoogleSignInDiagnostics.unresolved(intent, notFound(intent));
             return notFound(intent);
         }
         int result = bridgeStartActivityWithStack(intent, flags, resultTo, request);

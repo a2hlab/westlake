@@ -1,0 +1,6 @@
+[
+  {
+    "pid": 22024,
+    "event": "[WL-AUTH-PROXY] time=1794792501984 request=610 operation=token owner=com.android.vending force_refresh=false cache_before=true token_present=true"
+  }
+]
