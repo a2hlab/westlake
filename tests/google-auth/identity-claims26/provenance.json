@@ -1,0 +1,30 @@
+{
+  "candidate": "26",
+  "adapterRuntimeSha256": "4b97cb2aa19c84d21cc9312ca0f70a12e4ae818efb171aa1b4a34944b5ea2e29",
+  "nativeRuntimeSha256": "12506b24d30f51fd0e8e0678ad2184512e2ca9c42f6f74fba199d79c9edec6f1",
+  "frameworkPreloadPassed": true,
+  "identityClaimAdaptationOptIn": true,
+  "defaultEnabled": false,
+  "hostTests": {
+    "identityClaims": 17,
+    "delegationPolicy": 36,
+    "accountPolicy": 8,
+    "boundaryTrace": "PASS"
+  },
+  "sources": {
+    "framework/window/java/WindowSessionAdapter.java": "95e0bc4b17285332acf99fdba544a6df4c4f14444d2e5be3d9bd1898757f62cf",
+    "framework/activity/java/RemoteActivities.java": "2695e1a17f29f6b152bdb01b6e41e12787002a216d2a5e874d1a5603921adfce",
+    "framework/core/java/GoogleIdentityClaims.java": "cc59133a82c4c27f9a359d8e39793a28e9eec5f4268b24acd9deaef19b01621d",
+    "framework/core/java/GoogleAuthDelegationPolicy.java": "d11bf408ac3628e92345729d03e7a37d3941165b271612e3f0831f2473987e23",
+    "framework/android-runtime/src/android_graphics_compat_shim.cpp": "b0398973edee94f46dbeee0a0640a0fff5dc55e44b843d6092f6b19575d87253"
+  },
+  "fullSourceClosure": false,
+  "providerRuntimeChanged": false,
+  "rawCredentialsOrScreenshotsPublished": false,
+  "recordedAtUtc": "2026-11-16T22:12:31.689713+00:00",
+  "officialGmsApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "fotmobApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+  "officialGmsVersion": "24.40.34",
+  "providerMicrogApkSha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+  "providerAdapterRuntimeSha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+}

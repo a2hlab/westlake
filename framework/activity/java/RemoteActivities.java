@@ -22,6 +22,7 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import adapter.core.GoogleAuthDelegation;
 import adapter.core.GoogleAuthDelegationPolicy;
+import adapter.core.GoogleIdentityClaims;
 import adapter.core.GoogleAuthProxy;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -179,6 +180,8 @@ public final class RemoteActivities {
         String actualClass = info.targetActivity == null ? info.name : info.targetActivity;
         launch.setComponent(new ComponentName(info.packageName, actualClass));
         Incoming pending = new Incoming(callback, statedCaller, verifiedUid, wantsResult, verifiedInfo, verifiedPid, verifiedSpawner, cleanup);
+        pending.targetPackage = info.packageName;
+        pending.targetActivity = actualClass;
         synchronized (INCOMING) {
             if (INCOMING.size() >= LIMIT) throw new IllegalStateException("too many remote activities");
             INCOMING.add(pending);
@@ -242,18 +245,21 @@ public final class RemoteActivities {
                             ? found.result.getString(expiry ? "expiry" : "scopes") : null;
                 }
             }
+            String providerKey = GoogleIdentityClaims.request(key,
+                    "1".equals(System.getenv("WESTLAKE_GOOGLE_IDENTITY_CLAIMS")), selected.targetPackage, selected.targetActivity);
             Bundle result = PlayServicesChannel.delegatedAuth(selected.origin, selected.originPid, selected.spawner,
-                    account, key, selected.witness(account), null);
+                    account, providerKey, selected.witness(account), null);
             if (result == null) return null;
             String token = result.getString("token");
             synchronized (selected.tokens) {
                 if (!selected.selected(account)) return null;
                 if (token != null) {
                     if (selected.tokens.size() >= 16 && !selected.tokens.containsKey(key)) throw new SecurityException("token limit");
-                    selected.tokens.put(key, new Issued(account, result));
+                    selected.tokens.put(key, new Issued(account, result, providerKey));
                 }
             }
-            GoogleAuthDelegation.event("ui_read=true owner=" + request.owner + " token_present=" + (token != null));
+            GoogleAuthDelegation.event("ui_read=true owner=" + request.owner + " token_present=" + (token != null)
+                    + " identity_claims_adapted=" + !key.equals(providerKey));
             return token;
         } catch (Exception error) {
             GoogleAuthDelegation.event("ui_denied=true " + GoogleAuthDelegation.failure(error));
@@ -264,7 +270,10 @@ public final class RemoteActivities {
     private static final class Issued {
         final Account account;
         final Bundle result;
-        Issued(Account account, Bundle result) { this.account = account; this.result = result; }
+        final String providerKey;
+        Issued(Account account, Bundle result, String providerKey) {
+            this.account = account; this.result = result; this.providerKey = providerKey;
+        }
     }
 
     static void callerDestroyed(IBinder token) {
@@ -284,6 +293,7 @@ public final class RemoteActivities {
         final int originPid;
         final String spawner;
         final Runnable cleanup;
+        String targetPackage, targetActivity;
         final long authDeadline = SystemClock.elapsedRealtime() + 10 * 60_000L;
         final java.util.Map<String, Issued> tokens = new java.util.HashMap<>();
 
@@ -316,7 +326,7 @@ public final class RemoteActivities {
                 Issued issued = entry.getValue();
                 if (token != null && token.equals(issued.result.getString("token")) && selected(issued.account)) {
                     synchronized (tokens) { tokens.remove(entry.getKey()); }
-                    PlayServicesChannel.delegatedAuth(origin, originPid, spawner, issued.account, entry.getKey(), witness(issued.account), token);
+                    PlayServicesChannel.delegatedAuth(origin, originPid, spawner, issued.account, issued.providerKey, witness(issued.account), token);
                 }
             }
         }

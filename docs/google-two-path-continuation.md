@@ -147,7 +147,7 @@ the metadata fix.
 
 With the same policy-1 identity preserved, FotMob again received an identity-service 212 status-0
 callback. The creator-owned activity now displayed Google's **Choose an account** dialog, with
-FotMob's name and icon. The account list remained empty across captures more than five minutes
+FotMob's name and icon. The account list appeared empty across captures more than five minutes
 apart. There was no completed Google sign-in, app-account creation or successful token result.
 
 The broker reported one account in requests around the attempt. This proves the provider can enumerate
@@ -155,7 +155,8 @@ an account; it does not prove that the chooser accepted it or that account selec
 GMS UI thread dump showed its main looper idle and no blocked account-loading stack. Background GMS
 credential/cache reads remained withheld. Those observations do not establish the cause of the empty
 list: account eligibility, account metadata and the chooser's fragment/lifecycle integration still need
-to be distinguished before changing auth policy. No credential export or extra scope grant was added.
+to be distinguished before changing auth policy. This was the build-18 diagnosis; the subsequent
+resize investigation below resolves the apparent empty list. No credential export or extra scope grant was added.
 
 The temporary FotMob process was stopped after capture; provider, official-host data and original
 identities were retained. See [the sanitized result](../tests/google-auth/continuation18/fotmob-policy1.json).
@@ -163,6 +164,113 @@ identities were retained. See [the sanitized result](../tests/google-auth/contin
 The post-flow build-17 thread samples were GMS main/persistent/unstable/UI: 93/85/55/33;
 Store main/background/quick-launch/installer: 134/66/41/51. These finite samples contrast with the
 observed recursive lookup failure, but are not a soak-test or performance acceptance result.
+
+### Dialog resize investigation, builds 19–23
+
+Value-free, temporary diagnostics on the real chooser found one account in its loaded model and
+two adapter rows (account plus add-account) at both 15 and 35 seconds. The dialog grew from
+1139 x 414 to 1139 x 669, but its lower content was not visible. This was a rendering defect,
+not evidence that microG failed to enumerate the account. The object-graph diagnostics were
+removed before the production candidate; no proprietary disassembly or account values are published.
+
+The investigation found three rendering gaps:
+
+1. Android's `SurfaceControl.Transaction.setBufferSize` queues its size until `apply()`, while
+   Westlake's native `setPosition` immediately writes RS bounds using the current cached size.
+   A combined transaction moved the growing dialog but reused its old height. `applyPosition`
+   now applies the buffer size before position, closes its transaction, and handles movement to
+   the origin as well as nonzero positions.
+2. BLAST updated its bookkeeping and the layer, but did not resize the native buffer producer.
+   Correcting layer bounds alone stretched the old, clipped buffer. `BBQ_nativeUpdate` now
+   validates dimensions, unwraps the Android window wrapper, and changes OH buffer geometry
+   through the C API while preserving buffer usage. Unchanged geometry avoids a redundant set.
+3. The real chooser still retained a stretched frame after the producer resize; tapping its
+   noninteractive header caused a repaint and revealed the account row. Build 23 schedules one
+   invalidation in the next animation phase after a size change, checks that the view remains
+   attached, and discards the tracked size on window removal. It does not poll or trigger a
+   recurring relayout. The solid-color fixture also passed with a delayed resize on build 22,
+   so that fixture alone does not establish this last fix. On build 23, the quiet real chooser
+   displayed the account row automatically, without the diagnostic header tap.
+
+The source-only `Fixture$Resize` draws a colored dialog and a yellow marker near its bottom.
+The same signed fixture fails on the old build-18 runtime: after growth from 240 to 720 pixels,
+the displayed height remains 240. Candidate 22 passes all four screenshot checks: centered
+600 x 240, growth to 600 x 720, shrinkage to 600 x 360, and movement to (0,0) at 600 x 480.
+The bottom marker is present at its correct, unscaled location in each case. This checks actual
+composited pixels, rather than accepting Java's reported layout dimensions. Build 23 also passes
+all four cases with the resize delayed until one second after input.
+
+Candidate 23 uses the source-built Java adapter from build 23 and the incrementally rebuilt
+`liboh_android_runtime.so`. Framework preload passes on the board. Other native objects, ART,
+the bridge, shim and platform inputs are reused; this is not a clean full-source build.
+The test provider and Store are unchanged. Official GMS and FotMob data are carried forward,
+with the original GMS identity checked for equality; no account reset or grant expansion is used.
+
+With build 22 and the one diagnostic header tap, choosing the existing authorized account returned
+`RESULT_OK` (-1) from official Google UI to FotMob. The provider recorded two OAuth token results
+and one ID-token result for FotMob, with token and expiry present and no additional consent required;
+only those booleans are retained. FotMob removed its sign-in prompt and displayed a profile menu
+containing **Sign out**. No separate application signup form appeared. The private grants-file hash
+and original GMS identity still matched their pre-test values. Build 23 repeated the Google
+`RESULT_OK` handoff with the account row visible automatically. These results establish the
+Google token handoff and initial signed-in UI, but not a durable application session.
+
+### FotMob session diagnosis after build 23
+
+FotMob subsequently set its reauthentication flag. Private inspection found an unexpired ID token
+whose audience matched the existing approved client and whose subject matched the app's stored
+Google identifier, but whose email claim was absent. This is a claim-shape check, not cryptographic
+verification of the JWT. The app stored an empty Google account name. Inspection of the original
+signed app confirmed that it marks that state as a dead session before attempting token refresh.
+
+The provider honored official GMS's `include_email=0` and `include_profile=0` request. Existing
+private grants already allow email/profile, and were not expanded. Build 24 tested support for
+GMS's aggregate `^^snowballing^^` cache metadata address; it still returned an email-less ID token
+and FotMob requested reauthentication. That unsuccessful adaptation was removed. Inspection of
+token-cache property names, excluding credential values on-device, found separate `profile`
+and `openid` requests. There was no `email` scope request. Do not attribute this result solely
+to a missing aggregate-cache implementation.
+
+Build 26 implements explicit, opt-in identity-claim adaptation, enabled only with
+`WESTLAKE_GOOGLE_IDENTITY_CLAIMS=1` on the official host in addition to the existing delegation
+guards. For the verified `GoogleSignInActivity` target of an active incoming request, it asks
+Google for email/profile claims on the audience-bound ID token. Other activities, OAuth access
+tokens and server authorization codes retain their original requests. This follows the GIS
+[sign-in API's basic-identity contract](https://developers.google.com/identity/sign-in/android/sign-in-identity);
+it is a compatibility experiment, not proof that every version of GMS needs the adaptation.
+
+The provider still verifies original caller signatures, the exact approved client ID, explicit
+email/profile grants and the live selection witness before and after network I/O. It requests
+claims from Google; it does not edit a JWT, fabricate user information, combine scope grants or
+override server consent. Opaque request options remain unchanged and separately pinned. The
+original cache key keeps its expiry association, and invalidation uses the adapted provider key.
+The feature is disabled by default.
+
+### Board result, build 26
+
+The official chooser again displayed its account row automatically. Selection returned
+`RESULT_OK` to the original signed FotMob APK. Exactly the audience-bound ID-token request was
+adapted; the two OAuth access-token requests were unchanged. The resulting token's RSA signature
+was verified locally with Google's public JWKS, without sending the token to a verification
+endpoint. Its issuer, approved audience, issuance/expiry times, subject and verified email claim
+passed the checks. FotMob stored the matching, nonempty Google account name. The original GMS
+identity and operator-grants hash remained unchanged; policy remained 1 with no certification
+override. See [the sanitized result](../tests/google-auth/identity-claims26/fotmob-policy1.json).
+
+FotMob then invoked `com.google.android.auth.IAuthManagerService`, transaction 5, for silent token
+refresh. GMS reached the post-picker token-cache/password boundary; no further provider token
+was issued after the activity result. The current broker cannot authorize that read once the
+live selection has ended. FotMob set its reauthentication flag again even though the stored token
+was signed, unexpired and contained email. Thus the missing-email failure is fixed in the opt-in
+experiment, while durable application-session acceptance still **fails**. Backend acceptance,
+expired-token refresh and session retention across restart are not established.
+
+Supporting refresh requires a separate, explicit authorization path tied to the verified original
+app's live request, previously authorized account, exact client ID and existing scope grants.
+That path must recheck revocation and caller liveness and retain denial for unrelated GMS
+background work. Returning `true` from the existing picker witness after the picker closes, or
+exporting a reusable Google account credential, would not satisfy this boundary. Additional
+request-option and backend failures may emerge once the refresh path is implemented.
 
 ## Remaining product boundaries
 
@@ -182,9 +290,10 @@ observed recursive lookup failure, but are not a soak-test or performance accept
 
 ## Next acceptance gates
 
-1. Trace the real chooser's account-list and lifecycle path without logging account values. Fix only the
-   demonstrated adapter gap, then retest FotMob with the same identity and exact existing grants. A visible
-   selectable account and a valid result to FotMob are required; an empty dialog is not sign-in success.
+1. The chooser/rendering and Google result-handoff gate passes on policy 1; build 26 also verifies
+   the opt-in identity-claim repair. Implement and negatively test the separately authorized silent
+   refresh path, then validate backend acceptance, token expiry and session retention across restart.
+   Initial profile UI or a cryptographically valid Google token alone is insufficient.
 2. Keep the policy-3 identity as the product-target control. Any proposed account/check-in integration must
    demonstrate service availability on that preserved identity without overriding certification policy or
    resetting identifiers. The current broker does not meet this gate.
