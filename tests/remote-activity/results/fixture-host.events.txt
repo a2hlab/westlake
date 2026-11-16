@@ -1,0 +1,4 @@
+[WL-CHANNEL-IDENTITY] pid=11954 claims org.westlake.googlebootstrap.remoteactivity; spawner says org.westlake.googlebootstrap.remoteactivity (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=11954 org.westlake.googlebootstrap.remoteactivity certificates match (114 ms)
+[WL-CHANNEL-IDENTITY] pid=12023 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=12023 com.google.android.gms certificates match (12 ms)

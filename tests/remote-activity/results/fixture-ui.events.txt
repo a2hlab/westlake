@@ -1,0 +1,9 @@
+[WL-CHANNEL-IDENTITY] pid=11954 claims org.westlake.googlebootstrap.remoteactivity; spawner says org.westlake.googlebootstrap.remoteactivity (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=11954 org.westlake.googlebootstrap.remoteactivity certificates match (97 ms)
+[WL-REMOTE-ACTIVITY] time=1794796093759 launch_received caller=org.westlake.googlebootstrap.remoteactivity process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Echo
+[WL-REMOTE-ACTIVITY] time=1794796095095 pending_activity_prepared process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Receipt
+[WL-REMOTE-ACTIVITY] time=1794796095131 result_sent caller=org.westlake.googlebootstrap.remoteactivity result_code=-1
+[WL-REMOTE-ACTIVITY] time=1794796095293 launch_received caller=org.westlake.googlebootstrap.remoteactivity process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Cancel
+[WL-REMOTE-ACTIVITY] time=1794796095315 result_sent caller=org.westlake.googlebootstrap.remoteactivity result_code=0
+[WL-REMOTE-ACTIVITY] time=1794796095388 launch_received caller=org.westlake.googlebootstrap.remoteactivity process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Wait
+[WL-ACTIVITY-TEST] waiting=true pid=12023

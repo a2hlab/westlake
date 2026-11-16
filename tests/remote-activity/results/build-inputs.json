@@ -1,0 +1,32 @@
+{
+  "schema": "westlake-remote-activity-build-v1",
+  "candidate": "remote-activity04",
+  "java": {
+    "westlake-unrelocated.classes.jar": {
+      "bytes": 679866,
+      "sha256": "f57fb887bd2f4b979236fa1326f8d1f34d64075139b0d4b59dcc14d1f088f83b"
+    }
+  },
+  "sources": {
+    "framework/activity/java/ActivityResults.java": "41fbac2a8fb372589f9ae3f1deead5daaf879ee2d0b2ccb6020a3aeabe689f1c",
+    "framework/activity/java/RemoteActivities.java": "d97d36b9f65838fc2a3f72fad4bc32b3e9391ccd6ef7ca4e0a2a38bc522884f7",
+    "framework/activity/java/ActivityClientControllerAdapter.java": "153bb532ad203e183b1e7deec0fdc437d3fb94556522faa0a3fde905fff96a3a",
+    "framework/activity/java/ActivityTaskManagerAdapter.java": "e1f69a8fdb28a7c4a58152190af8765e9a00cd11b9be664935b778913fba2ee3",
+    "framework/activity/java/PlayServicesChannel.java": "1a50450475b1c35d118275cca575ab4b57bcca31316e0bbb09a5f4b3d1a19d97",
+    "framework/activity/java/LocalIntentSenders.java": "a0d7fe1fea649c97526b503c42e4c4fcf6a2a05bd4684de7b07c5bfa959593f3",
+    "framework/activity/java/AppSchedulerBridge.java": "ebf9df12e5b16ee9d32cd2b26c967c85b7164706653d3cf27cbe203dc99302fb",
+    "framework/core/java/SocketBinder.java": "2025546235130eb8d12409af28fd57d2734180d43b282cbc00e89da8d438a11c",
+    "framework/package-manager/java/PackageManagerAdapter.java": "fa1be3a99fbf9503aafd6f1c91141228f20d7533a2436183c3957c7190f6f67c"
+  },
+  "fixture_check_count": 18,
+  "fixture_all_passed": true,
+  "fixture_processes": {
+    "client": 11954,
+    "host": 10360,
+    "ui": 12023
+  },
+  "host_death_test": "Killed only verified fixture UI PID 12023; client received one RESULT_CANCELED",
+  "native_uid": 20010056,
+  "production_isolation": false,
+  "framework_preload_passed": true
+}

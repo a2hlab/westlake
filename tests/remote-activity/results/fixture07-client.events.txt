@@ -1,0 +1,8 @@
+[WL-REMOTE-ACTIVITY] time=1794797629556 start_sent target=com.google.android.gms process=com.google.android.gms:ui
+[WL-REMOTE-ACTIVITY] time=1794797631630 result_received result_code=-1
+[WL-REMOTE-ACTIVITY] time=1794797631648 pending_activity_rejected type=SecurityException
+[WL-REMOTE-ACTIVITY] time=1794797631659 start_sent target=com.google.android.gms process=com.google.android.gms:ui
+[WL-REMOTE-ACTIVITY] time=1794797631683 result_received result_code=0
+[WL-REMOTE-ACTIVITY] time=1794797631705 start_sent target=com.google.android.gms process=com.google.android.gms:ui
+[WL-REMOTE-ACTIVITY] time=1794797681148 result_received result_code=0
+[WL-ACTIVITY-TEST] complete=true

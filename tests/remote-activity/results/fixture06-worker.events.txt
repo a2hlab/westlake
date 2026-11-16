@@ -1,0 +1,2 @@
+[WL-CHANNEL-IDENTITY] pid=22265 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=22265 com.google.android.gms certificates match (27 ms)

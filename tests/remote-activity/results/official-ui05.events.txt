@@ -1,0 +1,15 @@
+[WL-REMOTE-ACTIVITY] time=1794796672529 launch_received caller=com.spotify.music process=com.google.android.gms.ui class=com.google.android.gms.auth.api.signin.ui.SignInActivity
+[WL-AUTH-PROXY] provider_launch_verified=true pid=22024
+[WL-REMOTE-ACTIVITY] time=1794796685983 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.signin.activity.SignInActivity
+[WL-AUTH-PROXY] time=1794796723956 account_visibility_read target=com.spotify.music visibility=4
+[WL-AUTH-PROXY] time=1794796724001 account_visibility_changed target=com.spotify.music visibility=2 token_grant=false
+[WL-AUTH-PROXY] time=1794796724641 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794796724857 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794796724923 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794796725007 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794796725078 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794796725135 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794796725378 account_visibility_read target=com.spotify.music visibility=2
+[WL-REMOTE-ACTIVITY] time=1794796726385 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.auth.uiflows.common.FilteringRedirectActivity
+[WL-REMOTE-ACTIVITY] time=1794796726882 pending_activity_rejected type=SecurityException
+[WL-REMOTE-ACTIVITY] time=1794796727268 result_sent caller=com.spotify.music result_code=0

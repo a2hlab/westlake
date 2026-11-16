@@ -1,5 +1,11 @@
 # Official GMS token and Spotify Google Sign-In follow-up
 
+**Historical baseline:** the subsequent [activity/result implementation and board
+replay](remote-activity-results.md) fix the Spotify activity-resolution failure
+and reach Google's account picker and credential-recovery screen. The token
+contract described below remains unresolved; full Spotify login is not proven.
+The original measurements below are retained unchanged.
+
 **Spotify root cause is now confirmed:** a [diagnostic replay](spotify-google-signin-diagnosis.md)
 recorded no matching OH activity, start error `-91`, and Google `Status(17)`.
 The immediate blocker is external Google activity resolution. The initial run

@@ -1,0 +1,8 @@
+[WL-REMOTE-ACTIVITY] time=1794796627878 launch_received caller=org.westlake.googlebootstrap.remoteactivity process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Echo
+[WL-REMOTE-ACTIVITY] time=1794796628802 pending_activity_prepared process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Receipt
+[WL-REMOTE-ACTIVITY] time=1794796628820 result_sent caller=org.westlake.googlebootstrap.remoteactivity result_code=-1
+[WL-REMOTE-ACTIVITY] time=1794796629035 launch_received caller=org.westlake.googlebootstrap.remoteactivity process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Cancel
+[WL-REMOTE-ACTIVITY] time=1794796629044 result_sent caller=org.westlake.googlebootstrap.remoteactivity result_code=0
+[WL-REMOTE-ACTIVITY] time=1794796629069 launch_received caller=org.westlake.googlebootstrap.remoteactivity process=com.google.android.gms:ui class=org.westlake.remoteactivity.fixture.Fixture$Wait
+[WL-ACTIVITY-TEST] waiting=true pid=18075
+[WL-ACTIVITY-TEST] wait_destroyed=true

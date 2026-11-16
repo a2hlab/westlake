@@ -1,0 +1,20 @@
+{
+  "Private_hidden": true,
+  "Private_denied": true,
+  "Disabled_hidden": true,
+  "Disabled_denied": true,
+  "Protected_hidden": true,
+  "Protected_denied": true,
+  "echo_result": true,
+  "caller_identity": true,
+  "declared_process": true,
+  "referrer": true,
+  "pending_intent_result": true,
+  "pending_intent_one_shot": true,
+  "foreign_forwarded_intent_read_denied": true,
+  "nested_parcelable": true,
+  "explicit_cancel": true,
+  "waiting_for_host_death": true,
+  "host_death_cancel": true,
+  "exactly_three_results": true
+}

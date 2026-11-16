@@ -1,0 +1,29 @@
+[WL-REMOTE-ACTIVITY] time=1794797926875 launch_received caller=com.spotify.music process=com.google.android.gms.ui class=com.google.android.gms.auth.api.signin.ui.SignInActivity
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.auth.api.signin.ui.SignInActivity recordId=1000001 abilityJson.len=-1 wantJson.len=-1 ohTokenAddr=0x0
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.common.api.GoogleApiActivity recordId=2 abilityJson.len=-1 wantJson.len=260 ohTokenAddr=0x0
+[WL-REMOTE-ACTIVITY] time=1794797942662 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.signin.activity.SignInActivity
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.signin.activity.SignInActivity recordId=3 abilityJson.len=-1 wantJson.len=599 ohTokenAddr=0x0
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.common.account.AccountPickerActivity recordId=4 abilityJson.len=-1 wantJson.len=698 ohTokenAddr=0x0
+[WL-AUTH-PROXY] time=1794797989483 account_visibility_read target=com.spotify.music visibility=4
+[WL-AUTH-PROXY] time=1794797989599 account_visibility_changed target=com.spotify.music visibility=2 token_grant=false
+[WL-AUTH-PROXY] time=1794797990507 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794797990614 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794797990778 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794797991142 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794797991282 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794797991414 account_visibility_read target=com.spotify.music visibility=2
+[WL-AUTH-PROXY] time=1794797991710 account_visibility_read target=com.spotify.music visibility=2
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.auth.uiflows.common.UnpackingRedirectActivity recordId=5 abilityJson.len=-1 wantJson.len=557 ohTokenAddr=0x0
+[WL-REMOTE-ACTIVITY] time=1794797993485 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.auth.uiflows.common.FilteringRedirectActivity
+[WL-REMOTE-ACTIVITY] time=1794797993485 result_forwarded present=true
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.auth.uiflows.common.FilteringRedirectActivity recordId=6 abilityJson.len=-1 wantJson.len=702 ohTokenAddr=0x0
+[WL-REMOTE-ACTIVITY] time=1794797994158 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.auth.uiflows.controller.ControllerLauncherActivity
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.auth.uiflows.controller.ControllerLauncherActivity recordId=7 abilityJson.len=-1 wantJson.len=206 ohTokenAddr=0x0
+[WL-REMOTE-ACTIVITY] time=1794797995580 result_forwarded present=true
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.auth.uiflows.gettoken.GetTokenActivity recordId=8 abilityJson.len=-1 wantJson.len=1297 ohTokenAddr=0x0
+[WL-AUTH-PROXY] time=1794797998983 client_credential_read=getUserData result=withheld
+[WL-REMOTE-ACTIVITY] time=1794797999309 result_forwarded present=true
+[B47-SLA] ENTRY bundle=com.google.android.gms ability=com.google.android.gms.auth.uiflows.minutemaid.MinuteMaidActivity recordId=9 abilityJson.len=-1 wantJson.len=1671 ohTokenAddr=0x0
+[WL-AUTH-PROXY] time=1794798016951 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794798016951 client_credential_read=getUserData result=withheld
+[WL-REMOTE-ACTIVITY] time=1794798054693 result_sent caller=com.spotify.music result_code=0

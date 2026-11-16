@@ -13,6 +13,7 @@ import android.content.IContentProvider;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.ActivityInfo;
 import android.content.pm.IPackageManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -103,6 +104,8 @@ public final class PlayServicesChannel {
     private static final int MODULE_LIST = 19;
     /** A narrow, separately authorized account/token provider; never a Play API route. */
     private static final int AUTH_PROVIDER = 20;
+    private static final int QUERY_ACTIVITIES = 21;
+    private static final int START_ACTIVITY_FOR_RESULT = 22;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -419,6 +422,50 @@ public final class PlayServicesChannel {
     /** This process's own package: a host that is also a client never asks another process about it. */
     private static String ownPackage() {
         return adapter.packagemanager.SourcePackageRegistry.packageForUid(Process.myUid());
+    }
+
+    static boolean routesActivity(Intent intent) {
+        String target = intent == null ? null : targetPackage(intent);
+        return target != null && PLAY_PACKAGES.contains(target) && !target.equals(ownPackage())
+                && channelFor(target).socket() != null;
+    }
+
+    static List<ResolveInfo> queryRemoteActivities(Intent intent, String type, long flags) {
+        if (!routesActivity(intent)) return Collections.emptyList();
+        Channel c = channelFor(targetPackage(intent));
+        IBinder root = root(c);
+        if (root == null) return Collections.emptyList();
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent.cloneFilter(), 0); data.writeString(type); data.writeLong(flags);
+            if (!root.transact(QUERY_ACTIVITIES, data, reply, 0)) return Collections.emptyList();
+            reply.readException();
+            List<ResolveInfo> found = reply.createTypedArrayList(ResolveInfo.CREATOR);
+            if (found == null) return Collections.emptyList();
+            for (ResolveInfo info : found) if (info.activityInfo != null) localize(c, info.activityInfo.applicationInfo);
+            return found;
+        } catch (RemoteException | RuntimeException error) {
+            RemoteActivities.event("query_failed type=" + error.getClass().getSimpleName());
+            return Collections.emptyList();
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    static IBinder activityProcess(ActivityInfo info) {
+        Channel host = channelFor(info.packageName);
+        String process = AppProcesses.processOf(info);
+        Channel target = process.equals(info.packageName) ? host : remoteProcess(host, info.packageName, process);
+        return target == null ? null : root(target);
+    }
+
+    static IBinder startRemoteActivity(IBinder root, Intent intent, ComponentName caller,
+            boolean wantsResult, IBinder callback) throws RemoteException {
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0); data.writeTypedObject(caller, 0);
+            data.writeBoolean(wantsResult); data.writeStrongBinder(callback);
+            if (!root.transact(START_ACTIVITY_FOR_RESULT, data, reply, 0)) return null;
+            reply.readException(); return reply.readStrongBinder();
+        } finally { data.recycle(); reply.recycle(); }
     }
 
     /**
@@ -1600,6 +1647,22 @@ public final class PlayServicesChannel {
             int user = UserHandle.myUserId();
             reply.writeNoException();
             switch (code) {
+                case QUERY_ACTIVITIES: {
+                    if (!mIdentityEnforced || mVerifiedInfo == null) throw new SecurityException("activity identity not verified");
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    String type = data.readString(); long queryFlags = data.readLong();
+                    reply.writeTypedList(RemoteActivities.resolveHere(intent, type, queryFlags, mOwnApplication));
+                    return true;
+                }
+                case START_ACTIVITY_FOR_RESULT: {
+                    if (!mIdentityEnforced || mVerifiedInfo == null) throw new SecurityException("activity identity not verified");
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    ComponentName caller = data.readTypedObject(ComponentName.CREATOR);
+                    boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
+                    reply.writeStrongBinder(RemoteActivities.accept(intent, caller, wantsResult, callback,
+                            mVerifiedInfo.packageName, Binder.getCallingUid(), mOwnApplication));
+                    return true;
+                }
                 case AUTH_PROVIDER: {
                     if (!mIdentityEnforced || mVerifiedInfo == null || mVerifiedInfo.signatures == null
                             || mVerifiedInfo.signatures.length != 1) {
@@ -1783,6 +1846,7 @@ public final class PlayServicesChannel {
                         PackageManager.GET_SIGNATURES);
                 mOwnApplication = claimed.equals(own.packageName) && sameSignatures(info.signatures, own.signatures);
             } catch (PackageManager.NameNotFoundException e) { throw new SecurityException("host package unavailable"); }
+            mChannel.setVerifiedSameApp(mIdentityEnforced && mOwnApplication);
             if (claimed.equals(application().getPackageName())) {
                 // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
                 closeAll(apkFiles);

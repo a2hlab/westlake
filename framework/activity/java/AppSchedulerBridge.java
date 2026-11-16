@@ -1964,6 +1964,24 @@ public class AppSchedulerBridge {
                                                       String abilityJson,
                                                       String wantJson,
                                                       long ohTokenAddr) {
+        scheduleLaunchAbility(appThread, bundleName, abilityName, abilityRecordId,
+                abilityJson, wantJson, ohTokenAddr, null);
+    }
+
+    private static final java.util.concurrent.atomic.AtomicInteger sRemoteActivityRecord =
+            new java.util.concurrent.atomic.AtomicInteger(1_000_000);
+
+    /** Main-thread entry from the verified activity channel, preserving the original Parcelables. */
+    static void launchRemoteActivity(Intent intent, ActivityResults.Request request) {
+        String name = intent.getComponent().getClassName();
+        PendingLaunchIntents.offer(name, intent, request);
+        scheduleLaunchAbility(null, intent.getComponent().getPackageName(), name,
+                sRemoteActivityRecord.incrementAndGet(), null, null, 0L, request);
+    }
+
+    private static void scheduleLaunchAbility(Object appThread, String bundleName, String abilityName,
+            int abilityRecordId, String abilityJson, String wantJson, long ohTokenAddr,
+            ActivityResults.Request remoteRequest) {
         System.err.println("[B47-SLA] ENTRY bundle=" + bundleName
                 + " ability=" + abilityName + " recordId=" + abilityRecordId
                 + " abilityJson.len=" + (abilityJson == null ? -1 : abilityJson.length())
@@ -1973,24 +1991,28 @@ public class AppSchedulerBridge {
                 + ", ability=" + abilityName + ", recordId=" + abilityRecordId);
 
         // A host started without an activity of its own (WESTLAKE_NO_ACTIVITY=1: the shared Play services and
-        // Play Store processes in a round) shows none later either. A client's license check had the Play Store
+        // Play Store processes in a round) shows none without an explicit interactive request. A client's license check had the Play Store
         // open its paywall, and that page stayed above every app launched after it (ADR-0007: a windowless Store
         // while screenshots are measured). The start is logged instead, with the app the link names.
-        if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))) {
+        if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))
+                && remoteRequest == null && !RemoteActivities.interactive()) {
             System.err.println("[WL-PLAY] windowless host: not showing " + abilityName + " for "
                     + describeWant(wantJson));
             return;
         }
 
+        ActivityResults.Request launchRequest = remoteRequest;
         try {
             ActivityThread activityThread = ActivityThread.currentActivityThread();
             if (activityThread == null) {
                 System.err.println("[B47-SLA] ActivityThread.currentActivityThread() == null");
+                if (remoteRequest != null) throw new IllegalStateException("activity thread unavailable");
                 return;
             }
             IApplicationThread applicationThread = activityThread.getApplicationThread();
             if (applicationThread == null) {
                 System.err.println("[B47-SLA] applicationThread == null");
+                if (remoteRequest != null) throw new IllegalStateException("application thread unavailable");
                 return;
             }
 
@@ -2034,6 +2056,8 @@ public class AppSchedulerBridge {
             Intent intent = buildIntentFromWant(packageName, activityInfo.name, wantJson);
             // A start from this app's own code: the Intent it passed, extras and action intact.
             PendingLaunchIntents.Entry pending = PendingLaunchIntents.take(activityInfo.name);
+            if (pending != null) launchRequest = pending.request;
+            if (launchRequest != null && launchRequest.remote != null && launchRequest.remote.done.get()) return;
             Intent original = pending != null ? pending.intent : null;
             if (original != null) {
                 original.setComponent(new android.content.ComponentName(packageName, activityInfo.name));
@@ -2073,7 +2097,8 @@ public class AppSchedulerBridge {
                     cfg,                                  // curConfig
                     cfg,                                  // overrideConfig (P3 split-screen 才需差异化)
                     0,                                    // deviceId (default display)
-                    extractReferrer(wantJson),            // referrer (P2: from Want.parameters caller)
+                    launchRequest != null && launchRequest.remote != null ? launchRequest.remote.caller.getPackageName()
+                            : extractReferrer(wantJson),
                     null,                                 // voiceInteractor (P3 A_ONLY_NULL)
                     2,                                    // procState = PROCESS_STATE_TOP
                     extractSavedInstanceState(wantJson),  // state (P2: from Want.parameters)
@@ -2224,7 +2249,8 @@ public class AppSchedulerBridge {
             // initiated on a boundary worker, scheduleTransaction() can enqueue successfully while
             // the Android main queue sleeps forever. Keep stock scheduling as the default; the
             // direct-launch harness may explicitly execute the already-stock ClientTransaction.
-            if (abilityRecordId > 1 && "1".equals(System.getenv("WL_SYNC_TRANSACTION"))) {
+            if ((launchRequest != null && launchRequest.remote != null)
+                    || (abilityRecordId > 1 && "1".equals(System.getenv("WL_SYNC_TRANSACTION")))) {
                 ActivityThread.currentActivityThread().executeTransaction(transaction);
                 System.err.println("[B47-SLA] AFTER executeTransaction SYNC OK");
             } else {
@@ -2258,6 +2284,8 @@ public class AppSchedulerBridge {
             System.err.println("[B47-SLA] FAILED to schedule launch: " + e);
             e.printStackTrace(System.err);
             Log.e(TAG, "Failed to schedule launch activity", e);
+            if (launchRequest != null && launchRequest.remote != null) launchRequest.remote.complete(android.app.Activity.RESULT_CANCELED,
+                    null, true, true);
         }
     }
 

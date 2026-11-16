@@ -1,0 +1,20 @@
+{
+  "schema": "westlake-spotify-activity-replay-v1",
+  "candidate": "remote-activity05",
+  "spotify_pid": 15700,
+  "official_gms_ui_pid": 17284,
+  "account_picker_rendered": true,
+  "selected_authorized_existing_account": true,
+  "account_visibility_read_initial": 4,
+  "account_visibility_after_selection": 2,
+  "token_grant_added": false,
+  "account_picker_result": -1,
+  "account_visibility_crash_fixed": true,
+  "gms_ui_survived": true,
+  "nested_recovery_activity": "com.google.android.gms.auth.uiflows.common.FilteringRedirectActivity",
+  "following_pending_intent_rejected": "SecurityException from initial no-forwarding restriction",
+  "returned_google_status": 12501,
+  "authenticated_spotify_session": false,
+  "new_account_created": false,
+  "account_value_recorded": false
+}

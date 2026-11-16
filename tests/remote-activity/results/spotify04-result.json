@@ -1,0 +1,18 @@
+{
+  "schema": "westlake-spotify-activity-replay-v1",
+  "candidate": "remote-activity04",
+  "spotify_pid": 10968,
+  "official_gms_ui_pid": 12456,
+  "original_unresolved_launch_fixed": true,
+  "gms_nested_pending_intent_launched": true,
+  "account_picker_rendered": true,
+  "selected_existing_authorized_test_account": true,
+  "account_value_recorded": false,
+  "gms_ui_died": true,
+  "failure_exception": "java.lang.SecurityException",
+  "failure_method": "AccountManager.getAccountVisibility -> GoogleAuthProxy.answer",
+  "returned_google_status": 8,
+  "authenticated_spotify_session": false,
+  "new_account_created": false,
+  "account_picker_screenshot_published": false
+}

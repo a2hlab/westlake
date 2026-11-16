@@ -1,0 +1,15 @@
+{
+  "schema": "westlake-remote-activity-fixture-v1",
+  "fixture_only": true,
+  "device_tested": false,
+  "apk_sha256": {
+    "host": "1133e1af6969ccc74f7fc26df736012c5322b42fe8187c0341c76c468ab0a443",
+    "client": "bb16fc8fe031b31659425436b949e02edbb0194ecd691c784562aad7a284635c"
+  },
+  "sources": {
+    "tests/remote-activity/Fixture.java": "69971524b43665999be9ae1b4d5e6ce6e52fbd08170fd38927a13d24390d40fe",
+    "tests/remote-activity/client.xml": "e8fffdb45110aea152de7e5af1e6f5d08d824205093f2fe6986054e76ba9b0b2",
+    "tests/remote-activity/host.xml": "3f9bfa98cb48428673710238ca9cf3b957d39a5e031f645d4047ed6165b8084b"
+  },
+  "evidence_filter": "Only Java and manifest build inputs; README is documentation"
+}

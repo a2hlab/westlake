@@ -1,0 +1,5 @@
+[WL-REMOTE-ACTIVITY] time=1794796187298 launch_received caller=com.spotify.music process=com.google.android.gms.ui class=com.google.android.gms.auth.api.signin.ui.SignInActivity
+[WL-AUTH-PROXY] provider_launch_verified=true pid=22024
+[WL-REMOTE-ACTIVITY] time=1794796202307 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.signin.activity.SignInActivity
+[WL-AUTH-PROXY] time=1794796250850 client_method=getAccountVisibility unsupported=true
+[WL-AUTH-PROXY] time=1794796250850 client_method=getAccountVisibility denied=true

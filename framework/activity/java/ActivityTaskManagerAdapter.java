@@ -20,6 +20,7 @@ package adapter.activity;
 
 import android.app.ActivityManager;
 import android.app.ActivityTaskManager;
+import android.app.ActivityThread;
 import android.app.IActivityClientController;
 import android.app.IActivityController;
 import android.app.IAppTask;
@@ -149,8 +150,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         }
         intent = resolveOwnActivity(intent, resolvedType);
         // startActivityForResult: the started activity's result goes back to resultTo when it
-        // finishes (ActivityResults). Only the app's own activities launch here to answer it.
-        final ActivityResults.Request request = ActivityResults.requested(resultTo, resultWho, requestCode);
+        // finishes (ActivityResults), locally or through a configured, verified activity host.
+        boolean forwardResult = intent != null && (intent.getFlags() & Intent.FLAG_ACTIVITY_FORWARD_RESULT) != 0;
+        if (forwardResult && requestCode >= 0) return ActivityManager.START_FORWARD_AND_REQUEST_CONFLICT;
+        final ActivityResults.Request request = forwardResult ? ActivityResults.forward(resultTo)
+                : ActivityResults.requested(resultTo, resultWho, requestCode);
+        if (forwardResult) RemoteActivities.event("result_forwarded present=" + (request != null));
         // ADR-0002: one of the app's activities declared for its launched process, started from another of its
         // processes, starts in the launched process (PlayServicesChannel.startInHome). With a result asked for,
         // here, as before: a result does not cross processes yet.
@@ -181,7 +186,15 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             });
             return ActivityManager.START_SUCCESS;
         }
-        return startOutside(intent, flags, resultTo, request);
+        try {
+            Integer remote = RemoteActivities.start(intent, resolvedType, resultTo, request);
+            int result = remote != null ? remote : startOutside(intent, flags, resultTo, request);
+            if (forwardResult && result < 0) ActivityResults.restoreForward(resultTo, request);
+            return result;
+        } catch (RuntimeException error) {
+            if (forwardResult) ActivityResults.restoreForward(resultTo, request);
+            throw error;
+        }
     }
 
     /**
@@ -389,6 +402,19 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             String resolvedType, IBinder resultTo, String resultWho, int requestCode,
             int flagsMask, int flagsValues, Bundle options) throws RemoteException {
         logBridged("startActivityIntentSender", "-> the sender's own intent");
+        if (RemoteActivities.enabled()) {
+            Intent prepared = LocalIntentSenders.prepareActivity(target, fillInIntent, flagsMask, flagsValues);
+            java.util.List<android.content.pm.ResolveInfo> own = adapter.packagemanager.SourcePackageRegistry
+                    .queryActivities(prepared, prepared == null ? null : prepared.getType(),
+                            android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+            if (own.isEmpty()) return ActivityManager.START_CANCELED;
+            android.content.pm.ActivityInfo info = own.get(0).activityInfo;
+            if (!info.enabled || !AppProcesses.runsHere(AppProcesses.processOf(info)))
+                return ActivityManager.START_CANCELED;
+            RemoteActivities.event("pending_activity_prepared process=" + AppProcesses.self() + " class=" + info.name);
+            return startActivity(caller, ActivityThread.currentPackageName(), null, prepared,
+                    prepared.getType(), resultTo, resultWho, requestCode, 0, null, options);
+        }
         // The sender holds what to start. The fill-in only adds to it, and alone starts nothing useful:
         // Play services' sign-in moves between its screens this way.
         return LocalIntentSenders.send(target, 0, fillInIntent, resolvedType, null);

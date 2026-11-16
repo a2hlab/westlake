@@ -1,5 +1,10 @@
 # Spotify Google login: confirmed activity-resolution failure
 
+**Follow-up:** the [activity/result implementation](remote-activity-results.md)
+now addresses this diagnosed launch failure and the subsequently observed
+nested PendingIntent stall. This page preserves the pre-fix evidence; consult
+the follow-up for current validation and remaining limits.
+
 **The immediate failure is local: Westlake cannot resolve the external Google
 sign-in activity.** An instrumented board replay on 2026-11-15 Pacific /
 2026-11-16 UTC returned Android start error `-91`, followed by Google's

@@ -32,6 +32,7 @@ public final class GoogleAuthProxy {
     private static final ExecutorService REQUESTS = Executors.newCachedThreadPool();
     private static final AtomicLong IDS = new AtomicLong();
     private static final Object TOKEN_LOCK = new Object();
+    private static final java.util.Map<Account, java.util.Map<String, Integer>> VISIBILITY = new java.util.HashMap<>();
 
     private GoogleAuthProxy() {}
     public static boolean provider() { return "microg".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_PROVIDER")); }
@@ -311,6 +312,46 @@ public final class GoogleAuthProxy {
         });
     }
 
+    private static boolean knownAccount(Account requested) throws Exception {
+        for (Account account : accounts("com.google")) if (account.equals(requested)) return true;
+        return false;
+    }
+
+    private static boolean interactiveCaller(String packageName) throws Exception {
+        return (Boolean) Class.forName("adapter.activity.RemoteActivities")
+                .getMethod("isInteractiveCaller", String.class).invoke(null, packageName);
+    }
+
+    private static int visibility(Account account, String packageName) throws Exception {
+        if (packageName == null || !knownAccount(account)) return AccountManager.VISIBILITY_NOT_VISIBLE;
+        if (packageName.equals(ActivityThread.currentPackageName())) return AccountManager.VISIBILITY_VISIBLE;
+        // A prior screen's selection is not authority for a new request or another process.
+        if (!interactiveCaller(packageName)) return AccountManager.VISIBILITY_USER_MANAGED_NOT_VISIBLE;
+        synchronized (VISIBILITY) {
+            java.util.Map<String, Integer> selected = VISIBILITY.get(account);
+            return selected == null ? AccountManager.VISIBILITY_USER_MANAGED_NOT_VISIBLE
+                    : selected.getOrDefault(packageName, AccountManager.VISIBILITY_USER_MANAGED_NOT_VISIBLE);
+        }
+    }
+
+    private static boolean setVisibility(Account account, String packageName, int value) throws Exception {
+        if (packageName == null || !knownAccount(account) || !interactiveCaller(packageName)) return false;
+        if (value != AccountManager.VISIBILITY_VISIBLE && value != AccountManager.VISIBILITY_USER_MANAGED_VISIBLE
+                && value != AccountManager.VISIBILITY_NOT_VISIBLE && value != AccountManager.VISIBILITY_USER_MANAGED_NOT_VISIBLE)
+            return false;
+        synchronized (VISIBILITY) { VISIBILITY.computeIfAbsent(account, key -> new java.util.HashMap<>()).put(packageName, value); }
+        event("account_visibility_changed target=" + packageName + " visibility=" + value + " token_grant=false");
+        return true;
+    }
+
+    /** UI-scoped metadata only: ending the verified request removes its temporary selection. */
+    public static void clearInteractiveVisibility(String packageName) {
+        synchronized (VISIBILITY) {
+            for (java.util.Map<String, Integer> selected : VISIBILITY.values()) selected.remove(packageName);
+            VISIBILITY.values().removeIf(java.util.Map::isEmpty);
+        }
+    }
+
     /** Adapter entry point. Never falls through to the official reusable-credential store. */
     static Object answer(String method, Object[] args) {
         if (AccountManagerStub.callerPid() != android.os.Process.myPid()) {
@@ -324,6 +365,17 @@ public final class GoogleAuthProxy {
                     event("client_credential_read=" + method + " result=withheld"); return null;
                 case "getAuthenticatorTypes":
                     return new AuthenticatorDescription[] {new AuthenticatorDescription("com.google", "com.google.android.gms", 0, 0, 0, 0, true)};
+                case "getAccountVisibility": {
+                    int value = visibility((Account) args[0], (String) args[1]);
+                    event("account_visibility_read target=" + args[1] + " visibility=" + value);
+                    return value;
+                }
+                case "setAccountVisibility":
+                    return setVisibility((Account) args[0], (String) args[1], (Integer) args[2]);
+                case "hasAccountAccess": {
+                    int value = visibility((Account) args[0], (String) args[1]);
+                    return value == AccountManager.VISIBILITY_VISIBLE || value == AccountManager.VISIBILITY_USER_MANAGED_VISIBLE;
+                }
                 case "getAccountsAsUser":
                 case "getAccountsByTypeForPackage": return accounts((String) args[0]);
                 case "getAccountsForPackage": return accounts(null);

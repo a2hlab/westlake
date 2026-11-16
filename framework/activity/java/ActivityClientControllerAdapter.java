@@ -332,6 +332,7 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
 
     @Override
     public void activityDestroyed(IBinder token) {
+        ActivityResults.destroyed(token);
         // finishActivity already drove OH TerminateAbility; only the task model needs the news.
         leaveTask(token);
     }
@@ -506,16 +507,19 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     public IBinder getActivityTokenBelow(IBinder token) { return null; }
 
     @Override
-    public ComponentName getCallingActivity(IBinder token) { return null; }
+    public ComponentName getCallingActivity(IBinder token) { return ActivityResults.callingActivity(token); }
 
     @Override
-    public String getCallingPackage(IBinder token) { return null; }
+    public String getCallingPackage(IBinder token) {
+        ComponentName caller = ActivityResults.callingActivity(token);
+        return caller == null ? null : caller.getPackageName();
+    }
 
     @Override
-    public int getLaunchedFromUid(IBinder token) { return 0; }
+    public int getLaunchedFromUid(IBinder token) { return ActivityResults.launchedFromUid(token); }
 
     @Override
-    public String getLaunchedFromPackage(IBinder token) { return null; }
+    public String getLaunchedFromPackage(IBinder token) { return ActivityResults.launchedFromPackage(token); }
 
     // ====================================================================
     // Orientation.  [STUB]

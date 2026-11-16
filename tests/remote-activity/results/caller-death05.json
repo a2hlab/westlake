@@ -1,0 +1,7 @@
+{
+  "client_pid": 18038,
+  "target_ui_pid": 18075,
+  "target_still_alive": true,
+  "waiting_activity_destroyed": true,
+  "test": "terminate verified client process while target waits"
+}
