@@ -234,6 +234,26 @@ public final class SocketBinder {
         return binder instanceof Proxy ? ((Proxy) binder).channel.mCallerUid : 0;
     }
 
+    /** Whether this call arrived on the same connection that owns a remote capability. */
+    public static boolean isCallingPeer(IBinder binder) {
+        Inbound inbound = sInbound.get();
+        return inbound != null && binder instanceof Proxy
+                && inbound.channel == ((Proxy) binder).channel;
+    }
+
+    private volatile boolean mVerifiedSameApp;
+    /** Private protocol: stored activity Intents can cross only verified same-app connections. */
+    public static final int SAME_APP_ACTIVITY_INTENT = 0x574c41;
+
+    /** Set only after the channel's package, APK files and signer were checked against its spawner. */
+    public void setVerifiedSameApp(boolean sameApp) { mVerifiedSameApp = sameApp; }
+
+    /** A capability may reveal its stored Intent only to another verified process of its own app. */
+    public static boolean isCallingSameApp() {
+        Inbound inbound = sInbound.get();
+        return inbound != null && inbound.channel.mVerifiedSameApp;
+    }
+
     /** The process id of a connected socket's peer, as the kernel reports it. */
     public static int peerPid(int fd) throws IOException {
         return SocketBinderNative.peerPid(fd);
@@ -376,6 +396,13 @@ public final class SocketBinder {
 
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            // Every forwarding hop must preserve the same-app restriction. Checking only the
+            // final creator would reveal its stored Intent to a foreign holder via an intermediary.
+            if (code == SAME_APP_ACTIVITY_INTENT) {
+                for (Inbound inbound = sInbound.get(); inbound != null; inbound = inbound.outer)
+                    if (!inbound.channel.mVerifiedSameApp)
+                        throw new SecurityException("stored activity Intent crossed an unverified or foreign hop");
+            }
             if (!TRACE || code == INTERFACE_TRANSACTION) return channel.call(id, code, data, reply, flags);
             if (code == 46) sLastService = serviceIdOf(data);
             try {

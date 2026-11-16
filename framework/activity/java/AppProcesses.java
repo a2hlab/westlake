@@ -4,6 +4,7 @@ import android.content.pm.ComponentInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.ParcelFileDescriptor;
+import android.os.StrictMode;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
@@ -247,7 +248,17 @@ public final class AppProcesses {
         FileDescriptor fd = null;
         try {
             fd = Os.socket(OsConstants.AF_UNIX, OsConstants.SOCK_STREAM, 0);
-            Os.connect(fd, UnixSocketAddress.createFileSystem(socket));
+            // This is local appspawn IPC. BlockGuard treats Os.connect as
+            // network I/O even for AF_UNIX, so a strict app otherwise cannot
+            // start a component's process. Relax only this local connect.
+            StrictMode.ThreadPolicy previousPolicy = StrictMode.getThreadPolicy();
+            try {
+                StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder(previousPolicy)
+                        .permitNetwork().build());
+                Os.connect(fd, UnixSocketAddress.createFileSystem(socket));
+            } finally {
+                StrictMode.setThreadPolicy(previousPolicy);
+            }
             for (int sent = 0; sent < request.length; ) {
                 sent += Os.write(fd, request, sent, request.length - sent);
             }

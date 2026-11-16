@@ -1052,6 +1052,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             return null;
         }
         // Convert ComponentName to Want-style query
+        java.util.List<ResolveInfo> remote = adapter.activity.RemoteActivities.query(
+                new Intent().setComponent(component), null, flags);
+        if (!remote.isEmpty()) return remote.get(0).activityInfo;
         IntentWantConverter.WantParams want = new IntentWantConverter.WantParams();
         want.bundleName = component.getPackageName();
         want.abilityName = IntentWantConverter.abilityNameToClassName(component.getClassName());
@@ -1115,6 +1118,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             return new ParceledListSlice<>(result);
         }
         List<ResolveInfo> outside = ohAbilities(intent, flags);
+        outside.addAll(adapter.activity.RemoteActivities.query(intent, resolvedType, flags));
         result.addAll(outside);
         // A web link nothing outside the app handles: the stand-in browser (WEB_LINK_BROWSER).
         if (outside.isEmpty() && looksForBrowser(intent)) result.add(webLinkResolveInfo(flags));
