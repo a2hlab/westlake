@@ -5,17 +5,24 @@ microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](../../docs/google-official-auth-validation.md) and
 [validation.json](validation.json).
 
-Latest run: [auth-boundary validation](../../docs/google-auth-boundary-validation.md),
-with results under `boundary-validation/`. The build-04 setup and preserved
+Latest run: [delegation validation](../../docs/google-auth-delegation-validation.md),
+with results under `delegation-validation/`. The build-04 setup and preserved
 results below describe the historical baseline; the latest diagnostic host uses
 the current adapter build with the additional trace flag described below.
 
-The current source adds a fourth `spoof-package` button. It calls the official
+The current source includes six buttons. The `spoof-package` button calls the official
 token Binder with `com.spotify.music` in both package options while retaining
 the probe's actual APK, signer and verified channel identity. This is a negative
 identity test, not a Spotify login or a delegated token grant. The manifest
-input key for this source is `google-official-auth-probe-v3`; earlier build
+input key for this source is `google-official-auth-probe-v4`; earlier build
 records below retain their original v1/v2 identities.
+
+The `delegation-ui` and `delegation-provider` buttons attempt the new wire
+operations while retaining the probe's real APK identity. Both must return
+`SecurityException`; a missing channel or unsupported transaction is not a pass.
+These are denial tests, not delegated positive controls. Actual Spotify supplied
+the positive interactive flow. Build 11 returned `RESULT_OK` and reached its
+new-account form, where the test stopped without signup.
 
 ## Build
 

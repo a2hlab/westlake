@@ -1,0 +1,17 @@
+{
+  "schema": "westlake-official-auth-v1",
+  "mode": "control",
+  "scope": "ac2dm",
+  "startTime": 1794809608551,
+  "gmsVersion": 244034029,
+  "accountCount": 1,
+  "operation": {
+    "entry": "AccountManager.getAuthToken",
+    "route": "direct_microg_positive_control",
+    "tokenPresent": true,
+    "requestId": 295,
+    "forceRefresh": true,
+    "outcome": "token_received"
+  },
+  "endTime": 1794809610030
+}

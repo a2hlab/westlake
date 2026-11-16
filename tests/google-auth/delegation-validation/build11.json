@@ -1,0 +1,48 @@
+{
+  "scope": "experimental Spotify original-app token delegation",
+  "baseCommit": "eda489528ee9cfe91843a0c4b212b471372689dc",
+  "sources": {
+    "framework/core/java/GoogleAuthDelegation.java": "6faf939b4e336ae10a1e6c5aa8055cdf7d1f197d42d1c505c42502d895c93327",
+    "framework/core/java/GoogleAuthDelegationPolicy.java": "d11bf408ac3628e92345729d03e7a37d3941165b271612e3f0831f2473987e23",
+    "framework/core/java/GoogleAuthProxy.java": "35a180d3e070ee0e997c6dce96deedbf9b9f2465eb52be6f7a85bfb43053b01b",
+    "framework/activity/java/PlayServicesChannel.java": "64902cbc558b92b507eef84d9d235cab8aec78575d7989154a38f832da63f00b",
+    "framework/activity/java/RemoteActivities.java": "ce65b7e01fff712f488744574d74e6a38ce0d2008b624220faa28a5dbf65c3f3",
+    "tests/google-auth/OfficialAuthActivity.java": "39b37b0937e7ac7c6d761ff38e66e9d71872ebf4556b76c4023c649e4921566e",
+    "tests/google-bootstrap/GoogleAuthDelegationPolicyTest.java": "677c29961b64fae4a4f2eaf4c54b89e44f552bad593113098cf9e38fe050d711"
+  },
+  "runtimeArtifacts": {
+    "adapter-runtime-bcp.classes.jar": {
+      "bytes": 698669,
+      "sha256": "f02dd92eea0f1511d1f2efae83167c9b15cc5fd6b882f981d3d917fd7ab89618"
+    },
+    "adapter-runtime-bcp.jar": {
+      "bytes": 379796,
+      "sha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    },
+    "framework.classes.jar": {
+      "bytes": 48623168,
+      "sha256": "428a3410775f7ca450fee2c3f9ac0738260c4b528411fd5e53ac0492c8ea2c61"
+    },
+    "framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    }
+  },
+  "compiledSources": 125,
+  "compiledClasses": 259,
+  "frameworkPreloadPass": true,
+  "hostChecks": {
+    "delegationPolicy": 36,
+    "directPolicy": 8,
+    "boundaryTraceRedaction": "pass",
+    "bootstrapPythonTests": 6
+  },
+  "probeApkSha256": "475755430db28ad1012bd9dc02871d29af7f8c9f390848987a10ba75251b9979",
+  "probeCurrentSignerSha256": "77e047c82dd1571e2f1b1e745cddc6e35dae8e7a3fcde358a3f79c4d185653ab",
+  "appApks": {
+    "spotify": "8ae192315399a972623f56c7e9322fd2fb625720f3167137655a1b9c29e202c7",
+    "microg": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+    "officialGms": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "store": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272"
+  }
+}

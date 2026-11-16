@@ -1,0 +1,32 @@
+{
+  "schema": "westlake-spotify-delegation-v1",
+  "result": "google_activity_ok_then_spotify_signup_required",
+  "spotifyVersion": "9.1.86.2432",
+  "spotifyVersionCode": 146555520,
+  "spotifyPid": 26418,
+  "officialGmsUiPid": 26775,
+  "microgProviderPid": 24012,
+  "tokenResults": {
+    "oauth2": 4,
+    "serverCode": 3,
+    "allHaveExpiry": true,
+    "allConsentRequired": false,
+    "forcedFresh": true,
+    "successfulLocalCacheInvalidations": 1
+  },
+  "officialResultSentTime": 1794809531160,
+  "spotifyResultReceivedTime": 1794809531162,
+  "activityResultCode": -1,
+  "uiObserved": "Create account / date of birth / Next",
+  "signupCompleted": false,
+  "dobEntered": false,
+  "playbackTested": false,
+  "googleStatusCodeDecoded": false,
+  "spotifyServerCodeRedemptionIndependentlyObserved": false,
+  "privateScreenshotSha256": "05b552634315f3d3b2811b18818cebbc43eb5649ed6cd33e8566aba27553a420",
+  "privateScreenshotsPublished": false,
+  "nativeUid": 20010056,
+  "productionIsolationValidated": false,
+  "input": "private process mailbox",
+  "probeStoppedAfterValidation": true
+}

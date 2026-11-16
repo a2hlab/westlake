@@ -35,7 +35,7 @@ public final class OfficialAuthActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
-        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package"}) {
+        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package", "delegation-ui", "delegation-provider"}) {
             Button button = new Button(this); button.setText("Official GMS token: " + mode);
             button.setOnClickListener(v -> run(mode)); layout.addView(button);
         }
@@ -58,6 +58,7 @@ public final class OfficialAuthActivity extends Activity {
                 else {
                     Future<JSONObject> request = requests.submit(() -> "sdk".equals(mode)
                             ? sdk(accounts[0]) : "control".equals(mode) ? control(accounts[0])
+                            : mode.startsWith("delegation-") ? delegationDenied(accounts[0], mode)
                             : binder(accounts[0], "spoof-package".equals(mode)));
                     try { result.put("operation", request.get(100, TimeUnit.SECONDS)); }
                     catch (Exception error) { request.cancel(true); result.put("operation", failure(error)); }
@@ -84,6 +85,34 @@ public final class OfficialAuthActivity extends Activity {
                     .put("tokenPresent", token != null && !token.isEmpty())
                     .put("outcome", token != null && !token.isEmpty() ? "token_received" : "empty_token");
         } catch (Exception error) { return failure(error).put("entry", "GoogleAuthUtil.getToken"); }
+    }
+
+    /** Adversarial wire requests keep the probe's real, independently verified APK identity. */
+    private JSONObject delegationDenied(Account account, String mode) throws Exception {
+        boolean provider = mode.equals("delegation-provider");
+        Class<?> channel = Class.forName("adapter.activity.PlayServicesChannel");
+        java.lang.reflect.Field field = channel.getDeclaredField(provider ? "AUTH" : "SERVICES");
+        field.setAccessible(true);
+        java.lang.reflect.Method getRoot = channel.getDeclaredMethod("root", field.getType());
+        getRoot.setAccessible(true);
+        IBinder root = (IBinder) getRoot.invoke(null, field.get(null));
+        JSONObject result = new JSONObject().put("entry", "PlayServicesChannel." + mode)
+                .put("actualIdentity", getPackageName());
+        if (root == null) return result.put("outcome", "channel_unavailable");
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            if (!provider) {
+                data.writeString("peekAuthToken"); data.writeInt(1); account.writeToParcel(data, 0);
+                data.writeString("com.spotify.music:d6a6dced4a85f24204bf9505ccc1fce114cadb32:oauth2:email");
+            }
+            // The foreign broker must be refused before any delegated payload can be read.
+            boolean handled = root.transact(provider ? 23 : 24, data, reply, 0);
+            if (!handled) return result.put("outcome", "transaction_unsupported");
+            reply.readException();
+            return result.put("outcome", "unexpected_acceptance");
+        } catch (SecurityException expected) {
+            return result.put("outcome", "security_exception").put("denied", true);
+        } finally { data.recycle(); reply.recycle(); }
     }
 
     private JSONObject control(Account account) throws Exception {

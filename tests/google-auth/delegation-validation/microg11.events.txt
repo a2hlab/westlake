@@ -1,0 +1,9 @@
+[WL-AUTH-DELEGATION] time=1794809525148 token=true owner=com.spotify.music kind=oauth2 token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809526184 token=true owner=com.spotify.music kind=server_code token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809526868 token=true owner=com.spotify.music kind=oauth2 token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809528049 token=true owner=com.spotify.music kind=server_code token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809528785 token=true owner=com.spotify.music kind=oauth2 token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809529525 token=true owner=com.spotify.music kind=oauth2 token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809530667 token=true owner=com.spotify.music kind=server_code token_present=true expiry_present=true consent_required=false
+[WL-AUTH-DELEGATION] time=1794809531091 invalidate=true owner=com.spotify.music cache_removed=true
+[WL-AUTH-DELEGATION] time=1794809615094 provider_denied=true type=SecurityException reason=broker_not_granted frame0=adapter.core.GoogleAuthDelegationPolicy.requireBroker frame1=adapter.core.GoogleAuthDelegation.requireBroker frame2=adapter.activity.PlayServicesChannel$Root.onTransact

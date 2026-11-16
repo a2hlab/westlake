@@ -16,6 +16,13 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.RemoteException;
+import android.accounts.Account;
+import android.content.pm.PackageInfo;
+import android.os.Bundle;
+import android.os.SystemClock;
+import adapter.core.GoogleAuthDelegation;
+import adapter.core.GoogleAuthDelegationPolicy;
+import adapter.core.GoogleAuthProxy;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -97,7 +104,8 @@ public final class RemoteActivities {
     }
 
     static IBinder accept(Intent intent, ComponentName statedCaller, boolean wantsResult, IBinder callback,
-            String verifiedPackage, int verifiedUid, boolean sameApp) throws RemoteException {
+            PackageInfo verifiedInfo, int verifiedPid, String verifiedSpawner, int verifiedUid, boolean sameApp) throws RemoteException {
+        String verifiedPackage = verifiedInfo.packageName;
         if (!enabled() || callback == null || !SocketBinder.isCallingPeer(callback))
             throw new SecurityException("activity callback must belong to the verified caller channel");
         if (statedCaller == null || !verifiedPackage.equals(statedCaller.getPackageName()))
@@ -115,7 +123,7 @@ public final class RemoteActivities {
         launch.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
         String actualClass = info.targetActivity == null ? info.name : info.targetActivity;
         launch.setComponent(new ComponentName(info.packageName, actualClass));
-        Incoming pending = new Incoming(callback, statedCaller, verifiedUid, wantsResult);
+        Incoming pending = new Incoming(callback, statedCaller, verifiedUid, wantsResult, verifiedInfo, verifiedPid, verifiedSpawner);
         synchronized (INCOMING) {
             if (INCOMING.size() >= LIMIT) throw new IllegalStateException("too many remote activities");
             INCOMING.add(pending);
@@ -143,6 +151,67 @@ public final class RemoteActivities {
         return false;
     }
 
+    /** Only same-app channel callers reach this entry, or the official UI's own AccountManager. */
+    static String readDelegatedAuth(String method, Account account, String input) {
+        if (!GoogleAuthDelegation.enabled()) return null;
+        boolean tokenRead = "peekAuthToken".equals(method);
+        boolean invalidate = "invalidateAuthToken".equals(method);
+        boolean expiry = "getUserData".equals(method) && input != null && input.startsWith("EXP:");
+        boolean scopes = "getUserData".equals(method) && input != null && input.startsWith("SCOPES:");
+        if (!tokenRead && !invalidate && !expiry && !scopes) return null;
+        try {
+            if (invalidate) {
+                List<Incoming> live;
+                synchronized (INCOMING) { live = new ArrayList<>(INCOMING); }
+                for (Incoming pending : live) pending.invalidate(input);
+                return null;
+            }
+            String key = tokenRead ? input : input.substring(expiry ? 4 : 7);
+            GoogleAuthDelegationPolicy request = GoogleAuthDelegationPolicy.parse(key);
+            Incoming selected = null;
+            synchronized (INCOMING) {
+                for (Incoming pending : INCOMING) {
+                    if (pending.selected(account) && pending.caller.getPackageName().equals(request.owner)) {
+                        if (selected != null) throw new SecurityException("ambiguous interactive request");
+                        selected = pending;
+                    }
+                }
+            }
+            if (selected == null) return null;
+            if (!request.signer.equals(GoogleAuthProxy.digest(selected.origin.signatures[0].toByteArray(), "SHA-1")))
+                throw new SecurityException("cache signer differs from origin");
+            if (!tokenRead) {
+                synchronized (selected.tokens) {
+                    Issued found = selected.tokens.get(key);
+                    return found != null && found.account.equals(account) && selected.selected(account)
+                            ? found.result.getString(expiry ? "expiry" : "scopes") : null;
+                }
+            }
+            Bundle result = PlayServicesChannel.delegatedAuth(selected.origin, selected.originPid, selected.spawner,
+                    account, key, selected.witness(account), null);
+            if (result == null) return null;
+            String token = result.getString("token");
+            synchronized (selected.tokens) {
+                if (!selected.selected(account)) return null;
+                if (token != null) {
+                    if (selected.tokens.size() >= 16 && !selected.tokens.containsKey(key)) throw new SecurityException("token limit");
+                    selected.tokens.put(key, new Issued(account, result));
+                }
+            }
+            GoogleAuthDelegation.event("ui_read=true owner=" + request.owner + " token_present=" + (token != null));
+            return token;
+        } catch (Exception error) {
+            GoogleAuthDelegation.event("ui_denied=true " + GoogleAuthDelegation.failure(error));
+            return null;
+        }
+    }
+
+    private static final class Issued {
+        final Account account;
+        final Bundle result;
+        Issued(Account account, Bundle result) { this.account = account; this.result = result; }
+    }
+
     static void callerDestroyed(IBinder token) {
         List<Outgoing> cancel = new ArrayList<>();
         synchronized (OUTGOING) { for (Outgoing p : OUTGOING) if (p.callerToken == token) cancel.add(p); }
@@ -156,9 +225,43 @@ public final class RemoteActivities {
         final boolean wantsResult;
         final AtomicBoolean done = new AtomicBoolean();
         volatile IBinder activityToken;
+        final PackageInfo origin;
+        final int originPid;
+        final String spawner;
+        final long authDeadline = SystemClock.elapsedRealtime() + 10 * 60_000L;
+        final java.util.Map<String, Issued> tokens = new java.util.HashMap<>();
 
-        Incoming(IBinder callback, ComponentName caller, int uid, boolean wantsResult) {
+        Incoming(IBinder callback, ComponentName caller, int uid, boolean wantsResult,
+                PackageInfo origin, int originPid, String spawner) {
             this.callback = callback; this.caller = caller; this.callerUid = uid; this.wantsResult = wantsResult;
+            this.origin = origin; this.originPid = originPid; this.spawner = spawner;
+        }
+
+        boolean selected(Account account) {
+            return !done.get() && SystemClock.elapsedRealtime() < authDeadline && callback.isBinderAlive()
+                    && GoogleAuthProxy.selectedInteractiveAccount(account, caller.getPackageName());
+        }
+
+        IBinder witness(Account account) {
+            return new Binder() {
+                @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
+                    if (code != 1 || !PlayServicesChannel.authProviderCalling()) throw new SecurityException("wrong witness peer");
+                    data.enforceInterface(GoogleAuthDelegation.WITNESS);
+                    reply.writeNoException(); reply.writeBoolean(selected(account)); return true;
+                }
+            };
+        }
+
+        void invalidate(String token) throws RemoteException {
+            java.util.Map<String, Issued> copy;
+            synchronized (tokens) { copy = new java.util.HashMap<>(tokens); }
+            for (java.util.Map.Entry<String, Issued> entry : copy.entrySet()) {
+                Issued issued = entry.getValue();
+                if (token != null && token.equals(issued.result.getString("token")) && selected(issued.account)) {
+                    synchronized (tokens) { tokens.remove(entry.getKey()); }
+                    PlayServicesChannel.delegatedAuth(origin, originPid, spawner, issued.account, entry.getKey(), witness(issued.account), token);
+                }
+            }
         }
 
         @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
@@ -174,6 +277,7 @@ public final class RemoteActivities {
         void complete(int result, Intent intent, boolean notify, boolean close) {
             if (!done.compareAndSet(false, true)) return;
             synchronized (INCOMING) { INCOMING.remove(this); }
+            synchronized (tokens) { tokens.clear(); }
             adapter.core.GoogleAuthProxy.clearInteractiveVisibility(caller.getPackageName());
             callback.unlinkToDeath(this, 0);
             if (notify) {

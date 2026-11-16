@@ -1,0 +1,10 @@
+[WL-REMOTE-ACTIVITY] time=1794809487567 launch_received caller=com.spotify.music process=com.google.android.gms.ui class=com.google.android.gms.auth.api.signin.ui.SignInActivity
+[WL-REMOTE-ACTIVITY] time=1794809491285 pending_activity_prepared process=com.google.android.gms.ui class=com.google.android.gms.signin.activity.SignInActivity
+[WL-AUTH-DELEGATION] time=1794809525329 ui_read=true owner=com.spotify.music token_present=true
+[WL-AUTH-DELEGATION] time=1794809526186 ui_read=true owner=com.spotify.music token_present=true
+[WL-AUTH-DELEGATION] time=1794809526878 ui_read=true owner=com.spotify.music token_present=true
+[WL-AUTH-DELEGATION] time=1794809528050 ui_read=true owner=com.spotify.music token_present=true
+[WL-AUTH-DELEGATION] time=1794809528788 ui_read=true owner=com.spotify.music token_present=true
+[WL-AUTH-DELEGATION] time=1794809529529 ui_read=true owner=com.spotify.music token_present=true
+[WL-AUTH-DELEGATION] time=1794809530677 ui_read=true owner=com.spotify.music token_present=true
+[WL-REMOTE-ACTIVITY] time=1794809531160 result_sent caller=com.spotify.music result_code=-1

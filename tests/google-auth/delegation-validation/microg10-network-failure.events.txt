@@ -1,0 +1,2 @@
+[WL-AUTH-DELEGATION] time=1794808748577 provider_denied=true type=NetworkOnMainThreadException frame0=android.os.StrictMode$AndroidBlockGuardPolicy.onNetwork frame1=java.net.Inet6AddressImpl.lookupHostByName frame2=java.net.Inet6AddressImpl.lookupAllHostAddr
+[WL-AUTH-DELEGATION] time=1794808749162 provider_denied=true type=NetworkOnMainThreadException frame0=android.os.StrictMode$AndroidBlockGuardPolicy.onNetwork frame1=java.net.Inet6AddressImpl.lookupHostByName frame2=java.net.Inet6AddressImpl.lookupAllHostAddr

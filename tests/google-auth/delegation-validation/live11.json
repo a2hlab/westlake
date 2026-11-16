@@ -1,0 +1,47 @@
+{
+  "google-auth-delegation-microg11": {
+    "credentialEntryCount": 1,
+    "parent": 23977,
+    "child": 24012,
+    "uid": 20010056,
+    "liveJarSha256": [
+      "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    ]
+  },
+  "google-auth-delegation-official11": {
+    "credentialEntryCount": 0,
+    "parent": 24807,
+    "child": 24828,
+    "uid": 20010056,
+    "liveJarSha256": [
+      "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    ]
+  },
+  "google-auth-delegation-store11": {
+    "credentialEntryCount": 0,
+    "parent": 25405,
+    "child": 25426,
+    "uid": 20010056,
+    "liveJarSha256": [
+      "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    ]
+  },
+  "google-signin-spotify-fresh11": {
+    "credentialEntryCount": 0,
+    "parent": 26386,
+    "child": 26418,
+    "uid": 20010056,
+    "liveJarSha256": [
+      "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    ]
+  },
+  "google-auth-delegation-probe11": {
+    "credentialEntryCount": 0,
+    "parent": 28529,
+    "child": 28550,
+    "uid": 20010056,
+    "liveJarSha256": [
+      "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    ]
+  }
+}

@@ -1,5 +1,11 @@
 # Official GMS auth boundary: continued board validation
 
+This report preserves the build-08 baseline. The subsequent
+[delegation implementation and build-11 replay](google-auth-delegation-validation.md)
+returned Google tokens and an official `RESULT_OK` to Spotify, then stopped at
+Spotify's new-account form. The failures and missing contracts below describe
+the earlier implementation.
+
 The activity fix survives a new official GMS host launch, and Spotify again
 reaches Google's account picker and credential-recovery screen. Native official
 authentication still fails while the direct microG control succeeds. This run

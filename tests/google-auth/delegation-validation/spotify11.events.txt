@@ -1,0 +1,2 @@
+[WL-REMOTE-ACTIVITY] time=1794809487567 start_sent target=com.google.android.gms process=com.google.android.gms.ui
+[WL-REMOTE-ACTIVITY] time=1794809531162 result_received result_code=-1

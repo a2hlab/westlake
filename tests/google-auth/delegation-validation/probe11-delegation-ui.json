@@ -1,0 +1,15 @@
+{
+  "schema": "westlake-official-auth-v1",
+  "mode": "delegation-ui",
+  "scope": "ac2dm",
+  "startTime": 1794809614356,
+  "gmsVersion": 244034029,
+  "accountCount": 1,
+  "operation": {
+    "entry": "PlayServicesChannel.delegation-ui",
+    "actualIdentity": "org.westlake.googlebootstrap.probe",
+    "outcome": "security_exception",
+    "denied": true
+  },
+  "endTime": 1794809614392
+}

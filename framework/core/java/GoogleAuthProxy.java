@@ -39,6 +39,16 @@ public final class GoogleAuthProxy {
     public static boolean provider() { return "microg".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_PROVIDER")); }
     public static boolean client() { return System.getenv("WESTLAKE_GOOGLE_AUTH_CONNECT") != null; }
 
+    static Properties readGrants() throws Exception {
+        Properties props = new Properties();
+        File file = new File(ActivityThread.currentApplication().getDataDir(), "westlake-auth-proxy/grants.properties");
+        android.system.StructStat stat = android.system.Os.stat(file.getPath());
+        if ((stat.st_mode & 077) != 0 || stat.st_uid != android.os.Process.myUid())
+            throw new SecurityException("auth grants must be private and owned by the provider");
+        try (FileInputStream in = new FileInputStream(file)) { props.load(in); }
+        return props;
+    }
+
     public static String digest(byte[] bytes, String algorithm) throws Exception {
         StringBuilder out = new StringBuilder();
         for (byte b : MessageDigest.getInstance(algorithm).digest(bytes)) out.append(String.format("%02x", b & 255));
@@ -74,14 +84,7 @@ public final class GoogleAuthProxy {
         }
 
         private Properties grants() throws Exception {
-            Properties props = new Properties();
-            File file = new File(ActivityThread.currentApplication().getDataDir(), "westlake-auth-proxy/grants.properties");
-            android.system.StructStat stat = android.system.Os.stat(file.getPath());
-            if ((stat.st_mode & 077) != 0 || stat.st_uid != android.os.Process.myUid()) {
-                throw new SecurityException("auth grants must be private and owned by the provider");
-            }
-            try (FileInputStream in = new FileInputStream(file)) { props.load(in); }
-            return props;
+            return readGrants();
         }
 
         private Account account(Account requested) {
@@ -353,6 +356,15 @@ public final class GoogleAuthProxy {
         }
     }
 
+    /** Selection already checked against the provider; never performs IPC during a witness callback. */
+    public static boolean selectedInteractiveAccount(Account account, String packageName) {
+        synchronized (VISIBILITY) {
+            java.util.Map<String, Integer> selected = VISIBILITY.get(account);
+            int value = selected == null ? 0 : selected.getOrDefault(packageName, 0);
+            return value == AccountManager.VISIBILITY_VISIBLE || value == AccountManager.VISIBILITY_USER_MANAGED_VISIBLE;
+        }
+    }
+
     /** Diagnostic only: no raw account, key, scope, token, message, or credential is emitted. */
     private static void traceBoundary(String method, Object[] args) {
         if (!"1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))
@@ -391,9 +403,15 @@ public final class GoogleAuthProxy {
         try {
             switch (method) {
                 case "getPassword":
+                    traceBoundary(method, args);
+                    event("client_credential_read=" + method + " result=withheld"); return null;
                 case "peekAuthToken":
                 case "getUserData":
                     traceBoundary(method, args);
+                    if (GoogleAuthDelegation.enabled()) {
+                        String value = GoogleAuthDelegation.read(method, (Account) args[0], (String) args[1]);
+                        if (value != null) return value;
+                    }
                     event("client_credential_read=" + method + " result=withheld"); return null;
                 case "getAuthenticatorTypes":
                     return new AuthenticatorDescription[] {new AuthenticatorDescription("com.google", "com.google.android.gms", 0, 0, 0, 0, true)};
@@ -445,6 +463,7 @@ public final class GoogleAuthProxy {
                 }
                 case "invalidateAuthToken": {
                     if (!"com.google".equals(args[0])) return null;
+                    if (GoogleAuthDelegation.enabled()) GoogleAuthDelegation.invalidate((String) args[1]);
                     Parcel reply = call(INVALIDATE, data -> data.writeString((String) args[1]));
                     try { event("client_invalidation cache_removed=" + reply.readBoolean()); }
                     finally { reply.recycle(); }

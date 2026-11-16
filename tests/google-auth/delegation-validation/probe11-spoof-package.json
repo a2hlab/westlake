@@ -1,0 +1,16 @@
+{
+  "schema": "westlake-official-auth-v1",
+  "mode": "spoof-package",
+  "scope": "ac2dm",
+  "startTime": 1794809615592,
+  "gmsVersion": 244034029,
+  "accountCount": 1,
+  "operation": {
+    "outcome": "failed",
+    "errorType": "SecurityException",
+    "errorCode": "unclassified",
+    "entry": "IAuthManagerService.getTokenWithAccount",
+    "spoofPackageTest": true
+  },
+  "endTime": 1794809615683
+}
