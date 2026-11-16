@@ -891,6 +891,10 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (RemotePackages.contains(packageName)) {
             return RemotePackages.packageInfo(packageName, flags);
         }
+        if (InstalledPackages.contains(packageName)) {   // published by an installer's session (ADR-0006)
+            sAbsentPackages.remove(packageName);
+            return InstalledPackages.packageInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
                     + System.getenv("ASX_WEBVIEW_APK"));
@@ -952,6 +956,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (RemotePackages.contains(packageName)) {
             return GuestPackages.besideDefaults(packageName, RemotePackages.applicationInfo(packageName, flags));
         }
+        if (InstalledPackages.contains(packageName)) {
+            return InstalledPackages.applicationInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
         }
@@ -994,6 +1001,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         String self = SourcePackageRegistry.packageName();
         if (self != null) answered.add(self);
         answered.addAll(GuestPackages.names());
+        answered.addAll(InstalledPackages.names());
         for (String play : PLAY_PACKAGES) {
             if (RemotePackages.contains(play)) answered.add(play);
         }
@@ -1890,15 +1898,32 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * PackageManager.deletePackage (DELETE_PACKAGES, which no Westlake app holds): an uninstall the user confirms, of a
+     * package an installer published here (InstallerSessions.uninstall). The outcome goes to the observer.
+     */
     @Override
-    public void deletePackageAsUser(java.lang.String arg0, int arg1, android.content.pm.IPackageDeleteObserver arg2, int arg3, int arg4) throws android.os.RemoteException {
-        logStub("deletePackageAsUser", "");
+    public void deletePackageAsUser(java.lang.String packageName, int versionCode, android.content.pm.IPackageDeleteObserver observer, int userId, int flags) throws android.os.RemoteException {
+        logBridged("deletePackageAsUser", packageName);
+        InstallerSessions.uninstall(packageName, versionCode, android.app.ActivityThread.currentPackageName(), (code, message) -> {
+            try {
+                if (observer != null) observer.packageDeleted(packageName, code);
+            } catch (android.os.RemoteException | RuntimeException ignored) {
+            }
+        });
     }
 
 
     @Override
-    public void deletePackageVersioned(android.content.pm.VersionedPackage arg0, android.content.pm.IPackageDeleteObserver2 arg1, int arg2, int arg3) throws android.os.RemoteException {
-        logStub("deletePackageVersioned", "");
+    public void deletePackageVersioned(android.content.pm.VersionedPackage target, android.content.pm.IPackageDeleteObserver2 observer, int userId, int flags) throws android.os.RemoteException {
+        logBridged("deletePackageVersioned", target.getPackageName());
+        InstallerSessions.uninstall(target.getPackageName(), target.getLongVersionCode(),
+                android.app.ActivityThread.currentPackageName(), (code, message) -> {
+            try {
+                if (observer != null) observer.onPackageDeleted(target.getPackageName(), code, message);
+            } catch (android.os.RemoteException | RuntimeException ignored) {
+            }
+        });
     }
 
 
@@ -1929,6 +1954,8 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.lang.String getInstallerPackageName(java.lang.String arg0) throws android.os.RemoteException {
+        // A package an installer published here: what its install record says (ADR-0006 decision 4).
+        if (arg0 != null && InstalledPackages.contains(arg0)) return InstalledPackages.recorded(arg0, "installer");
         if (installedByPlayStore(arg0)) return PLAY_STORE_PACKAGE;
         logStub("getInstallerPackageName", arg0 == null ? "" : arg0);
         return null;
@@ -1943,6 +1970,16 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         // reports what PackageManagerService records for a Play Store install on Android 14 and
         // later: the Play Store initiated and installed it, owns its updates, and the source is a
         // store. Its signing info stays unknown (null), which Android also reports when it has none.
+        // A package an installer published here answers from its install record instead: the installer that
+        // committed the session initiated and installed it, the update owner is the one the commit settled, and the
+        // source is what the installer declared (ADR-0006 decision 4).
+        if (arg0 != null && InstalledPackages.contains(arg0)) {
+            String installer = InstalledPackages.recorded(arg0, "installer");
+            String source = InstalledPackages.recorded(arg0, "packageSource");
+            return new android.content.pm.InstallSourceInfo(installer, null, null, installer,
+                    InstalledPackages.recorded(arg0, InstallerSessions.UPDATE_OWNER),
+                    source != null ? Integer.parseInt(source) : android.content.pm.PackageInstaller.PACKAGE_SOURCE_UNSPECIFIED);
+        }
         if (installedByPlayStore(arg0)) {
             return new android.content.pm.InstallSourceInfo(PLAY_STORE_PACKAGE, null, null, PLAY_STORE_PACKAGE,
                     PLAY_STORE_PACKAGE, android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE);

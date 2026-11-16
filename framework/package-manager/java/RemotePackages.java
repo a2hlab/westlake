@@ -176,6 +176,17 @@ public final class RemotePackages {
         return false;
     }
 
+    /**
+     * The uid an installed package has: its uid here if it has connected, otherwise the one the shared table gives
+     * it, in this process's user, as it will have when it is launched. Nothing is registered.
+     */
+    public static synchronized int installedUid(String packageName) {
+        Integer uid = sUids.get(packageName);
+        if (uid != null) return uid;
+        int user = android.os.Process.myUid() / PER_USER_RANGE;
+        return user * PER_USER_RANGE + appId(packageName);
+    }
+
     /** The virtual uid of a connected app, or -1. */
     public static synchronized int uidOf(String packageName) {
         Integer uid = sUids.get(packageName);

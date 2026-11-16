@@ -95,6 +95,8 @@ public final class PlayServicesChannel {
     private static final int RECEIVER = 15;
     /** To an app's launched process, from another of its processes: start one of its activities declared there. */
     private static final int ACTIVITY = 16;
+    /** To an app's launched process, from another of its processes: ask the user to confirm a package change. */
+    private static final int CONFIRM = 17;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -248,6 +250,32 @@ public final class PlayServicesChannel {
             System.err.println(TAG + "activity start in " + process + " failed: " + e);
             return false;
         } finally {
+            data.recycle();
+        }
+    }
+
+    /**
+     * The user's confirmation of a package change, asked in this app's launched process, which has its windows
+     * (InstallConfirmDialog): from the installer's :background process, where the Play Store's sessions live. The
+     * answer comes on answer. False when that process could not be reached or had no activity to ask over.
+     */
+    public static boolean confirmInHome(android.os.Bundle request, IBinder answer) {
+        Channel home = ownProcess(AppProcesses.home());
+        IBinder root = home == null ? null : root(home);
+        if (root == null) return false;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeBundle(request);
+            data.writeStrongBinder(answer);
+            root.transact(CONFIRM, data, reply, 0);
+            reply.readException();
+            return reply.readBoolean();
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "confirmation in " + AppProcesses.home() + " not asked: " + e);
+            return false;
+        } finally {
+            reply.recycle();
             data.recycle();
         }
     }
@@ -1543,6 +1571,15 @@ public final class PlayServicesChannel {
                             if (app != null) app.startActivity(start);
                         });
                     }
+                    return true;
+                }
+                case CONFIRM: {
+                    android.os.Bundle request = data.readBundle(getClass().getClassLoader());
+                    IBinder answer = data.readStrongBinder();
+                    if (Binder.getCallingUid() != Process.myUid()) {
+                        throw new SecurityException("only this app's own processes ask its user here");
+                    }
+                    reply.writeBoolean(InstallConfirmDialog.show(request, answer));
                     return true;
                 }
                 case RECEIVER: {
