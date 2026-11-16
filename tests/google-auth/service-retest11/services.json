@@ -1,0 +1,167 @@
+[
+  {
+    "service": 1,
+    "name": "GAMES",
+    "historicallyRefusedApps": 2,
+    "baselineComparedApps": 2,
+    "requestedAgainApps": 2,
+    "status0ObservedApps": 0,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 1,
+    "noCallbackObservedApps": 1
+  },
+  {
+    "service": 8,
+    "name": "ADMOB",
+    "historicallyRefusedApps": 17,
+    "baselineComparedApps": 17,
+    "requestedAgainApps": 17,
+    "status0ObservedApps": 16,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 1,
+    "noCallbackObservedApps": 1
+  },
+  {
+    "service": 14,
+    "name": "WEAR",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 0,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 1,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 51,
+    "name": "PHENOTYPE",
+    "historicallyRefusedApps": 2,
+    "baselineComparedApps": 2,
+    "requestedAgainApps": 2,
+    "status0ObservedApps": 2,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 93,
+    "name": "MEASUREMENT",
+    "historicallyRefusedApps": 26,
+    "baselineComparedApps": 26,
+    "requestedAgainApps": 26,
+    "status0ObservedApps": 25,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 1,
+    "noCallbackObservedApps": 1
+  },
+  {
+    "service": 116,
+    "name": "GASS",
+    "historicallyRefusedApps": 20,
+    "baselineComparedApps": 20,
+    "requestedAgainApps": 20,
+    "status0ObservedApps": 19,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 1,
+    "noCallbackObservedApps": 1
+  },
+  {
+    "service": 126,
+    "name": "SMS_RETRIEVER",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 1,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 161,
+    "name": "CAST_API",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 1,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 212,
+    "name": "AUTH_API_IDENTITY_SIGNIN",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 1,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 258,
+    "name": "AUTH_BLOCKSTORE",
+    "historicallyRefusedApps": 4,
+    "baselineComparedApps": 4,
+    "requestedAgainApps": 4,
+    "status0ObservedApps": 3,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 1
+  },
+  {
+    "service": 270,
+    "name": "CLIENT_TELEMETRY",
+    "historicallyRefusedApps": 10,
+    "baselineComparedApps": 10,
+    "requestedAgainApps": 10,
+    "status0ObservedApps": 2,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 10,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 300,
+    "name": "APP_SET_ID",
+    "historicallyRefusedApps": 26,
+    "baselineComparedApps": 26,
+    "requestedAgainApps": 26,
+    "status0ObservedApps": 25,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 1
+  },
+  {
+    "service": 322,
+    "name": "DEVICE_PERFORMANCE",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 1,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 326,
+    "name": "TIME",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 1,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  },
+  {
+    "service": 380,
+    "name": "RECAPTCHABASE",
+    "historicallyRefusedApps": 1,
+    "baselineComparedApps": 1,
+    "requestedAgainApps": 1,
+    "status0ObservedApps": 1,
+    "status9ObservedApps": 0,
+    "otherStatusesObservedApps": 0,
+    "noCallbackObservedApps": 0
+  }
+]

@@ -10,6 +10,11 @@ with results under `delegation-validation/`. The build-04 setup and preserved
 results below describe the historical baseline; the latest diagnostic host uses
 the current adapter build with the additional trace flag described below.
 
+The subsequent [26-app service retest](../../docs/google-service-retest.md)
+uses the same build 11 and adds an authorized FotMob sign-in attempt. Its
+`service-retest11/` evidence keeps Google connection results separate from
+visible app behavior and full feature acceptance.
+
 The current source includes six buttons. The `spoof-package` button calls the official
 token Binder with `com.spotify.music` in both package options while retaining
 the probe's actual APK, signer and verified channel identity. This is a negative

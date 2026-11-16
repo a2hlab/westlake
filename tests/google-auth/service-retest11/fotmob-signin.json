@@ -1,0 +1,30 @@
+{
+  "package": "com.mobilefootie.wc2010",
+  "version": "239.17834.20261016",
+  "authorizedGoogleSignIn": true,
+  "newAccountCreated": false,
+  "signInCompleted": false,
+  "googleAccountPickerReached": false,
+  "tokenDelegationObserved": false,
+  "uiError": "13: There was a problem signing in with Google. Please try again.",
+  "runtimeEvent": "pending_activity_rejected type=SecurityException",
+  "transportEvent": "android.content.IIntentSender code=5721153 reply=-1",
+  "diagnosis": "Current same-app PendingIntent preparation rejects the cross-package Google identity sender before Google UI launch. The source also resolves only local activities after preparation. A verified cross-package PendingIntent broker/result route is missing.",
+  "registrationRefusalObserved": false,
+  "securityGuardBypassed": false,
+  "stopReason": "Local activity routing rejection; no signup or credential entry occurred.",
+  "endEpoch": 1794814578.5176845,
+  "primaryAliveAtCleanup": false,
+  "endLifecycleNote": "Primary app was already absent when exact-namespace cleanup ran; only its spawner required stopping. The error-13 screen was captured before this.",
+  "subsequentNativeFailure": {
+    "signal": 5,
+    "name": "SIGTRAP",
+    "code": 1,
+    "nameCode": "TRAP_BRKPT",
+    "rootCause": "not established",
+    "faultEpochMs": 1794814546081,
+    "faultThreadName": "Chrome_InProcRe",
+    "topFrames": "unmapped; no symbolized root cause",
+    "elapsedAfterPendingIntentRejectionSeconds": 19.545
+  }
+}

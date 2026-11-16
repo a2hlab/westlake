@@ -1,0 +1,34 @@
+{
+  "targetCount": 26,
+  "completedCount": 26,
+  "capturedCount": 26,
+  "setupFailureCount": 0,
+  "aliveAtBaselineCaptureCount": 25,
+  "appsWithCallbackByStatus": {
+    "0": 26,
+    "13": 2,
+    "16": 1,
+    "23": 17
+  },
+  "appsWithNoCallback": 0,
+  "appsWithNativeSignalInBaselineLogs": 1,
+  "uiVerdictCounts": {
+    "blocked_by_app_device_check": 2,
+    "player_shell_visible_content_not_established": 1,
+    "onboarding_rendered_ad_content_not_established": 1,
+    "blank_content_at_capture": 1,
+    "advertisement_visible_provider_unknown": 1,
+    "splash_at_capture": 1,
+    "onboarding_rendered": 5,
+    "google_signin_blocked_local_pending_intent": 1,
+    "subscription_offer_rendered": 4,
+    "target_not_visible_foreign_screen": 5,
+    "home_and_default_prompt_rendered": 1,
+    "ad_player_placeholder": 1,
+    "target_dialog_over_foreign_background": 1,
+    "native_crash_before_capture": 1
+  },
+  "fullBusinessFlowAcceptedCount": 0,
+  "missingPackages": [],
+  "unreviewedScreenshots": []
+}

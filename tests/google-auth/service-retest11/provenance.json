@@ -1,0 +1,32 @@
+{
+  "scope": "26 prior status-9 apps; fresh-data startup and observed Google IPC, plus separately authorized FotMob sign-in",
+  "westlakeCommit": "51d53662e1f13749b8bcbe074cc19bbdf8b9ece0",
+  "manifestBaseCommit": "b76ad3e8d48699f15e05fc52b10209edb2eeae0d",
+  "extraManifestPins": 22,
+  "framework": "auth-delegation11",
+  "adapterSha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3",
+  "baselineAppsSha256": "7278dc7828760e6d7a1b82cbe252ea987543a8468845ee44260ab80c87741ce1",
+  "preparedCount": 26,
+  "observationSeconds": 90,
+  "oneAppAtATime": true,
+  "nativeHostUid": 20010056,
+  "googleHostsRestartedForRetest": false,
+  "manualGsfRegistrationPerformed": false,
+  "googlePolicyOverrideAdded": false,
+  "scopeLimitations": [
+    "A different saved baseline and current run are not a controlled registration intervention.",
+    "Status zero is a broker connection, not feature completion.",
+    "SocketBinder callback afterService attribution is approximate during concurrent connections.",
+    "Trace messages are sampled at power-of-two counts, so record counts are not operation counts.",
+    "Private screenshots and raw logs stay local.",
+    "These native processes share a UID; production per-app isolation is not validated."
+  ],
+  "completion": {
+    "runnerExitCode": 0,
+    "completedBaselines": 26,
+    "retainedClientAdapterHashesVerified": 26,
+    "corpusPrimaryProcessesStillRunning": 0,
+    "googleHostsKeptRunning": true,
+    "rawLogsOrScreenshotsPublished": false
+  }
+}
