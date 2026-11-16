@@ -80,9 +80,7 @@ public final class LocalServiceBinders {
                     binder = proxy(name, "android.content.IClipboard", LocalServiceBinders::clipboard);
                     break;
                 case "account":
-                    binder = System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null
-                            ? proxy(name, "android.accounts.IAccountManager", LocalAccounts::answer, false)
-                            : proxy(name, "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+                    binder = accountService();
                     break;
                 case "audio":
                     binder = proxy(name, "android.media.IAudioService", LocalServiceBinders::audio);
@@ -181,6 +179,9 @@ public final class LocalServiceBinders {
                 case "safety_center":
                     binder = proxy(name, "android.safetycenter.ISafetyCenterManager", (method, args) -> DEFAULT);
                     break;
+                case "permission_checker":
+                    binder = proxy(name, "android.permission.IPermissionChecker", LocalServiceBinders::permissionChecker);
+                    break;
                 case "slice":
                     binder = proxy(name, "android.app.slice.ISliceManager", (method, args) -> DEFAULT);
                     break;
@@ -230,6 +231,32 @@ public final class LocalServiceBinders {
         return binder;
     }
 
+    /**
+     * The account service. In the Play services host, LocalAccounts as a real IAccountManager.Stub, which
+     * answers other processes too. In the Play Store host, that Stub through its channel: on Android the
+     * Play Store's account manager is the system's, which holds the Google account. Elsewhere, the plain
+     * answers: no accounts.
+     */
+    private static IBinder accountService() throws ClassNotFoundException {
+        if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
+        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
+            IBinder remote = playServicesHostService("account");
+            if (remote != null) return remote;
+        }
+        return proxy("account", "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+    }
+
+    /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */
+    private static IBinder playServicesHostService(String name) {
+        try {
+            return (IBinder) Class.forName("adapter.activity.PlayServicesChannel")
+                    .getMethod("remoteService", String.class).invoke(null, name);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            System.err.println("[" + TAG + "] " + name + " from the Play services host unavailable: " + e);
+            return null;
+        }
+    }
+
     private static IBinder proxy(String name, String descriptor, Answers answers) throws ClassNotFoundException {
         return proxy(name, descriptor, answers, true);
     }
@@ -274,6 +301,45 @@ public final class LocalServiceBinders {
     private static Object statusBar(String method, Object[] args) {
         if ("getDisableFlags".equals(method)) return new int[2];   // nothing disabled
         return DEFAULT;
+    }
+
+    /**
+     * PermissionChecker, which a content provider asks about a caller of another uid: a permission is
+     * granted to a package that requests it, as an installed app holds what its manifest asks for and
+     * Westlake installs nothing else; this process holds what Context.checkPermission says it holds.
+     * App ops aren't kept, so an op is allowed. Results are PermissionChecker's: 0 granted, 2 denied.
+     */
+    private static Object permissionChecker(String method, Object[] args) {
+        switch (method) {
+            case "checkPermission":
+                return holds((String) args[0], (android.content.AttributionSourceState) args[1]) ? 0 : 2;
+            case "checkOp":
+                return 0;
+            default:
+                return DEFAULT;
+        }
+    }
+
+    private static boolean holds(String permission, android.content.AttributionSourceState source) {
+        android.app.Application app = android.app.ActivityThread.currentApplication();
+        if (permission == null || source == null || app == null) return false;
+        if (source.uid == android.os.Process.myUid()) {
+            return app.checkPermission(permission, source.pid, source.uid)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        }
+        android.content.pm.PackageManager manager = app.getPackageManager();
+        String[] packages = manager.getPackagesForUid(source.uid);
+        if (packages == null || source.packageName == null
+                || !java.util.Arrays.asList(packages).contains(source.packageName)) {
+            return false;
+        }
+        try {
+            String[] requested = manager.getPackageInfo(source.packageName,
+                    android.content.pm.PackageManager.GET_PERMISSIONS).requestedPermissions;
+            return requested != null && java.util.Arrays.asList(requested).contains(permission);
+        } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException e) {
+            return false;
+        }
     }
 
     private static Object alarm(String method, Object[] args) {
@@ -1019,7 +1085,7 @@ public final class LocalServiceBinders {
         }
     }
 
-    private static Object defaultValue(Class<?> type) {
+    static Object defaultValue(Class<?> type) {
         // An empty array, never null: callers iterate what a service hands back without checking,
         // and a null Account[] from getAccounts() throws inside the caller rather than here.
         if (type != null && type.isArray()) {

@@ -327,6 +327,19 @@ static void set_identity(jlong token)
     t_explicit = (uint32_t)token & EXPLICIT_IDENTITY;
 }
 
+/*
+ * Binder.isDirectlyHandlingTransaction: true while this thread serves a socket channel's call, as
+ * libbinder answers while a thread executes a transaction from the driver (its serving stack). Nested
+ * calls on a waiting thread count up and down. AttributionSource refuses to be unparceled outside a
+ * transaction (Android 12 and later), so every content provider call served over a channel threw.
+ */
+static __thread int t_serving;
+
+static jboolean directly_handling(void)
+{
+    return t_serving > 0 ? JNI_TRUE : JNI_FALSE;
+}
+
 static jlong critical_clear_identity(void)
 {
     jlong old = identity_token();
@@ -345,9 +358,14 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_installCallingIdenti
         {"clearCallingIdentity", "()J", (void*)critical_clear_identity},
         {"restoreCallingIdentity", "(J)V", (void*)set_identity},
     };
+    /* Apart, so that a framework without it (before Android 14) keeps the identity natives above. */
+    static const JNINativeMethod serving[] = {
+        {"isDirectlyHandlingTransactionNative", "()Z", (void*)directly_handling},
+    };
     jclass binder = (*env)->FindClass(env, "android/os/Binder");
     if (binder != NULL) {
         (*env)->RegisterNatives(env, binder, methods, sizeof(methods) / sizeof(methods[0]));
+        if ((*env)->RegisterNatives(env, binder, serving, 1) != JNI_OK) (*env)->ExceptionClear(env);
         (*env)->DeleteLocalRef(env, binder);
     }
 }
@@ -360,6 +378,7 @@ JNIEXPORT jlong JNICALL Java_adapter_core_SocketBinderNative_setCallingIdentity(
     t_calling_uid = uid;
     t_calling_pid = pid;
     t_explicit = 0;
+    t_serving++;
     return old;
 }
 
@@ -368,6 +387,7 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_restoreCallingIdenti
     (void)env;
     (void)c;
     set_identity(identity);
+    if (t_serving > 0) t_serving--;
 }
 
 JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_shutdown(JNIEnv* env, jclass c, jint fd)
@@ -382,6 +402,75 @@ JNIEXPORT void JNICALL Java_adapter_core_SocketBinderNative_close(JNIEnv* env, j
     (void)env;
     (void)c;
     close(fd);
+}
+
+/*
+ * CursorWindow's parcel natives. liboh_android_runtime's hand CursorWindow::writeToParcel and
+ * createFromParcel a null Parcel. Nothing reached them while every provider ran in the process that
+ * asked it: a provider's rows cross in a CursorWindow only to a caller in another process. Providers
+ * of the Play services process, queried by the Play Store's process over SocketBinder, are the first,
+ * and the provider's process died on the first query. These pass the Parcel behind the Java one to the
+ * same CursorWindow methods, which liboh_android_runtime exports.
+ */
+typedef int32_t (*CursorWindowWrite)(void* window, const void* parcel);
+typedef int32_t (*CursorWindowCreate)(const void* parcel, void** window);
+static CursorWindowWrite g_cursor_write;
+static CursorWindowCreate g_cursor_create;
+
+static void* runtime_symbol(const char* name)
+{
+    void* symbol = dlsym(RTLD_DEFAULT, name);
+    if (symbol == NULL) {
+        void* library = dlopen("liboh_android_runtime.so", RTLD_NOW);
+        if (library != NULL) symbol = dlsym(library, name);
+    }
+    return symbol;
+}
+
+static void cursor_window_write(JNIEnv* env, jclass c, jlong window, jobject parcel)
+{
+    (void)c;
+    const void* p = native_parcel(env, parcel);
+    if (p == NULL) return;
+    if (window == 0 || g_cursor_write == NULL) {
+        throw_named(env, "java/lang/IllegalStateException", "CursorWindow cannot be written");
+        return;
+    }
+    int32_t status = g_cursor_write((void*)(intptr_t)window, p);
+    if (status != 0) throw_named(env, "java/lang/RuntimeException", "Could not write CursorWindow to Parcel");
+}
+
+static jlong cursor_window_create(JNIEnv* env, jclass c, jobject parcel)
+{
+    (void)c;
+    const void* p = native_parcel(env, parcel);
+    if (p == NULL) return 0;
+    void* window = NULL;
+    int32_t status = g_cursor_create != NULL ? g_cursor_create(p, &window) : -1;
+    if (status != 0 || window == NULL) {
+        throw_named(env, "android/database/CursorWindowAllocationException", "Could not create CursorWindow from Parcel");
+        return 0;
+    }
+    return (jlong)(intptr_t)window;
+}
+
+/* Over liboh_android_runtime's registrations, when its CursorWindow methods are there to call. */
+static void register_cursor_window(JNIEnv* env)
+{
+    g_cursor_write = (CursorWindowWrite)runtime_symbol("_ZN7android12CursorWindow13writeToParcelEPNS_6ParcelE");
+    g_cursor_create = (CursorWindowCreate)runtime_symbol("_ZN7android12CursorWindow16createFromParcelEPNS_6ParcelEPPS0_");
+    if (g_cursor_write == NULL || g_cursor_create == NULL) return;
+    static const JNINativeMethod methods[] = {
+        {"nativeWriteToParcel", "(JLandroid/os/Parcel;)V", (void*)cursor_window_write},
+        {"nativeCreateFromParcel", "(Landroid/os/Parcel;)J", (void*)cursor_window_create},
+    };
+    jclass window = (*env)->FindClass(env, "android/database/CursorWindow");
+    if (window == NULL) {
+        (*env)->ExceptionClear(env);
+        return;
+    }
+    if ((*env)->RegisterNatives(env, window, methods, 2) != JNI_OK) (*env)->ExceptionClear(env);
+    (*env)->DeleteLocalRef(env, window);
 }
 
 #define NATIVE(name, signature) {#name, signature, (void*)Java_adapter_core_SocketBinderNative_##name}
@@ -413,5 +502,6 @@ int wl_register_socket_binder(JNIEnv* env)
     int rc = (*env)->RegisterNatives(env, c, methods, sizeof(methods) / sizeof(methods[0]));
     if (rc != 0) (*env)->ExceptionClear(env);
     (*env)->DeleteLocalRef(env, c);
+    register_cursor_window(env);
     return rc == 0;
 }

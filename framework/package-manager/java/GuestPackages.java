@@ -77,6 +77,8 @@ public final class GuestPackages {
      * Google certificates the availability check reads.
      */
     private static final boolean BESIDE_PLAY_SERVICES = System.getenv("WESTLAKE_PLAY_SERVICES_CONNECT") != null;
+    /** A Play Store host is connected too (PlayServicesChannel): Companion's stand-ins step aside for it. */
+    private static final boolean PLAY_STORE_HOST = System.getenv("WESTLAKE_PLAY_STORE_CONNECT") != null;
 
     /**
      * The Play Store services Companion answers beside Play services, by action. Each is answered
@@ -122,6 +124,8 @@ public final class GuestPackages {
      * library names the component).
      */
     public static boolean answersBesidePlayServices(Intent intent) {
+        // With the Play Store's own process connected, Google's Play Store answers these itself.
+        if (PLAY_STORE_HOST) return false;
         if (!BESIDE_PLAY_SERVICES || intent == null || !BESIDE_ACTIONS.contains(intent.getAction())) return false;
         ComponentName component = intent.getComponent();
         String target = component != null ? component.getPackageName() : intent.getPackage();

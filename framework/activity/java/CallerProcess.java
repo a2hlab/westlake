@@ -41,7 +41,32 @@ public final class CallerProcess {
         info.importance = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
         List<ActivityManager.RunningAppProcessInfo> list = new ArrayList<>(1);
         list.add(info);
+        addRecentClients(list);
         return list;
+    }
+
+    /** How recently an app connected to this host must have called it to be listed as running. */
+    private static final long RECENT_CLIENT_MILLIS = 30_000;
+
+    /**
+     * In a shared host (Play services, the Play Store), the apps connected to it that called it
+     * recently, as foreground processes. On a phone these services are privileged and see every
+     * process, and both use the table to decide whether a client is running. The Play Store refuses a
+     * split install for a caller it cannot find in the foreground ("in background", -7). GrapheneOS,
+     * whose Play is unprivileged, lists recent binder peers as IMPORTANCE_FOREGROUND the same way.
+     * An ordinary app has no clients, so its answer stays its own process.
+     */
+    private static void addRecentClients(List<ActivityManager.RunningAppProcessInfo> list) {
+        for (java.util.Map.Entry<Integer, Integer> caller
+                : adapter.core.SocketBinder.recentCallers(RECENT_CLIENT_MILLIS).entrySet()) {
+            String client = adapter.packagemanager.RemotePackages.packageForUid(caller.getKey());
+            if (client == null) continue;
+            ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo(
+                    client, caller.getValue(), new String[] {client});
+            info.uid = caller.getKey();
+            info.importance = ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+            list.add(info);
+        }
     }
 
     /** getRunningServices(): the caller's own running services; none are tracked here. */

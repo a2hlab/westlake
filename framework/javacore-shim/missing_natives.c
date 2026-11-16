@@ -329,6 +329,59 @@ static jstring wl_prop_get(JNIEnv* env, jclass c, jstring key, jstring def)
     return answer;
 }
 
+/*
+ * Integer properties Westlake answers where the platform has none. build.version.extensions.s is the S SDK
+ * extension level (SdkExtensions.getExtensionVersion(S)): 7 is the level that added android.net.http.HttpEngine,
+ * which Westlake provides (the Tethering module's Cronet, libmainlinecronet). Google's Play Store and Chromium's
+ * platform-Cronet provider use HttpEngine only from level 7; at 0 the Play Store fell back to Java Cronet, which
+ * has no bidirectional streams. The R, T and U levels stay unset: they would promise module APIs (photo picker,
+ * AdServices) that Westlake does not have.
+ */
+typedef jint (*PropGetIntFn)(JNIEnv*, jclass, jstring, jint);
+static PropGetIntFn g_prop_get_int;
+static const struct { const char* key; jint value; } kIntProps[] = {
+    { "build.version.extensions.s", 7 },
+};
+static jint wl_prop_get_int(JNIEnv* env, jclass c, jstring key, jint def)
+{
+    jint answer = g_prop_get_int(env, c, key, def);
+    const char* k;
+    size_t i;
+    if ((*env)->ExceptionCheck(env) || key == NULL || answer != def) return answer;
+    k = (*env)->GetStringUTFChars(env, key, NULL);
+    if (k == NULL) return answer;
+    for (i = 0; i < sizeof(kIntProps) / sizeof(kIntProps[0]); i++) {
+        if (strcmp(k, kIntProps[i].key) == 0) {
+            answer = kIntProps[i].value;
+            break;
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, key, k);
+    return answer;
+}
+
+/* Wraps one of liboh_android_runtime's SystemProperties natives; returns its original entry, or NULL. */
+static void* wrap_property_native(JNIEnv* env, jclass c, const JNINativeMethod* wrapped)
+{
+    jmethodID m = (*env)->GetStaticMethodID(env, c, wrapped->name, wrapped->signature);
+    void* entry;
+    Dl_info info;
+    if (m == NULL) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    entry = *(void* const*) ((const char*) m + 16);   /* ArtMethod::ptr_sized_fields_.data_ */
+    if (entry == NULL || dladdr(entry, &info) == 0 || info.dli_fname == NULL
+            || strstr(info.dli_fname, "liboh_android_runtime") == NULL) {
+        return NULL;
+    }
+    if ((*env)->RegisterNatives(env, c, wrapped, 1) != JNI_OK) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    return entry;
+}
+
 /* Wraps SystemProperties.native_get(String, String) if its registered implementation can be found
  * and is liboh_android_runtime's; otherwise leaves it alone. Returns 1 when wrapped. */
 static int wrap_system_properties(JNIEnv* env)
@@ -351,6 +404,18 @@ static int wrap_system_properties(JNIEnv* env)
             g_prop_get = (PropGetFn) entry;
             ok = (*env)->RegisterNatives(env, c, &wrapped, 1) == JNI_OK;
             if (!ok) (*env)->ExceptionClear(env);
+        }
+    }
+    {
+        static const JNINativeMethod wrappedInt = {
+            "native_get_int", "(Ljava/lang/String;I)I", (void*) wl_prop_get_int };
+        /* Saved before registering, so the wrapper never runs without the original behind it. */
+        jmethodID mi = (*env)->GetStaticMethodID(env, c, wrappedInt.name, wrappedInt.signature);
+        if (mi == NULL) {
+            (*env)->ExceptionClear(env);
+        } else {
+            g_prop_get_int = (PropGetIntFn) *(void* const*) ((const char*) mi + 16);
+            if (wrap_property_native(env, c, &wrappedInt) == NULL) g_prop_get_int = NULL;
         }
     }
     (*env)->DeleteLocalRef(env, c);
