@@ -17,7 +17,8 @@ import java.util.Map;
  * The in-process notification service: the app's channels and its posted notifications, and the
  * sound a post makes. NotificationManagerService plays a notification's sound when it is posted
  * (buzzBeepBlink): the channel's sound and audio attributes from Android 8 (the notification's own
- * before), at the channel's importance DEFAULT or above, once per update with ONLY_ALERT_ONCE,
+ * before), at the channel's importance DEFAULT or above, an update only when it changes what the user
+ * sees and never with ONLY_ALERT_ONCE, at most one alert a second,
  * looping with FLAG_INSISTENT until the notification is cancelled. A timer or an alarm rings that
  * way: Fossify Clock posts its expired timer on a channel whose sound is the alarm.
  *
@@ -117,11 +118,23 @@ final class LocalNotifications {
         StatusBarNotification record = new StatusBarNotification(pkg, pkg, id, tag, android.os.Process.myUid(),
                 android.os.Process.myPid(), notification, android.os.Process.myUserHandle(), null,
                 System.currentTimeMillis());
-        boolean update;
+        StatusBarNotification previous;
         synchronized (sActive) {
-            update = sActive.put(key, record) != null;
+            previous = sActive.put(key, record);
         }
+        boolean update = previous != null;
         if (update && (notification.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0) return;
+        // As NotificationManagerService.shouldMuteNotificationLocked: an update that changes nothing the user
+        // sees is silent, and an app alerts at most once a second (AlertRateLimiter). Play services re-posted
+        // one unchanged notification about every 5 s while apps came and went, and each post chimed.
+        if (update && !visuallyInterruptive(previous.getNotification(), notification)) return;
+        long now = android.os.SystemClock.elapsedRealtime();
+        synchronized (LocalNotifications.class) {
+            if (now - sLastAlert < ALERT_INTERVAL_MS) {
+                System.err.println(TAG + " muting recently noisy " + key);
+                return;
+            }
+        }
         Uri sound;
         AudioAttributes attributes;
         String channelId = notification.getChannelId();
@@ -139,7 +152,47 @@ final class LocalNotifications {
             attributes = notification.audioAttributes;
         }
         if (sound == null || Uri.EMPTY.equals(sound)) return;
+        synchronized (LocalNotifications.class) {
+            sLastAlert = now;
+        }
         play(key, sound, attributes, (notification.flags & Notification.FLAG_INSISTENT) != 0);
+    }
+
+    /** AlertRateLimiter's interval: one alert a second per app. */
+    private static final long ALERT_INTERVAL_MS = 1000;
+    private static long sLastAlert = -ALERT_INTERVAL_MS;   // guarded by the class
+
+    /**
+     * NotificationManagerService.isVisuallyInterruptive, for an update: whether the title, the text, the
+     * completion of its progress or its actions changed. A foreground service's notification is one session
+     * and its updates never are.
+     */
+    static boolean visuallyInterruptive(Notification old, Notification now) {
+        if (old == null) return true;
+        if ((now.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) return false;
+        if (old.extras == null || now.extras == null) return false;
+        if (!java.util.Objects.equals(String.valueOf(old.extras.get(Notification.EXTRA_TITLE)),
+                String.valueOf(now.extras.get(Notification.EXTRA_TITLE)))) {
+            return true;
+        }
+        if (!java.util.Objects.equals(String.valueOf(old.extras.get(Notification.EXTRA_TEXT)),
+                String.valueOf(now.extras.get(Notification.EXTRA_TEXT)))) {
+            return true;
+        }
+        if (completed(old) != completed(now)) return true;
+        Notification.Action[] a = old.actions == null ? new Notification.Action[0] : old.actions;
+        Notification.Action[] b = now.actions == null ? new Notification.Action[0] : now.actions;
+        if (a.length != b.length) return true;
+        for (int i = 0; i < a.length; i++) {
+            if (!java.util.Objects.equals(String.valueOf(a[i].title), String.valueOf(b[i].title))) return true;
+        }
+        return false;
+    }
+
+    private static boolean completed(Notification n) {
+        int max = n.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0);
+        int progress = n.extras.getInt(Notification.EXTRA_PROGRESS, 0);
+        return max > 0 && progress == max;
     }
 
     private static void cancel(String key) {

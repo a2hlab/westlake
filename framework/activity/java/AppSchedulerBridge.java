@@ -246,6 +246,10 @@ public class AppSchedulerBridge {
 
             // 2. Bind the application (builds the app ClassLoader from sourceDir).
             sLaunchProcessName = declaredProcess(pkg, activityFqn);
+            // One of the app's other processes, which its launched process started (ADR-0002), binds the
+            // application under its own name.
+            AppProcesses.identify(pkg, sLaunchProcessName);
+            if (AppProcesses.isSecondary()) sLaunchProcessName = AppProcesses.self();
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
             MainThreadGuards.install(at);
             ensureBindApplication(at, pkg, null);
@@ -254,6 +258,11 @@ public class AppSchedulerBridge {
                 throw new IllegalStateException("Application binding failed; activity launch withheld");
             }
             PlayServicesChannel.startHostIfAsked();
+            // Another process of the app runs the components declared for it, and no activity.
+            if (AppProcesses.isSecondary()) {
+                System.err.println("[DIRECT-LAUNCH] " + AppProcesses.self() + " started: no activity");
+                return;
+            }
             // The shared Play services process runs with no activity (ADR-0001).
             if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))) {
                 System.err.println("[DIRECT-LAUNCH] no activity for " + pkg);

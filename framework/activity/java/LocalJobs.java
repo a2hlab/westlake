@@ -40,6 +40,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Objects;
 
 /**
@@ -82,6 +84,8 @@ public final class LocalJobs {
     private static final Object sLock = new Object();
     private static final List<Job> sJobs = new ArrayList<>();
     private static final Map<ComponentName, IJobService> sServices = new HashMap<>();   // main thread
+    /** Job services declared for another process that could not start there: bound here, as before. */
+    private static final Set<ComponentName> sHere = new HashSet<>();   // main thread
     private static final Runnable EVALUATE = LocalJobs::evaluate;
     private static Handler sHandler;
     private static Handler sMain;
@@ -568,6 +572,32 @@ public final class LocalJobs {
     }
 
     private static void begin(Run run) {
+        ComponentName component = run.job.info.getService();
+        IJobService known = sServices.get(component);
+        if (known != null && !known.asBinder().isBinderAlive()) sServices.remove(component);   // its process ended
+        if (!sServices.containsKey(component) && !sHere.contains(component)) {
+            // A job service declared for another of the app's processes runs there (ADR-0002), bound from a
+            // thread since that process may have to start; the job begins here once it is.
+            String process = InProcessServiceBinder.declaredProcess(component);
+            if (!AppProcesses.runsHere(process)) {
+                Intent bind = new Intent().setComponent(component).setFlags(Intent.FLAG_FROM_BACKGROUND);
+                Thread thread = new Thread(() -> {
+                    IBinder binder = PlayServicesChannel.bindInOwnProcess(process, bind);
+                    sMain.post(() -> {
+                        IJobService remote = binder == null ? null : IJobService.Stub.asInterface(binder);
+                        if (remote != null) {
+                            sServices.put(component, remote);
+                        } else {
+                            sHere.add(component);
+                        }
+                        begin(run);
+                    });
+                }, "app-process-job");
+                thread.setDaemon(true);
+                thread.start();
+                return;
+            }
+        }
         IJobService service;
         try {
             service = service(run.job.info.getService());
