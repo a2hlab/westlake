@@ -1,0 +1,62 @@
+{
+  "app": "com.mobilefootie.wc2010",
+  "appVersion": "239.17834.20261016",
+  "candidateBuild": 18,
+  "uncertifiedStatus": 1,
+  "identityFilePreserved": true,
+  "uncertifiedOverridePresent": false,
+  "googleSignInButtonPresent": true,
+  "service212BrokerStatusesObserved": [
+    0
+  ],
+  "serviceAttribution": "process-global afterService trace; not full API acceptance",
+  "foreignPendingIntentSent": true,
+  "officialActivity": "com.google.android.gms.auth.api.credentials.assistedsignin.ui.GoogleSignInActivity",
+  "verifiedCallerObserved": "com.mobilefootie.wc2010",
+  "activityLaunched": true,
+  "accountPickerObserved": true,
+  "callerNameAndIconRendered": true,
+  "visibleAccountRows": 0,
+  "accountListStillEmptyAfterMinutes": 5,
+  "providerAccountCountObserved": 1,
+  "providerCountCaveat": "broker request log reports one account; does not prove chooser eligibility or successful selection",
+  "uiThreadSample": "main looper idle; not a causal diagnosis of empty list",
+  "signedIn": false,
+  "newAppAccountCreated": false,
+  "credentialOrGrantPolicyChanged": false,
+  "hostsAtEnd": {
+    "google-auth-delegation-microg11": {
+      "alive": true,
+      "threadSamplesByProcess": {
+        "com.google.android.gms:ui": 31,
+        "com.google.android.gms": 20,
+        "com.google.android.gms:persistent": 16
+      },
+      "adapterSha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3"
+    },
+    "google-allowed-official18": {
+      "alive": true,
+      "threadSamplesByProcess": {
+        "com.google.android.gms.ui": 61,
+        "com.google.android.gms": 80,
+        "com.google.android.gms.persistent": 68,
+        "com.google.android.gms.unstable": 44
+      },
+      "adapterSha256": "380587f43d2a6dd0add0702397f2fefafd14e4a112e05848dcc1adda1ba93f24",
+      "carriedAppData": true
+    },
+    "google-allowed-store17": {
+      "alive": true,
+      "threadSamplesByProcess": {
+        "com.android.vending": 108,
+        "com.android.vending:background": 59,
+        "com.android.vending:quick_launch": 40,
+        "com.android.vending:instant_app_installer": 35
+      },
+      "adapterSha256": "3fa40e104540dcd815f002feaf14fad9f2330ea9933c6a0402480e5b88d43619",
+      "carriedAppData": true
+    }
+  },
+  "rawLogsPublished": false,
+  "capturedAtUtc": "2026-11-16T20:35:50.505398+00:00"
+}

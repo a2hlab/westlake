@@ -1,0 +1,37 @@
+{
+  "candidateBuild": 17,
+  "uncertifiedStatus": 3,
+  "identityFilePreserved": true,
+  "gmsAndStoreDataPreserved": true,
+  "storeAliveAtCapture": true,
+  "gmsAliveAtCapture": true,
+  "services": [
+    {
+      "serviceId": 51,
+      "action": "com.google.android.gms.phenotype.service.START",
+      "brokerStatus": 0,
+      "binderPresent": true,
+      "outcome": "broker_accepted"
+    },
+    {
+      "serviceId": 8,
+      "action": "com.google.android.gms.ads.service.START",
+      "brokerStatus": 9,
+      "binderPresent": false,
+      "outcome": "broker_rejected"
+    },
+    {
+      "serviceId": 93,
+      "action": "com.google.android.gms.measurement.START",
+      "brokerStatus": 9,
+      "binderPresent": false,
+      "outcome": "broker_rejected"
+    },
+    {
+      "serviceId": 300,
+      "action": "com.google.android.gms.appset.service.START",
+      "outcome": "bind_refused"
+    }
+  ],
+  "rawLogsPublished": false
+}

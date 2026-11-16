@@ -11,7 +11,7 @@ import java.io.File;
 import java.io.FileWriter;
 import org.json.JSONObject;
 
-/** Two throwaway APKs on a dedicated channel, with no real Google code or account. */
+/** Throwaway APKs on dedicated channels, with no real Google code or account. */
 public final class Fixture {
     static final String CLIENT = "org.westlake.googlebootstrap.remoteactivity";
     static final String PREFIX = "org.westlake.remoteactivity.fixture.Fixture$";
@@ -19,6 +19,17 @@ public final class Fixture {
         return new Intent("westlake.test.REMOTE").setComponent(new ComponentName("com.google.android.gms", PREFIX + name));
     }
     public static class Host extends Activity {}
+    public static class DiscoveryService extends android.app.Service {
+        @Override public android.os.IBinder onBind(Intent intent) { return new android.os.Binder(); }
+    }
+    public static class DiscoveryProvider extends android.content.ContentProvider {
+        @Override public boolean onCreate() { return true; }
+        @Override public android.database.Cursor query(Uri u, String[] p, String s, String[] a, String o) { return null; }
+        @Override public String getType(Uri u) { return null; }
+        @Override public Uri insert(Uri u, android.content.ContentValues v) { throw new UnsupportedOperationException(); }
+        @Override public int update(Uri u, android.content.ContentValues v, String s, String[] a) { throw new UnsupportedOperationException(); }
+        @Override public int delete(Uri u, String s, String[] a) { throw new UnsupportedOperationException(); }
+    }
     public static class ForwardEntry extends Activity {
         @Override public void onCreate(Bundle state) {
             super.onCreate(state);
@@ -49,8 +60,11 @@ public final class Fixture {
                         catch (android.content.IntentSender.SendIntentException expected) { used = true; }
                         answer.putExtra("one_shot", used);
                         reply.setDataSize(0); reply.setDataPosition(0); data.setDataPosition(0);
-                        service.transact(1, data, reply, 0); reply.readException();
+                        service.transact(2, data, reply, 0); reply.readException();
                         answer.putExtra("foreign_capability", reply.readTypedObject(android.app.PendingIntent.CREATOR));
+                        reply.setDataSize(0); reply.setDataPosition(0); data.setDataPosition(0);
+                        service.transact(3, data, reply, 0); reply.readException();
+                        answer.putExtra("foreign_wait", reply.readTypedObject(android.app.PendingIntent.CREATOR));
                     } catch (Exception error) {
                         answer.putExtra("pending_error", true); setResult(RESULT_OK, answer); finish();
                     } finally { data.recycle(); reply.recycle(); unbindService(this); }
@@ -79,7 +93,7 @@ public final class Fixture {
                 @Override protected boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags)
                         throws android.os.RemoteException {
                     try {
-                        if (code != 1 || !ready.await(10, java.util.concurrent.TimeUnit.SECONDS) || worker == null) return false;
+                        if (code < 1 || code > 3 || !ready.await(10, java.util.concurrent.TimeUnit.SECONDS) || worker == null) return false;
                     } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
                     return worker.transact(code, data, reply, flags);
                 }
@@ -90,9 +104,9 @@ public final class Fixture {
         @Override public android.os.IBinder onBind(Intent intent) {
             return new android.os.Binder() {
                 @Override protected boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) {
-                    if (code != 1) return false;
-                    android.app.PendingIntent pending = android.app.PendingIntent.getActivity(Worker.this, 1,
-                            target("Receipt").putExtra("marker", "original"),
+                    if (code < 1 || code > 3) return false;
+                    android.app.PendingIntent pending = android.app.PendingIntent.getActivity(Worker.this, code,
+                            target(code == 1 ? "Receipt" : code == 2 ? "ForeignReceipt" : "Wait").putExtra("marker", "original"),
                             android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_ONE_SHOT);
                     reply.writeNoException(); reply.writeTypedObject(pending, 0); return true;
                 }
@@ -110,7 +124,26 @@ public final class Fixture {
         @Override public void onCreate(Bundle state) {
             super.onCreate(state);
             setResult(RESULT_OK, new Intent().putExtra("immutable", "original".equals(getIntent().getStringExtra("marker")))
-                    .putExtra("nested_caller", new ComponentName("com.google.android.gms", PREFIX + "Echo").equals(getCallingActivity())));
+                    .putExtra("nested_caller", new ComponentName("com.google.android.gms", PREFIX + "Echo").equals(getCallingActivity()))
+                    .putExtra("foreign_caller", new ComponentName(CLIENT, PREFIX + "Client").equals(getCallingActivity()))
+                    .putExtra("creator_process", "com.google.android.gms:ui".equals(Application.getProcessName())));
+            finish();
+        }
+    }
+    public static class ForeignReceipt extends Activity {
+        @Override public void onCreate(Bundle state) {
+            super.onCreate(state);
+            boolean callerApk = false;
+            try {
+                android.content.pm.ApplicationInfo app = getPackageManager().getApplicationInfo(CLIENT, 0);
+                android.content.pm.PackageInfo archive = getPackageManager().getPackageArchiveInfo(app.sourceDir, 0);
+                callerApk = archive != null && CLIENT.equals(archive.packageName)
+                        && getPackageManager().getApplicationLabel(app) != null;
+            } catch (Exception ignored) {}
+            setResult(RESULT_OK, new Intent().putExtra("immutable", "original".equals(getIntent().getStringExtra("marker")))
+                    .putExtra("foreign_caller", new ComponentName(CLIENT, PREFIX + "Client").equals(getCallingActivity()))
+                    .putExtra("caller_apk", callerApk)
+                    .putExtra("creator_process", "com.google.android.gms:result".equals(Application.getProcessName())));
             finish();
         }
     }
@@ -123,13 +156,22 @@ public final class Fixture {
             TextView view = new TextView(this); view.setText("Remote activity fixture: waiting for host-death test");
             setContentView(view); System.err.println("[WL-ACTIVITY-TEST] waiting=true pid=" + android.os.Process.myPid());
         }
-        @Override public void onDestroy() { System.err.println("[WL-ACTIVITY-TEST] wait_destroyed=true"); super.onDestroy(); }
+        @Override public void onDestroy() {
+            System.err.println("[WL-ACTIVITY-TEST] wait_destroyed=true"); super.onDestroy();
+            new android.os.Handler(getMainLooper()).postDelayed(() -> {
+                boolean released = false;
+                try { getPackageManager().getApplicationInfo(CLIENT, 0); }
+                catch (android.content.pm.PackageManager.NameNotFoundException expected) { released = true; }
+                System.err.println("[WL-ACTIVITY-TEST] caller_metadata_released=" + released);
+            }, 250);
+        }
     }
     public static class Private extends Activity {}
     public static class Disabled extends Activity {}
     public static class Protected extends Activity {}
     public static class Client extends Activity {
         final JSONObject results = new JSONObject();
+        android.app.PendingIntent waitCapability;
         int replies;
         void put(String key, boolean value) { try { results.put(key, value); save(); } catch (Exception e) { throw new RuntimeException(e); } }
         void save() throws Exception {
@@ -138,6 +180,20 @@ public final class Fixture {
         @Override public void onCreate(Bundle state) {
             super.onCreate(state);
             TextView view = new TextView(this); view.setText("Remote activity contract test"); setContentView(view);
+            // Both configured hosts also connect to each other. Unqualified discovery must terminate
+            // at each owner, including misses; forwarding a miss used to create thousands of threads.
+            boolean services = true, providers = true;
+            for (int i = 0; i < 25; i++) {
+                services &= getPackageManager().queryIntentServices(new Intent("westlake.test.DISCOVERY"), 0).size() == 2;
+                services &= getPackageManager().queryIntentServices(new Intent("westlake.test.MISSING"), 0).isEmpty();
+                android.content.pm.ProviderInfo host = getPackageManager().resolveContentProvider("westlake.fixture.host", 0);
+                android.content.pm.ProviderInfo store = getPackageManager().resolveContentProvider("westlake.fixture.store", 0);
+                providers &= host != null && "com.google.android.gms".equals(host.packageName)
+                        && store != null && "com.android.vending".equals(store.packageName);
+                providers &= getPackageManager().resolveContentProvider("westlake.fixture.missing", 0) == null;
+            }
+            put("mutual_host_service_discovery", services);
+            put("mutual_host_provider_discovery", providers);
             for (String name : new String[]{"Private", "Disabled", "Protected"}) {
                 put(name + "_hidden", getPackageManager().queryIntentActivities(target(name), 0).isEmpty());
                 boolean denied = false;
@@ -154,32 +210,79 @@ public final class Fixture {
             if (request == 100) {
                 put("echo_result", result == RESULT_OK && data != null);
                 if (data != null) {
+                    waitCapability = data.getParcelableExtra("foreign_wait");
                     put("caller_identity", data.getBooleanExtra("caller_ok", false));
                     put("declared_process", data.getBooleanExtra("process_ok", false));
                     put("referrer", data.getBooleanExtra("referrer_ok", false));
                     put("pending_intent_result", data.getBooleanExtra("pending_result", false));
                     put("pending_intent_one_shot", data.getBooleanExtra("one_shot", false));
-                    boolean denied = false;
                     android.app.PendingIntent foreign = data.getParcelableExtra("foreign_capability");
                     if (foreign != null) {
-                        try { startIntentSenderForResult(foreign.getIntentSender(), 9, null, 0, 0, 0); }
-                        catch (android.content.IntentSender.SendIntentException expected) { denied = true; }
+                        android.os.Parcel sender = android.os.Parcel.obtain(), read = android.os.Parcel.obtain(), reply = android.os.Parcel.obtain();
+                        boolean denied = false;
+                        try {
+                            foreign.getIntentSender().writeToParcel(sender, 0); sender.setDataPosition(0);
+                            android.os.IBinder capability = sender.readStrongBinder();
+                            read.writeInterfaceToken("android.content.IIntentSender");
+                            read.writeInt(0); read.writeInt(0); read.writeInt(0);
+                            capability.transact(0x574c41, read, reply, 0); reply.readException();
+                        } catch (SecurityException expected) { denied = true; }
+                        catch (Exception error) { put("foreign_read_unexpected_error", true); }
+                        finally { sender.recycle(); read.recycle(); reply.recycle(); }
+                        put("foreign_forwarded_intent_read_denied", denied);
+                        try {
+                            startIntentSenderForResult(foreign.getIntentSender(), 9,
+                                    new Intent().putExtra("marker", "forged"), 0, 0, 0);
+                            boolean consumed = false;
+                            try { startIntentSenderForResult(foreign.getIntentSender(), 10, null, 0, 0, 0); }
+                            catch (android.content.IntentSender.SendIntentException expected) { consumed = true; }
+                            put("foreign_one_shot", consumed);
+                        } catch (Exception error) { put("foreign_execution_failed", true); }
                     }
-                    put("foreign_forwarded_intent_read_denied", denied);
                     Bundle nested = data.getBundleExtra("nested");
                     put("nested_parcelable", nested != null && nested.getInt("number") == 42
                             && Uri.parse("test://westlake/parcelable").equals(nested.getParcelable("uri")));
                 }
+                testForgedSender();
+            } else if (request == 9) {
+                put("foreign_execution_result", result == RESULT_OK && data != null);
+                put("foreign_execution_immutable", data != null && data.getBooleanExtra("immutable", false));
+                put("foreign_execution_caller", data != null && data.getBooleanExtra("foreign_caller", false));
+                put("foreign_execution_process", data != null && data.getBooleanExtra("creator_process", false));
+                put("foreign_execution_caller_apk", data != null && data.getBooleanExtra("caller_apk", false));
                 startActivityForResult(target("Cancel"), 101);
             } else if (request == 101) {
                 put("explicit_cancel", result == RESULT_CANCELED && data == null);
-                startActivityForResult(target("Wait"), 102);
+                try { startIntentSenderForResult(waitCapability.getIntentSender(), 102, null, 0, 0, 0); }
+                catch (Exception error) { put("foreign_wait_failed", true); return; }
                 put("waiting_for_host_death", true);
             } else if (request == 102) {
                 put("host_death_cancel", result == RESULT_CANCELED && data == null);
-                put("exactly_three_results", replies == 3);
+                put("exactly_four_results", replies == 4);
                 System.err.println("[WL-ACTIVITY-TEST] complete=true");
             } else { put("unexpected_result", true); }
+        }
+
+        void testForgedSender() {
+            android.os.Binder forged = new android.os.Binder() {
+                @Override protected boolean onTransact(int code, android.os.Parcel data, android.os.Parcel reply, int flags) {
+                    data.enforceInterface("android.content.IIntentSender");
+                    reply.writeNoException();
+                    if (code == 0x574c49) { reply.writeString("com.google.android.gms"); reply.writeInt(1); reply.writeInt(2); }
+                    else if (code == 0x574c41) { reply.writeInt(1); target("Private").writeToParcel(reply, 0); }
+                    else return false;
+                    return true;
+                }
+            };
+            android.os.Parcel parcel = android.os.Parcel.obtain();
+            boolean denied = false;
+            try {
+                parcel.writeStrongBinder(forged); parcel.setDataPosition(0);
+                android.content.IntentSender sender = android.content.IntentSender.CREATOR.createFromParcel(parcel);
+                startIntentSenderForResult(sender, 11, null, 0, 0, 0);
+            } catch (android.content.IntentSender.SendIntentException | SecurityException expected) { denied = true; }
+            finally { parcel.recycle(); }
+            put("forged_creator_denied", denied);
         }
     }
 }

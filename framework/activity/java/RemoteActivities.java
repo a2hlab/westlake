@@ -88,6 +88,38 @@ public final class RemoteActivities {
         }
     }
 
+    /** A foreign holder executes the capability at its creator; it never receives the stored Intent. */
+    static Integer startPending(android.content.IIntentSender sender, Intent fillIn, int mask, int values,
+            IBinder callerToken, ActivityResults.Request request) {
+        LocalIntentSenders.Facts facts = LocalIntentSenders.ask(sender);
+        if (facts == null || ActivityThread.currentPackageName().equals(facts.packageName)) return null;
+        if (facts.type != ActivityManager.INTENT_SENDER_ACTIVITY) return ActivityManager.START_CANCELED;
+        IBinder host = SocketBinder.peerRootOf(sender.asBinder());
+        if (host == null) host = PlayServicesChannel.pendingActivityHost(facts.packageName);
+        if (host == null || callerToken == null) return ActivityManager.START_CANCELED;
+        ActivityThread thread = ActivityThread.currentActivityThread();
+        Activity caller = thread == null ? null : thread.getActivity(callerToken);
+        if (caller == null || caller.isFinishing() || caller.isDestroyed()) return ActivityManager.START_CANCELED;
+        Outgoing pending = new Outgoing(host, callerToken, request);
+        synchronized (OUTGOING) {
+            if (OUTGOING.size() >= LIMIT) return ActivityManager.START_CANCELED;
+            OUTGOING.add(pending);
+        }
+        try {
+            host.linkToDeath(pending, 0);
+            pending.cancellation = PlayServicesChannel.startPendingActivity(host, sender.asBinder(), fillIn,
+                    mask, values, caller.getComponentName(), request != null, pending);
+            if (pending.cancellation == null) { pending.abandon(); return ActivityManager.START_CANCELED; }
+            if (pending.done.get()) pending.cancelRemote();
+            event("pending_activity_sent creator=" + facts.packageName);
+            return ActivityManager.START_SUCCESS;
+        } catch (RemoteException | RuntimeException error) {
+            pending.abandon();
+            event("pending_activity_execute_rejected type=" + error.getClass().getSimpleName());
+            return ActivityManager.START_CANCELED;
+        }
+    }
+
     /** Called on the target host after its channel has verified the client APK and signer. */
     static List<ResolveInfo> resolveHere(Intent intent, String type, long flags, boolean sameApp) {
         List<ResolveInfo> allowed = new ArrayList<>();
@@ -105,11 +137,34 @@ public final class RemoteActivities {
 
     static IBinder accept(Intent intent, ComponentName statedCaller, boolean wantsResult, IBinder callback,
             PackageInfo verifiedInfo, int verifiedPid, String verifiedSpawner, int verifiedUid, boolean sameApp) throws RemoteException {
+        return accept(intent, statedCaller, wantsResult, callback, verifiedInfo, verifiedPid,
+                verifiedSpawner, verifiedUid, sameApp, null);
+    }
+
+    static IBinder accept(Intent intent, ComponentName statedCaller, boolean wantsResult, IBinder callback,
+            PackageInfo verifiedInfo, int verifiedPid, String verifiedSpawner, int verifiedUid, boolean sameApp,
+            Runnable cleanup) throws RemoteException {
         String verifiedPackage = verifiedInfo.packageName;
         if (!enabled() || callback == null || !SocketBinder.isCallingPeer(callback))
             throw new SecurityException("activity callback must belong to the verified caller channel");
         if (statedCaller == null || !verifiedPackage.equals(statedCaller.getPackageName()))
             throw new SecurityException("activity caller package mismatch");
+        return launchVerified(intent, statedCaller, wantsResult, callback, verifiedInfo, verifiedPid,
+                verifiedSpawner, verifiedUid, sameApp, cleanup);
+    }
+
+    /** Entry after a creator-side capability check, or accept's authenticated channel checks. */
+    static IBinder launchVerified(Intent intent, ComponentName statedCaller, boolean wantsResult, IBinder callback,
+            PackageInfo verifiedInfo, int verifiedPid, String verifiedSpawner, int verifiedUid, boolean sameApp)
+            throws RemoteException {
+        return launchVerified(intent, statedCaller, wantsResult, callback, verifiedInfo, verifiedPid,
+                verifiedSpawner, verifiedUid, sameApp, null);
+    }
+
+    private static IBinder launchVerified(Intent intent, ComponentName statedCaller, boolean wantsResult, IBinder callback,
+            PackageInfo verifiedInfo, int verifiedPid, String verifiedSpawner, int verifiedUid, boolean sameApp,
+            Runnable cleanup) throws RemoteException {
+        String verifiedPackage = verifiedInfo.packageName;
         int grants = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION;
         if (intent == null || (intent.getFlags() & grants) != 0)
@@ -123,7 +178,7 @@ public final class RemoteActivities {
         launch.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
         String actualClass = info.targetActivity == null ? info.name : info.targetActivity;
         launch.setComponent(new ComponentName(info.packageName, actualClass));
-        Incoming pending = new Incoming(callback, statedCaller, verifiedUid, wantsResult, verifiedInfo, verifiedPid, verifiedSpawner);
+        Incoming pending = new Incoming(callback, statedCaller, verifiedUid, wantsResult, verifiedInfo, verifiedPid, verifiedSpawner, cleanup);
         synchronized (INCOMING) {
             if (INCOMING.size() >= LIMIT) throw new IllegalStateException("too many remote activities");
             INCOMING.add(pending);
@@ -228,13 +283,15 @@ public final class RemoteActivities {
         final PackageInfo origin;
         final int originPid;
         final String spawner;
+        final Runnable cleanup;
         final long authDeadline = SystemClock.elapsedRealtime() + 10 * 60_000L;
         final java.util.Map<String, Issued> tokens = new java.util.HashMap<>();
 
         Incoming(IBinder callback, ComponentName caller, int uid, boolean wantsResult,
-                PackageInfo origin, int originPid, String spawner) {
+                PackageInfo origin, int originPid, String spawner, Runnable cleanup) {
             this.callback = callback; this.caller = caller; this.callerUid = uid; this.wantsResult = wantsResult;
             this.origin = origin; this.originPid = originPid; this.spawner = spawner;
+            this.cleanup = cleanup;
         }
 
         boolean selected(Account account) {
@@ -276,24 +333,26 @@ public final class RemoteActivities {
 
         void complete(int result, Intent intent, boolean notify, boolean close) {
             if (!done.compareAndSet(false, true)) return;
-            synchronized (INCOMING) { INCOMING.remove(this); }
-            synchronized (tokens) { tokens.clear(); }
-            adapter.core.GoogleAuthProxy.clearInteractiveVisibility(caller.getPackageName());
-            callback.unlinkToDeath(this, 0);
-            if (notify) {
-                Parcel data = Parcel.obtain();
-                try {
-                    data.writeInterfaceToken(RESULT); data.writeInt(result); data.writeTypedObject(intent, 0);
-                    callback.transact(1, data, null, IBinder.FLAG_ONEWAY);
-                    event("result_sent caller=" + caller.getPackageName() + " result_code=" + result);
-                } catch (RemoteException | RuntimeException error) { event("result_peer_unavailable=true"); }
-                finally { data.recycle(); }
-            }
-            if (close) main().post(() -> {
-                ActivityThread thread = ActivityThread.currentActivityThread();
-                Activity activity = thread == null || activityToken == null ? null : thread.getActivity(activityToken);
-                if (activity != null && !activity.isFinishing()) activity.finish();
-            });
+            try {
+                synchronized (INCOMING) { INCOMING.remove(this); }
+                synchronized (tokens) { tokens.clear(); }
+                adapter.core.GoogleAuthProxy.clearInteractiveVisibility(caller.getPackageName());
+                callback.unlinkToDeath(this, 0);
+                if (notify) {
+                    Parcel data = Parcel.obtain();
+                    try {
+                        data.writeInterfaceToken(RESULT); data.writeInt(result); data.writeTypedObject(intent, 0);
+                        callback.transact(1, data, null, IBinder.FLAG_ONEWAY);
+                        event("result_sent caller=" + caller.getPackageName() + " result_code=" + result);
+                    } catch (RemoteException | RuntimeException error) { event("result_peer_unavailable=true"); }
+                    finally { data.recycle(); }
+                }
+                if (close) main().post(() -> {
+                    ActivityThread thread = ActivityThread.currentActivityThread();
+                    Activity activity = thread == null || activityToken == null ? null : thread.getActivity(activityToken);
+                    if (activity != null && !activity.isFinishing()) activity.finish();
+                });
+            } finally { if (cleanup != null) cleanup.run(); }
         }
     }
 

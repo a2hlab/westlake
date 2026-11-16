@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build two source-only activity contract fixtures; never connect them to a real GMS endpoint."""
+"""Build source-only activity/discovery fixtures; never connect them to real Google endpoints."""
 import argparse
 import hashlib
 import json
@@ -27,7 +27,7 @@ def build(args):
     run(sys.executable, ROOT / 'tools/strip_method_parameters.py', classes)
     run(bt / 'd8', '--min-api', '28', '--lib', api, '--output', out, *sorted(classes.rglob('*.class')))
     hashes = {}
-    for role in ['host', 'client']:
+    for role in ['host', 'store', 'client']:
         unsigned = out / (role + '-unsigned.apk')
         run(bt / 'aapt2', 'link', '-I', api, '--manifest', source / (role + '.xml'), '-o', unsigned)
         with zipfile.ZipFile(unsigned, 'a') as archive:

@@ -371,6 +371,18 @@ public final class LocalIntentSenders {
         } finally { data.recycle(); reply.recycle(); }
     }
 
+    /** Only the creator's namespace may prepare a capability for execution. Never return it to its holder. */
+    static Intent prepareForExecution(IIntentSender sender, Intent fillIn, int mask, int values) {
+        if (sender == null) throw new SecurityException("missing activity capability");
+        synchronized (LocalIntentSenders.class) {
+            Record local = find(sender);
+            if (local != null) return prepareActivity(local, fillIn, mask, values);
+        }
+        if (!adapter.core.SocketBinder.isSameAppObject(sender.asBinder()))
+            throw new SecurityException("activity capability is not owned by a verified creator process");
+        return prepareActivity(sender, fillIn, mask, values);
+    }
+
     private static synchronized Intent prepareActivity(Record record, Intent fillIn, int mask, int values) {
         if (record.cancelled || record.key.type != ActivityManager.INTENT_SENDER_ACTIVITY
                 || record.intents == null || record.intents.length != 1 || record.last() == null

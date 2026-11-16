@@ -108,6 +108,8 @@ public final class PlayServicesChannel {
     private static final int START_ACTIVITY_FOR_RESULT = 22;
     private static final int DELEGATED_AUTH = 23;
     private static final int READ_DELEGATED_AUTH = 24;
+    private static final int START_PENDING_ACTIVITY = 25;
+    private static final int START_CREATOR_ACTIVITY = 26;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -470,6 +472,41 @@ public final class PlayServicesChannel {
         } finally { data.recycle(); reply.recycle(); }
     }
 
+    static IBinder pendingActivityHost(String creator) {
+        return creator != null && PLAY_PACKAGES.contains(creator) && !creator.equals(ownPackage())
+                ? root(channelFor(creator)) : null;
+    }
+
+    static IBinder ownActivityProcess(ActivityInfo info) {
+        if (!ownPackage().equals(info.packageName)) throw new SecurityException("not an own activity");
+        Channel target = ownProcess(AppProcesses.processOf(info));
+        return target == null ? null : root(target);
+    }
+
+    static IBinder startPendingActivity(IBinder host, IBinder sender, Intent fillIn, int mask, int values,
+            ComponentName caller, boolean wantsResult, IBinder callback) throws RemoteException {
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeStrongBinder(sender); data.writeTypedObject(fillIn, 0);
+            data.writeInt(mask); data.writeInt(values); data.writeTypedObject(caller, 0);
+            data.writeBoolean(wantsResult); data.writeStrongBinder(callback);
+            if (!host.transact(START_PENDING_ACTIVITY, data, reply, 0)) return null;
+            reply.readException(); return reply.readStrongBinder();
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    static IBinder startCreatorActivity(IBinder host, Intent intent, ComponentName caller, boolean wantsResult,
+            IBinder callback, PackageInfo origin, int pid, String spawner, int uid) throws RemoteException {
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeTypedObject(intent, 0); data.writeTypedObject(caller, 0);
+            data.writeBoolean(wantsResult); data.writeStrongBinder(callback);
+            data.writeTypedObject(origin, 0); data.writeInt(pid); data.writeString(spawner); data.writeInt(uid);
+            if (!host.transact(START_CREATOR_ACTIVITY, data, reply, 0)) return null;
+            reply.readException(); return reply.readStrongBinder();
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
     /**
      * The other process's files, as this one must name them. Each process sees its own runtime at
      * the same logical path, so a path in the other's ApplicationInfo would name this process's own
@@ -615,6 +652,15 @@ public final class PlayServicesChannel {
                 SocketBinder channel = new SocketBinder(fd, null, c.label);
                 IBinder root = channel.getRemoteRoot();
                 hello(c, root);
+                // Capability provenance must be established in both connection directions. A package
+                // name returned by IIntentSender is not proof of ownership. Only our own trusted
+                // spawner can vouch for another process of this installation.
+                SpawnerIdentity.Vouched own = SpawnerIdentity.ask(System.getenv("WESTLAKE_SPAWN_SOCKET"),
+                        SocketBinder.peerPid(fd));
+                if (own != null) {
+                    try { channel.setVerifiedSameApp(ownPackage().equals(own.packageName) && own.apks.length > 0); }
+                    finally { own.close(); }
+                }
                 c.binder = channel;
                 System.err.println(TAG + "connected to " + name);
                 return root;
@@ -1388,20 +1434,46 @@ public final class PlayServicesChannel {
             return null;
         }
         ClientApks kept = new ClientApks(apks, app);
+        exposeApkPaths(app, apks);
+        ClientApks previous = sClientApks.put(packageName, kept);
+        if (previous != null) {
+            previous.restorePaths();   // its ApplicationInfo may still be held somewhere here
+            closeAll(previous.files);
+        }
+        return kept;
+    }
+
+    private static void exposeApkPaths(ApplicationInfo app, android.os.ParcelFileDescriptor[] apks) {
         String base = "/proc/self/fd/" + apks[0].getFd();
         app.sourceDir = base;
         app.publicSourceDir = base;
+        int splits = apks.length - 1;
         if (splits > 0) {
             String[] dirs = new String[splits];
             for (int i = 0; i < splits; i++) dirs[i] = "/proc/self/fd/" + apks[i + 1].getFd();
             app.splitSourceDirs = dirs;
             app.splitPublicSourceDirs = dirs.clone();
         }
-        ClientApks previous = sClientApks.put(packageName, kept);
-        if (previous != null) {
-            previous.restorePaths();   // its ApplicationInfo may still be held somewhere here
-            closeAll(previous.files);
+    }
+
+    /** Own descriptors for this operation; another activity/HELLO must not replace or close them. */
+    private static ClientApks exposeForwardedOrigin(PackageInfo origin, SpawnerIdentity.Vouched proof) {
+        android.os.ParcelFileDescriptor[] files = new android.os.ParcelFileDescriptor[proof.apks.length];
+        try {
+            for (int i = 0; i < files.length; i++) files[i] = android.os.ParcelFileDescriptor.dup(proof.apks[i]);
+        } catch (IOException error) {
+            proof.close(); closeAll(files);
+            throw new SecurityException("original caller APKs unavailable");
         }
+        if (!certificatesVerdict(origin.signatures, origin.signingInfo, proof).startsWith("match")) {
+            closeAll(files); throw new SecurityException("original caller signer mismatch");
+        }
+        int splits = origin.applicationInfo.splitSourceDirs == null ? 0 : origin.applicationInfo.splitSourceDirs.length;
+        if (files.length != 1 + splits) {
+            closeAll(files); throw new SecurityException("original caller APK set mismatch");
+        }
+        ClientApks kept = new ClientApks(files, origin.applicationInfo);
+        exposeApkPaths(origin.applicationInfo, files);
         return kept;
     }
 
@@ -1685,6 +1757,48 @@ public final class PlayServicesChannel {
             int user = UserHandle.myUserId();
             reply.writeNoException();
             switch (code) {
+                case START_PENDING_ACTIVITY: {
+                    if (!mIdentityEnforced || mVerifiedInfo == null) throw new SecurityException("activity identity not verified");
+                    IBinder sender = data.readStrongBinder(); Intent fillIn = data.readTypedObject(Intent.CREATOR);
+                    int mask = data.readInt(), values = data.readInt();
+                    ComponentName caller = data.readTypedObject(ComponentName.CREATOR);
+                    boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
+                    reply.writeStrongBinder(PendingActivityLaunch.accept(sender, fillIn, mask, values,
+                            caller, wantsResult, callback, mVerifiedInfo, mPeerPid, mVerifiedSpawner, Binder.getCallingUid()));
+                    return true;
+                }
+                case START_CREATOR_ACTIVITY: {
+                    if (!mIdentityEnforced || !mOwnApplication) throw new SecurityException("creator process not verified");
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    ComponentName caller = data.readTypedObject(ComponentName.CREATOR);
+                    boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
+                    PackageInfo origin = data.readTypedObject(PackageInfo.CREATOR);
+                    int pid = data.readInt(); String spawner = data.readString(); int uid = data.readInt();
+                    if (origin == null || origin.applicationInfo == null
+                            || origin.signatures == null || origin.signingInfo == null)
+                        throw new SecurityException("missing original caller");
+                    SpawnerIdentity.Vouched proof = SpawnerIdentity.ask(spawner, pid);
+                    if (proof == null) throw new SecurityException("original caller is not live");
+                    if (!origin.packageName.equals(proof.packageName) || proof.apks.length == 0) {
+                        proof.close(); throw new SecurityException("original caller launch mismatch");
+                    }
+                    // HELLO's /proc/self/fd paths belong to the intermediate process. Duplicate the
+                    // spawner's verified APKs here so this destination can load the caller's label/icon.
+                    ClientApks apks = exposeForwardedOrigin(origin, proof);
+                    java.util.concurrent.atomic.AtomicBoolean released = new java.util.concurrent.atomic.AtomicBoolean();
+                    Runnable cleanup = () -> {
+                        if (!released.compareAndSet(false, true)) return;
+                        RemotePackages.unregisterTemporaryClient(origin);
+                        apks.restorePaths(); closeAll(apks.files);
+                    };
+                    try {
+                        if (RemotePackages.registerTemporaryClient(origin, Process.myUid()) != uid)
+                            throw new SecurityException("original caller uid mismatch");
+                        reply.writeStrongBinder(RemoteActivities.accept(intent, caller, wantsResult, callback,
+                                origin, pid, spawner, uid, true, cleanup));
+                    } catch (RemoteException | RuntimeException error) { cleanup.run(); throw error; }
+                    return true;
+                }
                 case READ_DELEGATED_AUTH: {
                     if (!mIdentityEnforced || !mOwnApplication || !adapter.core.GoogleAuthDelegation.enabled()
                             || !"com.google.android.gms".equals(application().getPackageName()))
@@ -1770,12 +1884,16 @@ public final class PlayServicesChannel {
                 }
                 case SERVICE_INFO: {
                     ComponentName component = data.readTypedObject(ComponentName.CREATOR);
-                    reply.writeTypedObject(packages.getServiceInfo(component, data.readLong(), user), 0);
+                    long infoFlags = data.readLong();
+                    reply.writeTypedObject(component != null && own(component.getPackageName())
+                            ? packages.getServiceInfo(component, infoFlags, user) : null, 0);
                     return true;
                 }
                 case PROVIDER_INFO: {
                     ComponentName component = data.readTypedObject(ComponentName.CREATOR);
-                    reply.writeTypedObject(packages.getProviderInfo(component, data.readLong(), user), 0);
+                    long infoFlags = data.readLong();
+                    reply.writeTypedObject(component != null && own(component.getPackageName())
+                            ? packages.getProviderInfo(component, infoFlags, user) : null, 0);
                     return true;
                 }
                 case RESOLVE_PROVIDER: {
@@ -1787,7 +1905,7 @@ public final class PlayServicesChannel {
                         reply.writeTypedObject(holder != null ? holder.info : null, 0);
                         return true;
                     }
-                    ProviderInfo info = packages.resolveContentProvider(authority, providerFlags, user);
+                    ProviderInfo info = localProviderInfo(authority, providerFlags);
                     reply.writeTypedObject(info != null && runsHere(info.packageName) ? info : null, 0);
                     return true;
                 }
@@ -1795,12 +1913,7 @@ public final class PlayServicesChannel {
                     Intent intent = data.readTypedObject(Intent.CREATOR);
                     String type = data.readString();
                     long packageFlags = data.readLong();
-                    List<ResolveInfo> found = new ArrayList<>();
-                    for (Object item : packages.queryIntentServices(intent, type, packageFlags, user).getList()) {
-                        ResolveInfo resolved = (ResolveInfo) item;
-                        if (resolved.serviceInfo != null && runsHere(resolved.serviceInfo)) found.add(resolved);
-                    }
-                    reply.writeTypedList(found);
+                    reply.writeTypedList(localServices(intent, type, packageFlags));
                     return true;
                 }
                 case BIND: {
@@ -2137,12 +2250,37 @@ public final class PlayServicesChannel {
                 || adapter.packagemanager.GuestPackages.runsAsCode(component));
     }
 
+    /** Discovery replies are terminal: calling the aggregate PM here recurses GMS -> Store -> GMS. */
+    private static List<ResolveInfo> localServices(Intent intent, String type, long flags) {
+        List<ResolveInfo> found = new ArrayList<>(
+                adapter.packagemanager.SourcePackageRegistry.queryServices(intent, type, flags));
+        found.addAll(adapter.packagemanager.GuestPackages.queryServices(intent, type, flags));
+        found.removeIf(info -> !runsHere(info.serviceInfo));
+        return found;
+    }
+
+    private static ProviderInfo localProviderInfo(String authority, long flags) {
+        if (authority == null || authority.isEmpty()) return null;
+        PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
+                ownPackage(), flags | PackageManager.GET_PROVIDERS);
+        if (info == null || info.providers == null) return null;
+        for (ProviderInfo provider : info.providers) {
+            if (provider.authority == null) continue;
+            for (String declared : provider.authority.split(";")) {
+                if (authority.equals(declared.trim())) return provider;
+            }
+        }
+        return null;
+    }
+
     /** Resolved to a component in this process, as the activity manager adapter requires. */
     private static Intent explicit(Intent intent) throws RemoteException {
         Intent resolved = new Intent(intent);
-        if (resolved.getComponent() != null) return resolved;
-        List<ResolveInfo> found = ActivityThread.getPackageManager()
-                .queryIntentServices(intent, null, 0, UserHandle.myUserId()).getList();
+        if (resolved.getComponent() != null) {
+            if (!runsHere(resolved.getComponent())) throw new IllegalArgumentException("service not run here");
+            return resolved;
+        }
+        List<ResolveInfo> found = localServices(intent, null, 0);
         if (found.isEmpty() || found.get(0).serviceInfo == null) {
             throw new IllegalArgumentException("no service for " + intent);
         }
@@ -2202,7 +2340,7 @@ public final class PlayServicesChannel {
             ContentProviderHolder holder = LocalGservices.holder();
             return holder != null && holder.provider != null ? holder.provider.asBinder() : null;
         }
-        ProviderInfo info = ActivityThread.getPackageManager().resolveContentProvider(authority, 0, UserHandle.myUserId());
+        ProviderInfo info = localProviderInfo(authority, 0);
         if (info == null || !runsHere(info.packageName)) return null;
         // Android's activity manager hands a provider that is not exported only to its own app. Logged, not
         // refused, until ProviderInfo.exported is known to be right here for every package (ADR-0004).

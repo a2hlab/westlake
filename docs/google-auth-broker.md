@@ -2,8 +2,9 @@
 
 - **Status:** experimental and off by default.
 - **Origin:** Codex built and board-tested it on `experiment/microg-bootstrap` (report head [027c5b9]).
-- **This change:** it came to main on 2026-11-16, without that branch's bootstrap experiment. The split
-  compiles and passes the host tests, but the board has not run it in this form yet.
+- **Current continuation:** the cleaned split at `40a365f`, without that branch's bootstrap experiment,
+  has now run on the board with the creator-owned PendingIntent and local-discovery fixes described in
+  [the continuation report](google-two-path-continuation.md).
 
 [027c5b9]: https://github.com/a2hlab/westlake/tree/027c5b923efa0306e0f3db69d7156b041f3e711c
 
@@ -72,11 +73,12 @@ microG is redeployed.
 - The delegation adapter fits the cache protocol of the tested Play services build (versionCode
   244034029). It is not a stable Play services interface.
 - A `remote_consent` answer is not turned into success, and no consent UI is relayed.
-- Isolation is not real yet. In the board runs, every process of the setup shared one uid, so the
+- Isolation is not complete. Multiple apps still share the OH host bundle's uid, so the
   namespace and the broker's checks do not stop hostile native code under that uid. Per-app uids
   (ADR-0003, ADR-0008) come first, before any security claim.
-- A PendingIntent that another package created still cannot be executed through its creator. FotMob's
-  Google sign-in stops there.
+- A single-activity PendingIntent can now execute through its verified creator and return its result
+  to the foreign caller. The fixture proves this contract; actual FotMob/authentication results are
+  recorded separately in the continuation report. General activity stacks and URI grants remain unsupported.
 
 ## Evidence
 

@@ -5,13 +5,16 @@
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Echo" android:exported="true" android:process=":ui"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$ForwardEntry" android:exported="true" android:process=":ui"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Cancel" android:exported="true" android:process=":ui"/>
-  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Wait" android:exported="true" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Wait" android:exported="true" android:process=":result"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Private" android:exported="false" android:process=":ui"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Disabled" android:exported="true" android:enabled="false" android:process=":ui"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Protected" android:exported="true" android:permission="android.permission.MANAGE_USERS" android:process=":ui"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Receipt" android:exported="false" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$ForeignReceipt" android:exported="false" android:process=":result"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$ForwardReceipt" android:exported="false" android:process=":ui"/>
   <service android:name="org.westlake.remoteactivity.fixture.Fixture$Factory" android:exported="false"/>
   <service android:name="org.westlake.remoteactivity.fixture.Fixture$Worker" android:exported="false" android:process=":worker"/>
+  <service android:name="org.westlake.remoteactivity.fixture.Fixture$DiscoveryService" android:exported="true"><intent-filter><action android:name="westlake.test.DISCOVERY"/></intent-filter></service>
+  <provider android:name="org.westlake.remoteactivity.fixture.Fixture$DiscoveryProvider" android:authorities="westlake.fixture.host" android:exported="true"/>
  </application>
 </manifest>

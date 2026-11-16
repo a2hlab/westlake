@@ -56,6 +56,7 @@ public final class RemotePackages {
     private static volatile Source sSource;
     private static PackageUidTable sTable = uidTable();
     private static final Map<String, PackageInfo> sClients = new HashMap<>();
+    private static final Map<String, List<PackageInfo>> sTemporaryClients = new HashMap<>();
     private static final Map<String, Integer> sUids = new HashMap<>();
     private static final Map<Integer, String> sPackages = new HashMap<>();
 
@@ -70,16 +71,36 @@ public final class RemotePackages {
      * for a package however often it reconnects.
      */
     public static synchronized int registerClient(PackageInfo info, int ownUid) {
-        Integer uid = sUids.get(info.packageName);
-        if (uid == null) {
-            int user = ownUid / PER_USER_RANGE;
-            uid = user * PER_USER_RANGE + appId(info.packageName);
-            sUids.put(info.packageName, uid);
-            sPackages.put(uid, info.packageName);
-        }
+        int uid = clientUid(info.packageName, ownUid);
         info.applicationInfo.uid = uid;
         sClients.put(info.packageName, info);
         return uid;
+    }
+
+    private static int clientUid(String packageName, int ownUid) {
+        Integer uid = sUids.get(packageName);
+        if (uid == null) {
+            int user = ownUid / PER_USER_RANGE;
+            uid = user * PER_USER_RANGE + appId(packageName);
+            sUids.put(packageName, uid);
+            sPackages.put(uid, packageName);
+        }
+        return uid;
+    }
+
+    /** A forwarded activity holds its own APK descriptors without replacing an existing HELLO. */
+    public static synchronized int registerTemporaryClient(PackageInfo info, int ownUid) {
+        int uid = clientUid(info.packageName, ownUid);
+        info.applicationInfo.uid = uid;
+        sTemporaryClients.computeIfAbsent(info.packageName, ignored -> new ArrayList<>()).add(info);
+        return uid;
+    }
+
+    public static synchronized void unregisterTemporaryClient(PackageInfo info) {
+        List<PackageInfo> active = sTemporaryClients.get(info.packageName);
+        if (active == null) return;
+        active.removeIf(item -> item == info);
+        if (active.isEmpty()) sTemporaryClients.remove(info.packageName);
     }
 
     /** The table every Westlake process shares; none outside a Westlake launch. */
@@ -108,7 +129,10 @@ public final class RemotePackages {
     }
 
     private static synchronized PackageInfo client(String packageName) {
-        return sClients.get(packageName);
+        PackageInfo connected = sClients.get(packageName);
+        if (connected != null) return connected;
+        List<PackageInfo> active = sTemporaryClients.get(packageName);
+        return active == null || active.isEmpty() ? null : active.get(active.size() - 1);
     }
 
     public static boolean contains(String packageName) {

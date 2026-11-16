@@ -254,6 +254,16 @@ public final class SocketBinder {
         return inbound != null && inbound.channel.mVerifiedSameApp;
     }
 
+    /** Provenance of a remote capability, not the package name it claims in a reply. */
+    public static boolean isSameAppObject(IBinder binder) {
+        return binder instanceof Proxy && ((Proxy) binder).channel.mVerifiedSameApp;
+    }
+
+    /** Return a capability through the connection which delivered it, preserving its forwarding path. */
+    public static IBinder peerRootOf(IBinder binder) {
+        return binder instanceof Proxy ? ((Proxy) binder).channel.getRemoteRoot() : null;
+    }
+
     /** The process id of a connected socket's peer, as the kernel reports it. */
     public static int peerPid(int fd) throws IOException {
         return SocketBinderNative.peerPid(fd);
