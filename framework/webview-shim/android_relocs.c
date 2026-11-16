@@ -14,10 +14,12 @@
  * itself.
  */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <elf.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -764,4 +766,219 @@ __attribute__((visibility("hidden"))) void wl_copy_needed_siblings(const char *p
     }
 done:
     munmap(data, (size_t) st.st_size);
+}
+
+/*
+ * Android maps an app's native library straight out of its APK when the APK stores it uncompressed and
+ * page-aligned (extractNativeLibs="false", the default for app bundles): the class loader's library
+ * path lists "<apk>!/lib/<abi>", and the linker maps the member at its offset in the APK, so
+ * /proc/self/maps, /proc/self/map_files and dl_iterate_phdr name the APK, not a .so file. Westlake's
+ * launcher always extracts lib/<abi>, and every app loaded the extracted copy.
+ *
+ * With WESTLAKE_APK_MAPPED_LIBS=1, a library loaded from the staged directory is opened as its APK
+ * member instead (OH's loader maps a stored member itself, as bionic does) when:
+ * - the member is stored and its data starts on a page boundary, which Android requires to map it;
+ * - the staged copy is that member byte for byte (same size and CRC-32), so the launcher fixed nothing
+ *   in it (Android's RELR tags, init arrays hidden from OH's loader);
+ * - the shim has nothing to fix at load time (IFUNC relocations, inconsistent section headers);
+ * - no other packaged library names it in DT_NEEDED: OH's loader matches DT_NEEDED against short
+ *   names, which a load by path does not record, so a dependent would map a second copy.
+ * Anything else keeps the extracted copy.
+ */
+static uint32_t wl_crc32_table[256];
+static pthread_once_t wl_crc32_once = PTHREAD_ONCE_INIT;
+
+static void wl_crc32_init(void)
+{
+    for (uint32_t i = 0; i < 256; ++i) {
+        uint32_t c = i;
+        for (int k = 0; k < 8; ++k) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        wl_crc32_table[i] = c;
+    }
+}
+
+/* The CRC-32 of the file at path (zip's), and its size; 0 on success. */
+static int wl_file_crc32(const char *path, uint32_t *crc, uint64_t *size)
+{
+    pthread_once(&wl_crc32_once, wl_crc32_init);
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    static const size_t chunk = 1 << 20;
+    unsigned char *buffer = malloc(chunk);
+    uint32_t c = 0xFFFFFFFFu;
+    uint64_t total = 0;
+    ssize_t n = 0;
+    while (buffer != NULL && (n = read(fd, buffer, chunk)) > 0) {
+        for (ssize_t i = 0; i < n; ++i) c = wl_crc32_table[(c ^ buffer[i]) & 0xFF] ^ (c >> 8);
+        total += (uint64_t) n;
+    }
+    free(buffer);
+    close(fd);
+    if (buffer == NULL || n < 0) return -1;
+    *crc = c ^ 0xFFFFFFFFu;
+    *size = total;
+    return 0;
+}
+
+static uint16_t wl_le16(const unsigned char *p) { return (uint16_t) (p[0] | (p[1] << 8)); }
+static uint32_t wl_le32(const unsigned char *p)
+{
+    return (uint32_t) p[0] | ((uint32_t) p[1] << 8) | ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
+}
+
+struct wl_zip_member {
+    uint16_t method;
+    uint32_t crc;
+    uint32_t compressed;
+    uint32_t size;
+    uint64_t data;   /* offset of the member's bytes in the APK */
+};
+
+/* Finds entry in the zip at apk (no zip64); 0 on success. */
+static int wl_zip_find(const char *apk, const char *entry, struct wl_zip_member *out)
+{
+    int rc = -1;
+    int fd = open(apk, O_RDONLY | O_CLOEXEC);
+    struct stat st;
+    unsigned char *tail = NULL, *directory = NULL;
+    if (fd < 0) return -1;
+    if (fstat(fd, &st) != 0 || st.st_size < 22) goto out;
+    size_t tail_size = st.st_size < 65557 ? (size_t) st.st_size : 65557;
+    tail = malloc(tail_size);
+    if (tail == NULL || pread(fd, tail, tail_size, st.st_size - (off_t) tail_size) != (ssize_t) tail_size) goto out;
+    const unsigned char *end = NULL;
+    for (size_t i = tail_size - 22 + 1; i-- > 0;) {
+        if (wl_le32(tail + i) == 0x06054b50u) { end = tail + i; break; }
+    }
+    if (end == NULL) goto out;
+    uint32_t directory_size = wl_le32(end + 12), directory_offset = wl_le32(end + 16);
+    if (directory_offset == 0xFFFFFFFFu || (uint64_t) directory_offset + directory_size > (uint64_t) st.st_size) goto out;
+    directory = malloc(directory_size > 0 ? directory_size : 1);
+    if (directory == NULL ||
+        pread(fd, directory, directory_size, directory_offset) != (ssize_t) directory_size) goto out;
+    size_t entry_length = strlen(entry);
+    for (size_t at = 0; at + 46 <= directory_size;) {
+        const unsigned char *h = directory + at;
+        if (wl_le32(h) != 0x02014b50u) break;
+        uint16_t name_length = wl_le16(h + 28), extra_length = wl_le16(h + 30), comment_length = wl_le16(h + 32);
+        if (at + 46 + name_length > directory_size) break;
+        if (name_length == entry_length && memcmp(h + 46, entry, entry_length) == 0) {
+            unsigned char local[30];
+            uint32_t header = wl_le32(h + 42);
+            if (header == 0xFFFFFFFFu || pread(fd, local, sizeof(local), header) != (ssize_t) sizeof(local) ||
+                wl_le32(local) != 0x04034b50u) goto out;
+            out->method = wl_le16(h + 10);
+            out->crc = wl_le32(h + 16);
+            out->compressed = wl_le32(h + 20);
+            out->size = wl_le32(h + 24);
+            out->data = (uint64_t) header + 30 + wl_le16(local + 26) + wl_le16(local + 28);
+            rc = 0;
+            goto out;
+        }
+        at += 46 + (size_t) name_length + extra_length + comment_length;
+    }
+out:
+    free(directory);
+    free(tail);
+    close(fd);
+    return rc;
+}
+
+/* Names some library in the staged directory lists in DT_NEEDED, read once. */
+static char **wl_needed_names;
+static size_t wl_needed_count;
+static pthread_once_t wl_needed_once = PTHREAD_ONCE_INIT;
+
+static void wl_add_needed_name(const char *name, void *ctx)
+{
+    (void) ctx;
+    for (size_t i = 0; i < wl_needed_count; ++i) {
+        if (strcmp(wl_needed_names[i], name) == 0) return;
+    }
+    char **grown = realloc(wl_needed_names, (wl_needed_count + 1) * sizeof(char *));
+    if (grown == NULL) return;
+    wl_needed_names = grown;
+    if ((wl_needed_names[wl_needed_count] = strdup(name)) != NULL) wl_needed_count++;
+}
+
+static void wl_read_needed_names(void)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    DIR *d = dir != NULL ? opendir(dir) : NULL;
+    struct dirent *e;
+    while (d != NULL && (e = readdir(d)) != NULL) {
+        size_t n = strlen(e->d_name);
+        if (n < 4 || strcmp(e->d_name + n - 3, ".so") != 0) continue;
+        char path[1024];
+        if (snprintf(path, sizeof(path), "%s/%s", dir, e->d_name) >= (int) sizeof(path)) continue;
+        wl_for_each_needed(path, wl_add_needed_name, NULL);
+    }
+    if (d != NULL) closedir(d);
+}
+
+__attribute__((visibility("hidden"))) int wl_apk_member_for(const char *staged, char *member, size_t size)
+{
+    const char *flag = getenv("WESTLAKE_APK_MAPPED_LIBS");
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    if (flag == NULL || strcmp(flag, "1") != 0 || dir == NULL || staged == NULL) return 0;
+    size_t dir_length = strlen(dir);
+    if (dir_length == 0 || strncmp(staged, dir, dir_length) != 0 || staged[dir_length] != '/') return 0;
+    const char *name = staged + dir_length + 1;
+    size_t name_length = strlen(name);
+    if (name_length < 4 || strchr(name, '/') != NULL || strcmp(name + name_length - 3, ".so") != 0) return 0;
+    pthread_once(&wl_needed_once, wl_read_needed_names);
+    for (size_t i = 0; i < wl_needed_count; ++i) {
+        if (strcmp(wl_needed_names[i], name) == 0) {
+            wl_relocs_log("[WESTLAKE-LOADER] %s: kept the extracted copy: another packaged library needs it\n", staged);
+            return 0;
+        }
+    }
+    if (wl_needs_android_relocs(staged) || wl_needs_ifunc_resolution(staged) || wl_needs_section_repair(staged)) {
+        wl_relocs_log("[WESTLAKE-LOADER] %s: kept the extracted copy: it needs a loadable copy\n", staged);
+        return 0;
+    }
+    char entry[512];
+    if (snprintf(entry, sizeof(entry), "lib/arm64-v8a/%s", name) >= (int) sizeof(entry)) return 0;
+    uint32_t crc = 0;
+    uint64_t file_size = 0;
+    int have_crc = 0;
+    long page = sysconf(_SC_PAGESIZE);
+    const char *base = getenv("ASX_APK_PATH");
+    const char *splits = getenv("ASX_SPLIT_APK_PATHS");
+    /* The APKs the launcher staged: the base, then each split. */
+    size_t list_length = (base != NULL ? strlen(base) : 0) + 1 + (splits != NULL ? strlen(splits) : 0) + 1;
+    char *list = malloc(list_length);
+    if (list == NULL) return 0;
+    snprintf(list, list_length, "%s:%s", base != NULL ? base : "", splits != NULL ? splits : "");
+    int found = 0, explained = 0;
+    for (char *apk = list, *next; apk != NULL && !found; apk = next) {
+        next = strchr(apk, ':');
+        if (next != NULL) *next++ = '\0';
+        struct wl_zip_member m;
+        if (apk[0] == '\0' || wl_zip_find(apk, entry, &m) != 0) continue;
+        const char *why = NULL;
+        if (m.method != 0 || m.compressed != m.size) {
+            why = "the APK compresses it";
+        } else if (page <= 0 || m.data % (uint64_t) page != 0) {
+            why = "its data is not page-aligned in the APK";
+        } else {
+            if (have_crc == 0) have_crc = wl_file_crc32(staged, &crc, &file_size) == 0 ? 1 : -1;
+            if (have_crc < 0) {
+                why = "the extracted copy cannot be read";
+            } else if (file_size != m.size || crc != m.crc) {
+                why = "the extracted copy differs from the APK's";
+            }
+        }
+        if (why != NULL) {
+            wl_relocs_log("[WESTLAKE-LOADER] %s: kept the extracted copy: %s (%s)\n", staged, why, apk);
+            explained = 1;
+            continue;
+        }
+        found = snprintf(member, size, "%s!/%s", apk, entry) < (int) size;
+    }
+    free(list);
+    if (!found && !explained) {
+        wl_relocs_log("[WESTLAKE-LOADER] %s: kept the extracted copy: no APK member %s\n", staged, entry);
+    }
+    return found;
 }
