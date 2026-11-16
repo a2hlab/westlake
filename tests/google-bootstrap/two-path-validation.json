@@ -1,0 +1,148 @@
+{
+  "schema": "westlake-two-path-validation-v1",
+  "status": "passed_bounded_board_validation",
+  "goal_achieved": true,
+  "live_auth_test": {
+    "token_before_and_after_invalidation": true,
+    "cache_removed": true,
+    "forced_requests": true,
+    "reusable_credential_withheld": true,
+    "ungranted_scope_denied": true,
+    "untrusted_delegation_option_denied": true,
+    "wrong_account_denied": true,
+    "ungranted_certificate_denied": true,
+    "grant_revocation_clears_cached_account": true,
+    "restored_grant_recovers_same_client": true,
+    "provider_denial_events_correlated_with_negative_probe": true
+  },
+  "official_api_test": {
+    "passed": true,
+    "api": "AdvertisingIdService",
+    "gms_version": 244034029,
+    "id_has_uuid_format": true,
+    "zero_id": false,
+    "limit_ad_tracking": false,
+    "source": "two-path-results/fourth-v2-live.json"
+  },
+  "rotation_fix": {
+    "status": "board_confirmed_official_account_list_access",
+    "legacy_gms_certificate_sha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83",
+    "current_gms_certificate_sha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053"
+  },
+  "source_hashes_first_build": {
+    "framework/activity/java/PlayServicesChannel.java": "1c48c6dd8c6a6b07eeb49ed24918b6d039769bb8fb46f8a9c015b6c8a04b1752",
+    "framework/core/java/GoogleAuthPolicy.java": "f49392b74bf2be9d035492d6342038e857a2f5da28b3944af4c1bd9c1a1e3b65",
+    "framework/core/java/GoogleAuthProxy.java": "e7c39119825526235e3b27af7c552d3c29839a06e8eebd8e4b963ef6efb74889",
+    "framework/core/java/GoogleBootstrapExperiment.java": "cf0ee75566c0f0a4ea9fc32ebea687392ecedecbdf384291cf8d1927572d8c01",
+    "framework/core/java/LocalAccounts.java": "1b9b6b474f5c65041de1943d2ef956592af79ce97b7b3e0a6ce8f9fce4096813",
+    "framework/core/java/LocalServiceBinders.java": "25e573dda98901702f083aa9ca6c1c58ca21b0b64603734afeb661f208d51945"
+  },
+  "probe_apk_sha256": "ff1f297b0500b45d83b8e52fe7c3c229977fbf0c07d6aab630418aabaa1a6400",
+  "remaining": [],
+  "production_isolation_proven": false,
+  "google_registration_workaround_proven": false,
+  "source_hashes_second_build": {
+    "framework/activity/java/PlayServicesChannel.java": "b0a2563071135f085af0f7d07ffa586090a12262b766c75a61f2bda809cea684",
+    "framework/core/java/GoogleAuthPolicy.java": "f49392b74bf2be9d035492d6342038e857a2f5da28b3944af4c1bd9c1a1e3b65",
+    "framework/core/java/GoogleAuthProxy.java": "a51a408116f3b76b4bf69b1969046c89bab30e27d7faebdc9aa4cdae6fc999d3",
+    "framework/core/java/GoogleBootstrapExperiment.java": "cf0ee75566c0f0a4ea9fc32ebea687392ecedecbdf384291cf8d1927572d8c01",
+    "framework/core/java/LocalAccounts.java": "1b9b6b474f5c65041de1943d2ef956592af79ce97b7b3e0a6ce8f9fce4096813",
+    "framework/core/java/LocalServiceBinders.java": "25e573dda98901702f083aa9ca6c1c58ca21b0b64603734afeb661f208d51945"
+  },
+  "source_hashes_third_build": {
+    "framework/activity/java/PlayServicesChannel.java": "b0a2563071135f085af0f7d07ffa586090a12262b766c75a61f2bda809cea684",
+    "framework/core/java/GoogleAuthPolicy.java": "f49392b74bf2be9d035492d6342038e857a2f5da28b3944af4c1bd9c1a1e3b65",
+    "framework/core/java/GoogleAuthProxy.java": "7f90809f9d21f5a540b3b57bc74081f4d33b6c3ae51561951c76b8cc4570c01d",
+    "framework/core/java/GoogleBootstrapExperiment.java": "cf0ee75566c0f0a4ea9fc32ebea687392ecedecbdf384291cf8d1927572d8c01",
+    "framework/core/java/LocalAccounts.java": "1b9b6b474f5c65041de1943d2ef956592af79ce97b7b3e0a6ce8f9fce4096813",
+    "framework/core/java/LocalServiceBinders.java": "25e573dda98901702f083aa9ca6c1c58ca21b0b64603734afeb661f208d51945"
+  },
+  "official_diagnostic_token_consumer": {
+    "token_received": true,
+    "invalidation_and_second_request_succeeded": true,
+    "reusable_credential_transferred": false
+  },
+  "lifecycle_third_build": {
+    "official_offline_auth_still_works": true,
+    "official_restart_both_paths_work": true,
+    "auth_offline_official_api_survives": false,
+    "cause": "synchronous account-list failure killed GMS",
+    "fix_status": "build 04 validated: tokens fail while provider offline, known account metadata remains and official Advertising ID survives"
+  },
+  "validation_date_utc": "2026-11-16",
+  "scope": "Concurrent token-only microG auth, official Advertising ID, official Play Store catalogue/download/install; authorization and independent host lifecycle checks.",
+  "source_hashes_fourth_build": {
+    "framework/activity/java/PlayServicesChannel.java": "b0a2563071135f085af0f7d07ffa586090a12262b766c75a61f2bda809cea684",
+    "framework/core/java/GoogleAuthPolicy.java": "f49392b74bf2be9d035492d6342038e857a2f5da28b3944af4c1bd9c1a1e3b65",
+    "framework/core/java/GoogleAuthProxy.java": "5a8910017e08c663c8e799488e8bda7eef19115a85d6b30c7bc4e5efdd01ac18",
+    "framework/core/java/GoogleBootstrapExperiment.java": "cf0ee75566c0f0a4ea9fc32ebea687392ecedecbdf384291cf8d1927572d8c01",
+    "framework/core/java/LocalAccounts.java": "1b9b6b474f5c65041de1943d2ef956592af79ce97b7b3e0a6ce8f9fce4096813",
+    "framework/core/java/LocalServiceBinders.java": "25e573dda98901702f083aa9ca6c1c58ca21b0b64603734afeb661f208d51945"
+  },
+  "probe_v2_apk_sha256": "5ce884f84d18f8e7aec8a9839b8eba257e3ba157a31ec72813c627846f84987e",
+  "probe_v2_signer_sha256": "77e047c82dd1571e2f1b1e745cddc6e35dae8e7a3fcde358a3f79c4d185653ab",
+  "lifecycle_fourth_build": {
+    "microg_offline_auth_fails": true,
+    "microg_offline_official_api_survives": true,
+    "microg_offline_repeat_after_35_seconds_passes": true,
+    "microg_restart_both_paths_work_in_same_client": true,
+    "official_offline_auth_still_works": true,
+    "official_offline_official_api_fails": true,
+    "official_restart_both_paths_work_in_same_client": true,
+    "same_provider_data_directories_reused": true,
+    "sources": [
+      "two-path-results/fourth-auth-offline.json",
+      "two-path-results/fourth-auth-restarted.json",
+      "two-path-results/fourth-official-offline.json",
+      "two-path-results/fourth-official-restarted.json"
+    ]
+  },
+  "play_store_test": {
+    "passed": true,
+    "version_code": 85354840,
+    "apk_sha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+    "signed_in_account_via_live_microg_proxy": true,
+    "reusable_credential_imported": false,
+    "catalogue_loaded": true,
+    "search_page_loaded": true,
+    "free_app_download_and_install": "com.whatsapp v264409011",
+    "source": "two-path-results/fourth-store-install.json",
+    "private_install_mount_required_by_fixture": true,
+    "manual_gsf_registration_performed_in_experiment": false
+  },
+  "credential_and_checkin_evidence": {
+    "source": "two-path-results/fourth-credential-placement.json",
+    "microg_only_reusable_credential": true,
+    "checkin_source": "two-path-results/fourth-checkin-placement.json",
+    "distinct_checkin_ids": true,
+    "values_published": false
+  },
+  "official_uncertified_status": 1,
+  "acceptance": {
+    "1": true,
+    "2": true,
+    "3": true,
+    "4": true,
+    "5": true,
+    "6": true
+  },
+  "unvalidated_product_scope": [
+    "Production per-app UID/SELinux isolation",
+    "Google certification or registration exemption",
+    "Play Integrity",
+    "Maps and fused location",
+    "Third-party Google Sign-In and Google-specific auth Binder protocols",
+    "FCM message delivery",
+    "Billing",
+    "Multi-account and consent/reauthentication UI",
+    "Full HK corpus improvement",
+    "Installed WhatsApp launch, login, messaging or native OH package publication"
+  ],
+  "verification": {
+    "adapter_build": "120 sources, 250 classes; source hashes match deployed build 04",
+    "boot": "9 jars, 27 boot artifacts; board preload passed",
+    "policy_host_checks": 8,
+    "classifier_host_tests": 6,
+    "probe_apks_built_and_signature_verified": true
+  }
+}

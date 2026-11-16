@@ -1,8 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.westlake.googlebootstrap.probe">
     <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <queries><package android:name="com.google.android.gms" /></queries>
     <application android:label="Westlake Google experiment" android:allowBackup="false">
+        <activity android:name=".TwoPathActivity" android:exported="true" />
         <activity android:name=".ProbeActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

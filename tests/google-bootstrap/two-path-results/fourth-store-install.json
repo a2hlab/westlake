@@ -1,0 +1,22 @@
+{
+  "package": "com.whatsapp",
+  "version_code": 264409011,
+  "installer": "com.android.vending",
+  "session_id": 735381765,
+  "downloaded_by_official_store": true,
+  "published_by_westlake_installer": true,
+  "ui_shows_installed": true,
+  "app_launched_or_logged_in": false,
+  "base_and_three_splits_verified": true,
+  "apk_sha256": {
+    "base.apk": "31285eac5c31195ac55bad9dff56dbc08b03c71e0f953ff9916f491e145f6382",
+    "split_config.arm64_v8a.apk": "6379ced54bee4281e0f23ddffe06cdd833b93264abe8fc49354eff8e8e8dcd8f",
+    "split_config.mdpi.apk": "51297b585a1e20ef6b321f1bb0e731d177fc00eccddea4ddef5c5c81fd4d66b1",
+    "split_i18n_en.apk": "1600a05ff60318059441d29debe791e182de1c89186ad279c249f881a2e371ac"
+  },
+  "signer_sha256": "fb920d381bee1b2093f27dc8f13d994da629dc91887d0529b35c9a2dc4f4a6c2",
+  "first_attempt_failed": "existing package directory owned by another native host UID",
+  "retry_fixture": "private install directory bind-mounted only in Store experiment mount namespace",
+  "global_install_directory_changed": false,
+  "confirmation": "accepted through existing dialog by test harness under authorized board test"
+}

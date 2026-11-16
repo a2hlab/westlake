@@ -1,0 +1,25 @@
+{
+  "schema": "westlake-google-two-path-v1",
+  "phase": "official-offline",
+  "startTime": 1794787254840,
+  "auth": {
+    "accountCount": 1,
+    "reusableCredentialWithheld": true,
+    "tokenPresent": true,
+    "requestId": 140,
+    "forceRefresh": true,
+    "cachePresentBefore": true,
+    "tokenAfterInvalidation": true,
+    "secondRequestId": 142,
+    "cachePresentAfterInvalidation": false,
+    "ungrantedScopeDenied": true,
+    "untrustedDelegationOptionDenied": true,
+    "outcome": "token_operations_completed"
+  },
+  "officialApi": {
+    "api": "AdvertisingIdService",
+    "outcome": "failed",
+    "errorType": "NameNotFoundException"
+  },
+  "endTime": 1794787255356
+}

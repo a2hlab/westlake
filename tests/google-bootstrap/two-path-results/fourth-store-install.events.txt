@@ -1,0 +1,80 @@
+pid=22853
+[WL-INSTALL] asking the user: install com.whatsapp (WhatsApp) over com.android.vending/com.google.android.finsky.activities.MainActivity
+[WL-INSTALL] the user accepted: install com.whatsapp
+[WL-INSTALL] asking the user: install com.whatsapp (WhatsApp) over com.android.vending/com.google.android.finsky.activities.MainActivity
+[WL-INSTALL] the user accepted: install com.whatsapp
+pid=23089
+[WL-INSTALL] createSession 275652295 by com.android.vending for com.whatsapp: mode=1 flags=0x404000 size=-1 reason=4 scenario=0 source=0 requireUserAction=0 multiPackage=false staged=false dataLoader=false location=1 user=200
+[WL-INSTALL] session 275652295.getDataLoaderParams is not taken
+[WL-INSTALL] session 275652295 is labelled "Pending"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 openWrite com.whatsapp.dm offset=0 length=3387681
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 openWrite config.mdpi offset=0 length=1364153
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 openWrite i18n_en offset=0 length=29097
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 progress 13%
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 progress 27%
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 openWrite config.arm64_v8a offset=0 length=14643775
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 progress 63%
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 progress 88%
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 progress 100%
+[WL-INSTALL] session 275652295 openWrite com.whatsapp.apk offset=0 length=147363498
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 is labelled "Downloading"
+[WL-INSTALL] session 275652295 checksums for com.whatsapp.apk
+[WL-INSTALL] session 275652295 is labelled "Installing"
+[WL-INSTALL] session 275652295 openWrite app.metadata offset=0 length=-1
+[WL-INSTALL] session 275652295 commit (transferred=false): app.metadata 4494 bytes sha256 ae944da72842d21c; com.whatsapp.apk 147363498 bytes sha256 31285eac5c31195a com.whatsapp v264409011 signed v3 by fb920d381bee1b20; com.whatsapp.dm 3387681 bytes sha256 d68a0a36d39a70ed; config.arm64_v8a 14643775 bytes sha256 6379ced54bee4281 com.whatsapp v264409011 split config.arm64_v8a signed v3 by fb920d381bee1b20; config.mdpi 1364153 bytes sha256 51297b585a1e20ef com.whatsapp v264409011 split config.mdpi signed v3 by fb920d381bee1b20; i18n_en 29097 bytes sha256 1600a05ff6031805 com.whatsapp v264409011 split i18n_en signed v3 by fb920d381bee1b20; split types required [base__abi, base__density], present [base__abi, base__density, i18n_en__module]; native code for [arm64-v8a]
+[WL-INSTALL] session 275652295 asks the user: a new install
+[WL-INSTALL] session 275652295 not installed: not published: cannot create /data/service/el1/public/appspawnx/installed/.session-275652295
+[WL-INSTALL] session 275652295 closed after it finished
+[WL-INSTALL] createSession 735381765 by com.android.vending for com.whatsapp: mode=1 flags=0x404000 size=-1 reason=4 scenario=0 source=0 requireUserAction=0 multiPackage=false staged=false dataLoader=false location=1 user=200
+[WL-INSTALL] session 735381765.getDataLoaderParams is not taken
+[WL-INSTALL] session 735381765 is labelled "Pending"
+[WL-INSTALL] session 735381765 is labelled "Pending"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 openWrite com.whatsapp.dm offset=0 length=3387681
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 openWrite i18n_en offset=0 length=29097
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 openWrite config.mdpi offset=0 length=1364153
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 progress 29%
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 progress 33%
+[WL-INSTALL] session 735381765 openWrite config.arm64_v8a offset=0 length=14643775
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 progress 88%
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 progress 100%
+[WL-INSTALL] session 735381765 openWrite com.whatsapp.apk offset=0 length=147363498
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 is labelled "Downloading"
+[WL-INSTALL] session 735381765 checksums for com.whatsapp.apk
+[WL-INSTALL] session 735381765 openWrite app.metadata offset=0 length=-1
+[WL-INSTALL] session 735381765 is labelled "Installing"
+[WL-INSTALL] session 735381765 commit (transferred=false): app.metadata 4494 bytes sha256 ae944da72842d21c; com.whatsapp.apk 147363498 bytes sha256 31285eac5c31195a com.whatsapp v264409011 signed v3 by fb920d381bee1b20; com.whatsapp.dm 3387681 bytes sha256 d68a0a36d39a70ed; config.arm64_v8a 14643775 bytes sha256 6379ced54bee4281 com.whatsapp v264409011 split config.arm64_v8a signed v3 by fb920d381bee1b20; config.mdpi 1364153 bytes sha256 51297b585a1e20ef com.whatsapp v264409011 split config.mdpi signed v3 by fb920d381bee1b20; i18n_en 29097 bytes sha256 1600a05ff6031805 com.whatsapp v264409011 split i18n_en signed v3 by fb920d381bee1b20; split types required [base__abi, base__density], present [base__abi, base__density, i18n_en__module]; native code for [arm64-v8a]
+[WL-INSTALL] session 735381765 asks the user: a new install
+[WL-INSTALL] session 735381765 installed com.whatsapp v264409011
+[WL-INSTALL] session 735381765 closed after it finished

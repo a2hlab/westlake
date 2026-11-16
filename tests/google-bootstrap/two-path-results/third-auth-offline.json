@@ -1,0 +1,15 @@
+{
+  "schema": "westlake-google-two-path-v1",
+  "phase": "auth-offline",
+  "startTime": 1794787346607,
+  "auth": {
+    "outcome": "failed",
+    "errorType": "IllegalStateException"
+  },
+  "officialApi": {
+    "api": "AdvertisingIdService",
+    "outcome": "failed",
+    "errorType": "NameNotFoundException"
+  },
+  "endTime": 1794787346609
+}

@@ -101,6 +101,8 @@ public final class PlayServicesChannel {
     private static final int MODULE_FILE = 18;
     /** To a host, from a client: the module files the host shares (ADR-0005, PlayModuleFiles.list). */
     private static final int MODULE_LIST = 19;
+    /** A narrow, separately authorized account/token provider; never a Play API route. */
+    private static final int AUTH_PROVIDER = 20;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -385,6 +387,7 @@ public final class PlayServicesChannel {
 
     private static final Channel SERVICES = new Channel(CONNECT, "play-services");
     private static final Channel STORE = new Channel(STORE_CONNECT, "play-store");
+    private static final Channel AUTH = new Channel("WESTLAKE_GOOGLE_AUTH_CONNECT", "microg-auth");
 
     /** The hosts this process is a client of, the Play services process first. */
     private static List<Channel> channels() {
@@ -552,7 +555,15 @@ public final class PlayServicesChannel {
         synchronized (CLIENT_LOCK) {
             if (c.binder != null && c.binder.isAlive()) return c.binder.getRemoteRoot();
             try {
-                SocketBinder channel = new SocketBinder(SocketBinder.connect(name), null, c.label);
+                int fd = SocketBinder.connect(name);
+                if (c == AUTH) {
+                    try { verifyAuthProvider(fd); }
+                    catch (IOException | RuntimeException e) {
+                        android.os.ParcelFileDescriptor.adoptFd(fd).close();
+                        throw e;
+                    }
+                }
+                SocketBinder channel = new SocketBinder(fd, null, c.label);
                 IBinder root = channel.getRemoteRoot();
                 hello(c, root);
                 c.binder = channel;
@@ -611,6 +622,42 @@ public final class PlayServicesChannel {
             data.recycle();
             reply.recycle();
         }
+    }
+
+    /** Pin the provider to the root spawner and APK selected by the launcher, before sending account data. */
+    private static void verifyAuthProvider(int fd) throws IOException {
+        SpawnerIdentity.Vouched provider = SpawnerIdentity.ask(
+                System.getenv("WESTLAKE_GOOGLE_AUTH_SPAWNER"), SocketBinder.peerPid(fd));
+        if (provider == null) throw new SecurityException("auth provider is not vouched for");
+        try {
+            String expected = System.getenv("WESTLAKE_GOOGLE_AUTH_APK_SHA256");
+            if (!"com.google.android.gms".equals(provider.packageName) || provider.apks.length == 0
+                    || expected == null || !expected.matches("[0-9a-f]{64}")) {
+                throw new SecurityException("auth provider pin missing");
+            }
+            java.security.MessageDigest hash = java.security.MessageDigest.getInstance("SHA-256");
+            try (java.io.InputStream in = new android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    android.os.ParcelFileDescriptor.dup(provider.apks[0]))) {
+                byte[] buffer = new byte[65536];
+                for (int n; (n = in.read(buffer)) != -1;) hash.update(buffer, 0, n);
+            }
+            StringBuilder actual = new StringBuilder();
+            for (byte b : hash.digest()) actual.append(String.format("%02x", b & 255));
+            if (!expected.equals(actual.toString())) throw new SecurityException("auth provider APK differs");
+            System.err.println("[WL-AUTH-PROXY] provider_launch_verified=true pid=" + SocketBinder.peerPid(fd));
+        } catch (java.security.NoSuchAlgorithmException e) { throw new IOException("SHA-256 unavailable"); }
+        finally { provider.close(); }
+    }
+
+    public static IBinder remoteAuthService() {
+        IBinder root = root(AUTH);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            root.transact(AUTH_PROVIDER, data, reply, 0);
+            reply.readException(); return reply.readStrongBinder();
+        } catch (RemoteException e) { return null; }
+        finally { data.recycle(); reply.recycle(); }
     }
 
     private static <T extends Parcelable> T callForObject(Channel c, int code, Parcelable.Creator<T> creator, Marshal args) {
@@ -1525,6 +1572,10 @@ public final class PlayServicesChannel {
         final int mPeerPid;
         volatile SocketBinder mChannel;
         private volatile boolean mIdentified;
+        private boolean mIdentityEnforced;
+        private boolean mOwnApplication;
+        private PackageInfo mVerifiedInfo;
+        private IBinder mAuthProvider;
 
         Root(int peerPid) {
             mPeerPid = peerPid;
@@ -1542,10 +1593,29 @@ public final class PlayServicesChannel {
                 return true;
             }
             if (!mIdentified) throw new SecurityException("channel has not said who it is");
+            if (adapter.core.GoogleAuthProxy.provider() && !mOwnApplication && code != AUTH_PROVIDER) {
+                throw new SecurityException("authentication namespace exposes only its token provider");
+            }
             IPackageManager packages = ActivityThread.getPackageManager();
             int user = UserHandle.myUserId();
             reply.writeNoException();
             switch (code) {
+                case AUTH_PROVIDER: {
+                    if (!mIdentityEnforced || mVerifiedInfo == null || mVerifiedInfo.signatures == null
+                            || mVerifiedInfo.signatures.length != 1) {
+                        throw new SecurityException("auth client identity is not enforced");
+                    }
+                    if (mAuthProvider == null) {
+                        android.content.pm.Signature[] current = mVerifiedInfo.signingInfo == null ? null
+                                : mVerifiedInfo.signingInfo.getApkContentsSigners();
+                        if (current == null || current.length != 1) {
+                            throw new SecurityException("auth client requires a verified current signer");
+                        }
+                        mAuthProvider = adapter.core.GoogleAuthProxy.providerBinder(mVerifiedInfo.packageName,
+                                current[0].toByteArray(), mVerifiedInfo.signatures[0].toByteArray(), mPeerPid);
+                    }
+                    reply.writeStrongBinder(mAuthProvider); return true;
+                }
                 case PACKAGE_INFO: {
                     String name = data.readString();
                     long packageFlags = data.readLong();
@@ -1706,6 +1776,13 @@ public final class PlayServicesChannel {
                         + " bytes; no spawner socket");
             }
             checkIdentity(this, claimed, info, spawner, apkFiles);
+            mIdentityEnforced = "enforce".equals(System.getenv("WESTLAKE_CHANNEL_IDENTITY"));
+            mVerifiedInfo = info;
+            try {
+                PackageInfo own = application().getPackageManager().getPackageInfo(application().getPackageName(),
+                        PackageManager.GET_SIGNATURES);
+                mOwnApplication = claimed.equals(own.packageName) && sameSignatures(info.signatures, own.signatures);
+            } catch (PackageManager.NameNotFoundException e) { throw new SecurityException("host package unavailable"); }
             if (claimed.equals(application().getPackageName())) {
                 // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
                 closeAll(apkFiles);

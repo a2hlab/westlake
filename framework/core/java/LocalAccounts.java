@@ -82,7 +82,7 @@ final class LocalAccounts {
     }
 
     private static void save() {
-        if (GoogleBootstrapExperiment.enabled()) {
+        if (GoogleBootstrapExperiment.enabled() || GoogleAuthProxy.provider()) {
             try { BootstrapTransfer.writePrivate(file().toPath(), store()); }
             catch (IOException e) { throw new IllegalStateException("experiment account write failed", e); }
             return;
@@ -185,6 +185,7 @@ final class LocalAccounts {
 
     /** One IAccountManager call. LocalServiceBinders.DEFAULT for those with nothing to answer. */
     static Object answer(String method, Object[] args) {
+        if (GoogleAuthProxy.client()) return GoogleAuthProxy.answer(method, args);
         if (MANAGER_ONLY.contains(method) && !managedByCaller()) {
             throw new SecurityException("uid " + AccountManagerStub.callerUid() + " cannot use " + method
                     + " on accounts of type " + TYPE);

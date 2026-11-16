@@ -1,0 +1,9 @@
+{
+  "source": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-410f84b034944cf78970038da5a1293e/two-path-installed",
+  "target": "/data/service/el1/public/appspawnx/installed",
+  "namespace": "mnt:[4026533047]",
+  "global_before": "20010054:20010054:755:725705",
+  "global_after": "20010054:20010054:755:725705",
+  "private_mount": "20010056:20010056:700:818367",
+  "global_unchanged": true
+}

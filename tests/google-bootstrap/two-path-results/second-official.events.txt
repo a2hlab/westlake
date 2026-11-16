@@ -1,0 +1,5 @@
+[WL-AUTH-PROXY] provider_launch_verified=true pid=13262
+[WL-CHANNEL-IDENTITY] pid=14235 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=14235 com.google.android.gms certificates match (649 ms)
+[WL-AUTH-PROXY] time=1794786861171 client_method=getAccountsByFeatures denied=true
+[WL-AUTH-PROXY] provider_launch_verified=true pid=13262

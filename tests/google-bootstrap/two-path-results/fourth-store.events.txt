@@ -1,0 +1,9 @@
+[WL-AUTH-PROXY] provider_launch_verified=true pid=22024
+[WL-CHANNEL-IDENTITY] pid=23089 claims com.android.vending; spawner says com.android.vending (match); apk files match (7 presented, 7 launched)
+[WL-CHANNEL-IDENTITY] pid=23089 com.android.vending certificates match (1174 ms)
+[WL-CHANNEL-IDENTITY] pid=23461 claims com.android.vending; spawner says com.android.vending (match); apk files match (7 presented, 7 launched)
+[WL-CHANNEL-IDENTITY] pid=23461 com.android.vending certificates match (233 ms)
+[WL-CHANNEL-IDENTITY] pid=23615 claims com.android.vending; spawner says com.android.vending (match); apk files match (7 presented, 7 launched)
+[WL-CHANNEL-IDENTITY] pid=23615 com.android.vending certificates match (784 ms)
+[WL-AUTH-PROXY] time=1794788127482 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794788468241 client_credential_read=getUserData result=withheld

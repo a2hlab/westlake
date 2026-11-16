@@ -1,0 +1,18 @@
+{
+  "schema": "westlake-google-two-path-v1",
+  "phase": "live",
+  "startTime": 1794788188096,
+  "auth": {
+    "outcome": "failed",
+    "errorType": "SecurityException"
+  },
+  "officialApi": {
+    "api": "AdvertisingIdService",
+    "gmsVersion": 244034029,
+    "idHasUuidFormat": true,
+    "zeroId": false,
+    "limitAdTracking": false,
+    "outcome": "api_completed"
+  },
+  "endTime": 1794788188984
+}

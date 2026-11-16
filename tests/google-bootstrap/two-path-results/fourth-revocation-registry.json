@@ -1,0 +1,6 @@
+{
+  "before": "present",
+  "after_explicit_denial": "removed",
+  "auth_error": "SecurityException",
+  "client_pid": 25435
+}

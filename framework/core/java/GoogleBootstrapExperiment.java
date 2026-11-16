@@ -30,7 +30,7 @@ public final class GoogleBootstrapExperiment {
     private GoogleBootstrapExperiment() {}
 
     public static boolean enabled() { return MODE != null && !MODE.isEmpty(); }
-    static boolean microg() { return "microg-export".equals(MODE); }
+    static boolean microg() { return "microg-export".equals(MODE) || GoogleAuthProxy.provider(); }
 
     public static void event(String outcome) {
         if (enabled()) System.err.println("[WL-GOOGLE-EXPERIMENT] run=" + RUN + " mode=" + MODE

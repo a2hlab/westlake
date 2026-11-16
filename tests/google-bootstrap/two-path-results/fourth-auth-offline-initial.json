@@ -1,0 +1,20 @@
+{
+  "schema": "westlake-google-two-path-v1",
+  "phase": "auth-offline",
+  "startTime": 1794787809102,
+  "auth": {
+    "accountCount": 1,
+    "reusableCredentialWithheld": true,
+    "outcome": "failed",
+    "errorType": "AuthenticatorException"
+  },
+  "officialApi": {
+    "api": "AdvertisingIdService",
+    "gmsVersion": 244034029,
+    "idHasUuidFormat": true,
+    "zeroId": false,
+    "limitAdTracking": false,
+    "outcome": "api_completed"
+  },
+  "endTime": 1794787809484
+}

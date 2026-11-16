@@ -1,0 +1,17 @@
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787292934 start manufacturer=HopeRun model=DAYU200 android=14 sdk=34 profile=0271dc8fc3d77e6d3afb4e8e9d7d54db85fe25e812fcec08365d8efe7d256996 apk=1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1
+[WL-AUTH-PROXY] provider_launch_verified=true pid=15824
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787294409 token_initial=present
+[WL-AUTH-PROXY] time=1794787294485 client_invalidation cache_removed=true
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787294805 token_after_invalidation=present consent=false
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787295354 official_checkin=requested completion=unverified
+[WL-CHANNEL-IDENTITY] pid=18266 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=18266 com.google.android.gms certificates match (1966 ms)
+[WL-AUTH-PROXY] time=1794787308371 client_credential_read=getPassword result=withheld
+[WL-CHANNEL-IDENTITY] pid=18378 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=18378 com.google.android.gms certificates match (1856 ms)
+[WL-CHANNEL-IDENTITY] pid=17119 claims org.westlake.googlebootstrap.probe; spawner says org.westlake.googlebootstrap.probe (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=17119 org.westlake.googlebootstrap.probe certificates match (6 ms)
+[WL-AUTH-PROXY] time=1794787344429 client_method=getAccountsAsUser failed=RemoteException
+[WL-CHANNEL-IDENTITY] pid=18213 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=18213 com.google.android.gms certificates match (559 ms)
+[WL-AUTH-PROXY] provider_launch_verified=true pid=15824

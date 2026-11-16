@@ -1,0 +1,7 @@
+{
+  "microg_checkin_id_present": true,
+  "official_checkin_id_present": true,
+  "independent_checkin_ids": true,
+  "both_device_credentials_present": true,
+  "values_retained_in_report": false
+}

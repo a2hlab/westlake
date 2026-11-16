@@ -1,0 +1,158 @@
+{
+  "google-two-path-microg04": {
+    "parent": 19776,
+    "child": 19797,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-5470f32a3ba74ef995c4008dfcc5dd43",
+    "socket": "/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+    "apk_sha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+    "runtime_env": [
+      "WESTLAKE_APP_PROCESSES=1",
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_PROVIDER=microg",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_NO_ACTIVITY=1",
+      "WESTLAKE_PLAY_SERVICES_SERVE=wl.twopath.auth01"
+    ],
+    "device_report_sha256": "3b189b9418dcbb6e3106f0155fab9774bed6a834f826d8748cf419672520485c"
+  },
+  "google-two-path-microg-restart04": {
+    "parent": 22009,
+    "child": 22024,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-5470f32a3ba74ef995c4008dfcc5dd43",
+    "socket": "/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+    "apk_sha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+    "runtime_env": [
+      "WESTLAKE_APP_PROCESSES=1",
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_PROVIDER=microg",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_NO_ACTIVITY=1",
+      "WESTLAKE_PLAY_SERVICES_SERVE=wl.twopath.auth01"
+    ],
+    "device_report_sha256": "fc55b6d3d63dd4e534932988c0886c2d290ddb15554ca035c8861f946d591946",
+    "same_data_directory": true
+  },
+  "google-two-path-official04": {
+    "parent": 20437,
+    "child": 20458,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-d12e0cf91fe04af2a7bf12e6620291d1",
+    "socket": "/dev/unix/socket/A2HSourced12e0cf91fe04af2a7bf",
+    "apk_sha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "runtime_env": [
+      "WESTLAKE_APP_PROCESSES=1",
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+      "WESTLAKE_GOOGLE_AUTH_CONNECT=wl.twopath.auth01",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER=/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+      "WESTLAKE_GOOGLE_EXPERIMENT=official-recheck",
+      "WESTLAKE_GOOGLE_EXPERIMENT_RUN=twopath01",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_NO_ACTIVITY=1",
+      "WESTLAKE_PLAY_SERVICES_SERVE=wl.twopath.gms01"
+    ],
+    "device_report_sha256": "ddd476ea4eed7428986ffe5ee40a795a48b4552023c712b78d92018e0a826095"
+  },
+  "google-two-path-official-restart04": {
+    "parent": 25823,
+    "child": 25838,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-d12e0cf91fe04af2a7bf12e6620291d1",
+    "socket": "/dev/unix/socket/A2HSourced12e0cf91fe04af2a7bf",
+    "apk_sha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "runtime_env": [
+      "WESTLAKE_APP_PROCESSES=1",
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+      "WESTLAKE_GOOGLE_AUTH_CONNECT=wl.twopath.auth01",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER=/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+      "WESTLAKE_GOOGLE_EXPERIMENT=official-recheck",
+      "WESTLAKE_GOOGLE_EXPERIMENT_RUN=twopath01",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_NO_ACTIVITY=1",
+      "WESTLAKE_PLAY_SERVICES_SERVE=wl.twopath.gms01"
+    ],
+    "device_report_sha256": "91a835420c89314fa986a10adf4afb14b56f9caa10279bcc66d7008433f6f3d6",
+    "same_data_directory": true
+  },
+  "google-two-path-client04": {
+    "parent": 20949,
+    "child": 20972,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-cc48206e89cd401cb0551f7be2a4e23a",
+    "socket": "/dev/unix/socket/A2HSourcecc48206e89cd401cb055",
+    "apk_sha256": "ff1f297b0500b45d83b8e52fe7c3c229977fbf0c07d6aab630418aabaa1a6400",
+    "runtime_env": [
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+      "WESTLAKE_GOOGLE_AUTH_CONNECT=wl.twopath.auth01",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER=/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_PLAY_SERVICES_CONNECT=wl.twopath.gms01"
+    ],
+    "device_report_sha256": "858e80bde6e16a0d9733932d00ce0acd4b13d60294ac1da8265aca4589ebca09"
+  },
+  "google-two-path-client-v204": {
+    "parent": 25413,
+    "child": 25435,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-24aab9a6d7fe43f4ad5086709c059c3b",
+    "socket": "/dev/unix/socket/A2HSource24aab9a6d7fe43f4ad50",
+    "apk_sha256": "5ce884f84d18f8e7aec8a9839b8eba257e3ba157a31ec72813c627846f84987e",
+    "runtime_env": [
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+      "WESTLAKE_GOOGLE_AUTH_CONNECT=wl.twopath.auth01",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER=/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_PLAY_SERVICES_CONNECT=wl.twopath.gms01"
+    ],
+    "device_report_sha256": "0c396a72fc58138b8513683e0b2743a84a3713b14f2b429d77d81d2e5e47a7ea"
+  },
+  "google-two-path-denied04": {
+    "parent": 24401,
+    "child": 24424,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-9ec929aa193d45c88aaf47beff0cc542",
+    "socket": "/dev/unix/socket/A2HSource9ec929aa193d45c88aaf",
+    "apk_sha256": "bb4f5c190594899092bd9cdf0bff5f661109a0691e4273d556ad538fe3b9697d",
+    "runtime_env": [
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+      "WESTLAKE_GOOGLE_AUTH_CONNECT=wl.twopath.auth01",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER=/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_PLAY_SERVICES_CONNECT=wl.twopath.gms01"
+    ],
+    "device_report_sha256": "3ccfc95bf5df90f423f1a4e5de882f858af9c5f2a55ab14f8441e7e7e49b81be"
+  },
+  "google-two-path-store04": {
+    "parent": 22822,
+    "child": 22853,
+    "uid": 20010056,
+    "runtime": "/data/app/el2/100/base/org.westlake.sourcehost/files/a2hlab-source-410f84b034944cf78970038da5a1293e",
+    "socket": "/dev/unix/socket/A2HSource410f84b034944cf78970",
+    "apk_sha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+    "runtime_env": [
+      "WESTLAKE_APP_PROCESSES=1",
+      "WESTLAKE_CHANNEL_IDENTITY=enforce",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256=e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+      "WESTLAKE_GOOGLE_AUTH_CONNECT=wl.twopath.auth01",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER=/dev/unix/socket/A2HSource5470f32a3ba74ef995c4",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1",
+      "WESTLAKE_LOCATION_GNSS=0",
+      "WESTLAKE_PLAY_SERVICES_CONNECT=wl.twopath.gms01",
+      "WESTLAKE_PLAY_STORE_SERVE=wl.twopath.store01"
+    ],
+    "device_report_sha256": "91ac405c4ea0285d79074164bf81950e255b9433210be79ec016b99cbe783af2"
+  }
+}

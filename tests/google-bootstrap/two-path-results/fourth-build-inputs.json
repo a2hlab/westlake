@@ -1,0 +1,266 @@
+{
+  "adapter_source_inputs": {
+    "framework/activity/java/AbilityConnectionBridge.java": "75734282854695cb198b5dd597f4d30d49581004c476729625b1a25b1b12a31d",
+    "framework/activity/java/AbilitySchedulerBridge.java": "547162200e5e2f017cd30e2343b98423608a11534227d25c747c3a104a4e211e",
+    "framework/activity/java/ActivityClientControllerAdapter.java": "a0ddf09e09e7e4b5bc9575a98a87aa543dd0248f95adb43c8a72bbce5993f478",
+    "framework/activity/java/ActivityManagerAdapter.java": "75d0f0d8ab9b9f85e8098c0d0b89b086b6fc85511fe5a3715f584e545f492019",
+    "framework/activity/java/ActivityResults.java": "183ccb652fdee2d857a41867d6629eaf5e2d791a447153b1fb536f66444c025b",
+    "framework/activity/java/ActivityTaskManagerAdapter.java": "8625e362e568a847833c2c93806120727948ff5aa33587248e8516f4a37d440a",
+    "framework/activity/java/AppBindDataDefaults.java": "335e79e08d19251ea60d81c691f8c0bd6c984a4a6988363a7b65921ee17a6105",
+    "framework/activity/java/AppProcesses.java": "798102ae6ec6e342032102853c6fd358e38da79e4f4648909898820a903c715f",
+    "framework/activity/java/AppSchedulerBridge.java": "0703452950b489f0820b821e50d743f724dba3db3273aad1eee6aba53f96d9ed",
+    "framework/activity/java/CallerProcess.java": "52be3d35da98dfe1a7475d183c3c12197519ea3c08ab8306460b8432e4c5cebf",
+    "framework/activity/java/CompatChangeTable.java": "9a351bff1597eb867585123d46b426ebc67c80116f818b48b3d883953edc4e56",
+    "framework/activity/java/GuestHost.java": "ba6d4e4777ed5eb20d0a6f3818c7bec0f86ecd9f03f3d0e89c45518f6605b95b",
+    "framework/activity/java/InProcessServiceBinder.java": "b6a3e91eb5d1d1b4d7f74d891c63e6609bbb7f17747650fa1eea055bfe9fd833",
+    "framework/activity/java/InstallConfirmDialog.java": "0b525ca897dc1fc603321af666d46add1e8d0fe144f2da1953133b8c83ee295f",
+    "framework/activity/java/IntentWantConverter.java": "f705adff2b2ae0507a8deaf459294f87859f09f8bb45d1f318233f660a6c6321",
+    "framework/activity/java/LifecycleAdapter.java": "8e5e954e679d915b82798d3660b4fb318b1ae0fc12ec303c7f135c51b971cec8",
+    "framework/activity/java/LocalBroadcasts.java": "e1c89a4fe8124333b42268617ae3118c2efc636e45cb19faea793e4288b1bc30",
+    "framework/activity/java/LocalGservices.java": "df1ac21dd9cf2164d499e2349d83953b6f85848b7df1868422fdb28dc8437497",
+    "framework/activity/java/LocalIntentSenders.java": "b6c09822dcb459da3c7170c13b8053152139230a509eda466f0e2f71181fd240",
+    "framework/activity/java/LocalJobs.java": "718ee0183cfcd57ffde29a00fb3fcfa7c4555251235c890d610aa90cfe79a044",
+    "framework/activity/java/MainThreadGuards.java": "d826bb352f9739c1608dba808e9f4bbacc25eb379de281b142a9a612a3832e51",
+    "framework/activity/java/ManifestReceivers.java": "e3662c640c7f4c55c5c2bf039edb66c649d4925a473287c9d921b995d7daf5bc",
+    "framework/activity/java/OhApplicationInfoConverter.java": "c122c16617b73ca98a03726d6dac2465ddabdada88f1d17c8e3f20129e05142d",
+    "framework/activity/java/OhConfigurationConverter.java": "ea34fcf08a8eacb8de98988619a1e1be6262fbf15fe206058c1f5cfa9add4ac1",
+    "framework/activity/java/OhDisplayProvider.java": "baf14c0276209ef4015dc588e8f5e9035272ad9ad31c5b7bc5ad96e30720157f",
+    "framework/activity/java/OwnTask.java": "b46741c33dd9ce81aae5c73eccb3d0ac153edcebec9842db4763ee526c03a7ea",
+    "framework/activity/java/PendingLaunchIntents.java": "2ada76341d8ea794617c53b6e8e25a20a569dd65366b2c0fe4eaa6a3761d3b14",
+    "framework/activity/java/PlayModuleFiles.java": "3e77ed4d7f13df02b3b5d4c99ac12e9644e02cc482da514e5507821ee8df9c56",
+    "framework/activity/java/PlayServicesChannel.java": "b0a2563071135f085af0f7d07ffa586090a12262b766c75a61f2bda809cea684",
+    "framework/activity/java/ServiceConnectionRegistry.java": "1c69114de7555a0a8d0097be577129a6184e0ccd650abdad55a97f6091e9e3a9",
+    "framework/activity/java/SpawnerIdentity.java": "ec2ffe19103ca589022cac9a5ea5d13e0eaed2b5227c56e33f01e06e7ef08558",
+    "framework/activity/java/WebLinkDialog.java": "a4b2b405d6e1c16e7438f2ab237932eb9fb5b5edf164d381717fe276924643a3",
+    "framework/activity/java/WlCalendarProvider.java": "0a6b8a5f7dec10031ea36db1de3f2a9ef3b3ddfe84954f9964069f607dca0d81",
+    "framework/activity/java/WlMediaProvider.java": "ebf00e15056eaf1378364b0be3affe74adc6c7b0678d0a73659faa61be005267",
+    "framework/activity/java/WlSettingsProvider.java": "b5a0cad07de427a30d5147b74327e6d5876c38c948b8f0c33c938439b7087ba5",
+    "framework/appspawn-x/java/adapter/compat/WestlakeSecureRandomSpi.java": "c882584af92d2df53953117e0514a73c988e39699f3db8287e3773c8ee73e9aa",
+    "framework/appspawn-x/java/adapter/compat/WlMediaSession.java": "2d3e2a0b33a707eb75b469efc0aaaff53772896f20b1e87322384d9f439033bb",
+    "framework/appspawn-x/java/adapter/compat/WlShortcutService.java": "91ccf29f16333f2af1b4fd21dc7058cee0b9069e205ad741ffb38cad5dd27563",
+    "framework/appspawn-x/java/adapter/security/OhPeerCertificates.java": "e02889bc724ad4fe4dae3943ae9f55f9fd86d7481d5d94e2c2ade31b248ce105",
+    "framework/appspawn-x/java/adapter/security/OhSystemTrustManager.java": "f9d8c3817713a972811ebf88e2e3399e720fce261a343b66d78e2eda02a6fbe0",
+    "framework/appspawn-x/java/adapter/security/OhTrustBridge.java": "f3d24a749ddbd3ec35e15e095c5081123e6f0fa2e24100a1edf0f889eb6ea6ef",
+    "framework/appspawn-x/java/adapter/security/OhTrustManagerFactorySpi.java": "51abbd33a220fe3345e8a19b6fd523729ff5000726044e68722bcbf06eb7fa5a",
+    "framework/appspawn-x/java/com/android/internal/os/AppSpawnXInit.java": "d0ae6f3c0d0c179e16bf340165e78e1350eab8d010a7b52a35a8c350a1b2c7dc",
+    "framework/appspawn-x/java/com/android/internal/os/WestlakePreloadClassList.java": "6f38b1fb5c73c180dd118b711907fd209c80d956c9e98fc990b6a34abea56d85",
+    "framework/broadcast/java/BroadcastEventConverter.java": "1228789569e237520932036e2b0ea92a5080ea2b25d1f3aba86f90d2968889dc",
+    "framework/broadcast/java/CommonEventReceiverBridge.java": "f4f5f1272f82889469b7534ace0d6646b85b376067a0ef411444793df25f8eff",
+    "framework/contentprovider/java/ContentProviderBridge.java": "264e864617d087dcca157559324cb2c1d3a67e6e01436c5e395ef3b5b7b34dea",
+    "framework/contentprovider/java/ContentProviderRegistry.java": "585ea5726656fc0b7b541124f4dbead1d7eeb4cf9580dcc02bd5e9bc6e51119c",
+    "framework/contentprovider/java/ContentProviderUriConverter.java": "906291e05efc0a689a55988c77bb2b8f12268d45fcd0ecf8f8e137baf4e03427",
+    "framework/core/java/AccountManagerStub.java": "11a0951ca8c8c649904b128ed0704a73b26e64dd63a49a5ef15396f6df149929",
+    "framework/core/java/ActivityToken.java": "f84414c47b301c795619ed6b2714658b98a8cf58eb98f6400674b019224b23e5",
+    "framework/core/java/BootstrapTransfer.java": "ba161d8b0d08dd63d74d8600ecc82fcccb38e8f3e640a09c7764f169a954e02c",
+    "framework/core/java/ConnectivityManagerAdapter.java": "e8f56e11d7270aebf760b365d1f1fcc4bd2f73881a76011f1651c801caa76659",
+    "framework/core/java/DefaultSounds.java": "8b692face74acc436c08fde7b29d532a2751c76fd1c103a62bfb523aa0d87e71",
+    "framework/core/java/GoogleAuthPolicy.java": "f49392b74bf2be9d035492d6342038e857a2f5da28b3944af4c1bd9c1a1e3b65",
+    "framework/core/java/GoogleAuthProxy.java": "5a8910017e08c663c8e799488e8bda7eef19115a85d6b30c7bc4e5efdd01ac18",
+    "framework/core/java/GoogleBootstrapExperiment.java": "cf0ee75566c0f0a4ea9fc32ebea687392ecedecbdf384291cf8d1927572d8c01",
+    "framework/core/java/LocalAccounts.java": "1b9b6b474f5c65041de1943d2ef956592af79ce97b7b3e0a6ce8f9fce4096813",
+    "framework/core/java/LocalAlarms.java": "730cedbc74492c20c6d14223c48767ce41252320e276d5ecebf95091b0b8eb3a",
+    "framework/core/java/LocalContentObservers.java": "ae11c3344b8d05346ed65e43a21bac869b8e9a53f96dd1d0e8f780d0c37af365",
+    "framework/core/java/LocalNotifications.java": "e80ec9ef64c7ea6863f01eb10e64aea333784bf87198812cb80c6cd0f58d25ac",
+    "framework/core/java/LocalServiceBinders.java": "25e573dda98901702f083aa9ca6c1c58ca21b0b64603734afeb661f208d51945",
+    "framework/core/java/LocalToasts.java": "b9373966948f0f75a1c23cef3d9294c75abf14a44d9fba1dbec565f8b22ae759",
+    "framework/core/java/LocationManagerAdapter.java": "1a31d7bda8258b86407d32e9955e5a1f4300f754a0f37af730ee46433564285f",
+    "framework/core/java/NotificationSwitch.java": "2be3b8ef35a8d64b687500ed8c1451f691808cbbb935ba5e1c0b8aa335554871",
+    "framework/core/java/OHEnvironment.java": "b000df455bf557a8bc642897b66b554bbf6cbdc1f81eab44479e4185dfd59081",
+    "framework/core/java/OHServiceManager.java": "1c78602cc3293fd0361bd39dc817e2f99940aa270a3fee1c9440fa549f24f7dc",
+    "framework/core/java/OhConnectivityState.java": "9d7d759ed44ba54f1e37f2737d1592c86f324ecf0072e1463f8ec95b644b89e7",
+    "framework/core/java/OhNotifications.java": "eed8b1ceee1f8f4bcfbe9b38f4dc29cd27e638559a474f8763ab9e047619bbf1",
+    "framework/core/java/OhTokenRegistry.java": "d9e76ec29c99c51e02b919c6a0b6d362a8f6e548351b78d8019f97a3f25dbc13",
+    "framework/core/java/PermissionLevels.java": "76337db0f40cedbb3f7b9cc22c51d978499a8cc1b493a8c7770ae64d6f13461e",
+    "framework/core/java/ServiceAnswers.java": "67d46bd57617015a14e4e609bdcdc498a5bb752541cb6a001847c603dc06f813",
+    "framework/core/java/ServiceInterceptor.java": "f437df4b482a96ff6941740eb230fc2f33addd1e109e0bc425c36068c044bfde",
+    "framework/core/java/SocketBinder.java": "a3046c52da7ee60b61d1c47468352dfce2af5bde1a07c39f2df24c87aaaefd57",
+    "framework/core/java/SocketBinderNative.java": "b4c38ce3063dff2903c289ffe81e4f3748d32bc96c8fa8d9c39eb52a8582db0a",
+    "framework/core/java/SoftwareAndroidKeyStore.java": "c3f134f6c0f5b08400b599e10786e60139ee44aadcaa404e33b68d4433b873b4",
+    "framework/core/java/WebViewUpdateServiceAdapter.java": "53b93599cde83d6e417d4933b759c10e15d32fd4959232a3d3569a932865b584",
+    "framework/core/java/westlake/impl/IThermalServiceImpl.java": "e4a30defced427d613f939a7c58c274c06f11072cd4e2bab459b2f638a7747de",
+    "framework/package-manager/java/ApplicationInfoCache.java": "aa9a81b5e8a62752ca7e198997c8df8c0e9f8d0eb189a7a61ff7ab2b342c3c30",
+    "framework/package-manager/java/ApplicationMetaDataReader.java": "b3c025472918d9d5115b82d10f1463b505b4b401da14026887cf9d84eff913ba",
+    "framework/package-manager/java/DataDirs.java": "cd8e43fad41a6ae86ff919394617cccfe7dca894e6be2b3f6b2d3b535389ed20",
+    "framework/package-manager/java/GuestPackages.java": "e0f225656acd21200136928653707c34df6bb3455db5b965630e41fa35734cbe",
+    "framework/package-manager/java/InstalledPackages.java": "e7146971213a7187ae41e0a295584f448d966c95eb723b87a26b934a77f07c57",
+    "framework/package-manager/java/InstallerSessions.java": "d554397422aa5f00a4b3de225d35060651f81794a253ed2cd0d212f532caa66d",
+    "framework/package-manager/java/OHPermissionEnforcer.java": "af918a5e64bab5148b06227af3f50bf06dcce264b2fce555559ab018839e3cbb",
+    "framework/package-manager/java/OHUserManager.java": "093759c7ecb77e7d9877ff7eff40c4a741637453348f708a19aa65de3b7a5c0b",
+    "framework/package-manager/java/PackageInfoBuilder.java": "0705d6f0e0c20f6361f20c74f8eb2f22acf6a6c3867bdfb99f20e3cc91f027a3",
+    "framework/package-manager/java/PackageManagerAdapter.java": "1ad6b60f12ea16417f19fd859ecf5fc3778875bb8fdf466b8b91385f53b3d6c5",
+    "framework/package-manager/java/PackageUidTable.java": "6e61d71f96da66ff398df0d7040585e38049b8b7dcd243e5a1883078cbb9c07d",
+    "framework/package-manager/java/PermissionManagerAdapter.java": "b3124918aadde7ff26916c2935399c71e74aa8ea7ddc52252de4af6068793855",
+    "framework/package-manager/java/PermissionMapper.java": "2f07d2c05726ba53787dbcc465b6be7a0172eab00c05351b8d0d9f7f2e9dc33b",
+    "framework/package-manager/java/ProviderInfoResolver.java": "5726752324d3bfad7def7cc7cc3c80c2158ff90ec5d4c7d38577cce456c59c60",
+    "framework/package-manager/java/RemotePackages.java": "b4ddcb03eea2c590b47ce4033224762242f617b56b964f530a13e4f28be3a4ef",
+    "framework/package-manager/java/ServiceInfoResolver.java": "8bdc54991165f504906fbd67794eeb5fd0f6378cacccdc5b1d06e0fb0fc05443",
+    "framework/package-manager/java/SourcePackageRegistry.java": "5cc94545952edfbb9c723a8a4f7eafd4d36f4547442a4d5a9a24a018f0668a58",
+    "framework/package-manager/java/SpawnerRegistry.java": "c9e2ca87cb060cbd5978263c55e1e7ebc314bbedd367faae80bec961c1207d81",
+    "framework/package-manager/java/SplitApkResolver.java": "d45e1cf1ebaa1c5cecfe80b9f8f7fe796779c62eda1be93126c4f9a52f3aa5ba",
+    "framework/window/java/AccessibilityTreeDump.java": "f748d89eb94bf7276ce55c6f3f8f033c91c37b70230a0bf9cdbdaceb67998119",
+    "framework/window/java/DisplayManagerAdapter.java": "692da003e2e47bb7f5434e2148c47bb820f3beb509aaf2f649f019518eca0190",
+    "framework/window/java/IWindowManagerBridge.java": "0bb5bf31ec7f293cec8ce44b609a484631e40c495fd322e59ac2c04d305aacba",
+    "framework/window/java/IWindowSessionBridge.java": "d0dffb9b6f2396d379a134a6bf697f136d169a0d9f7810ba753da053ac8d5132",
+    "framework/window/java/InputEventBridge.java": "c2b9b99b1bcf6c5dbeb0bf56f6e3abad5c55fadb2e71ea4939e1efc387e29eba",
+    "framework/window/java/InputManagerAdapter.java": "b773134d13f511dec6487c0d181361c9ef5dd7b68137822e6f38529737b65eaf",
+    "framework/window/java/InputMethodManagerAdapter.java": "130ba4c1179fc55a696f48ecd2969d07f7403165076ec855b63bddca0452caf3",
+    "framework/window/java/OHTextInjector.java": "84badf3748156581fb01987e9cf69bc4baab12ba2514539a327f03701466dacd",
+    "framework/window/java/OHTouchInjector.java": "a34b73e1191ce65b8f0f490822205a5eeaadff0a0b352c4b603293ca973d45db",
+    "framework/window/java/OhImeBridge.java": "83c8af1fdc0f46c9433ddba713baf7e57e9a1805b06d7ae4cdb734ff663f708d",
+    "framework/window/java/OhImeMetadata.java": "b6122a7d948ce4ea35898825b0748dac44feac2d3b725b1d0cdd8bc421f418c0",
+    "framework/window/java/OhInputMethodSession.java": "e279798948812602cc9526b4e7ae7308e4b42e5f3aa46b7e55ef1eda1dcc1c61",
+    "framework/window/java/OhInsetsBridge.java": "2b6e247d60158421c44f17c80cb75ae1d40e68f8056ad4e7f628069377131953",
+    "framework/window/java/OhWebViewBridge.java": "1dc2667c236157743d66e685582a09efc64fe00aa2f1a9071d20a822fd209fcf",
+    "framework/window/java/OhWindowOrder.java": "4744fad5e40f38776d3bff1d4412fb1c9e2bc4e2e14acce0a126ccf05ba7ad55",
+    "framework/window/java/OhWindowPolicy.java": "6741f0ff33384ad03c22c95a4200ce5ae767afadc85d03ae1c9fa7757ccb8b3d",
+    "framework/window/java/SessionStageBridge.java": "0757e594b8f5d45cb3f52af511163bdb3e05192e98f005b9bb8c99731e876d79",
+    "framework/window/java/SurfaceViewWindow.java": "4dcc041deae274a0c95e7d720ab3b9c8928a238a479ba75be22382b6d466e869",
+    "framework/window/java/WindowCallbackBridge.java": "f12ee2e8698150e9bbf753498c7fb65dfb6fdd9633d2d6bc79cd4490a8cea25c",
+    "framework/window/java/WindowIdStandIn.java": "0f90adb96c3e3b554abdc4ba4d999d7593f513f3e00dda9d994cfb21c3f015a5",
+    "framework/window/java/WindowManagerAdapter.java": "5298ff1f77a8b1fa5d2488249ebdce05b3e9dd3e7b2712f35f362616d63ca4b5",
+    "framework/window/java/WindowManagerAgentBridge.java": "7ba4285732d8f88c539b960a21dd8e6c8aa7198f1402a52d65a532a30da129ef",
+    "framework/window/java/WindowSessionAdapter.java": "f8576bc5659582da7fa15d6b8435ab263c2cdfb3314b8d74db47c1ea5cf2a2e1"
+  },
+  "adapter_artifacts": {
+    "westlake-unrelocated.classes.jar": {
+      "bytes": 664795,
+      "sha256": "520cb9d4cfb72bf9c12268489c8fdcb5f3ade3694b05914765922d80daa92cbc"
+    }
+  },
+  "runtime_artifacts": {
+    "adapter-runtime-bcp.classes.jar": {
+      "bytes": 664795,
+      "sha256": "520cb9d4cfb72bf9c12268489c8fdcb5f3ade3694b05914765922d80daa92cbc"
+    },
+    "adapter-runtime-bcp.jar": {
+      "bytes": 366057,
+      "sha256": "d36741190dea5b7dbc07bfa1471100f657d1bbc524a23ea9f58b655d9f5f523a"
+    },
+    "framework.classes.jar": {
+      "bytes": 48623168,
+      "sha256": "428a3410775f7ca450fee2c3f9ac0738260c4b528411fd5e53ac0492c8ea2c61"
+    },
+    "framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    }
+  },
+  "boot_artifacts": {
+    "boot-adapter-runtime-bcp.art": {
+      "bytes": 619280,
+      "sha256": "edfbe40aff83461ad37ae48dc90c5ece09377343b8a58db5ebec2f55ce12e24a"
+    },
+    "boot-adapter-runtime-bcp.oat": {
+      "bytes": 17024,
+      "sha256": "d7ca201c92234cae8bcd8fb06d1063ac050d088c495da51254d2e21ccd813dbf"
+    },
+    "boot-adapter-runtime-bcp.vdex": {
+      "bytes": 864108,
+      "sha256": "aa082c5f2dd5abb127a80d147af0660b5cb27fc9fe0a293d2e47c6fd76d7a876"
+    },
+    "boot-apache-xml.art": {
+      "bytes": 1651232,
+      "sha256": "e4d419f72d22f5d0d67c0c02bb9ab7ca997f556a7d92e482043b19de813235a3"
+    },
+    "boot-apache-xml.oat": {
+      "bytes": 21120,
+      "sha256": "bbfc251619c59ae998d5cdcc30dfbfb56ba883423153dbc95e6eb37c9da45b9d"
+    },
+    "boot-apache-xml.vdex": {
+      "bytes": 999472,
+      "sha256": "20476b98d65414de9437a7706864227063377fcad5e0eda774e87d17fd2e3fb4"
+    },
+    "boot-bouncycastle.art": {
+      "bytes": 1107280,
+      "sha256": "8a68a46ad7534d4143dcd9603dd57091eda7a76c1ef089ea405614725c2fac63"
+    },
+    "boot-bouncycastle.oat": {
+      "bytes": 25216,
+      "sha256": "cd2bcce5c72182fa661d1b06dcbc9306e8ccb335974f28ea093aca670cc42c24"
+    },
+    "boot-bouncycastle.vdex": {
+      "bytes": 1259912,
+      "sha256": "ac95a246f2b4706c17d8176c9e1c643f752d111b2cd3a8bff6822235c47efdf3"
+    },
+    "boot-conscrypt.art": {
+      "bytes": 351168,
+      "sha256": "bbb2801b86ae333e0433c8fc31189d374ba216180b5fd7f1df056cfc888a7e71"
+    },
+    "boot-conscrypt.oat": {
+      "bytes": 17024,
+      "sha256": "b3c92868ba82305b613b284eca84c251961d5dcc40499c852316dc62f63a29cf"
+    },
+    "boot-conscrypt.vdex": {
+      "bytes": 427764,
+      "sha256": "285dbff86378a1eb3495283053fd03b11729efb61c7e7f20da7145a85016b91f"
+    },
+    "boot-core-icu4j.art": {
+      "bytes": 1870640,
+      "sha256": "ff3acf848e7c14ffc3d18e8f391c253d90ff29c0224d353916ce011d05cb59cc"
+    },
+    "boot-core-icu4j.oat": {
+      "bytes": 29312,
+      "sha256": "b59afc2ae2661f03b380f732f561316c19d1593c2b4f4bd0ade2f73eb1a89107"
+    },
+    "boot-core-icu4j.vdex": {
+      "bytes": 2416732,
+      "sha256": "708e2b092a036cb3efba3d60f418ebe63b1203ecc202f34ddf2b7bba89b6cf48"
+    },
+    "boot-core-libart.art": {
+      "bytes": 449568,
+      "sha256": "845d406cde4bea7e19f8e18cfa0bd71b073c2f4fd6396108be654b822c806167"
+    },
+    "boot-core-libart.oat": {
+      "bytes": 21120,
+      "sha256": "8a35d493be0f39d851413fcc581efbf33b029d9026599cec6af02264c1045a8d"
+    },
+    "boot-core-libart.vdex": {
+      "bytes": 500980,
+      "sha256": "86bd533be08880d3d638a2b07614d2078ed07eaa01a4c68e2e94bc32bdbd2359"
+    },
+    "boot-framework.art": {
+      "bytes": 46787040,
+      "sha256": "b8bfc7c0fa887b9ed8a836fbca7b81faf035347f4bd06b02ea54ba37421c606f"
+    },
+    "boot-framework.oat": {
+      "bytes": 373376,
+      "sha256": "6d56fa098ce1c18047d8bdecef97c27d81cb7394c08023958a58f50b178a4f4d"
+    },
+    "boot-framework.vdex": {
+      "bytes": 47228460,
+      "sha256": "aae547206944291354aaf567b138a335c866032b6dfe2664c56ffb33ee27e5ff"
+    },
+    "boot-okhttp.art": {
+      "bytes": 284832,
+      "sha256": "998bf97aada5d5e12993a48989be7b6b6b9b48cf417a0ee6b6b4c295431443f2"
+    },
+    "boot-okhttp.oat": {
+      "bytes": 17024,
+      "sha256": "8c6c35333af3c0339b81612043d1991a724601cd72ae8f2575286fcf78666bbf"
+    },
+    "boot-okhttp.vdex": {
+      "bytes": 352304,
+      "sha256": "a6eb42b8eaa99aae1bce013a8f68f8682006c755e118fc20b990ff903edb048f"
+    },
+    "boot.art": {
+      "bytes": 4953808,
+      "sha256": "8d31cdae4a49b05a2ac87a9d668b7d93c56a4074fc227f53928af2aa0c1a84c7"
+    },
+    "boot.oat": {
+      "bytes": 57984,
+      "sha256": "7d4e0abe6908b28a8bfe90eb5bd32ba12754b6293e7ea0e6a68c3a6c82d6988e"
+    },
+    "boot.vdex": {
+      "bytes": 4725628,
+      "sha256": "03e3ade4a936a1b07d2aa72b0e6e7692980c0d98381b4274ca6f11814c0d1c78"
+    }
+  },
+  "probe_v2_source_inputs": {
+    "tests/google-bootstrap/ProbeActivity.java": "2aef82111039e1e15d71f2dd1f8ec2bf728830b17e47516d8efbc721a6d715e3",
+    "tests/google-bootstrap/TwoPathActivity.java": "81627d60a9ccaea958c1cc8a74590f88d094ea7aef59dd7c60bf153349ea074e",
+    "tests/google-bootstrap/AndroidManifest.xml": "07b775ff408d87ccffeba7501bea6214c369f9dc60c3b672a5a13be225d3dfb4"
+  },
+  "probe_v2_apk_sha256": "5ce884f84d18f8e7aec8a9839b8eba257e3ba157a31ec72813c627846f84987e",
+  "adapter_source_inputs_match_current_tree": true,
+  "probe_v2_source_inputs_match_current_tree": true
+}

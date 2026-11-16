@@ -1,5 +1,10 @@
 # Board results: microG bootstrap into official Google Play services
 
+Later evidence: the [live two-path proxy validation](google-two-path-validation.md)
+completed official Play Store catalogue, download and installation with the reusable
+credential retained only by microG. The results below remain the earlier sequential
+handoff experiment and should be read in that historical scope.
+
 Test session: 2026-11-15 Pacific / 2026-11-16 UTC.
 
 **The prototype transferred a reusable microG-issued credential to official

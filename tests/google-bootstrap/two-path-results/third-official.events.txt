@@ -1,0 +1,128 @@
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787150520 start manufacturer=HopeRun model=DAYU200 android=14 sdk=34 profile=0271dc8fc3d77e6d3afb4e8e9d7d54db85fe25e812fcec08365d8efe7d256996 apk=1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1
+[WL-AUTH-PROXY] provider_launch_verified=true pid=15824
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787158206 token_initial=present
+[WL-AUTH-PROXY] time=1794787163781 client_invalidation cache_removed=true
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787164166 token_after_invalidation=present consent=false
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787164197 official_checkin=requested completion=unverified
+[WL-CHANNEL-IDENTITY] pid=16860 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=16860 com.google.android.gms certificates match (1535 ms)
+[WL-CHANNEL-IDENTITY] pid=17205 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=17205 com.google.android.gms certificates match (685 ms)
+[WL-CHANNEL-IDENTITY] pid=17119 claims org.westlake.googlebootstrap.probe; spawner says org.westlake.googlebootstrap.probe (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=17119 org.westlake.googlebootstrap.probe certificates match (5 ms)
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787192380 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=[omitted] freshness=provider_write_only
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787200552 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=[omitted] freshness=provider_write_only
+[WL-AUTH-PROXY] time=1794787203598 client_credential_read=getPassword result=withheld
+[WL-GOOGLE-EXPERIMENT] run=twopath01 mode=official-recheck time=1794787208727 gservices_update=full uncertified_status=1 policy_override=false device_id_hash=[omitted] freshness=provider_write_only
+[WL-CHANNEL-IDENTITY] pid=16542 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-AUTH-PROXY] provider_launch_verified=true pid=15824
+[WL-CHANNEL-IDENTITY] pid=16542 com.google.android.gms certificates match (1771 ms)
+[WL-AUTH-PROXY] time=1794787167885 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787168505 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787169623 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787169623 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787169820 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787169918 client_credential_read=getUserData result=withheld
+[WL-CHANNEL-IDENTITY] pid=17205 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=17205 com.google.android.gms certificates match (1940 ms)
+[WL-AUTH-PROXY] time=1794787178032 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178033 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178033 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787178033 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787178039 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178204 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178205 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178205 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787178205 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787178205 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178206 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787178206 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787178207 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178488 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178489 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787178489 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787178598 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178600 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787178600 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787178601 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787178613 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787179445 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787179445 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787179445 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787180570 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787180570 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787193380 client_method=getPreviousName unsupported=true
+[WL-AUTH-PROXY] time=1794787193381 client_method=getPreviousName denied=true
+[WL-AUTH-PROXY] time=1794787196154 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787196155 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787196949 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787196988 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787196989 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787196990 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787196992 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787200882 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787200883 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787200883 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787202748 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787202749 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787202750 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787202750 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787202777 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787204461 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787204463 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787204463 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787204463 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787204466 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787204902 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787204904 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787204904 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787204904 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787204906 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787205237 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787205238 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787205238 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787205239 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787205241 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787206744 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787206744 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787206745 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787207532 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787207532 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787207532 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787207705 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787207705 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787208166 client_method=getPreviousName unsupported=true
+[WL-AUTH-PROXY] time=1794787208168 client_method=getPreviousName denied=true
+[WL-AUTH-PROXY] time=1794787211986 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787211987 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787212000 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787212001 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787212020 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787212051 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787212055 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787212055 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787212060 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787212079 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787223448 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787223450 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787223450 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787223454 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787223466 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225749 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225750 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225750 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787225751 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787225753 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225757 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225764 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225764 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787225771 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794787225773 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225931 client_credential_read=getUserData result=withheld
+[WL-AUTH-PROXY] time=1794787225932 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794787225932 client_credential_read=getPassword result=withheld
+[WL-CHANNEL-IDENTITY] pid=16542 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=16542 com.google.android.gms certificates match (2052 ms)
+[WL-AUTH-PROXY] provider_launch_verified=true pid=15824
+[WL-CHANNEL-IDENTITY] pid=16860 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=16860 com.google.android.gms certificates match (514 ms)

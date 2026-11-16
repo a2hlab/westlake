@@ -1,0 +1,37 @@
+[WL-CHANNEL-IDENTITY] pid=13506 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=13506 com.google.android.gms certificates match (723 ms)
+[WL-CHANNEL-IDENTITY] pid=13937 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=13937 com.google.android.gms certificates match (552 ms)
+[WL-AUTH-PROXY] time=1794786832371 client_verified owner=com.google.android.gms certificate_sha256=7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053 pid=13937
+[WL-AUTH-PROXY] time=1794786832403 request=1 operation=accounts owner=com.google.android.gms count=1
+[WL-CHANNEL-IDENTITY] pid=14235 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=14235 com.google.android.gms certificates match (558 ms)
+[WL-AUTH-PROXY] time=1794786842217 client_verified owner=com.google.android.gms certificate_sha256=7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053 pid=14235
+[WL-AUTH-PROXY] time=1794786842220 request=2 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786842423 request=3 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786847303 request=4 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786857458 request=5 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786860118 request=6 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786860228 request=7 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786860258 request=8 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786860275 request=9 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786860323 request=10 operation=accounts owner=com.google.android.gms count=1
+[WL-AUTH-PROXY] time=1794786860902 request=11 operation=accounts owner=com.google.android.gms count=1
+[WL-CHANNEL-IDENTITY] pid=14532 claims org.westlake.googlebootstrap.probe; spawner says org.westlake.googlebootstrap.probe (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=14532 org.westlake.googlebootstrap.probe certificates match (3 ms)
+[WL-AUTH-PROXY] time=1794786861976 client_verified owner=org.westlake.googlebootstrap.probe certificate_sha256=77e047c82dd1571e2f1b1e745cddc6e35dae8e7a3fcde358a3f79c4d185653ab pid=14532
+[WL-AUTH-PROXY] time=1794786862035 request=12 operation=accounts owner=org.westlake.googlebootstrap.probe count=1
+[WL-AUTH-PROXY] time=1794786863691 request=13 operation=token owner=org.westlake.googlebootstrap.probe force_refresh=true cache_before=true token_present=true
+[WL-AUTH-PROXY] time=1794786863701 request=14 operation=invalidate owner=org.westlake.googlebootstrap.probe cache_removed=true
+[WL-AUTH-PROXY] time=1794786863975 request=15 operation=token owner=org.westlake.googlebootstrap.probe force_refresh=true cache_before=false token_present=true
+[WL-AUTH-PROXY] time=1794786863992 request=16 operation=2 denied=true
+[WL-CHANNEL-IDENTITY] pid=14808 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (9 presented, 9 launched)
+[WL-CHANNEL-IDENTITY] pid=14808 com.google.android.gms certificates match (521 ms)
+[WL-AUTH-PROXY] time=1794786871638 client_verified owner=com.google.android.gms certificate_sha256=7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053 pid=14808
+[WL-AUTH-PROXY] time=1794786871670 request=17 operation=accounts owner=com.google.android.gms count=1
+[WL-CHANNEL-IDENTITY] pid=13262 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=13262 com.google.android.gms certificates match (806 ms)
+[WL-CHANNEL-IDENTITY] pid=13506 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=13506 com.google.android.gms certificates match (984 ms)
+[WL-CHANNEL-IDENTITY] pid=13262 claims com.google.android.gms; spawner says com.google.android.gms (match); apk files match (1 presented, 1 launched)
+[WL-CHANNEL-IDENTITY] pid=13262 com.google.android.gms certificates match (846 ms)

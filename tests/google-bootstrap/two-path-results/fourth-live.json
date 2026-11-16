@@ -1,0 +1,28 @@
+{
+  "schema": "westlake-google-two-path-v1",
+  "phase": "live",
+  "startTime": 1794787774965,
+  "auth": {
+    "accountCount": 1,
+    "reusableCredentialWithheld": true,
+    "tokenPresent": true,
+    "requestId": 7,
+    "forceRefresh": true,
+    "cachePresentBefore": true,
+    "tokenAfterInvalidation": true,
+    "secondRequestId": 9,
+    "cachePresentAfterInvalidation": false,
+    "ungrantedScopeDenied": true,
+    "untrustedDelegationOptionDenied": true,
+    "outcome": "token_operations_completed"
+  },
+  "officialApi": {
+    "api": "AdvertisingIdService",
+    "gmsVersion": 244034029,
+    "idHasUuidFormat": true,
+    "zeroId": false,
+    "limitAdTracking": false,
+    "outcome": "api_completed"
+  },
+  "endTime": 1794787777355
+}
