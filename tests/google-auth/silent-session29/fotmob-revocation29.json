@@ -1,0 +1,23 @@
+{
+  "candidate": "29",
+  "revocationMethod": "operator atomically replaced the app revocation generation",
+  "adapterVisibilityApiExercised": false,
+  "providerOperatorGrantsChanged": false,
+  "deniedSilentRequests": 5,
+  "tokensReturned": 0,
+  "providerTokenEventsAfterRevocationBeforeReselection": 0,
+  "tokenVerificationOfSavedToken": {
+    "signatureVerifiedWithGoogleJwks": true,
+    "issuerRecognized": true,
+    "audienceMatchesApprovedClient": true,
+    "tokenUnexpired": true,
+    "issuedAtNotFuture": true,
+    "emailClaimPresent": true,
+    "emailVerified": true,
+    "emailMatchesStoredAccountName": true,
+    "subjectMatchesStoredId": true,
+    "mustReauthenticate": "true",
+    "tokenAgeSeconds": 701
+  },
+  "reauthenticationWarningVisible": true
+}

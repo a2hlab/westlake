@@ -1,0 +1,30 @@
+{
+  "nativeRuntimeSha256": "12506b24d30f51fd0e8e0678ad2184512e2ca9c42f6f74fba199d79c9edec6f1",
+  "officialGmsApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "officialGmsVersion": "24.40.34",
+  "fotmobApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+  "providerMicrogApkSha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+  "providerAdapterRuntimeSha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3",
+  "candidate": "29",
+  "adapterRuntimeSha256": "4a36e0e12809da20425fb993e66ff3c6a487b8043cd32dcb77b70b79cdbeb9ee",
+  "adapter28RuntimeSha256": "c1bf752180775711e3d9fc80adcba3c0a7619d70f9d6222c09abb74037ac5ec0",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "frameworkPreloadPassed": true,
+  "hostSessionPolicyTestsPassed": 23,
+  "sources": {
+    "framework/activity/java/GoogleAuthOperations.java": "45c3c6f65aa07cb7a94aaa8ba5aefd49d986ddd1198618b43d48b8dc7bac02c9",
+    "framework/activity/java/PlayServicesChannel.java": "2c7196e3d3ee4f4f12b0808aa8e6ae7d102256555d3394899899acf618c5653c",
+    "framework/activity/java/RemoteActivities.java": "e45f34941d03d92cca7911969f231f246ee4828155d29a99428d5d2b73fc89be",
+    "framework/core/java/GoogleAuthProxy.java": "20842c7b2db946f2954cb3e325ccdaeecf16812c707e5567f4ecef9fc3a286ab",
+    "framework/core/java/GoogleAuthSessions.java": "d255848f9889c0b54efe11ff464bfb99ec6749c6b6d7b5771c6bbde1b8af5ebb",
+    "framework/core/java/SocketBinder.java": "b61c2269d5a749c39bdcb20a8db5002171b9b098698ae336e4a6b9b0d083fba0"
+  },
+  "negativeProbeSourceSha256": "6e68374d0b2d6d61e1db7d2cb841712060b8ed2ea2d92beaf1e062faea5f7741",
+  "negativeProbeApkSha256": "67ed0d05f9a8d177a67b78be5e29035f46e3723ddf63bb916bbbb37dd36be842",
+  "probeManifestInput": "google-official-auth-probe-v5",
+  "defaultEnabled": false,
+  "providerRuntimeChanged": false,
+  "fullSourceClosure": false,
+  "rawCredentialsScreenshotsOrDisassemblyPublished": false,
+  "recordedAtUtc": "2026-11-16T23:31:29.519628+00:00"
+}

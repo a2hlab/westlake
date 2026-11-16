@@ -35,7 +35,7 @@ public final class OfficialAuthActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
-        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package", "delegation-ui", "delegation-provider"}) {
+        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package", "delegation-ui", "delegation-provider", "silent-ungranted", "silent-spoof"}) {
             Button button = new Button(this); button.setText("Official GMS token: " + mode);
             button.setOnClickListener(v -> run(mode)); layout.addView(button);
         }
@@ -50,7 +50,7 @@ public final class OfficialAuthActivity extends Activity {
             JSONObject result = new JSONObject();
             try {
                 result.put("schema", "westlake-official-auth-v1").put("mode", mode)
-                        .put("scope", "ac2dm").put("startTime", System.currentTimeMillis());
+                        .put("scope", mode.startsWith("silent-") ? "audience_id_token" : "ac2dm").put("startTime", System.currentTimeMillis());
                 result.put("gmsVersion", getPackageManager().getPackageInfo("com.google.android.gms", 0).getLongVersionCode());
                 Account[] accounts = AccountManager.get(this).getAccountsByType("com.google");
                 result.put("accountCount", accounts.length);
@@ -59,7 +59,7 @@ public final class OfficialAuthActivity extends Activity {
                     Future<JSONObject> request = requests.submit(() -> "sdk".equals(mode)
                             ? sdk(accounts[0]) : "control".equals(mode) ? control(accounts[0])
                             : mode.startsWith("delegation-") ? delegationDenied(accounts[0], mode)
-                            : binder(accounts[0], "spoof-package".equals(mode)));
+                            : binder(accounts[0], mode));
                     try { result.put("operation", request.get(100, TimeUnit.SECONDS)); }
                     catch (Exception error) { request.cancel(true); result.put("operation", failure(error)); }
                 }
@@ -130,9 +130,24 @@ public final class OfficialAuthActivity extends Activity {
                 .put("outcome", token != null && !token.isEmpty() ? "token_received" : "empty_token");
     }
 
-    private JSONObject binder(Account account, boolean spoofPackage) throws Exception {
+    private JSONObject binder(Account account, String mode) throws Exception {
+        boolean silent = mode.startsWith("silent-");
+        boolean spoofPackage = "spoof-package".equals(mode) || "silent-spoof".equals(mode);
+        String scope = "ac2dm", claimed = "com.spotify.music";
+        if (silent) {
+            // Test-only operator input: an existing app's public client ID, never a credential.
+            java.util.Properties test = new java.util.Properties();
+            try (java.io.InputStream in = new java.io.FileInputStream(new File(getFilesDir(), "silent-auth-test.properties"))) {
+                test.load(in);
+            }
+            String client = test.getProperty("client_id"); claimed = test.getProperty("claimed_package");
+            if (client == null || !client.matches("[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com")
+                    || claimed == null || !claimed.matches("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+"))
+                throw new IllegalArgumentException("invalid negative-test configuration");
+            scope = "audience:server:client_id:" + client;
+        }
         JSONObject result = new JSONObject().put("entry", "IAuthManagerService.getTokenWithAccount");
-        result.put("spoofPackageTest", spoofPackage);
+        result.put("spoofPackageTest", spoofPackage).put("silentNegativeTest", silent);
         CountDownLatch connected = new CountDownLatch(1); IBinder[] service = new IBinder[1];
         ServiceConnection connection = new ServiceConnection() {
             @Override public void onServiceConnected(ComponentName name, IBinder value) { service[0] = value; connected.countDown(); }
@@ -151,20 +166,23 @@ public final class OfficialAuthActivity extends Activity {
             result.put("expectedDescriptor", expected);
             if (!expected) return result.put("outcome", "unexpected_descriptor");
             // Negative identity test only. The probe's signed APK and channel identity stay unchanged.
-            String claimedPackage = spoofPackage ? "com.spotify.music" : getPackageName();
+            String claimedPackage = spoofPackage ? claimed : getPackageName();
             Bundle extras = new Bundle(); extras.putString("androidPackageName", claimedPackage);
             extras.putString("clientPackageName", claimedPackage);
             Parcel data = Parcel.obtain(), reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken(descriptor); data.writeInt(1); account.writeToParcel(data, 0);
-                data.writeString("ac2dm"); data.writeInt(1); extras.writeToParcel(data, 0);
+                data.writeString(scope); data.writeInt(1); extras.writeToParcel(data, 0);
                 if (!service[0].transact(5, data, reply, 0)) return result.put("outcome", "transaction_unsupported");
                 reply.readException();
                 Bundle response = reply.readInt() == 0 ? null : Bundle.CREATOR.createFromParcel(reply);
                 if (response == null) return result.put("outcome", "null_response");
                 response.setClassLoader(getClassLoader());
                 String token = response.getString("authtoken");
-                boolean present = token != null && !token.isEmpty();
+                Bundle details = response.getBundle("tokenDetails");
+                if (details != null) details.setClassLoader(getClassLoader());
+                boolean present = (token != null && !token.isEmpty())
+                        || (details != null && details.getParcelable("TokenData") != null);
                 return result.put("outcome", present ? "token_received" : "token_not_returned")
                         .put("tokenPresent", present).put("errorCode", safeError(response.getString("Error")))
                         .put("recoveryIntentPresent", response.containsKey("userRecoveryIntent"));

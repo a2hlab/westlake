@@ -339,7 +339,14 @@ public final class GoogleAuthProxy {
     }
 
     private static boolean setVisibility(Account account, String packageName, int value) throws Exception {
-        if (packageName == null || !knownAccount(account) || !interactiveCaller(packageName)) return false;
+        if (packageName == null || !knownAccount(account)) return false;
+        if (GoogleAuthDelegation.enabled() && "1".equals(System.getenv("WESTLAKE_GOOGLE_SILENT_AUTH"))
+                && (value == AccountManager.VISIBILITY_NOT_VISIBLE || value == AccountManager.VISIBILITY_USER_MANAGED_NOT_VISIBLE)) {
+            Class.forName("adapter.activity.GoogleAuthOperations").getMethod("revoke", String.class).invoke(null, packageName);
+            clearInteractiveVisibility(packageName);
+            return true;
+        }
+        if (!interactiveCaller(packageName)) return false;
         if (value != AccountManager.VISIBILITY_VISIBLE && value != AccountManager.VISIBILITY_USER_MANAGED_VISIBLE
                 && value != AccountManager.VISIBILITY_NOT_VISIBLE && value != AccountManager.VISIBILITY_USER_MANAGED_NOT_VISIBLE)
             return false;

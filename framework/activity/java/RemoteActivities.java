@@ -254,6 +254,9 @@ public final class RemoteActivities {
             }
             String providerKey = GoogleIdentityClaims.request(key,
                     "1".equals(System.getenv("WESTLAKE_GOOGLE_IDENTITY_CLAIMS")), selected.targetPackage, selected.targetActivity);
+            if (GoogleAuthOperations.enabled()) synchronized (selected.tokens) {
+                if (selected.authEpoch == null) selected.authEpoch = GoogleAuthOperations.generation(request.owner);
+            }
             Bundle result = PlayServicesChannel.delegatedAuth(selected.origin, selected.originPid, selected.spawner,
                     account, providerKey, selected.witness(account), null);
             if (result == null) return null;
@@ -301,6 +304,7 @@ public final class RemoteActivities {
         final String spawner;
         final Runnable cleanup;
         String targetPackage, targetActivity;
+        String authEpoch;
         final long authDeadline = SystemClock.elapsedRealtime() + 10 * 60_000L;
         final java.util.Map<String, Issued> tokens = new java.util.HashMap<>();
 
@@ -352,7 +356,22 @@ public final class RemoteActivities {
             if (!done.compareAndSet(false, true)) return;
             try {
                 synchronized (INCOMING) { INCOMING.remove(this); }
-                synchronized (tokens) { tokens.clear(); }
+                synchronized (tokens) {
+                    if (result == Activity.RESULT_OK && notify && GoogleAuthOperations.enabled()
+                            && "com.google.android.gms".equals(targetPackage)
+                            && "com.google.android.gms.auth.api.credentials.assistedsignin.ui.GoogleSignInActivity".equals(targetActivity)
+                            && SystemClock.elapsedRealtime() < authDeadline && callback.isBinderAlive()) {
+                        for (Issued issued : tokens.values()) try {
+                            GoogleAuthDelegationPolicy request = GoogleAuthDelegationPolicy.parse(issued.providerKey);
+                            if (request.clientId != null && !request.serverCode && issued.result.getString("token") != null
+                                    && GoogleAuthProxy.selectedInteractiveAccount(issued.account, caller.getPackageName()))
+                                GoogleAuthOperations.remember(origin, issued.account, issued.providerKey, authEpoch);
+                        } catch (Exception error) {
+                            GoogleAuthDelegation.event("session_grant_denied=true " + GoogleAuthDelegation.failure(error));
+                        }
+                    }
+                    tokens.clear();
+                }
                 adapter.core.GoogleAuthProxy.clearInteractiveVisibility(caller.getPackageName());
                 callback.unlinkToDeath(this, 0);
                 if (notify) {

@@ -1,0 +1,73 @@
+{
+  "silent-ungranted": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "silent-ungranted",
+    "scope": "audience_id_token",
+    "startTime": 1794871573396,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "entry": "IAuthManagerService.getTokenWithAccount",
+      "spoofPackageTest": false,
+      "silentNegativeTest": true,
+      "expectedDescriptor": true,
+      "outcome": "token_not_returned",
+      "tokenPresent": false,
+      "errorCode": "BadAuthentication",
+      "recoveryIntentPresent": true
+    },
+    "endTime": 1794871575112
+  },
+  "silent-spoof": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "silent-spoof",
+    "scope": "audience_id_token",
+    "startTime": 1794871596922,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "outcome": "failed",
+      "errorType": "SecurityException",
+      "errorCode": "unclassified",
+      "entry": "IAuthManagerService.getTokenWithAccount",
+      "spoofPackageTest": true
+    },
+    "endTime": 1794871596985
+  },
+  "delegation-ui": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "delegation-ui",
+    "scope": "ac2dm",
+    "startTime": 1794871597754,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "entry": "PlayServicesChannel.delegation-ui",
+      "actualIdentity": "org.westlake.googlebootstrap.probe",
+      "outcome": "security_exception",
+      "denied": true
+    },
+    "endTime": 1794871597788
+  },
+  "delegation-provider": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "delegation-provider",
+    "scope": "ac2dm",
+    "startTime": 1794871598737,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "entry": "PlayServicesChannel.delegation-provider",
+      "actualIdentity": "org.westlake.googlebootstrap.probe",
+      "outcome": "security_exception",
+      "denied": true
+    },
+    "endTime": 1794871598796
+  },
+  "probeSignerUnchanged": true,
+  "actualProbePackage": "org.westlake.googlebootstrap.probe",
+  "ungrantedRequestDeniedByBrokerTrace": true,
+  "spoofedRequestDeniedAtAuthTransactionBoundary": true,
+  "providerTokenEventsForProbeDuringNegativeWindow": 0,
+  "sharedHostUidIsolationAccepted": false
+}

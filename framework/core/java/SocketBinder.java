@@ -141,6 +141,19 @@ public final class SocketBinder {
     private volatile int mCallerUid;
     private volatile int mCallerPid;
 
+    /** Optional verified per-connection policy. A scope ends even when the target throws. */
+    public interface CallScope extends AutoCloseable { @Override void close(); }
+    public interface CallScopes {
+        CallScope enter(IBinder target, int code, Parcel data, int flags) throws RemoteException;
+    }
+    private volatile CallScopes mCallScopes;
+    public void setCallScopes(CallScopes scopes) { mCallScopes = scopes; }
+
+    public static boolean isCallingChannel(SocketBinder channel) {
+        Inbound inbound = sInbound.get();
+        return inbound != null && inbound.channel == channel;
+    }
+
     /** Per caller uid set with setCaller: {pid, elapsedRealtime of its latest incoming call}. */
     private static final ConcurrentHashMap<Integer, long[]> sRecentCallers = new ConcurrentHashMap<>();
 
@@ -691,10 +704,13 @@ public final class SocketBinder {
     }
 
     /** As Binder.execTransact would: a failure the Parcel can carry goes back to the caller. */
-    private static boolean invoke(IBinder target, Frame call, Parcel data, Parcel reply, boolean oneway, Frame answer) {
+    private boolean invoke(IBinder target, Frame call, Parcel data, Parcel reply, boolean oneway, Frame answer) {
         try {
             if (TRACE) traceInbound(target, call.code, data);
-            return target.transact(call.code, data, reply, call.flags);
+            CallScopes scopes = mCallScopes;
+            CallScope scope = scopes == null ? null : scopes.enter(target, call.code, data, call.flags);
+            try { return target.transact(call.code, data, reply, call.flags); }
+            finally { if (scope != null) scope.close(); }
         } catch (RemoteException | RuntimeException e) {
             if (oneway) {
                 System.err.println("SocketBinder: oneway call failed: " + e);

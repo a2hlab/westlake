@@ -763,6 +763,8 @@ public final class PlayServicesChannel {
 
     public static String readDelegatedAuth(String method, android.accounts.Account account, String key) throws RemoteException {
         if (!adapter.core.GoogleAuthDelegation.enabled() || !"com.google.android.gms".equals(application().getPackageName())) return null;
+        // The authenticated app call owns this capability. Do not borrow another process's picker.
+        if (GoogleAuthOperations.present()) return GoogleAuthOperations.read(method, account, key);
         String ui = "com.google.android.gms.ui";
         if (AppProcesses.runsHere(ui)) return RemoteActivities.readDelegatedAuth(method, account, key);
         // Cache reads must not start a background UI; the verified activity route starts it.
@@ -2012,7 +2014,8 @@ public final class PlayServicesChannel {
         }
 
         /** Registers the app this channel says it is; answers the uid it now has here. */
-        private int hello(Parcel data) {
+        private synchronized int hello(Parcel data) {
+            if (mIdentified) throw new SecurityException("channel already identified");
             String claimed = data.readString();
             PackageInfo info = data.readTypedObject(PackageInfo.CREATOR);
             IBinder callback = data.readStrongBinder();
@@ -2038,6 +2041,11 @@ public final class PlayServicesChannel {
                 mOwnApplication = claimed.equals(own.packageName) && sameSignatures(info.signatures, own.signatures);
             } catch (PackageManager.NameNotFoundException e) { throw new SecurityException("host package unavailable"); }
             mChannel.setVerifiedSameApp(mIdentityEnforced && mOwnApplication);
+            if (mIdentityEnforced && !mOwnApplication && GoogleAuthOperations.enabled()) {
+                mChannel.setCallScopes((target, code, request, flags) ->
+                        GoogleAuthOperations.enter(mVerifiedInfo, mPeerPid, mVerifiedSpawner, mChannel,
+                                target, code, request, flags));
+            }
             if (claimed.equals(application().getPackageName())) {
                 // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
                 closeAll(apkFiles);

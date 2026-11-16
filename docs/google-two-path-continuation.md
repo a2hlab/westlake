@@ -5,6 +5,13 @@ The product target remains an uncertified OpenHarmony device with an existing Go
 official services in an OS-enforced sandbox, and independently replaceable services such as location.
 These changes do not establish certification, remove Google's policy restrictions, or complete that sandbox.
 
+Latest result: builds 28–29 fix FotMob's post-picker silent ID-token failure on
+the policy-1 host. Board tests cover successful replies, process restart,
+unrelated-app denial, operator revocation and explicit re-selection. See
+[continuing ID-token authorization](#continuing-id-token-authorization-builds-2829)
+for evidence and limits. Earlier build sections below retain their historical
+results; policy-3 service availability and full app/backend acceptance remain open.
+
 ## Implemented behavior
 
 ### Execute a foreign activity PendingIntent at its creator
@@ -73,7 +80,7 @@ The original data remained saved and was restored; no fresh-identity result is u
 The candidate builds on the cleaned `google-auth-broker` branch at `40a365f`, including
 `remote-activities` at `5defb5a`. It does not reintroduce the old credential-export bootstrap experiment.
 
-The final candidate, build 18, compiles 124 source files into 259 classes, packages the framework, builds all nine boot JARs
+The candidate at this stage, build 18, compiles 124 source files into 259 classes, packages the framework, builds all nine boot JARs
 and 27 boot artifacts, and passes framework preload on the OH board. The adapter runtime SHA-256 is
 `380587f43d2a6dd0add0702397f2fefafd14e4a112e05848dcc1adda1ba93f24`;
 the framework JAR is `0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452`.
@@ -413,6 +420,92 @@ It uses policy 1, preserves the original identity and grant-file hash, and leave
 certification overrides absent. The product-target restricted identity must pass
 its own service-availability gate after the lifecycle work.
 
+### Continuing ID-token authorization, builds 28–29
+
+`WESTLAKE_GOOGLE_SILENT_AUTH=1`, together with the existing delegation, identity
+enforcement and private-log guards, enables a separate silent-request path in
+the official GMS host. It is off by default. The initial supported contract is
+the synchronous legacy `IAuthManagerService.getTokenWithAccount` transaction 5
+for audience-bound ID tokens. This is the request the original FotMob APK makes.
+It does not enable arbitrary background GMS credentials, OAuth access tokens,
+server authorization codes, asynchronous auth APIs or opaque token options.
+
+The verified Google sign-in activity still loses its temporary visibility and
+token map on completion. When it returns `RESULT_OK`, a provider-approved ID-token
+request and the selected account can instead create a private persistent record.
+That record binds package, current and legacy signer, a hash of the account,
+exact audience service, allowed email/profile claims and revocation generation.
+It contains no account name or token, uses atomic replacement and owner-only
+permissions, and supplements rather than replaces the provider's operator grants.
+
+At a foreign app's verified GMS socket connection, `SocketBinder` opens a scope
+only around the matching auth transaction. `GoogleAuthOperations` parses the
+account, audience and known SDK metadata, checks claimed package names against
+the APK/spawner-verified identity, and restores the incoming Parcel position.
+Unknown options get a denying scope. A package name in a cache key or request
+Bundle is never caller proof. A connection may introduce its identity only once;
+concurrent introductions are serialized.
+
+The resulting operation has its own capability, connection liveness and deadline.
+A thread-local only locates it during the synchronous service call: a read must
+also arrive on that exact verified connection. A nested call from another peer
+cannot borrow it. The provider receives an explicit witness bound to this operation,
+independently re-verifies the original app's live spawner/APK, and rechecks its
+existing operator grants and the witness before and after network I/O. The witness
+re-reads the persistent selection and its generation. The scope closes in a
+`finally` block and discards token/expiry state when the transaction ends. Work
+dispatched elsewhere without this context remains denied.
+
+microG retains the reusable credential and returns only the authorized scoped
+token. Official GMS still constructs the normal response consumed by the original
+app. Silent calls use their actual validated options; they do not inherit the
+interactive claim-rewrite rule. The provider continues the experiment's forced
+network refresh, so this is not an optimized cache or battery-life result.
+
+Setting an account's visibility to either not-visible state revokes the app's
+saved selection when this feature is enabled. A new generation invalidates old
+selections and in-flight witnesses; a picker that began its token work before
+revocation cannot reinstate that old generation. A new explicit successful
+selection may grant access again. Provider-grant revocation remains independently
+enforced. Malformed, public or symlinked selection files fail closed. Account
+removal/re-addition and each app's own sign-out UI still need separate acceptance;
+a local sign-out is not automatically a Google consent revocation.
+
+Host tests cover 23 cases including missing permission, wrong app/signer/account/
+audience, claim expansion, unsupported token types/options, persisted re-read,
+revocation and stale re-grant, corrupt generation records and unsafe file modes.
+The shared host-UID product limitation below still applies to this experiment.
+
+Board validation used the original signed FotMob 239.17834.20261016, official
+GMS 24.40.34 and the unchanged microG provider. Java compilation, framework
+packaging, boot-image generation and board framework preload passed. The exact
+artifacts and compiled source hashes are in
+[`silent-session29/provenance.json`](../tests/google-auth/silent-session29/provenance.json).
+Build 29 adds serialized channel identification and corrupt-generation rejection
+to build 28; its sources match the deployed adapter. Native runtime, ART and shim
+inputs were reused, so this is not full source-closure validation.
+
+| Test | Observed result | Evidence |
+| --- | --- | --- |
+| Successful picker completion, build 28 | Six subsequent silent requests returned tokens through official GMS; no recovery Intent or reauthentication warning. Saved token signature and identity claims verified locally against Google public keys. | [After picker](../tests/google-auth/silent-session29/fotmob-after-picker28.json) |
+| Restart official GMS and FotMob, build 29 | Five successful silent replies without another sign-in. The saved selection was carried with the package data; the warning stayed absent. | [Process restart](../tests/google-auth/silent-session29/fotmob-process-restart29.json) |
+| Unrelated probe, build 29 | Own identity with FotMob's client ID received no token; claiming FotMob in extras was denied. Direct UI/provider delegation calls were also denied. No provider token event for the probe. | [Four negative cases](../tests/google-auth/silent-session29/negative-probe29.json) |
+| Revoke FotMob selection, build 29 | Five silent requests failed with `BadAuthentication`; no provider token was issued. The warning returned even though the previously saved token was still unexpired. | [Revocation](../tests/google-auth/silent-session29/fotmob-revocation29.json) |
+| Explicit account re-selection after revocation, build 29 | A new selection was persisted before `RESULT_OK`; six subsequent silent requests succeeded and the warning disappeared. | [Re-selection](../tests/google-auth/silent-session29/fotmob-reselection29.json) |
+
+The revocation test atomically replaced the app's generation as an operator;
+it did **not** exercise the adapter's account-visibility hook or FotMob's sign-out
+UI. The process-restart test kept the app's earlier saved token, so that saved
+value alone does not prove refresh; the new client replies and matching broker
+and provider events establish successful silent calls. No test waited for actual
+token expiry, measured FotMob backend acceptance, or exercised concurrent callers
+and caller death during a silent token request.
+
+The original official-GMS identity and provider operator-grant hash remained
+unchanged, and no separate app signup occurred. The tested host retained policy
+1 with no certification override. The policy-3 service refusal was not retested
+or resolved. Raw logs and account screenshots remain private local evidence.
+
 ## Remaining product boundaries
 
 - The official GMS and test applications still share OH UIDs within host bundles. Verified Java channels
@@ -431,10 +524,12 @@ its own service-availability gate after the lifecycle work.
 
 ## Next acceptance gates
 
-1. The chooser/rendering and Google result-handoff gate passes on policy 1; build 26 also verifies
-   the opt-in identity-claim repair. Implement and negatively test the separately authorized silent
-   refresh path, then validate backend acceptance, token expiry and session retention across restart.
-   Initial profile UI or a cryptographically valid Google token alone is insufficient.
+1. Policy-1 chooser/result handoff, identity-claim repair and the narrow synchronous silent ID-token
+   path now pass on the board, including process restart, operator revocation, explicit re-selection
+   and unrelated-app denial. Still validate backend acceptance, actual token expiry, account removal,
+   app sign-out, the account-visibility revocation hook, and concurrent/caller-death behavior during
+   silent requests. OAuth access tokens, server codes and asynchronous APIs need separate contracts
+   and tests. Initial profile UI or a cryptographically valid Google token alone is insufficient.
 2. Keep the policy-3 identity as the product-target control. Any proposed account/check-in integration must
    demonstrate service availability on that preserved identity without overriding certification policy or
    resetting identifiers. The current broker does not meet this gate.

@@ -5,21 +5,22 @@ microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-official-auth-validation.md) and
 [validation.json](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/tests/google-auth/validation.json).
 
-Latest run: [delegation validation](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-auth-delegation-validation.md),
-with results under `delegation-validation/`. The build-04 setup and preserved
-results below describe the historical baseline; the latest diagnostic host uses
-the current adapter build with the additional trace flag described below.
+Latest run: [silent ID-token authorization, builds 28–29](../../docs/google-two-path-continuation.md#continuing-id-token-authorization-builds-2829),
+with results under `silent-session29/`. Earlier [delegation validation](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-auth-delegation-validation.md)
+is preserved under `delegation-validation/`. The build-04 setup below describes
+the historical baseline; current runs use the pinned adapter in their provenance
+record with the additional feature and trace flags described below.
 
 The subsequent [26-app service retest](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-service-retest.md)
 uses the same build 11 and adds an authorized FotMob sign-in attempt. Its
 `service-retest11/` evidence keeps Google connection results separate from
 visible app behavior and full feature acceptance.
 
-The current source includes six buttons. The `spoof-package` button calls the official
+The current source includes eight buttons. The `spoof-package` button calls the official
 token Binder with `com.spotify.music` in both package options while retaining
 the probe's actual APK, signer and verified channel identity. This is a negative
 identity test, not a Spotify login or a delegated token grant. The manifest
-input key for this source is `google-official-auth-probe-v4`; earlier build
+input key for this source is `google-official-auth-probe-v5`; earlier build
 records below retain their original v1/v2 identities.
 
 The `delegation-ui` and `delegation-provider` buttons attempt the new wire
@@ -28,6 +29,16 @@ operations while retaining the probe's real APK identity. Both must return
 These are denial tests, not delegated positive controls. Actual Spotify supplied
 the positive interactive flow. Build 11 returned `RESULT_OK` and reached its
 new-account form, where the test stopped without signup.
+
+The `silent-ungranted` and `silent-spoof` buttons address the new silent ID-token
+boundary using the probe's actual verified signer. Supply a private test file
+`files/silent-auth-test.properties` with `client_id` and `claimed_package` for an
+existing authorized app. These are identifiers, not credentials. The first test
+uses the probe's real package with the other app's client ID; the second also
+claims the other app in the request extras. Neither may receive a token. Require
+the expected bound service and a completed response or explicit denial; a missing
+account, configuration, process or channel is not a pass. The response check covers
+both `authtoken` and `tokenDetails.TokenData`.
 
 ## Build
 
@@ -157,6 +168,35 @@ The general Play trace may contain private data. Keep raw traces, screenshots,
 account data and proprietary disassembly outside the repository. The checked-in
 record contains only reviewed metadata, relative timing and artifact hashes.
 
+## Silent ID-token authorization, builds 28–29
+
+The original signed FotMob APK received six silent token replies after its picker
+finished on build 28. Restarting official GMS and FotMob on build 29 produced five
+more successful replies without another sign-in. An operator generation change
+then denied five requests; explicitly selecting the account again restored six
+successful replies. The warning followed this transition: absent, present after
+revocation, absent after re-selection. See [the results and limitations](../../docs/google-two-path-continuation.md#continuing-id-token-authorization-builds-2829).
+
+Enable `WESTLAKE_GOOGLE_SILENT_AUTH=1` only in the official-GMS host alongside
+`WESTLAKE_GOOGLE_AUTH_DELEGATION=1`, `WESTLAKE_CHANNEL_IDENTITY=enforce` and
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1`, keeping the existing provider identity pins and
+operator grants. The feature is off by default. Use build 29's adapter in GMS and
+the client; the microG provider remains unchanged. Preserve package data when
+restarting processes, including `westlake-auth-sessions` in the official-GMS data
+directory. Its records contain selection bindings, not account names or tokens.
+
+The [negative probe record](silent-session29/negative-probe29.json) covers all four
+denial cases. For `silent-spoof`, the completed `SecurityException` is corroborated
+by the GMS auth-scope denial trace: the probe's generic exception handler does not
+retain the earlier descriptor-check fields. Never count an unbound or timed-out
+request as an authorization denial. The [provenance](silent-session29/provenance.json)
+pins the current probe source/APK and manifest input `google-official-auth-probe-v5`.
+
+This run validates the synchronous audience ID-token path on policy 1. Backend
+acceptance, actual token expiry, app sign-out/account removal, the visibility-API
+revocation hook, silent-request caller death/concurrency and policy 3 remain open.
+The revocation test was an operator generation update, not an app logout test.
+
 ## Host tests
 
 The broker's policies and file handling are plain Java. From the repository root:
@@ -171,6 +211,8 @@ javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java fra
 java -cp $out/delegation adapter.core.GoogleIdentityClaimsTest                 # ..._PASS 17
 javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/google-auth/host/GoogleAuthBoundaryTraceTest.java
 java -cp $out/trace GoogleAuthBoundaryTraceTest                                # ..._TEST_PASS
+javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
+java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
 java -cp $out/files adapter.core.PrivateFilesTest                              # PRIVATE_FILES_PASS 6
 ```

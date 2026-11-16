@@ -1,0 +1,41 @@
+{
+  "candidate": "29",
+  "app": "com.mobilefootie.wc2010",
+  "previousSelectionRevoked": true,
+  "explicitExistingAccountReselected": true,
+  "googleResultCode": -1,
+  "newSessionPersistedBeforeResult": true,
+  "postPickerSilentReplies": 6,
+  "silentReplyOffsetsMs": [
+    1183,
+    2397,
+    3382,
+    4270,
+    5166,
+    11612
+  ],
+  "matchingSilentProviderTokenEvents": 6,
+  "tokensReturnedThroughOfficialGms": true,
+  "recoveryIntentPresent": false,
+  "reauthenticationWarningVisible": false,
+  "tokenVerification": {
+    "signatureVerifiedWithGoogleJwks": true,
+    "issuerRecognized": true,
+    "audienceMatchesApprovedClient": true,
+    "tokenUnexpired": true,
+    "issuedAtNotFuture": true,
+    "emailClaimPresent": true,
+    "emailVerified": true,
+    "emailMatchesStoredAccountName": true,
+    "subjectMatchesStoredId": true,
+    "mustReauthenticate": "false",
+    "tokenAgeSeconds": 20
+  },
+  "newApplicationSignupEncountered": false,
+  "backendAcceptance": "unmeasured",
+  "actualTokenExpiryTested": false,
+  "originalGmsIdentityPreserved": true,
+  "operatorGrantsUnchanged": true,
+  "providerAlive": true,
+  "officialAlive": true
+}
