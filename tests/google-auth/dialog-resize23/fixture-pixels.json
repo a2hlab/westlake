@@ -1,0 +1,82 @@
+[
+  {
+    "stage": 0,
+    "display": [
+      1200,
+      1920
+    ],
+    "bounds": [
+      300,
+      841,
+      900,
+      1079
+    ],
+    "bottomMarker": [
+      30,
+      179,
+      570,
+      209
+    ],
+    "passed": true
+  },
+  {
+    "stage": 1,
+    "display": [
+      1200,
+      1920
+    ],
+    "bounds": [
+      300,
+      600,
+      900,
+      1320
+    ],
+    "bottomMarker": [
+      30,
+      660,
+      570,
+      690
+    ],
+    "passed": true
+  },
+  {
+    "stage": 2,
+    "display": [
+      1200,
+      1920
+    ],
+    "bounds": [
+      301,
+      781,
+      899,
+      1139
+    ],
+    "bottomMarker": [
+      30,
+      300,
+      568,
+      328
+    ],
+    "passed": true
+  },
+  {
+    "stage": 3,
+    "display": [
+      1200,
+      1920
+    ],
+    "bounds": [
+      0,
+      0,
+      600,
+      480
+    ],
+    "bottomMarker": [
+      31,
+      421,
+      569,
+      449
+    ],
+    "passed": true
+  }
+]

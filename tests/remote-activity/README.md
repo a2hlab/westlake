@@ -69,3 +69,15 @@ endpoint, since they deliberately use the same package name.
 The [implementation report](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/remote-activity-results.md),
 on the experiment branch with its evidence, separates
 these contract tests from actual Spotify/Google authentication results.
+
+For the dialog resize regression, launch the client APK with activity
+`org.westlake.remoteactivity.fixture.Fixture$Resize` and no Google endpoints.
+The dialog starts red (600 x 240 pixels). Tap it once per stage to grow it to
+green (600 x 720), shrink it to blue (600 x 360), and move it to the display
+origin in magenta (600 x 480). Each change runs one second after the tap, so
+capture after the delay and layout have settled. Do not tap again to force a repaint.
+Run `python3 tests/remote-activity/check_resize_capture.py red.jpeg green.jpeg
+blue.jpeg magenta.jpeg` with Pillow installed. It checks the displayed color
+bounds against the requested size and position, and the yellow bottom marker
+against its new unscaled location. Java layout measurements alone cannot detect
+a stale compositor crop or buffer geometry. The fixture does not use accounts.

@@ -200,6 +200,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // ViewRootImpl passes LayoutParams to relayout only when they changed (null otherwise), and
     // placement needs gravity, x/y and flags on every relayout, so each window's are kept.
     private final Map<IBinder, WindowManager.LayoutParams> mWindowAttrs = new HashMap<>();
+    private final Map<IBinder, Point> mSurfaceSizes = new java.util.concurrent.ConcurrentHashMap<>();
 
     private WindowManager.LayoutParams rememberAttrs(IWindow window, WindowManager.LayoutParams attrs) {
         synchronized (mWindowAttrs) {
@@ -409,14 +410,38 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
 
     /** Move a placed window's layer to its frame; a size update resets the layer to (0,0). */
     private static void applyPosition(SurfaceControl sc, Rect frame) {
-        if (sc == null || !sc.isValid() || (frame.left == 0 && frame.top == 0)) return;
-        try {
-            new SurfaceControl.Transaction()
-                    .setBufferSize(sc, frame.width(), frame.height())
-                    .setPosition(sc, frame.left, frame.top)
-                    .apply();
+        if (sc == null || !sc.isValid()) return;
+        try (SurfaceControl.Transaction transaction = new SurfaceControl.Transaction()) {
+            // Android defers setBufferSize until apply(), but our native position
+            // bridge immediately sets RS bounds using the SC's current size.
+            // Commit the size first, otherwise a growing WRAP_CONTENT dialog is
+            // clipped to its old height (including asynchronously loaded rows).
+            transaction.setBufferSize(sc, frame.width(), frame.height()).apply();
+            transaction.setPosition(sc, frame.left, frame.top).apply();
         } catch (Throwable t) {
             System.err.println("[OH_WSA] layer position failed: " + t);
+        }
+    }
+
+    /** Repaint once after resizing the OH producer, even when the app has no animation/input. */
+    private void repaintAfterResize(IWindow window, int width, int height) {
+        Point previous = mSurfaceSizes.put(window.asBinder(), new Point(width, height));
+        if (previous == null || (previous.x == width && previous.y == height)) return;
+        try {
+            Object owner = WindowCallbackBridge.viewRootOf(window);
+            if (!(owner instanceof android.view.ViewRootImpl)) return;
+            View view = ((android.view.ViewRootImpl) owner).getView();
+            if (view == null) return;
+            // relayout runs during traversal. A callback in the next animation
+            // phase repaints after this traversal's BLAST producer-size update.
+            // Without it a quiet dialog can retain its old buffer until input.
+            // invalidate() does not request another relayout, so this is bounded
+            // to one repaint per size change, not a recurring rendering loop.
+            view.postOnAnimation(() -> {
+                if (view.isAttachedToWindow()) view.invalidate();
+            });
+        } catch (ReflectiveOperationException error) {
+            Log.w(TAG, "Could not schedule resize repaint", error);
         }
     }
 
@@ -1053,6 +1078,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
      */
 
     public void remove(IWindow window) throws RemoteException {
+        mSurfaceSizes.remove(window.asBinder());
         synchronized (mHeldBack) {
             mHeldBack.remove(window.asBinder());
             IBinder token = mBaseWindowTokens.remove(window.asBinder());
@@ -1310,6 +1336,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 // EGL-bound nw -> 2nd eglCreateWindowSurface failed -> libhwui abort.
                 nativeAttachSessionToSc(outSurfaceControl, sessionId);
                 applyPosition(outSurfaceControl, placed);
+                repaintAfterResize(window, width, height);
 
                 // G2.14r: instead of adding a new BCP native method (which
                 // requires boot image rebuild), the session ID is communicated

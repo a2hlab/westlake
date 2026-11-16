@@ -33,6 +33,12 @@
 #include <cstring>  // 2026-05-02 G2.14r: std::strncpy / std::strcpy in BBQ alloc
 #include <cstdio>   // WESTLAKE §441: stderr/fprintf were arriving only transitively
 #include <cstdlib>
+#include <limits>
+
+struct OHNativeWindow;
+struct ANativeWindow;
+extern "C" int32_t NativeWindowHandleOpt(OHNativeWindow* window, int code, ...);
+extern "C" OHNativeWindow* oh_anw_get_oh(ANativeWindow* window);
 
 extern "C" int HiLogPrint(int type, int level, unsigned int domain,
                           const char* tag, const char* fmt, ...)
@@ -550,6 +556,11 @@ void BBQ_nativeUpdate(JNIEnv*, jclass, jlong bbqPtr, jlong scPtr,
         ALOGW("BBQ.update: invalid bbqPtr=%lld", (long long)bbqPtr);
         return;
     }
+    if (width <= 0 || height <= 0 || width > std::numeric_limits<int32_t>::max()
+            || height > std::numeric_limits<int32_t>::max()) {
+        ALOGW("BBQ.update: invalid buffer dimensions");
+        return;
+    }
     b->width = static_cast<int32_t>(width);
     b->height = static_cast<int32_t>(height);
     b->format = format;
@@ -588,6 +599,31 @@ void BBQ_nativeUpdate(JNIEnv*, jclass, jlong bbqPtr, jlong scPtr,
         return;
     }
     b->ohNativeWindow = nw;
+    // Updating RS layer bounds alone scales the old buffer. BLAST must also
+    // resize its producer, so HWUI can draw the newly exposed part of a dialog.
+    // Use the stable OH C boundary (GET returns height before width). Preserve
+    // usage across SET_BUFFER_GEOMETRY, which can reset producer configuration.
+    // The window manager normally returns the AOSP-layout AdapterAnw wrapper.
+    // OH C operations must receive the underlying OH window, not that wrapper.
+    auto* window = oh_anw_get_oh(static_cast<ANativeWindow*>(nw));
+    if (!window) window = static_cast<OHNativeWindow*>(nw);
+    int32_t oldHeight = 0, oldWidth = 0;
+    const int geometryQuery = NativeWindowHandleOpt(window, 1 /* GET_BUFFER_GEOMETRY */,
+                                                   &oldHeight, &oldWidth);
+    if (geometryQuery != 0 || oldWidth != width || oldHeight != height) {
+        uint64_t usage = 0;
+        const int usageQuery = NativeWindowHandleOpt(window, 4 /* GET_USAGE */, &usage);
+        const int resized = usageQuery == 0
+                ? NativeWindowHandleOpt(window, 0 /* SET_BUFFER_GEOMETRY */,
+                                        static_cast<int32_t>(width), static_cast<int32_t>(height))
+                : usageQuery;
+        const int restored = resized == 0
+                ? NativeWindowHandleOpt(window, 5 /* SET_USAGE */, usage) : resized;
+        std::fprintf(stderr, "[WL-BLAST-RESIZE] session=%d old=%dx%d new=%dx%d resize=%d usage=%d\n",
+                sessionId, oldWidth, oldHeight, static_cast<int>(width), static_cast<int>(height),
+                resized, restored);
+        if (resized != 0 || restored != 0) return;
+    }
     ALOGI("BBQ.update: sessionId=%d → OHNativeWindow=%p (%dx%d fmt=%d)",
           sessionId, nw, static_cast<int>(width), static_cast<int>(height), format);
     if (std::getenv("WESTLAKE_SOURCE_LOG_STDERR")) {

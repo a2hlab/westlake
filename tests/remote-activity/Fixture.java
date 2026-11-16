@@ -19,6 +19,47 @@ public final class Fixture {
         return new Intent("westlake.test.REMOTE").setComponent(new ComponentName("com.google.android.gms", PREFIX + name));
     }
     public static class Host extends Activity {}
+    /** Tap the colored dialog to grow, shrink, then move it to the display origin. */
+    public static class Resize extends Activity {
+        int stage;
+        android.app.Dialog dialog;
+        android.view.View content;
+        final int[] heights = {240, 720, 360, 480};
+        final int[] colors = {0xffff0000, 0xff00ff00, 0xff0000ff, 0xffff00ff};
+        @Override public void onCreate(Bundle state) {
+            super.onCreate(state);
+            android.view.View background = new android.view.View(this);
+            background.setBackgroundColor(android.graphics.Color.BLACK);
+            setContentView(background);
+            dialog = new android.app.Dialog(this);
+            dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+            content = new android.view.View(this) {
+                final android.graphics.Paint paint = new android.graphics.Paint();
+                @Override protected void onDraw(android.graphics.Canvas canvas) {
+                    paint.setColor(android.graphics.Color.YELLOW);
+                    canvas.drawRect(30, getHeight() - 60, getWidth() - 30, getHeight() - 30, paint);
+                    paint.setColor(android.graphics.Color.WHITE);
+                    canvas.drawRect(32, 32, 48, 48, paint);
+                }
+            };
+            content.setOnClickListener(view -> android.os.Handler.createAsync(getMainLooper())
+                    .postDelayed(() -> { stage = (stage + 1) % heights.length; resize(); }, 1000));
+            dialog.setContentView(content);
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0));
+            dialog.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            dialog.show();
+            resize();
+        }
+        void resize() {
+            content.setBackgroundColor(colors[stage]);
+            android.view.Window window = dialog.getWindow();
+            window.setGravity(stage == 3 ? android.view.Gravity.TOP | android.view.Gravity.LEFT
+                    : android.view.Gravity.CENTER);
+            window.setLayout(600, heights[stage]);
+            System.err.println("[WL-RESIZE-TEST] stage=" + stage + " width=600 height=" + heights[stage]);
+        }
+        @Override public void onDestroy() { if (dialog != null) dialog.dismiss(); super.onDestroy(); }
+    }
     public static class DiscoveryService extends android.app.Service {
         @Override public android.os.IBinder onBind(Intent intent) { return new android.os.Binder(); }
     }

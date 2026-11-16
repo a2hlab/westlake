@@ -1,0 +1,40 @@
+{
+  "candidate": "23",
+  "package": "com.mobilefootie.wc2010",
+  "originalSignedApk": true,
+  "apkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+  "accountRowAutomaticallyVisible": true,
+  "extraRedrawTapRequired": false,
+  "existingAccountSelected": true,
+  "googleActivityResult": -1,
+  "callerReceivedResult": -1,
+  "appSignedInUiShown": true,
+  "sessionSurvivedUpdate": false,
+  "separateSignupPresented": false,
+  "durableAppSessionAccepted": false,
+  "policy3Accepted": false,
+  "dialogResizedFrom414To669": true,
+  "tokenEvents": [
+    {
+      "time": 1794864845879,
+      "kind": "oauth2",
+      "tokenPresent": true,
+      "expiryPresent": true,
+      "consentRequired": false
+    },
+    {
+      "time": 1794864846982,
+      "kind": "oauth2",
+      "tokenPresent": true,
+      "expiryPresent": true,
+      "consentRequired": false
+    },
+    {
+      "time": 1794864847958,
+      "kind": "id_token",
+      "tokenPresent": true,
+      "expiryPresent": true,
+      "consentRequired": false
+    }
+  ]
+}
