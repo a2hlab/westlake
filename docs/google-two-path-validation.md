@@ -1,5 +1,11 @@
 # Live microG authentication and official Play API validation
 
+**Follow-up: official SDK token issuance and Spotify Google login failed.**
+The [official-auth validation](google-official-auth-validation.md) confirms
+`BadAuthentication` from official GMS while the direct microG control succeeds,
+plus a separate unsuccessful Spotify Google login. The bounded results below
+remain valid; they do not establish general official GMS authentication.
+
 **Passed a bounded board validation on 2026-11-15 Pacific / 2026-11-16 UTC.**
 One client obtained scoped tokens from a live microG host and a nonzero Advertising
 ID from a separate official GMS host. Official Play Store used the same auth

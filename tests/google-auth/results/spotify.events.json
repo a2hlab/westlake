@@ -1,0 +1,82 @@
+[
+  {
+    "line": 871,
+    "event": "[WL-PLAY] connected to wl.twopath.gms01"
+  },
+  {
+    "line": 894,
+    "event": "[WL-PLAY] connected to wl.twopath.store01"
+  },
+  {
+    "line": 1000,
+    "event": "[WL-PLAY] connected to wl.twopath.gms01/com.google.android.gms.persistent"
+  },
+  {
+    "line": 1016,
+    "event": "[WL-PLAY] bound com.google.android.gms/.gcm.PushMessagingRegistrarProxy"
+  },
+  {
+    "line": 1104,
+    "event": "[WL-PLAY] bound com.google.android.gms/.chimera.GmsApiService"
+  },
+  {
+    "line": 1153,
+    "event": "[WL-PLAY] bound com.google.android.gms/.ads.identifier.service.AdvertisingIdService"
+  },
+  {
+    "line": 1156,
+    "event": "[WL-PLAY] bound com.android.vending/com.google.android.finsky.externalreferrer.GetInstallReferrerService"
+  },
+  {
+    "line": 1159,
+    "event": "[WL-PLAY] bound com.android.vending/com.google.android.finsky.externalreferrer.GetInstallReferrerService"
+  },
+  {
+    "line": 1229,
+    "event": "[WL-PLAY] connected to wl.twopath.store01/com.android.vending:background"
+  },
+  {
+    "line": 1230,
+    "event": "[WL-PLAY] bound com.android.vending/com.google.android.finsky.appcontentservice.engage.AppEngageServiceV2"
+  },
+  {
+    "line": 1509,
+    "event": "[WL-PLAY] bound com.android.vending/com.google.android.finsky.ageverification.service.AgeSignalsService"
+  },
+  {
+    "line": 1557,
+    "event": "[WESTLAKE-INPUTMAIN-727] receiver tap=(600,1720) down=0 up=0"
+  },
+  {
+    "line": 1595,
+    "event": "[WESTLAKE-TOUCHFD-798] command click=(600,1720) result=0"
+  },
+  {
+    "line": 1598,
+    "event": "[WESTLAKE-TOUCHFD-798] command click=(590,1080) result=0"
+  },
+  {
+    "line": 1602,
+    "event": "[WESTLAKE-TOUCHFD-798] command click=(590,1080) result=0"
+  },
+  {
+    "line": 1603,
+    "event": "[WESTLAKE-INPUTMAIN-727] receiver tap=(590,1080) down=0 up=0"
+  },
+  {
+    "line": 1613,
+    "event": "[WL-PLAY] bound com.google.android.gms/.chimera.GmsApiService"
+  },
+  {
+    "line": 1801,
+    "event": "[B47-SLA] ENTRY bundle=com.spotify.music ability=com.google.android.gms.auth.api.signin.internal.SignInHubActivity recordId=3"
+  },
+  {
+    "line": 1806,
+    "event": "[B47-SLA] BEFORE scheduleTransaction className=com.google.android.gms.auth.api.signin.internal.SignInHubActivity"
+  },
+  {
+    "line": 1847,
+    "event": "[WESTLAKE-RESULT] delivered requestCode=822892657 resultCode=0 data=true to com.spotify.login.loginflowimpl.LoginActivity"
+  }
+]

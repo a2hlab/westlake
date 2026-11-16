@@ -1,0 +1,33 @@
+{
+  "schema": "westlake-google-signin-corpus-v1",
+  "status": "failed_to_complete_signin",
+  "package": "com.spotify.music",
+  "version_name": "9.1.86.2432",
+  "version_code": 146555520,
+  "apk_sha256": "8ae192315399a972623f56c7e9322fd2fb625720f3167137655a1b9c29e202c7",
+  "apk_modified": false,
+  "native_runtime_adaptations": true,
+  "start_time_ms": 1794790868471,
+  "observation_end_time_ms": 1794791304281,
+  "account_signup_authorized": false,
+  "account_signup_performed": false,
+  "google_account_picker_observed": false,
+  "logged_in_session_observed": false,
+  "google_button_invoked": true,
+  "bundled_signin_hub_launched": true,
+  "activity_result_code": 0,
+  "activity_result_has_data": true,
+  "google_status_code": "not_captured",
+  "screen_message": "Something went wrong. Try again.",
+  "official_gms_service_connection_observed": true,
+  "direct_microg_auth_connection_configured": false,
+  "microg_client_grant_added": false,
+  "auth_proxy_events_in_app_window": 0,
+  "causal_limit": "The app failure is confirmed; cross-package activity/result routing is a source-confirmed gap. No captured Google status proves that it is the sole cause, and the token probe failure must not be attributed to this app without further evidence.",
+  "input": "Private PID mailbox, explicit main-queue click and DOWN/UP injection; not a physical-touch acceptance test.",
+  "evidence": [
+    "spotify.events.json",
+    "spotify-window-auth.events.json",
+    "spotify-error.jpeg"
+  ]
+}

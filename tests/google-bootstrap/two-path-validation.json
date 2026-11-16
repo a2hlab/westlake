@@ -144,5 +144,14 @@
     "policy_host_checks": 8,
     "classifier_host_tests": 6,
     "probe_apks_built_and_signature_verified": true
+  },
+  "official_auth_followup": {
+    "status": "failed_official_token_and_spotify_signin",
+    "source": "../google-auth/validation.json",
+    "direct_microg_control_passed": true,
+    "official_google_auth_util_error": "BadAuthentication",
+    "official_auth_manager_binder_error": "BadAuthentication",
+    "spotify_google_signin_completed": false,
+    "previous_bounded_scope_remains_valid": true
   }
 }

@@ -1,0 +1,4 @@
+[WL-AUTH-PROXY] time=1794790859244 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794790859246 client_credential_read=getPassword result=withheld
+[WL-AUTH-PROXY] time=1794790864988 client_credential_read=peekAuthToken result=withheld
+[WL-AUTH-PROXY] time=1794790864989 client_credential_read=getPassword result=withheld

@@ -2,11 +2,15 @@
 
 Discussion snapshot: 2026-11-15. Audience: Westlake implementers and reviewers.
 
-Board follow-up: [credential-handoff results](google-bootstrap-board-results.md).
-microG login/check-in and official-GMS credential reuse succeeded in the tested
-prototype. The official configuration continued to report
-`uncertified_status=1`; the sampled API results did not establish an improvement.
-The continuous proxy and a solution to Google's device restrictions remain open.
+Board follow-ups: [credential handoff](google-bootstrap-board-results.md),
+[continuous token proxy](google-two-path-validation.md), and
+[official authentication / Spotify failures](google-official-auth-validation.md).
+The continuous proxy now issues scoped tokens from live microG while selected
+official services run separately. Official Store catalogue/download/install and
+Advertising ID passed bounded tests. Official GMS token issuance returned
+`BadAuthentication`, however, and Spotify Google login failed. The token
+mediation and cross-package activity/result contracts remain incomplete;
+official GMS also continues to report `uncertified_status=1`.
 
 The intended direction is to keep **official Google Play services and Play
 Store running in a sandbox**, supported by a GrapheneOS-style compatibility
@@ -18,8 +22,8 @@ The central hypothesis is still open: **can state obtained through microG make
 the official Google backend usable on Westlake after its own fresh policy and
 credential checks?** Source inspection supports concrete integration points;
 it does not establish Google's acceptance. An opt-in bootstrap experiment is
-implemented locally. A continuous microG authentication proxy is still a design
-proposal. The [experiment runbook](google-bootstrap-experiment.md) describes
+implemented, followed by a continuous proxy with the bounded results and gaps
+linked above. The [experiment runbook](google-bootstrap-experiment.md) describes
 the executable steps; this note preserves the reasoning and intended scope.
 
 ## Product requirements and intended direction

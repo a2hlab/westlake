@@ -1,0 +1,78 @@
+{
+  "schema": "westlake-official-auth-validation-v1",
+  "status": "failed_official_token_and_spotify_signin",
+  "validation_date_utc": "2026-11-16",
+  "validation_date_pacific": "2026-11-15",
+  "framework_baseline_commit": "dbcc2f08c20a16c313284410bd46691e6ccd8254",
+  "framework_changed": false,
+  "framework_source_inputs_verified": 120,
+  "probe_source_inputs_match_tested_build": true,
+  "sdk_artifacts_verified": 21,
+  "sdk_root": "com.google.android.gms:play-services-auth-base:18.1.0",
+  "probe_apk_sha256": "5772f59a64c44b61abf337f125dc5e24aaaecc651bebc503f905379ede894535",
+  "probe_current_signer_sha256": "77e047c82dd1571e2f1b1e745cddc6e35dae8e7a3fcde358a3f79c4d185653ab",
+  "gms_version": 244034029,
+  "gms_base_sha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "runtime_dex_jar_sha256": "d36741190dea5b7dbc07bfa1471100f657d1bbc524a23ea9f58b655d9f5f523a",
+  "results": {
+    "direct_microg_forced_token_control": {
+      "passed": true,
+      "request_id": 599,
+      "source": "results/control.json"
+    },
+    "official_google_auth_util": {
+      "passed": false,
+      "error": "BadAuthentication",
+      "repeated": true,
+      "source": "results/sdk.json"
+    },
+    "official_auth_manager_binder": {
+      "passed": false,
+      "error": "BadAuthentication",
+      "repeated": true,
+      "source": "results/binder.json"
+    },
+    "spotify_google_signin": {
+      "passed": false,
+      "completed": false,
+      "source": "results/spotify.json"
+    }
+  },
+  "confirmed_token_gap": "Official GMS requests peekAuthToken and getPassword; current proxy withholds both. No provider token request follows either official token attempt.",
+  "source_confirmed_activity_gap": "External Google activities and their results are not transported through the current service channel; local results and same-app no-result home launches are insufficient.",
+  "spotify_cause_limit": "Observed hub launch, cancelled result and generic error. Google status not captured; sole cause not proven.",
+  "full_oauth_flow_passed": false,
+  "account_signup_performed": false,
+  "production_isolation_proven": false,
+  "google_server_rejection_of_hybrid_proven": false,
+  "previous_bounded_result_remains_valid": "../google-bootstrap/two-path-validation.json",
+  "implementation_still_required": [
+    "Verified cross-package activity/result transport",
+    "Explicit token mediation preserving verified original caller and scope",
+    "Consent and reauthentication lifecycle"
+  ],
+  "not_tested": [
+    "OAuth ID-token or server-auth-code completion",
+    "Maps/location",
+    "FCM delivery",
+    "Billing",
+    "Play Integrity",
+    "Other corpus app logins",
+    "Long-term server policy"
+  ],
+  "evidence_sha256": {
+    "results/binder.json": "0599f7f4840a093b0bb324c6deb1fea4390459204850790fe514328a1cd319bb",
+    "results/control.json": "d8258060fc2d10ebbb53a71f24d0557b26b59436528638a49f2cfe904e3e95b0",
+    "results/first-binder.json": "565117a94d76fa6dedd43ce4de4d54d587683398929e1868f9842b68d2e62fa5",
+    "results/first-sdk.json": "af066a7c35a76ff8cfb7f84af999f3a30507b399ae87139f2ae56aa3ad4b7780",
+    "results/microg.events.txt": "ff37147fecfa5008e7564652ceaca386864fea38152f6d75ef4e08b87fb8227c",
+    "results/official-gms.events.txt": "99ad8bf0cfde3a82482da8a1fa381a7241c7792e4e1225188fa463e449f38ea0",
+    "results/probe-build.json": "f2a05a19bd08d46bf0ac15632131209720bfc7e6cf6ae940fdd24bcaec5185e3",
+    "results/processes.json": "d2df599f6b2c7ddcfa0760ee66f35dedc14f9582b3b764ce0312941e0d364e84",
+    "results/sdk.json": "1534f35c1a6c72166018cd6b0eb3e6234895965d854cde9857b69bbc0d00d5fc",
+    "results/spotify-error.jpeg": "bf5bed0034d50f69fce8ab9fada8f67a7c22d8fa1443fd56161c60a1b6e1f5ae",
+    "results/spotify-window-auth.events.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "results/spotify.events.json": "e4d4a178ca53f9179e8b1bec3f89b7763348cc2f1bd190181be6bba11ee45b72",
+    "results/spotify.json": "1f24d7f5442a0380ef139ff74efc9524761b8abc58dac25ebdb9f3f029f7c454"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "collected_utc": "2026-11-16T01:08:26.241133+00:00",
+  "processes": [
+    {
+      "case": "google-two-path-microg-restart04",
+      "pid": 22024,
+      "parent": 22009,
+      "native_uid": 20010056,
+      "process_name": "com.google.android.gms:ui",
+      "mount_namespace": "mnt:[4026533044]"
+    },
+    {
+      "case": "google-two-path-official-restart04",
+      "pid": 25838,
+      "parent": 25823,
+      "native_uid": 20010056,
+      "process_name": "com.google.android.gms",
+      "mount_namespace": "mnt:[4026533045]"
+    },
+    {
+      "case": "google-two-path-store04",
+      "pid": 22853,
+      "parent": 22822,
+      "native_uid": 20010056,
+      "process_name": "com.android.vending",
+      "mount_namespace": "mnt:[4026533047]"
+    },
+    {
+      "case": "google-signin-spotify-prepare01",
+      "pid": 29993,
+      "parent": 29963,
+      "native_uid": 20010056,
+      "process_name": "com.spotify.music",
+      "mount_namespace": "mnt:[4026533048]"
+    }
+  ],
+  "sdk_probe_stopped": true,
+  "production_isolation_proven": false
+}
