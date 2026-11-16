@@ -102,8 +102,12 @@ public final class PlayServicesChannel {
     private static final int MODULE_FILE = 18;
     /** To a host, from a client: the module files the host shares (ADR-0005, PlayModuleFiles.list). */
     private static final int MODULE_LIST = 19;
+    /** A narrow, separately authorized account/token provider; never a Play API route. */
+    private static final int AUTH_PROVIDER = 20;
     private static final int QUERY_ACTIVITIES = 21;
     private static final int START_ACTIVITY_FOR_RESULT = 22;
+    private static final int DELEGATED_AUTH = 23;
+    private static final int READ_DELEGATED_AUTH = 24;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -388,6 +392,7 @@ public final class PlayServicesChannel {
 
     private static final Channel SERVICES = new Channel(CONNECT, "play-services");
     private static final Channel STORE = new Channel(STORE_CONNECT, "play-store");
+    private static final Channel AUTH = new Channel("WESTLAKE_GOOGLE_AUTH_CONNECT", "microg-auth");
 
     /** The hosts this process is a client of, the Play services process first. */
     private static List<Channel> channels() {
@@ -599,7 +604,15 @@ public final class PlayServicesChannel {
         synchronized (CLIENT_LOCK) {
             if (c.binder != null && c.binder.isAlive()) return c.binder.getRemoteRoot();
             try {
-                SocketBinder channel = new SocketBinder(SocketBinder.connect(name), null, c.label);
+                int fd = SocketBinder.connect(name);
+                if (c == AUTH) {
+                    try { verifyAuthProvider(fd); }
+                    catch (IOException | RuntimeException e) {
+                        android.os.ParcelFileDescriptor.adoptFd(fd).close();
+                        throw e;
+                    }
+                }
+                SocketBinder channel = new SocketBinder(fd, null, c.label);
                 IBinder root = channel.getRemoteRoot();
                 hello(c, root);
                 c.binder = channel;
@@ -658,6 +671,77 @@ public final class PlayServicesChannel {
             data.recycle();
             reply.recycle();
         }
+    }
+
+    /** Pin the provider to the root spawner and APK selected by the launcher, before sending account data. */
+    private static void verifyAuthProvider(int fd) throws IOException {
+        SpawnerIdentity.Vouched provider = SpawnerIdentity.ask(
+                System.getenv("WESTLAKE_GOOGLE_AUTH_SPAWNER"), SocketBinder.peerPid(fd));
+        if (provider == null) throw new SecurityException("auth provider is not vouched for");
+        try {
+            String expected = System.getenv("WESTLAKE_GOOGLE_AUTH_APK_SHA256");
+            if (!"com.google.android.gms".equals(provider.packageName) || provider.apks.length == 0
+                    || expected == null || !expected.matches("[0-9a-f]{64}")) {
+                throw new SecurityException("auth provider pin missing");
+            }
+            java.security.MessageDigest hash = java.security.MessageDigest.getInstance("SHA-256");
+            try (java.io.InputStream in = new android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    android.os.ParcelFileDescriptor.dup(provider.apks[0]))) {
+                byte[] buffer = new byte[65536];
+                for (int n; (n = in.read(buffer)) != -1;) hash.update(buffer, 0, n);
+            }
+            StringBuilder actual = new StringBuilder();
+            for (byte b : hash.digest()) actual.append(String.format("%02x", b & 255));
+            if (!expected.equals(actual.toString())) throw new SecurityException("auth provider APK differs");
+            System.err.println("[WL-AUTH-PROXY] provider_launch_verified=true pid=" + SocketBinder.peerPid(fd));
+        } catch (java.security.NoSuchAlgorithmException e) { throw new IOException("SHA-256 unavailable"); }
+        finally { provider.close(); }
+    }
+
+    public static IBinder remoteAuthService() {
+        IBinder root = root(AUTH);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            root.transact(AUTH_PROVIDER, data, reply, 0);
+            reply.readException(); return reply.readStrongBinder();
+        } catch (RemoteException e) { return null; }
+        finally { data.recycle(); reply.recycle(); }
+    }
+
+    /** Only the pinned microG connection can query an account-selection witness. */
+    static boolean authProviderCalling() {
+        IBinder provider = root(AUTH);
+        return provider != null && SocketBinder.isCallingPeer(provider);
+    }
+
+    public static String readDelegatedAuth(String method, android.accounts.Account account, String key) throws RemoteException {
+        if (!adapter.core.GoogleAuthDelegation.enabled() || !"com.google.android.gms".equals(application().getPackageName())) return null;
+        String ui = "com.google.android.gms.ui";
+        if (AppProcesses.runsHere(ui)) return RemoteActivities.readDelegatedAuth(method, account, key);
+        // Cache reads must not start a background UI; the verified activity route starts it.
+        Channel channel = processChannel(AppProcesses.socketOf(ui));
+        IBinder target = channel == null ? null : root(channel);
+        if (target == null) return null;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeString(method); data.writeTypedObject(account, 0); data.writeString(key);
+            if (!target.transact(READ_DELEGATED_AUTH, data, reply, 0)) return null;
+            reply.readException(); return reply.readString();
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    static android.os.Bundle delegatedAuth(PackageInfo origin, int pid, String spawner,
+            android.accounts.Account account, String key, IBinder witness, String invalidate) throws RemoteException {
+        IBinder provider = root(AUTH);
+        if (provider == null) throw new RemoteException("auth provider unavailable");
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeTypedObject(origin, 0); data.writeInt(pid); data.writeString(spawner);
+            data.writeTypedObject(account, 0); data.writeString(key); data.writeStrongBinder(witness); data.writeString(invalidate);
+            if (!provider.transact(DELEGATED_AUTH, data, reply, 0)) throw new RemoteException("delegation unavailable");
+            reply.readException(); return reply.readBundle(PlayServicesChannel.class.getClassLoader());
+        } finally { data.recycle(); reply.recycle(); }
     }
 
     private static <T extends Parcelable> T callForObject(Channel c, int code, Parcelable.Creator<T> creator, Marshal args) {
@@ -1575,6 +1659,8 @@ public final class PlayServicesChannel {
         private boolean mIdentityEnforced;
         private boolean mOwnApplication;
         private PackageInfo mVerifiedInfo;
+        private String mVerifiedSpawner;
+        private IBinder mAuthProvider;
 
         Root(int peerPid) {
             mPeerPid = peerPid;
@@ -1592,10 +1678,52 @@ public final class PlayServicesChannel {
                 return true;
             }
             if (!mIdentified) throw new SecurityException("channel has not said who it is");
+            if (adapter.core.GoogleAuthProxy.provider() && !mOwnApplication && code != AUTH_PROVIDER && code != DELEGATED_AUTH) {
+                throw new SecurityException("authentication namespace exposes only its token provider");
+            }
             IPackageManager packages = ActivityThread.getPackageManager();
             int user = UserHandle.myUserId();
             reply.writeNoException();
             switch (code) {
+                case READ_DELEGATED_AUTH: {
+                    if (!mIdentityEnforced || !mOwnApplication || !adapter.core.GoogleAuthDelegation.enabled()
+                            || !"com.google.android.gms".equals(application().getPackageName()))
+                        throw new SecurityException("delegated reads require the verified official app");
+                    String method = data.readString();
+                    android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
+                    reply.writeString(RemoteActivities.readDelegatedAuth(method, account, data.readString()));
+                    return true;
+                }
+                case DELEGATED_AUTH: {
+                    if (!mIdentityEnforced || mVerifiedInfo == null || mVerifiedInfo.signingInfo == null)
+                        throw new SecurityException("unverified broker");
+                    android.content.pm.Signature[] broker = mVerifiedInfo.signingInfo.getApkContentsSigners();
+                    if (broker.length != 1) throw new SecurityException("ambiguous broker signer");
+                    try {
+                        adapter.core.GoogleAuthDelegation.requireBroker(mVerifiedInfo.packageName, broker[0].toByteArray());
+                        PackageInfo origin = data.readTypedObject(PackageInfo.CREATOR);
+                        int originPid = data.readInt(); String spawner = data.readString();
+                        android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
+                        String key = data.readString(); IBinder witness = data.readStrongBinder(); String invalidate = data.readString();
+                        if (origin == null || origin.signingInfo == null || origin.signatures == null
+                                || origin.signatures.length != 1 || origin.signingInfo.getApkContentsSigners().length != 1)
+                            throw new SecurityException("unverified origin");
+                        SpawnerIdentity.Vouched proof = SpawnerIdentity.ask(spawner, originPid);
+                        if (proof == null) throw new SecurityException("origin is not live");
+                        if (!origin.packageName.equals(proof.packageName) || proof.apks.length == 0) {
+                            proof.close(); throw new SecurityException("origin launch mismatch");
+                        }
+                        if (!certificatesVerdict(origin.signatures, origin.signingInfo, proof).startsWith("match"))
+                            throw new SecurityException("origin signer mismatch");
+                        reply.writeBundle(adapter.core.GoogleAuthDelegation.provide(mVerifiedInfo.packageName, broker[0].toByteArray(),
+                                origin.packageName, origin.signingInfo.getApkContentsSigners()[0].toByteArray(),
+                                origin.signatures[0].toByteArray(), account, key, witness, invalidate));
+                        return true;
+                    } catch (Exception error) {
+                        adapter.core.GoogleAuthDelegation.event("provider_denied=true " + adapter.core.GoogleAuthDelegation.failure(error));
+                        throw new SecurityException("delegation refused");
+                    }
+                }
                 case QUERY_ACTIVITIES: {
                     if (!mIdentityEnforced || mVerifiedInfo == null) throw new SecurityException("activity identity not verified");
                     Intent intent = data.readTypedObject(Intent.CREATOR);
@@ -1609,8 +1737,24 @@ public final class PlayServicesChannel {
                     ComponentName caller = data.readTypedObject(ComponentName.CREATOR);
                     boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
                     reply.writeStrongBinder(RemoteActivities.accept(intent, caller, wantsResult, callback,
-                            mVerifiedInfo.packageName, Binder.getCallingUid(), mOwnApplication));
+                            mVerifiedInfo, mPeerPid, mVerifiedSpawner, Binder.getCallingUid(), mOwnApplication));
                     return true;
+                }
+                case AUTH_PROVIDER: {
+                    if (!mIdentityEnforced || mVerifiedInfo == null || mVerifiedInfo.signatures == null
+                            || mVerifiedInfo.signatures.length != 1) {
+                        throw new SecurityException("auth client identity is not enforced");
+                    }
+                    if (mAuthProvider == null) {
+                        android.content.pm.Signature[] current = mVerifiedInfo.signingInfo == null ? null
+                                : mVerifiedInfo.signingInfo.getApkContentsSigners();
+                        if (current == null || current.length != 1) {
+                            throw new SecurityException("auth client requires a verified current signer");
+                        }
+                        mAuthProvider = adapter.core.GoogleAuthProxy.providerBinder(mVerifiedInfo.packageName,
+                                current[0].toByteArray(), mVerifiedInfo.signatures[0].toByteArray(), mPeerPid);
+                    }
+                    reply.writeStrongBinder(mAuthProvider); return true;
                 }
                 case PACKAGE_INFO: {
                     String name = data.readString();
@@ -1774,6 +1918,7 @@ public final class PlayServicesChannel {
             checkIdentity(this, claimed, info, spawner, apkFiles);
             mIdentityEnforced = "enforce".equals(System.getenv("WESTLAKE_CHANNEL_IDENTITY"));
             mVerifiedInfo = info;
+            mVerifiedSpawner = spawner;
             try {
                 PackageInfo own = application().getPackageManager().getPackageInfo(application().getPackageName(),
                         PackageManager.GET_SIGNATURES);

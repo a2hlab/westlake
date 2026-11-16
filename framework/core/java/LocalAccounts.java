@@ -48,6 +48,8 @@ final class LocalAccounts {
     private static final String TYPE = "com.google";
     private static final String AUTHENTICATOR =
             "com.google.android.gms.auth.account.authenticator.GoogleAccountAuthenticatorService";
+    /** microG's authenticator, when this process is the auth provider (GoogleAuthProxy.provider()). */
+    private static final String MICROG_AUTHENTICATOR = "org.microg.gms.auth.loginservice.GoogleLoginService";
 
     private static final Object LOCK = new Object();
     private static final ExecutorService REQUESTS = Executors.newCachedThreadPool();
@@ -64,20 +66,31 @@ final class LocalAccounts {
     }
 
     private static Properties store() {
-        if (sStore != null) return sStore;
-        sStore = new Properties();
-        File file = file();
-        if (file.isFile()) {
-            try (FileInputStream in = new FileInputStream(file)) {
-                sStore.load(in);
-            } catch (IOException e) {
-                Log.e(TAG, "cannot read the account store: " + e.getClass().getName());
+        synchronized (LOCK) {
+            if (sStore != null) return sStore;
+            Properties loaded = new Properties();
+            File file = file();
+            if (file.isFile()) {
+                try (FileInputStream in = new FileInputStream(file)) {
+                    loaded.load(in);
+                } catch (IOException e) {
+                    // The auth provider's store holds the account credential: an empty store saved over it would
+                    // lose it, so the provider fails closed.
+                    if (GoogleAuthProxy.provider()) throw new IllegalStateException("account store unreadable", e);
+                    Log.e(TAG, "cannot read the account store: " + e.getClass().getName());
+                }
             }
+            sStore = loaded;
+            return sStore;
         }
-        return sStore;
     }
 
     private static void save() {
+        if (GoogleAuthProxy.provider()) {
+            try { PrivateFiles.writePrivate(file().toPath(), store()); }
+            catch (IOException e) { throw new IllegalStateException("private account write failed", e); }
+            return;
+        }
         try (FileOutputStream out = new FileOutputStream(file())) {
             store().store(out, null);
         } catch (IOException e) {
@@ -176,6 +189,7 @@ final class LocalAccounts {
 
     /** One IAccountManager call. LocalServiceBinders.DEFAULT for those with nothing to answer. */
     static Object answer(String method, Object[] args) {
+        if (GoogleAuthProxy.client()) return GoogleAuthProxy.answer(method, args);
         if (MANAGER_ONLY.contains(method) && !managedByCaller()) {
             throw new SecurityException("uid " + AccountManagerStub.callerUid() + " cannot use " + method
                     + " on accounts of type " + TYPE);
@@ -187,7 +201,8 @@ final class LocalAccounts {
                 return store().getProperty(key("data", (Account) args[0]) + "/" + args[1]);
             case "getAuthenticatorTypes":
                 return new AuthenticatorDescription[] {
-                    new AuthenticatorDescription(TYPE, ActivityThread.currentPackageName(), 0, 0, 0, 0)};
+                    new AuthenticatorDescription(TYPE, ActivityThread.currentPackageName(), 0, 0, 0, 0,
+                            GoogleAuthProxy.provider())};
             case "getAccountsForPackage":
                 return accounts(null).toArray(new Account[0]);
             case "getAccountsByTypeForPackage":
@@ -348,7 +363,9 @@ final class LocalAccounts {
             @Override
             public void onResult(Bundle value) throws RemoteException {
                 String token = value == null ? null : value.getString(AccountManager.KEY_AUTHTOKEN);
-                if (token != null) put(key("token", account) + "/" + tokenType, token);
+                // microG owns its caller/package/signature-aware custom-token cache. Do not collapse
+                // its results into the ordinary account/token-type cache.
+                if (token != null && !GoogleAuthProxy.provider()) put(key("token", account) + "/" + tokenType, token);
                 // The outcome only, never the token.
                 System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + " uid="
                         + request.getInt(AccountManager.KEY_CALLER_UID) + ": "
@@ -389,12 +406,12 @@ final class LocalAccounts {
 
             @Override
             public void onError(int code, String message) throws RemoteException {
-                Log.w(TAG, "authenticator error " + code + ": " + message);
+                Log.w(TAG, "authenticator error " + code);
                 if (caller != null) caller.onError(code, message);
             }
         };
         Intent intent = new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT)
-                .setComponent(new ComponentName(app.getPackageName(), AUTHENTICATOR));
+                .setComponent(new ComponentName(app.getPackageName(), (GoogleAuthProxy.provider() ? MICROG_AUTHENTICATOR : AUTHENTICATOR)));
         boolean bound = app.bindService(intent, new ServiceConnection() {
             @Override
             public void onServiceConnected(ComponentName name, IBinder binder) {
