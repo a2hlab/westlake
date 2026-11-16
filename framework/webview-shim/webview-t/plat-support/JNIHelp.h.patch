@@ -1,0 +1,51 @@
+--- a/include/nativehelper/JNIHelp.h
++++ b/include/nativehelper/JNIHelp.h
+@@ -96,12 +96,7 @@
+ }
+ 
+ [[maybe_unused]] static const char* platformStrError(int errnum, char* buf, size_t buflen) {
+-#ifdef _WIN32
+-    strerror_s(buf, buflen, errnum);
+-    return buf;
+-#else
+     return safe_strerror(strerror_r, errnum, buf, buflen);
+-#endif
+ }
+ 
+ [[maybe_unused]] static jmethodID FindMethod(JNIEnv* env, const char* className,
+@@ -370,8 +365,34 @@
+                              "Native registration unable to find class '%s'; aborting...",
+                              className);
+     }
+-    int result = env->RegisterNatives(clazz, methods, numMethods);
++    // WESTLAKE (arm64 board, 2026-07-21) — TOLERANT registration.
++    //
++    // This helper is `static` and therefore INLINED INTO EVERY CALLER (libhwui.so gets
++    // its own copy — it has no undefined `jniRegisterNativeMethods` at all, which is why
++    // patching libart's out-of-line copy had no effect).
++    //
++    // Upstream registers the whole table in ONE RegisterNatives call.  ART walks the array
++    // and bails out with JNI_ERR + NoSuchMethodError on the FIRST method the loaded class
++    // doesn't declare, leaving every LATER method unregistered.  Our framework.jar is not
++    // the same AOSP revision as the libhwui we build, so android/graphics/Typeface's table
++    // hits a missing entry and everything after it — including nativeGetReleaseFunc —
++    // silently stays unbound.  It was invisible because __android_log_assert is neutered on
++    // OHOS, so registration still reported success ("libhwui Typeface register rc=0").
++    //
++    // Register one method at a time and skip what this framework.jar lacks — the same
++    // tolerance the project already applies in stubs/tolerant_native_util.h and in
++    // AndroidRuntime::startReg.
++    for (int i = 0; i < numMethods; ++i) {
++        if (env->RegisterNatives(clazz, &methods[i], 1) != 0) {
++            if (env->ExceptionCheck()) {
++                env->ExceptionClear();
++            }
++        }
++    }
+     env->DeleteLocalRef(clazz);
++    return 0;
++
++    int result = -1;
+     if (result == 0) {
+         return 0;
+     }
