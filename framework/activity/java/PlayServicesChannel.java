@@ -68,6 +68,10 @@ public final class PlayServicesChannel {
     private static final String RUNTIME_ROOT = "WESTLAKE_RUNTIME_ROOT";
     private static final String REAL_ROOT = "WESTLAKE_RUNTIME_REAL_ROOT";
     private static final String TAG = "[WL-PLAY] ";
+    /** Whether hello() has said this process has no WESTLAKE_SPAWN_SOCKET (once per process). */
+    private static volatile boolean sNoSpawnSocketLogged;
+    /** Whether hello() has logged where its fields end (once per process). */
+    private static volatile boolean sHelloLayoutLogged;
     /** Set to a number of seconds to report, that long after launch, how the channel looks from this app. */
     private static final String CHECK = "WESTLAKE_PLAY_SERVICES_CHECK";
 
@@ -543,8 +547,29 @@ public final class PlayServicesChannel {
         try {
             data.writeString(packageName);
             data.writeTypedObject(own, 0);
+            int afterInfo = data.dataPosition();
             data.writeStrongBinder(sCallback);
             writeApks(data, own.applicationInfo);
+            int afterApks = data.dataPosition();
+            // The spawner that started this process, which the host asks whether this is the package it
+            // says it is (SpawnerIdentity). A host that predates it stops reading after the APKs.
+            String spawnSocket = System.getenv("WESTLAKE_SPAWN_SOCKET");
+            if (spawnSocket == null && !sNoSpawnSocketLogged) {
+                // The launcher gives every app's spawner this variable, which the app inherits. An app's
+                // native code can rewrite the environment; say what is left, so its host's "unverified" has
+                // a cause.
+                sNoSpawnSocketLogged = true;
+                System.err.println(TAG + "no WESTLAKE_SPAWN_SOCKET in this process's environment ("
+                        + System.getenv().size() + " variables; WESTLAKE_RUNTIME_ROOT "
+                        + (System.getenv("WESTLAKE_RUNTIME_ROOT") != null ? "present" : "absent") + ")");
+            }
+            data.writeString(spawnSocket);
+            if (!sHelloLayoutLogged) {
+                // A host that reads a field from the wrong place says "spawner says null"; compare with its line.
+                sHelloLayoutLogged = true;
+                System.err.println(TAG + "HELLO layout " + packageName + ": package info ends at " + afterInfo
+                        + ", APKs end at " + afterApks + ", " + data.dataSize() + " bytes");
+            }
             root.transact(HELLO, data, reply, 0);
             reply.readException();
             c.remoteRoot = reply.readString();
@@ -1086,10 +1111,21 @@ public final class PlayServicesChannel {
     }
 
     /** Appends the base and split APKs of this app, as open read-only files. */
+    /**
+     * The most APK files a HELLO carries: the socket binder sends at most 64 descriptors with one message
+     * (socketbinder_natives.c MAX_FDS). An app with more, such as a game with dozens of asset-pack splits, hands
+     * over none: all or none, since a host maps them by position.
+     */
+    private static final int MAX_HELLO_APKS = 64;
+
     private static void writeApks(Parcel data, ApplicationInfo app) {
         List<String> paths = new ArrayList<>();
         if (app != null && app.sourceDir != null) paths.add(app.sourceDir);
         if (app != null && app.splitSourceDirs != null) paths.addAll(Arrays.asList(app.splitSourceDirs));
+        if (paths.size() > MAX_HELLO_APKS) {
+            System.err.println(TAG + paths.size() + " APK files are more than a HELLO carries; handing over none");
+            paths.clear();
+        }
         List<android.os.ParcelFileDescriptor> apks = new ArrayList<>();
         for (String path : paths) {
             try {
@@ -1110,7 +1146,11 @@ public final class PlayServicesChannel {
     private static android.os.ParcelFileDescriptor[] readApks(Parcel data) {
         if (data.dataAvail() < 4) return new android.os.ParcelFileDescriptor[0];
         int count = data.readInt();
-        if (count < 0 || count > 32) return new android.os.ParcelFileDescriptor[0];
+        // Returning early would leave the entries unread, and the spawner socket after them would be read from the
+        // middle of them: one Unity game with 48 asset-pack splits was "unverified" that way in every round.
+        if (count < 0 || count > MAX_HELLO_APKS) {
+            throw new SecurityException("malformed introduction: " + count + " APK files");
+        }
         android.os.ParcelFileDescriptor[] apks = new android.os.ParcelFileDescriptor[count];
         for (int i = 0; i < count; i++) apks[i] = data.readTypedObject(android.os.ParcelFileDescriptor.CREATOR);
         return apks;
@@ -1538,15 +1578,26 @@ public final class PlayServicesChannel {
             if (claimed == null || info == null || info.applicationInfo == null || !claimed.equals(info.packageName)) {
                 throw new SecurityException("malformed introduction");
             }
+            int afterCallback = data.dataPosition();
+            android.os.ParcelFileDescriptor[] apkFiles = readApks(data);
+            int afterApks = data.dataPosition();
+            String spawner = data.dataAvail() > 0 ? data.readString() : null;
+            if (spawner == null) {
+                System.err.println(TAG + "HELLO layout " + claimed + " as read: callback ends at " + afterCallback
+                        + ", APKs (" + apkFiles.length + ") end at " + afterApks + ", " + data.dataSize()
+                        + " bytes; no spawner socket");
+            }
+            checkIdentity(this, claimed, info, spawner, apkFiles);
             if (claimed.equals(application().getPackageName())) {
                 // Another process of this app (ADR-0002): the same app, so the same uid, as on Android.
+                closeAll(apkFiles);
                 int uid = Process.myUid();
                 mChannel.setCaller(uid, mPeerPid);
                 mIdentified = true;
                 System.err.println(TAG + "process of this app pid=" + mPeerPid + " uid=" + uid);
                 return uid;
             }
-            ClientApks apks = exposeApks(claimed, info.applicationInfo, readApks(data));
+            ClientApks apks = exposeApks(claimed, info.applicationInfo, apkFiles);
             if (apks != null && callback != null) {
                 try {
                     callback.linkToDeath(() -> releaseApks(claimed, apks), 0);
@@ -1565,6 +1616,121 @@ public final class PlayServicesChannel {
             System.err.println(TAG + "client " + claimed + " pid=" + mPeerPid + " uid=" + uid);
             return uid;
         }
+    }
+
+    /**
+     * Whether the client is what it says it is, asked of the spawner that started it (SpawnerIdentity,
+     * ADR-0003 decision 3), in three parts:
+     * - the package: the spawner's own;
+     * - the APK files the client handed over: each one a file the spawner launched;
+     * - the certificates in the client's PackageInfo: those of the base APK the spawner launched. Until
+     *   this check, a client could state any certificate, Google's included.
+     *
+     * With WESTLAKE_CHANNEL_IDENTITY=enforce an introduction that fails any part is refused. Otherwise each
+     * answer is logged ([WL-CHANNEL-IDENTITY]), so a round can show that every real client passes before
+     * refusing is switched on; the certificates are then checked off this thread, because verifying an APK
+     * reads all of it and a log-only round should not change how long an introduction takes.
+     */
+    private static void checkIdentity(Root root, String claimed, PackageInfo info, String spawner,
+            android.os.ParcelFileDescriptor[] apkFiles) {
+        int pid = root.mPeerPid;
+        SpawnerIdentity.Vouched vouched = SpawnerIdentity.ask(spawner, pid);
+        String said = vouched == null ? null : vouched.packageName;
+        String verdict = said == null ? "unverified" : said.equals(claimed) ? "match" : "mismatch";
+        String files = "match".equals(verdict) ? apkFilesVerdict(vouched.apks, apkFiles) : "unchecked";
+        System.err.println("[WL-CHANNEL-IDENTITY] pid=" + pid + " claims " + claimed + "; spawner says " + said
+                + " (" + verdict + "); apk files " + files);
+        boolean enforce = "enforce".equals(System.getenv("WESTLAKE_CHANNEL_IDENTITY"));
+        boolean checkCertificates = "match".equals(verdict) && vouched.apks.length > 0;
+        if (enforce && (!"match".equals(verdict) || !files.startsWith("match") || !checkCertificates)) {
+            if (vouched != null) vouched.close();
+            closeAll(apkFiles);
+            throw new SecurityException("introduction as " + claimed + " not vouched for by its spawner");
+        }
+        if (!checkCertificates) {
+            if (vouched != null) vouched.close();
+            return;
+        }
+        android.content.pm.Signature[] stated = info.signatures;
+        android.content.pm.SigningInfo statedInfo = info.signingInfo;
+        if (enforce) {
+            String certificates = certificatesVerdict(stated, statedInfo, vouched);
+            System.err.println("[WL-CHANNEL-IDENTITY] pid=" + pid + " " + claimed + " certificates " + certificates);
+            if (!certificates.startsWith("match")) {
+                closeAll(apkFiles);
+                throw new SecurityException("introduction as " + claimed + " states certificates its APK lacks");
+            }
+            return;
+        }
+        new Thread(() -> System.err.println("[WL-CHANNEL-IDENTITY] pid=" + pid + " " + claimed + " certificates "
+                + certificatesVerdict(stated, statedInfo, vouched)), "wl-channel-identity").start();
+    }
+
+    /**
+     * "match" when every APK file the client handed over is one of the files its spawner launched, compared
+     * by device and inode, followed by the counts; "differ" otherwise.
+     */
+    private static String apkFilesVerdict(java.io.FileDescriptor[] launched,
+            android.os.ParcelFileDescriptor[] presented) {
+        try {
+            Set<String> ids = new HashSet<>();
+            for (java.io.FileDescriptor apk : launched) ids.add(fileId(android.system.Os.fstat(apk)));
+            for (android.os.ParcelFileDescriptor apk : presented) {
+                if (apk == null || !ids.contains(fileId(android.system.Os.fstat(apk.getFileDescriptor())))) {
+                    return "differ";
+                }
+            }
+            return "match (" + presented.length + " presented, " + launched.length + " launched)";
+        } catch (android.system.ErrnoException | RuntimeException e) {
+            return "unread (" + e + ")";
+        }
+    }
+
+    private static String fileId(android.system.StructStat stat) {
+        return stat.st_dev + ":" + stat.st_ino;
+    }
+
+    /**
+     * "match" when the certificates a client states are those of the base APK its spawner launched, as
+     * PackageManager reports them: GET_SIGNATURES gives the oldest certificate of a rotated signing key and
+     * the current signers otherwise; the SigningInfo gives the current signers. Closes the spawner's files.
+     */
+    private static String certificatesVerdict(android.content.pm.Signature[] stated,
+            android.content.pm.SigningInfo statedInfo, SpawnerIdentity.Vouched vouched) {
+        long start = android.os.SystemClock.elapsedRealtime();
+        android.os.ParcelFileDescriptor base = null;
+        try {
+            base = android.os.ParcelFileDescriptor.dup(vouched.apks[0]);
+            android.content.pm.parsing.result.ParseResult<android.content.pm.SigningDetails> result =
+                    android.util.apk.ApkSignatureVerifier.verify(
+                            android.content.pm.parsing.result.ParseTypeImpl.forParsingWithoutPlatformCompat().reset(),
+                            "/proc/self/fd/" + base.getFd(),
+                            android.content.pm.SigningDetails.SignatureSchemeVersion.JAR);
+            if (result.isError()) return "unread (" + result.getErrorMessage() + ")";
+            android.content.pm.SigningDetails details = result.getResult();
+            android.content.pm.Signature[] signers = details.getSignatures();
+            android.content.pm.Signature[] expected = details.hasPastSigningCertificates()
+                    ? new android.content.pm.Signature[] {details.getPastSigningCertificates()[0]}
+                    : signers;
+            boolean same = sameSignatures(stated, expected)
+                    && (statedInfo == null || sameSignatures(statedInfo.getApkContentsSigners(), signers));
+            return (same ? "match" : "differ") + " (" + (android.os.SystemClock.elapsedRealtime() - start) + " ms)";
+        } catch (IOException | RuntimeException | LinkageError e) {
+            return "unread (" + e + ")";
+        } finally {
+            if (base != null) {
+                try {
+                    base.close();
+                } catch (IOException ignored) {
+                }
+            }
+            vouched.close();
+        }
+    }
+
+    private static boolean sameSignatures(android.content.pm.Signature[] a, android.content.pm.Signature[] b) {
+        if (a == null || b == null || a.length == 0 || b.length == 0) return false;
+        return new HashSet<>(Arrays.asList(a)).equals(new HashSet<>(Arrays.asList(b)));
     }
 
     /**

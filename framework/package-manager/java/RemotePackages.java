@@ -26,8 +26,10 @@ import java.util.Map;
  * so this is what lets Play services tell its callers apart.
  *
  * An app has the same virtual uid in every Westlake process, and keeps it from one launch to the next, as
- * an app keeps its uid on Android from install on: the uids are in one table (PackageUidTable) in the host
- * app's files directory, which holds every launch's runtime (WESTLAKE_RUNTIME_REAL_ROOT is one of them).
+ * an app keeps its uid on Android from install on: the uids are in one registry that the spawners keep where
+ * only root can enter, which every process asks through PackageUidTable; a process whose spawner predates it
+ * uses the older table in the host app's files directory, which holds every launch's runtime
+ * (WESTLAKE_RUNTIME_REAL_ROOT is one of them).
  * Each process numbered its clients itself before, in the order they connected, so an app had one uid in
  * Play services, another in the Play Store and another in each of the store's other processes (ADR-0002),
  * and a uid that one of them passed to another named a different app there.
