@@ -340,7 +340,10 @@ public final class LocalServiceBinders {
         try {
             String[] requested = manager.getPackageInfo(source.packageName,
                     android.content.pm.PackageManager.GET_PERMISSIONS).requestedPermissions;
-            return requested != null && java.util.Arrays.asList(requested).contains(permission);
+            boolean held = requested != null && java.util.Arrays.asList(requested).contains(permission);
+            // What protection levels would say instead, logged only (ADR-0004 decision 1).
+            if (held) PermissionLevels.requested(manager, permission, source.packageName, app.getPackageName());
+            return held;
         } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException e) {
             return false;
         }

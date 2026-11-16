@@ -26,11 +26,185 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public static Integer proxyPermissionResult(java.lang.reflect.Method method, Object[] args) {
         if ("checkPermission".equals(method.getName()) && args != null && args.length == 3
                 && args[1] instanceof Integer && args[2] instanceof Integer) {
-            return checkProcessPermission((String) args[0], (Integer) args[1], (Integer) args[2]);
+            return trace("am.checkPermission", (String) args[0], (Integer) args[2],
+                    checkProcessPermission((String) args[0], (Integer) args[1], (Integer) args[2]));
         }
         if ("checkUidPermission".equals(method.getName()) && args != null && args.length == 2)
-            return checkProcessPermission((String) args[0], -1, (Integer) args[1]);
+            return trace("am.checkUidPermission", (String) args[0], (Integer) args[1],
+                    checkProcessPermission((String) args[0], -1, (Integer) args[1]));
+        // Android 15's Context.checkPermission asks this one. Unhandled, it fell to the stub's int default, 0:
+        // granted, for every permission and uid. Kept until one rule replaces all three answers (see rule).
+        if ("checkPermissionForDevice".equals(method.getName()) && args != null && args.length == 4
+                && args[2] instanceof Integer) {
+            return trace("am.checkPermissionForDevice", (String) args[0], (Integer) args[2],
+                    PackageManager.PERMISSION_GRANTED);
+        }
         return null;
+    }
+
+    /**
+     * What one rule, Android's protection levels, would answer whatever API asked (ADR-0004 decision 1), and why:
+     * "granted: <why>" or "denied: <why>". The uid's package (this process's own, or the one Westlake gave a
+     * client's uid) must request or define the permission. Then a normal permission, and a signature permission
+     * whose declarer shares the package's signer, is granted; a dangerous one is what OH granted the host app,
+     * the user's runtime grant, which every Westlake process shares; a platform-signature, internal or foreign
+     * signature permission is denied, as for any app Android installs; and so is one no package this process
+     * knows defines. Today the activity manager's checkPermission denies every other uid, its
+     * checkPermissionForDevice grants everything, and the package manager answers by request alone: trace()
+     * logs where they differ from this.
+     */
+    static String rule(String permission, int uid) {
+        if (permission == null) return "denied: no permission named";
+        // No Westlake app is platform-signed: a platform signature or internal permission is denied whoever asks,
+        // before the application or its package is readable (ContextImpl asks for STATUS_BAR_SERVICE that early).
+        String platform = adapter.core.PermissionLevels.platformDenial(permission);
+        if (platform != null) return "denied: " + platform;
+        Application app = ActivityThread.currentApplication();
+        PackageManager manager = app != null ? app.getPackageManager() : null;
+        // A check made outside a binder call names the kernel uid, which every Westlake process shares; in this
+        // process it means the process itself.
+        boolean own = uid == android.os.Process.myUid() || uid == android.system.Os.getuid();
+        String pkg = own ? (app != null ? app.getPackageName() : null) : RemotePackages.packageForUid(uid);
+        if (pkg == null || manager == null) return "unknown: no package for the uid";
+        Boolean requested = requestsOrDefines(manager, pkg, permission, own);
+        if (requested == null) return "unknown: " + pkg + " unreadable";
+        if (!requested) return "denied: not requested by " + pkg;
+        if (POST_NOTIFICATIONS.equals(permission)) {
+            return postNotifications() == PackageManager.PERMISSION_GRANTED
+                    ? "granted: notification switch on" : "denied: notification switch off";
+        }
+        String level = adapter.core.PermissionLevels.classify(manager, permission, pkg);
+        switch (level) {
+            case "normal":
+                return "granted: normal";
+            case "signature":
+                return "granted: signature shared";
+            case "dangerous":
+                return Native.granted(PermissionMapper.mapToOH(permission))
+                        ? "granted: dangerous, granted on OH" : "denied: dangerous, not granted on OH";
+            default:
+                return "denied: " + level;
+        }
+    }
+
+    /** Whether pkg requests or defines permission: this process's own package, or another one Westlake knows. */
+    /** Whether pkg requests or defines permission; null when this process cannot read its own package. */
+    private static Boolean requestsOrDefines(PackageManager manager, String pkg, String permission, boolean own) {
+        if (!own) return RemotePackages.holdsPermission(pkg, permission);
+        try {
+            PackageInfo info = manager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions != null) {
+                for (String requested : info.requestedPermissions) {
+                    if (permission.equals(requested)) return true;
+                }
+            }
+            if (info.permissions != null) {
+                for (PermissionInfo defined : info.permissions) {
+                    if (defined != null && permission.equals(defined.name)) return true;
+                }
+            }
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return null;   // not a package this process can read: no answer, rather than "not requested"
+        }
+        return false;
+    }
+
+    private static final java.util.Set<String> TRACED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    // The rule may ask another process about a package, so it never runs on the checking thread.
+    private static final java.util.concurrent.ExecutorService TRACER =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "permission-check-trace");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * Logs a check once per API, permission and uid, with the rule's answer where it differs ("[WL-PERM-CHECK]"),
+     * and returns the answer unchanged. The rule is worked out on its own thread.
+     */
+    /**
+     * WESTLAKE_PERMISSION_LEVELS=enforce: phase A of ADR-0004 decision 1. A check gets the rule's answer where the
+     * rule reaches one Android gives whatever the user does: normal, signature, not requested, platform or foreign
+     * signature, internal, undefined. A dangerous permission and the notification switch keep today's answer until
+     * a runtime request reaches OH's dialog; so does a check the rule cannot answer ("unknown"). Unset, checks are
+     * only traced.
+     */
+    private static final boolean ENFORCE = "enforce".equals(System.getenv("WESTLAKE_PERMISSION_LEVELS"));
+    /** The rule's reason per permission and uid, once known; non-dangerous answers do not change while a process runs. */
+    private static final java.util.Map<String, String> RULES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The answer phase A gives, or null to keep today's. Worked out on the checking thread, then cached. */
+    private static Integer enforced(String permission, int uid) {
+        String key = permission + " " + uid;
+        String rule = RULES.get(key);
+        if (rule == null) {
+            try {
+                rule = rule(permission, uid);
+            } catch (RuntimeException | LinkageError e) {
+                return null;
+            }
+            if (rule.startsWith("unknown")) return null;   // perhaps readable later: not cached
+            RULES.put(key, rule);
+        }
+        if (rule.contains("dangerous") || rule.contains("notification switch")) return null;
+        if (rule.startsWith("granted:")) return PackageManager.PERMISSION_GRANTED;
+        if (rule.startsWith("denied:")) return PackageManager.PERMISSION_DENIED;
+        return null;
+    }
+
+    static int trace(String api, String permission, int uid, int today) {
+        Integer phaseA = ENFORCE && permission != null ? enforced(permission, uid) : null;
+        int answer = phaseA != null ? phaseA : today;
+        if (permission != null && TRACED.add(api + " " + permission + " " + uid)) {
+            Throwable caller = new Throwable();   // where the check came from, printed where the rule differs
+            TRACER.execute(() -> {
+                awaitApplication(uid);
+                String given = answer == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
+                String rule;
+                try {
+                    rule = rule(permission, uid);
+                } catch (RuntimeException | LinkageError e) {
+                    rule = given + ": rule failed, " + e.getClass().getSimpleName();
+                }
+                String was = today == PackageManager.PERMISSION_GRANTED ? "granted" : "denied";
+                System.err.println("[WL-PERM-CHECK] " + api + " " + permission + " uid " + uid + ": " + given
+                        + (was.equals(given) ? "" : " (enforced; was " + was + ")")
+                        + (rule.startsWith(given + ":") ? "" : " (one rule: " + rule + ")" + callers(caller)));
+            });
+        }
+        return answer;
+    }
+
+    /**
+     * A check this process makes about itself can come before its application exists (ContextImpl asks for
+     * STATUS_BAR_SERVICE during start-up), when the rule cannot name the package yet: wait for it, up to 10 s.
+     */
+    private static void awaitApplication(int uid) {
+        if (uid != android.os.Process.myUid() && uid != android.system.Os.getuid()) return;
+        for (int i = 0; i < 100 && ActivityThread.currentApplication() == null; i++) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
+    }
+
+    /** The frames that asked, past this class and reflection: " from A.m:1 < B.n:2 ...", at most 10. */
+    private static String callers(Throwable caller) {
+        StringBuilder out = new StringBuilder();
+        int shown = 0;
+        for (StackTraceElement frame : caller.getStackTrace()) {
+            String cls = frame.getClassName();
+            if (cls.equals(PermissionManagerAdapter.class.getName()) || cls.startsWith("java.lang.reflect.")
+                    || cls.startsWith("$Proxy") || cls.startsWith("jdk.internal.")) {
+                continue;
+            }
+            out.append(shown == 0 ? " from " : " < ").append(cls.substring(cls.lastIndexOf('.') + 1))
+                    .append('.').append(frame.getMethodName()).append(':').append(frame.getLineNumber());
+            if (++shown == 10) break;
+        }
+        return out.toString();
     }
     public static int checkProcessPermission(String permission, int pid, int uid) {
         if (permission == null || uid != android.os.Process.myUid()
@@ -143,10 +317,11 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     public int checkUidPermission(int uid, java.lang.String permissionName, int deviceId) throws android.os.RemoteException {
         String remote = RemotePackages.packageForUid(uid);
         if (remote != null) {
-            return RemotePackages.holdsPermission(remote, permissionName)
-                    ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+            return trace("pm.checkUidPermission", permissionName, uid, RemotePackages.holdsPermission(remote, permissionName)
+                    ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED);
         }
-        return deviceId == 0 ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED;
+        return trace("pm.checkUidPermission", permissionName, uid,
+                deviceId == 0 ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED);
     }
 
     @Override
