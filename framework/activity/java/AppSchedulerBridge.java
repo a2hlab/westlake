@@ -194,7 +194,7 @@ public class AppSchedulerBridge {
             ai.nativeLibraryDir = nativeDirectory == null || nativeDirectory.isEmpty()
                     ? apkDir + "/lib/arm64" : nativeDirectory;
             ai.dataDir = "/data/data/" + pkg;
-            ai.deviceProtectedDataDir = ai.dataDir;
+            ai.deviceProtectedDataDir = adapter.packagemanager.DataDirs.deviceProtected(ai.dataDir);
             ai.credentialProtectedDataDir = ai.dataDir;
             // /data/data is drwxrwx--x system:system, so an app uid cannot create its own
             // directory there; the launcher stages it. Swallowing the failure here cost several
@@ -211,6 +211,7 @@ public class AppSchedulerBridge {
                 System.err.println("[DIRECT-LAUNCH] WARNING data dir check failed: " + ai.dataDir
                         + ": " + t);
             }
+            adapter.packagemanager.DataDirs.ensure(ai.deviceProtectedDataDir);
             ai.flags |= android.content.pm.ApplicationInfo.FLAG_HAS_CODE
                      |  android.content.pm.ApplicationInfo.FLAG_INSTALLED
                      |  android.content.pm.ApplicationInfo.FLAG_ALLOW_CLEAR_USER_DATA
@@ -1003,6 +1004,31 @@ public class AppSchedulerBridge {
      * non-null again, then clear it. The watcher does not fire twice, so nothing re-pins after.
      * Apps with no content providers never reach this hook and keep the previous behaviour.
      */
+    /**
+     * An <activity-alias> names no class: ActivityThread instantiates its targetActivity, as Android does for every
+     * alias. Built from the OH record, the info named the alias as the class, so the Play Store's MainActivityPrivate
+     * (an alias of MainActivity, which its background process asks for with a client's license hand-off) failed with
+     * ClassNotFoundException. Set before the LaunchActivityItem is made: it copies the info.
+     */
+    private static void resolveAlias(android.content.pm.ActivityInfo target) {
+        try {
+            if (target == null || target.packageName == null || target.targetActivity != null
+                    || !adapter.packagemanager.SourcePackageRegistry.contains(target.packageName)) return;
+            android.content.pm.PackageInfo info = adapter.packagemanager.SourcePackageRegistry.packageInfo(
+                    target.packageName, android.content.pm.PackageManager.GET_ACTIVITIES);
+            if (info == null || info.activities == null) return;
+            for (android.content.pm.ActivityInfo declared : info.activities) {
+                if (declared.name.equals(target.name) && declared.targetActivity != null) {
+                    System.err.println("[B47-SLA] " + target.name + " is an alias of " + declared.targetActivity);
+                    target.targetActivity = declared.targetActivity;
+                    return;
+                }
+            }
+        } catch (RuntimeException e) {
+            System.err.println("[B47-SLA] alias lookup failed for " + target.name + ": " + e);
+        }
+    }
+
     /** The theme the APK's manifest gives this activity (or its application), over the ability record's. */
     private static void fillFromManifest(android.content.pm.ActivityInfo target) {
         try {
@@ -1018,6 +1044,14 @@ public class AppSchedulerBridge {
             if (target.applicationInfo != null && appTheme != 0) target.applicationInfo.theme = appTheme;
             for (android.content.pm.ActivityInfo declared : info.activities) {
                 if (!declared.name.equals(target.name)) continue;
+                // An <activity-alias> names no class: ActivityThread instantiates its targetActivity, as Android
+                // does for every alias. Built from the OH record, the info named the alias as the class, so the
+                // Play Store's MainActivityPrivate (an alias of MainActivity, which its background process asks for
+                // with a client's license hand-off) failed with ClassNotFoundException.
+                if (declared.targetActivity != null && !declared.targetActivity.equals(target.targetActivity)) {
+                    System.err.println("[B47-SLA] " + target.name + " is an alias of " + declared.targetActivity);
+                    target.targetActivity = declared.targetActivity;
+                }
                 int theme = declared.theme != 0 ? declared.theme : appTheme;
                 if (theme != 0 && theme != target.theme) {
                     System.err.println("[B47-SLA] theme from the manifest: 0x" + Integer.toHexString(theme)
@@ -1776,8 +1810,9 @@ public class AppSchedulerBridge {
             }
             if (realDataDir != null) {
                 ai.dataDir = realDataDir;
-                ai.deviceProtectedDataDir = realDataDir;
+                ai.deviceProtectedDataDir = adapter.packagemanager.DataDirs.deviceProtected(realDataDir);
                 ai.credentialProtectedDataDir = realDataDir;
+                adapter.packagemanager.DataDirs.ensure(ai.deviceProtectedDataDir);
                 System.err.println("[B43-BIND][FIX-AII] dataDir overridden: " + realDataDir);
             } else {
                 System.err.println("[B43-BIND][FIX-AII] no real dataDir found, leaving "
@@ -1892,6 +1927,22 @@ public class AppSchedulerBridge {
      * ScheduleLaunchAbility, and we must translate it into an Android
      * activity launch.
      */
+    /** A want for the log: its action and its link without the query, but with the app the link names (id=). */
+    private static String describeWant(String wantJson) {
+        try {
+            org.json.JSONObject want = new org.json.JSONObject(wantJson == null ? "{}" : wantJson);
+            String action = want.optString("action", "");
+            String uri = want.optString("uri", "");
+            if (uri.isEmpty()) return action.isEmpty() ? "a want without a link" : action;
+            android.net.Uri link = android.net.Uri.parse(uri);
+            String id = link.isHierarchical() ? link.getQueryParameter("id") : null;
+            return (action.isEmpty() ? "" : action + " ") + link.getScheme() + "://" + link.getAuthority()
+                    + link.getPath() + (id != null ? " id=" + id : "");
+        } catch (org.json.JSONException | RuntimeException e) {
+            return "an unreadable want";
+        }
+    }
+
     /**
      * B.47 (2026-04-30, P2 §1.2 ScheduleLaunchAbility): full adapter from
      * OH AbilityInfo + Want + IRemoteObject token to Android LaunchActivityItem.
@@ -1919,6 +1970,16 @@ public class AppSchedulerBridge {
                 + " ohTokenAddr=0x" + Long.toHexString(ohTokenAddr));
         Log.i(TAG, "nativeOnScheduleLaunchAbility v2: bundle=" + bundleName
                 + ", ability=" + abilityName + ", recordId=" + abilityRecordId);
+
+        // A host started without an activity of its own (WESTLAKE_NO_ACTIVITY=1: the shared Play services and
+        // Play Store processes in a round) shows none later either. A client's license check had the Play Store
+        // open its paywall, and that page stayed above every app launched after it (ADR-0007: a windowless Store
+        // while screenshots are measured). The start is logged instead, with the app the link names.
+        if ("1".equals(System.getenv("WESTLAKE_NO_ACTIVITY"))) {
+            System.err.println("[WL-PLAY] windowless host: not showing " + abilityName + " for "
+                    + describeWant(wantJson));
+            return;
+        }
 
         try {
             ActivityThread activityThread = ActivityThread.currentActivityThread();
@@ -1965,6 +2026,7 @@ public class AppSchedulerBridge {
             // §1.2.4.2: build complete ActivityInfo from OH AbilityInfo JSON.
             android.content.pm.ActivityInfo activityInfo =
                     buildActivityInfoFromAbility(packageName, abilityName, appInfo, abilityJson);
+            resolveAlias(activityInfo);
 
             // §1.2.4.1: build Intent from OH Want JSON (component + action + categories
             // + data + type + flags + extras).

@@ -194,7 +194,9 @@ public final class GuestPackages {
         info.uid = Process.myUid();
         info.sourceDir = info.publicSourceDir = guest.apk;
         info.scanSourceDir = info.scanPublicSourceDir = guest.apk;
-        info.dataDir = info.deviceProtectedDataDir = info.credentialProtectedDataDir = dataDir;
+        info.dataDir = info.credentialProtectedDataDir = dataDir;
+        info.deviceProtectedDataDir = DataDirs.deviceProtected(dataDir);
+        DataDirs.ensure(info.deviceProtectedDataDir);
         info.nativeLibraryDir = info.nativeLibraryRootDir = dataDir + "/lib";
         info.nativeLibraryRootRequiresIsa = false;
         info.primaryCpuAbi = "arm64-v8a";

@@ -744,6 +744,59 @@ static jboolean wl_setPermission0(JNIEnv* env, jobject self, jobject file, jint 
     return chmod(path, enable ? (st.st_mode | bits) : (st.st_mode & ~bits)) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
+/*
+ * libcore.io.Linux.remove, as libcore's own (remove(path), ErrnoException "remove" on failure), bound only while
+ * WESTLAKE_TRACE_DELETE=<text> is in the environment: a remove of a path that contains that text is logged first,
+ * with the Java stack that asked for it. File.delete and Files.delete of a file both end here. A file an app keeps
+ * deleting names its caller (Play services' Chimera config, deleted right after it was written).
+ */
+static void wl_linux_remove(JNIEnv* env, jobject self, jstring java_path)
+{
+    const char* watch = getenv("WESTLAKE_TRACE_DELETE");
+    const char* path;
+    int result;
+    int saved;
+    (void) self;
+    if (java_path == NULL) {
+        jclass npe = (*env)->FindClass(env, "java/lang/NullPointerException");
+        if (npe != NULL) (*env)->ThrowNew(env, npe, "path == null");
+        return;
+    }
+    path = (*env)->GetStringUTFChars(env, java_path, NULL);
+    if (path == NULL) return;
+    if (watch != NULL && watch[0] != '\0' && strstr(path, watch) != NULL) {
+        char line[4200];
+        jclass t = (*env)->FindClass(env, "java/lang/Throwable");
+        jmethodID ctor = t != NULL ? (*env)->GetMethodID(env, t, "<init>", "(Ljava/lang/String;)V") : NULL;
+        jmethodID print = t != NULL ? (*env)->GetMethodID(env, t, "printStackTrace", "()V") : NULL;
+        snprintf(line, sizeof(line), "[WESTLAKE-DELETE] %s", path);
+        if (ctor != NULL && print != NULL) {
+            jstring msg = (*env)->NewStringUTF(env, line);
+            jobject e = msg != NULL ? (*env)->NewObject(env, t, ctor, msg) : NULL;
+            if (e != NULL) (*env)->CallVoidMethod(env, e, print);
+        }
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        if (t == NULL) fprintf(stderr, "%s\n", line);
+        fflush(stderr);
+    }
+    do {
+        result = remove(path);
+    } while (result == -1 && errno == EINTR);
+    saved = errno;
+    (*env)->ReleaseStringUTFChars(env, java_path, path);
+    if (result == -1) {
+        jclass errno_class = (*env)->FindClass(env, "android/system/ErrnoException");
+        jmethodID ctor = errno_class != NULL ? (*env)->GetMethodID(env, errno_class, "<init>", "(Ljava/lang/String;I)V") : NULL;
+        jstring name = (*env)->NewStringUTF(env, "remove");
+        jobject e = ctor != NULL && name != NULL ? (*env)->NewObject(env, errno_class, ctor, name, saved) : NULL;
+        if (e != NULL) (*env)->Throw(env, (jthrowable) e);
+    }
+}
+
+static const JNINativeMethod kLinuxRemove[] = {
+    { "remove", "(Ljava/lang/String;)V", (void*) wl_linux_remove },
+};
+
 static jboolean wl_setReadOnly0(JNIEnv* env, jobject self, jobject file)
 {
     char path[4096];
@@ -1642,6 +1695,10 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int pr = normalize_thread_priority(env);
         int fs = bind(env, "java/io/UnixFileSystem", kUnixFileSystem,
                       (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
+        if (getenv("WESTLAKE_TRACE_DELETE") != NULL) {
+            bind(env, "libcore/io/Linux", kLinuxRemove, 1);
+            note("[WL-NATIVES] tracing removes (WESTLAKE_TRACE_DELETE)\n");
+        }
         int tx = wl_register_text(env);
         int ar = wl_register_audiorecord(env);
         int ap = wl_register_audio_ports(env);
