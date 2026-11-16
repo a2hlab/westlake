@@ -705,6 +705,7 @@ int wl_register_localsocket(JNIEnv* env);
 int wl_register_surface_canvas(JNIEnv* env);
 int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
+int wl_register_location(JNIEnv* env);
 int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
@@ -1709,6 +1710,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int cv = wl_register_surface_canvas(env);
         int sc = wl_register_sqlite_collations(env);
         int ns = wl_register_notification_switch(env);
+        int lo = wl_register_location(env);
         wl_register_socket_binder(env);
         int ex = wl_register_extractor(env);
         int vc = wl_register_video_codec(env);
@@ -1723,12 +1725,12 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d MediaExtractor=%d VideoCodec=%d ImageReader=%d cmdline=%d more=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d Location=%d MediaExtractor=%d VideoCodec=%d ImageReader=%d cmdline=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, ir, cl, more);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, lo, ex, vc, ir, cl, more);
         note(line);
     }
     {
