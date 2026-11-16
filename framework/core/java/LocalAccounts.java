@@ -11,7 +11,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.os.Binder;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
@@ -21,11 +23,13 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -101,10 +105,18 @@ final class LocalAccounts {
         return found;
     }
 
+    /**
+     * What AccountManagerService sends when an account is added or removed: LOGIN_ACCOUNTS_CHANGED for
+     * receivers of the old broadcast, and ACTION_VISIBLE_ACCOUNTS_CHANGED to the package that registered
+     * a listener (registerAccountListener). Since Android 8, AccountManager's OnAccountsUpdateListeners
+     * run on the second one only; without it Google's settings screen still offered "Sign in" after
+     * its own add-account flow had added the account.
+     */
     private static void changed() {
         Context app = ActivityThread.currentApplication();
         if (app != null) {
             app.sendBroadcast(new Intent(AccountManager.LOGIN_ACCOUNTS_CHANGED_ACTION).setPackage(app.getPackageName()));
+            app.sendBroadcast(new Intent(AccountManager.ACTION_VISIBLE_ACCOUNTS_CHANGED).setPackage(app.getPackageName()));
         }
     }
 
@@ -151,8 +163,23 @@ final class LocalAccounts {
         }
     }
 
+    /**
+     * The calls AccountManagerService allows only to the account type's authenticator, or to an app
+     * signed with the same certificate (isAccountManagedByCaller): the account's password, its user
+     * data and its cached tokens hold its credentials. The Play Store, signed like Play services,
+     * passes; any other app gets the SecurityException it gets on Android.
+     */
+    private static final Set<String> MANAGER_ONLY = new java.util.HashSet<>(Arrays.asList(
+            "getPassword", "setPassword", "clearPassword", "getUserData", "setUserData", "peekAuthToken",
+            "setAuthToken", "addAccountExplicitly", "addAccountExplicitlyWithVisibility",
+            "removeAccountExplicitly", "renameAccount"));
+
     /** One IAccountManager call. LocalServiceBinders.DEFAULT for those with nothing to answer. */
     static Object answer(String method, Object[] args) {
+        if (MANAGER_ONLY.contains(method) && !managedByCaller()) {
+            throw new SecurityException("uid " + AccountManagerStub.callerUid() + " cannot use " + method
+                    + " on accounts of type " + TYPE);
+        }
         switch (method) {
             case "getPassword":
                 return exists((Account) args[0]) ? store().getProperty(key("password", (Account) args[0])) : null;
@@ -282,25 +309,56 @@ final class LocalAccounts {
     /** What AccountManagerService adds: who asked, which the authenticator reads. */
     private static Bundle withCaller(Bundle options) {
         Bundle out = options == null ? new Bundle() : new Bundle(options);
-        out.putInt(AccountManager.KEY_CALLER_UID, Binder.getCallingUid());
-        out.putInt(AccountManager.KEY_CALLER_PID, Binder.getCallingPid());
+        out.putInt(AccountManager.KEY_CALLER_UID, AccountManagerStub.callerUid());
+        out.putInt(AccountManager.KEY_CALLER_PID, AccountManagerStub.callerPid());
         return out;
+    }
+
+    /** isAccountManagedByCaller: this process (the authenticator's), or a caller signed by its certificate. */
+    private static boolean managedByCaller() {
+        int uid = AccountManagerStub.callerUid();
+        if (uid == android.os.Process.myUid()) return true;
+        Context app = ActivityThread.currentApplication();
+        if (app == null) return false;
+        PackageManager manager = app.getPackageManager();
+        String[] callers = manager.getPackagesForUid(uid);
+        Set<Signature> own = signers(manager, app.getPackageName());
+        if (callers == null || own.isEmpty()) return false;
+        for (String caller : callers) {
+            if (own.equals(signers(manager, caller))) return true;
+        }
+        return false;
+    }
+
+    private static Set<Signature> signers(PackageManager manager, String packageName) {
+        try {
+            PackageInfo info = manager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES);
+            if (info.signingInfo == null) return Collections.emptySet();
+            return new java.util.HashSet<>(Arrays.asList(info.signingInfo.getApkContentsSigners()));
+        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
+            return Collections.emptySet();
+        }
     }
 
     private static void getAuthToken(IAccountManagerResponse caller, Account account, String tokenType, Bundle options) {
         Bundle request = withCaller(options);
-        request.putString(AccountManager.KEY_ANDROID_PACKAGE_NAME, options == null ? null
-                : options.getString(AccountManager.KEY_ANDROID_PACKAGE_NAME));
+        final String who = options == null ? null : options.getString(AccountManager.KEY_ANDROID_PACKAGE_NAME);
+        request.putString(AccountManager.KEY_ANDROID_PACKAGE_NAME, who);
         IAccountManagerResponse caching = new IAccountManagerResponse.Stub() {
             @Override
             public void onResult(Bundle value) throws RemoteException {
                 String token = value == null ? null : value.getString(AccountManager.KEY_AUTHTOKEN);
                 if (token != null) put(key("token", account) + "/" + tokenType, token);
+                // The outcome only, never the token.
+                System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + " uid="
+                        + request.getInt(AccountManager.KEY_CALLER_UID) + ": "
+                        + (token != null ? "token" : value == null ? "no result" : "no token, keys " + value.keySet()));
                 if (caller != null) caller.onResult(value);
             }
 
             @Override
             public void onError(int code, String message) throws RemoteException {
+                System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + ": error " + code);
                 if (caller != null) caller.onError(code, message);
             }
         };

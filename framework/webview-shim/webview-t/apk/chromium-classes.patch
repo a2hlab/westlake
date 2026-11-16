@@ -1,0 +1,406 @@
+--- a/H40.smali
++++ b/H40.smali
+@@ -607,7 +607,19 @@
+     .line 52
+     move-result-object v6
+ 
++    iget v2, v1, Landroid/graphics/Point;->x:I
++
++    if-lez v2, :cond_3c
++
++    iget v2, v1, Landroid/graphics/Point;->y:I
++
++    if-gtz v2, :cond_3f
++
++    :cond_3c
++    invoke-virtual {v6, v1}, Landroid/view/Display;->getRealSize(Landroid/graphics/Point;)V
++
+     .line 53
++    :cond_3f
+     move-object v0, p0
+ 
+     .line 54
+--- a/com/android/webview/chromium/WebViewChromium.smali
++++ b/com/android/webview/chromium/WebViewChromium.smali
+@@ -6859,104 +6859,106 @@
+     .registers 5
+ 
+     .line 1
++    .line 2
+     iget-object v0, p0, Lcom/android/webview/chromium/WebViewChromium;->i:Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;
+ 
+-    .line 2
+     .line 3
+     const/4 v1, 0x1
+ 
+     .line 4
+-    invoke-virtual {v0, v1}, Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;->k(Z)V
+-
+     .line 5
+     .line 6
+-    .line 7
+-    invoke-virtual {p0}, Lcom/android/webview/chromium/WebViewChromium;->a()Z
++    invoke-virtual {v0, v1}, Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;->k(Z)V
+ 
++    .line 7
+     .line 8
+     .line 9
++    invoke-virtual {p0}, Lcom/android/webview/chromium/WebViewChromium;->a()Z
++
+     .line 10
+     move-result v0
+ 
+     .line 11
+-    if-eqz v0, :cond_18
+-
+     .line 12
++    if-eqz v0, :cond_1b
++
+     .line 13
++    .line 14
+     iget-object v0, p0, Lcom/android/webview/chromium/WebViewChromium;->i:Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;
+ 
+-    .line 14
+     .line 15
++    .line 16
+     new-instance v1, Lcom/android/webview/chromium/q;
+ 
+-    .line 16
+     .line 17
+     const/4 v2, 0x3
+ 
+     .line 18
+-    invoke-direct {v1, p0, p1, v2}, Lcom/android/webview/chromium/q;-><init>(Lcom/android/webview/chromium/WebViewChromium;Ljava/lang/Object;I)V
+-
+     .line 19
+     .line 20
+-    .line 21
+-    invoke-virtual {v0, v1}, Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;->i(Ljava/lang/Runnable;)V
++    invoke-direct {v1, p0, p1, v2}, Lcom/android/webview/chromium/q;-><init>(Lcom/android/webview/chromium/WebViewChromium;Ljava/lang/Object;I)V
+ 
++    .line 21
+     .line 22
+     .line 23
++    invoke-virtual {v0, v1}, Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;->i(Ljava/lang/Runnable;)V
++
+     .line 24
+     return-void
+ 
++    invoke-static {p0}, Lwestlake/WlFix;->web_draw(Ljava/lang/Object;)V
++
+     .line 25
+-    :cond_18
++    .line 26
++    :cond_1b
+     iget-object v0, p0, Lcom/android/webview/chromium/WebViewChromium;->f:Lorg/chromium/android_webview/AwContents;
+ 
+-    .line 26
+     .line 27
+-    invoke-virtual {v0}, Ljava/lang/Object;->getClass()Ljava/lang/Class;
+-
+     .line 28
+     .line 29
++    invoke-virtual {v0}, Ljava/lang/Object;->getClass()Ljava/lang/Class;
++
+     .line 30
++    .line 31
+     const-string v1, "AwContents.onDraw"
+ 
+-    .line 31
+     .line 32
+     const/4 v2, 0x0
+ 
+     .line 33
+-    :try_start_20
+-    invoke-static {v1, v2}, Lorg/chromium/base/TraceEvent;->R(Ljava/lang/String;Ljava/lang/String;)V
+-
+     .line 34
+     .line 35
++    :try_start_23
++    invoke-static {v1, v2}, Lorg/chromium/base/TraceEvent;->R(Ljava/lang/String;Ljava/lang/String;)V
++
+     .line 36
++    .line 37
+     iget-object v0, v0, Lorg/chromium/android_webview/AwContents;->d0:Ldc;
+ 
+-    .line 37
+     .line 38
+-    invoke-interface {v0, p1}, Ldc;->onDraw(Landroid/graphics/Canvas;)V
+-    :try_end_28
+-    .catchall {:try_start_20 .. :try_end_28} :catchall_2c
+-
+     .line 39
+     .line 40
+-    .line 41
+-    invoke-static {v1}, Lorg/chromium/base/TraceEvent;->y0(Ljava/lang/String;)V
++    invoke-interface {v0, p1}, Ldc;->onDraw(Landroid/graphics/Canvas;)V
++    :try_end_2b
++    .catchall {:try_start_23 .. :try_end_2b} :catchall_2f
+ 
++    .line 41
+     .line 42
+     .line 43
++    invoke-static {v1}, Lorg/chromium/base/TraceEvent;->y0(Ljava/lang/String;)V
++
+     .line 44
+     return-void
+ 
+     .line 45
+-    :catchall_2c
++    :catchall_2f
+     move-exception p1
+ 
+     .line 46
+-    invoke-static {v1}, Lorg/chromium/base/TraceEvent;->y0(Ljava/lang/String;)V
+-
+     .line 47
+     .line 48
++    invoke-static {v1}, Lorg/chromium/base/TraceEvent;->y0(Ljava/lang/String;)V
++
+     .line 49
+     throw p1
+ .end method
+--- a/com/android/webview/chromium/WebViewChromiumFactoryProviderForT.smali
++++ b/com/android/webview/chromium/WebViewChromiumFactoryProviderForT.smali
+@@ -31,3 +31,15 @@
+     .line 6
+     return-object v0
+ .end method
++
++
++# virtual methods
++.method public createWebView(Landroid/webkit/WebView;Landroid/webkit/WebView$PrivateAccess;Z)Landroid/webkit/WebViewProvider;
++    .registers 4
++
++    invoke-super {p0, p1, p2}, Lcom/android/webview/chromium/WebViewChromiumFactoryProvider;->createWebView(Landroid/webkit/WebView;Landroid/webkit/WebView$PrivateAccess;)Landroid/webkit/WebViewProvider;
++
++    move-result-object p0
++
++    return-object p0
++.end method
+--- a/org/chromium/android_webview/AwContents.smali
++++ b/org/chromium/android_webview/AwContents.smali
+@@ -9882,105 +9882,107 @@
+     .registers 8
+ 
+     .line 1
++    .line 2
+     iput p3, p0, Lorg/chromium/android_webview/AwContents;->Z:F
+ 
+-    .line 2
+     .line 3
++    .line 4
+     iput p4, p0, Lorg/chromium/android_webview/AwContents;->a0:F
+ 
+-    .line 4
++    invoke-static {p0}, Lwestlake/WlFix;->web_scroll(Ljava/lang/Object;)V
++
+     .line 5
++    .line 6
+     iget-object p3, p0, Lorg/chromium/android_webview/AwContents;->x:LHb;
+ 
+-    .line 6
+     .line 7
++    .line 8
+     iput p1, p3, LHb;->d:I
+ 
+-    .line 8
+     .line 9
++    .line 10
+     iput p2, p3, LHb;->e:I
+ 
+-    .line 10
+     .line 11
++    .line 12
+     iget p1, p0, Lorg/chromium/android_webview/AwContents;->W:F
+ 
+-    .line 12
+     .line 13
++    .line 14
+     cmpl-float p2, p1, p5
+ 
+-    .line 14
+     .line 15
+-    if-nez p2, :cond_1d
+-
+     .line 16
++    if-nez p2, :cond_20
++
+     .line 17
++    .line 18
+     iget p3, p0, Lorg/chromium/android_webview/AwContents;->X:F
+ 
+-    .line 18
+     .line 19
++    .line 20
+     cmpl-float p3, p3, p6
+ 
+-    .line 20
+     .line 21
+-    if-nez p3, :cond_1d
+-
+     .line 22
++    if-nez p3, :cond_20
++
+     .line 23
++    .line 24
+     iget p3, p0, Lorg/chromium/android_webview/AwContents;->Y:F
+ 
+-    .line 24
+     .line 25
++    .line 26
+     cmpl-float p3, p3, p7
+ 
+-    .line 26
+     .line 27
+-    if-nez p3, :cond_1d
+-
+     .line 28
++    if-nez p3, :cond_20
++
+     .line 29
+-    goto :goto_4a
++    goto :goto_4d
+ 
+     .line 30
+-    :cond_1d
++    .line 31
++    :cond_20
+     iput p6, p0, Lorg/chromium/android_webview/AwContents;->X:F
+ 
+-    .line 31
+     .line 32
++    .line 33
+     iput p7, p0, Lorg/chromium/android_webview/AwContents;->Y:F
+ 
+-    .line 33
+     .line 34
+-    if-eqz p2, :cond_45
+-
+     .line 35
++    if-eqz p2, :cond_48
++
+     .line 36
++    .line 37
+     iput p5, p0, Lorg/chromium/android_webview/AwContents;->W:F
+ 
+-    .line 37
+     .line 38
++    .line 39
+     iget-object p2, p0, Lorg/chromium/android_webview/AwContents;->h:Lsa;
+ 
+-    .line 39
+     .line 40
++    .line 41
+     iget-object p2, p2, Lsa;->a:Lorg/chromium/ui/base/WindowAndroid;
+ 
+-    .line 41
+     .line 42
++    .line 43
+     iget-object p2, p2, Lorg/chromium/ui/base/WindowAndroid;->d:Lhs;
+ 
+-    .line 43
+     .line 44
++    .line 45
+     iget p2, p2, Lhs;->d:F
+ 
+-    .line 45
+     .line 46
++    .line 47
+     iget-object p3, p0, Lorg/chromium/android_webview/AwContents;->m:Lya;
+ 
+-    .line 47
+     .line 48
++    .line 49
+     iget-object p3, p3, Lya;->a:LOa;
+ 
+-    .line 49
+     .line 50
+     mul-float/2addr p1, p2
+ 
+@@ -9988,22 +9990,22 @@
+     mul-float/2addr p5, p2
+ 
+     .line 52
++    .line 53
+     iget-object p2, p3, LOa;->d:LJa;
+ 
+-    .line 53
+     .line 54
+-    invoke-static {p1}, Ljava/lang/Float;->floatToIntBits(F)I
+-
+     .line 55
+     .line 56
++    invoke-static {p1}, Ljava/lang/Float;->floatToIntBits(F)I
++
+     .line 57
+     move-result p1
+ 
+     .line 58
+-    invoke-static {p5}, Ljava/lang/Float;->floatToIntBits(F)I
+-
+     .line 59
+     .line 60
++    invoke-static {p5}, Ljava/lang/Float;->floatToIntBits(F)I
++
+     .line 61
+     move-result p3
+ 
+@@ -10011,30 +10013,30 @@
+     const/4 p4, 0x7
+ 
+     .line 63
+-    invoke-virtual {p2, p4, p1, p3}, Landroid/os/Handler;->obtainMessage(III)Landroid/os/Message;
+-
+     .line 64
+     .line 65
++    invoke-virtual {p2, p4, p1, p3}, Landroid/os/Handler;->obtainMessage(III)Landroid/os/Message;
++
+     .line 66
+     move-result-object p1
+ 
+     .line 67
+-    invoke-virtual {p2, p1}, Landroid/os/Handler;->sendMessage(Landroid/os/Message;)Z
+-
+     .line 68
+     .line 69
++    invoke-virtual {p2, p1}, Landroid/os/Handler;->sendMessage(Landroid/os/Message;)Z
++
+     .line 70
+-    :cond_45
++    .line 71
++    :cond_48
+     iget-object p1, p0, Lorg/chromium/android_webview/AwContents;->w:Loc;
+ 
+-    .line 71
+     .line 72
+-    invoke-virtual {p1}, Loc;->b()V
+-
+     .line 73
+     .line 74
++    invoke-virtual {p1}, Loc;->b()V
++
+     .line 75
+-    :goto_4a
++    :goto_4d
+     return-void
+ .end method
+ 
+--- a/org/chromium/content/browser/webcontents/WebContentsImpl.smali
++++ b/org/chromium/content/browser/webcontents/WebContentsImpl.smali
+@@ -234,11 +234,13 @@
+ .method public static onEvaluateJavaScriptResult(Ljava/lang/String;Lorg/chromium/content_public/browser/JavaScriptCallback;)V
+     .registers 2
+ 
+-    .line 1
+-    invoke-interface {p1, p0}, Lorg/chromium/content_public/browser/JavaScriptCallback;->a(Ljava/lang/String;)V
++    invoke-static {p0}, Lwestlake/WlFix;->web_callback(Ljava/lang/Object;)V
+ 
++    .line 1
+     .line 2
+     .line 3
++    invoke-interface {p1, p0}, Lorg/chromium/content_public/browser/JavaScriptCallback;->a(Ljava/lang/String;)V
++
+     .line 4
+     return-void
+ .end method

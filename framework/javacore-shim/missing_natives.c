@@ -329,6 +329,59 @@ static jstring wl_prop_get(JNIEnv* env, jclass c, jstring key, jstring def)
     return answer;
 }
 
+/*
+ * Integer properties Westlake answers where the platform has none. build.version.extensions.s is the S SDK
+ * extension level (SdkExtensions.getExtensionVersion(S)): 7 is the level that added android.net.http.HttpEngine,
+ * which Westlake provides (the Tethering module's Cronet, libmainlinecronet). Google's Play Store and Chromium's
+ * platform-Cronet provider use HttpEngine only from level 7; at 0 the Play Store fell back to Java Cronet, which
+ * has no bidirectional streams. The R, T and U levels stay unset: they would promise module APIs (photo picker,
+ * AdServices) that Westlake does not have.
+ */
+typedef jint (*PropGetIntFn)(JNIEnv*, jclass, jstring, jint);
+static PropGetIntFn g_prop_get_int;
+static const struct { const char* key; jint value; } kIntProps[] = {
+    { "build.version.extensions.s", 7 },
+};
+static jint wl_prop_get_int(JNIEnv* env, jclass c, jstring key, jint def)
+{
+    jint answer = g_prop_get_int(env, c, key, def);
+    const char* k;
+    size_t i;
+    if ((*env)->ExceptionCheck(env) || key == NULL || answer != def) return answer;
+    k = (*env)->GetStringUTFChars(env, key, NULL);
+    if (k == NULL) return answer;
+    for (i = 0; i < sizeof(kIntProps) / sizeof(kIntProps[0]); i++) {
+        if (strcmp(k, kIntProps[i].key) == 0) {
+            answer = kIntProps[i].value;
+            break;
+        }
+    }
+    (*env)->ReleaseStringUTFChars(env, key, k);
+    return answer;
+}
+
+/* Wraps one of liboh_android_runtime's SystemProperties natives; returns its original entry, or NULL. */
+static void* wrap_property_native(JNIEnv* env, jclass c, const JNINativeMethod* wrapped)
+{
+    jmethodID m = (*env)->GetStaticMethodID(env, c, wrapped->name, wrapped->signature);
+    void* entry;
+    Dl_info info;
+    if (m == NULL) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    entry = *(void* const*) ((const char*) m + 16);   /* ArtMethod::ptr_sized_fields_.data_ */
+    if (entry == NULL || dladdr(entry, &info) == 0 || info.dli_fname == NULL
+            || strstr(info.dli_fname, "liboh_android_runtime") == NULL) {
+        return NULL;
+    }
+    if ((*env)->RegisterNatives(env, c, wrapped, 1) != JNI_OK) {
+        (*env)->ExceptionClear(env);
+        return NULL;
+    }
+    return entry;
+}
+
 /* Wraps SystemProperties.native_get(String, String) if its registered implementation can be found
  * and is liboh_android_runtime's; otherwise leaves it alone. Returns 1 when wrapped. */
 static int wrap_system_properties(JNIEnv* env)
@@ -351,6 +404,18 @@ static int wrap_system_properties(JNIEnv* env)
             g_prop_get = (PropGetFn) entry;
             ok = (*env)->RegisterNatives(env, c, &wrapped, 1) == JNI_OK;
             if (!ok) (*env)->ExceptionClear(env);
+        }
+    }
+    {
+        static const JNINativeMethod wrappedInt = {
+            "native_get_int", "(Ljava/lang/String;I)I", (void*) wl_prop_get_int };
+        /* Saved before registering, so the wrapper never runs without the original behind it. */
+        jmethodID mi = (*env)->GetStaticMethodID(env, c, wrappedInt.name, wrappedInt.signature);
+        if (mi == NULL) {
+            (*env)->ExceptionClear(env);
+        } else {
+            g_prop_get_int = (PropGetIntFn) *(void* const*) ((const char*) mi + 16);
+            if (wrap_property_native(env, c, &wrappedInt) == NULL) g_prop_get_int = NULL;
         }
     }
     (*env)->DeleteLocalRef(env, c);
@@ -640,6 +705,7 @@ int wl_register_localsocket(JNIEnv* env);
 int wl_register_surface_canvas(JNIEnv* env);
 int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
+int wl_register_location(JNIEnv* env);
 int wl_install_android_app_seccomp(void);
 int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
@@ -679,6 +745,59 @@ static jboolean wl_setPermission0(JNIEnv* env, jobject self, jobject file, jint 
     if (access & 1) bits |= owner_only ? S_IXUSR : (S_IXUSR | S_IXGRP | S_IXOTH);
     return chmod(path, enable ? (st.st_mode | bits) : (st.st_mode & ~bits)) == 0 ? JNI_TRUE : JNI_FALSE;
 }
+
+/*
+ * libcore.io.Linux.remove, as libcore's own (remove(path), ErrnoException "remove" on failure), bound only while
+ * WESTLAKE_TRACE_DELETE=<text> is in the environment: a remove of a path that contains that text is logged first,
+ * with the Java stack that asked for it. File.delete and Files.delete of a file both end here. A file an app keeps
+ * deleting names its caller (Play services' Chimera config, deleted right after it was written).
+ */
+static void wl_linux_remove(JNIEnv* env, jobject self, jstring java_path)
+{
+    const char* watch = getenv("WESTLAKE_TRACE_DELETE");
+    const char* path;
+    int result;
+    int saved;
+    (void) self;
+    if (java_path == NULL) {
+        jclass npe = (*env)->FindClass(env, "java/lang/NullPointerException");
+        if (npe != NULL) (*env)->ThrowNew(env, npe, "path == null");
+        return;
+    }
+    path = (*env)->GetStringUTFChars(env, java_path, NULL);
+    if (path == NULL) return;
+    if (watch != NULL && watch[0] != '\0' && strstr(path, watch) != NULL) {
+        char line[4200];
+        jclass t = (*env)->FindClass(env, "java/lang/Throwable");
+        jmethodID ctor = t != NULL ? (*env)->GetMethodID(env, t, "<init>", "(Ljava/lang/String;)V") : NULL;
+        jmethodID print = t != NULL ? (*env)->GetMethodID(env, t, "printStackTrace", "()V") : NULL;
+        snprintf(line, sizeof(line), "[WESTLAKE-DELETE] %s", path);
+        if (ctor != NULL && print != NULL) {
+            jstring msg = (*env)->NewStringUTF(env, line);
+            jobject e = msg != NULL ? (*env)->NewObject(env, t, ctor, msg) : NULL;
+            if (e != NULL) (*env)->CallVoidMethod(env, e, print);
+        }
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        if (t == NULL) fprintf(stderr, "%s\n", line);
+        fflush(stderr);
+    }
+    do {
+        result = remove(path);
+    } while (result == -1 && errno == EINTR);
+    saved = errno;
+    (*env)->ReleaseStringUTFChars(env, java_path, path);
+    if (result == -1) {
+        jclass errno_class = (*env)->FindClass(env, "android/system/ErrnoException");
+        jmethodID ctor = errno_class != NULL ? (*env)->GetMethodID(env, errno_class, "<init>", "(Ljava/lang/String;I)V") : NULL;
+        jstring name = (*env)->NewStringUTF(env, "remove");
+        jobject e = ctor != NULL && name != NULL ? (*env)->NewObject(env, errno_class, ctor, name, saved) : NULL;
+        if (e != NULL) (*env)->Throw(env, (jthrowable) e);
+    }
+}
+
+static const JNINativeMethod kLinuxRemove[] = {
+    { "remove", "(Ljava/lang/String;)V", (void*) wl_linux_remove },
+};
 
 static jboolean wl_setReadOnly0(JNIEnv* env, jobject self, jobject file)
 {
@@ -982,12 +1101,34 @@ static void wl_readProcLines(JNIEnv* env, jclass c, jstring file, jobjectArray r
  * Process.sendSignal and sendSignalQuiet, as AOSP's android_os_Process: kill(pid, sig) for a pid
  * above 0. A signal the process sends itself (Process.killProcess(myPid()) is SIGKILL) first logs
  * the Java stack that sent it: an app that ends itself that way left no trace at all, neither a
- * crash dump nor an exit (Microsoft 365, WeChat, Zoom and others in the Level 2 run).
+ * crash dump nor an exit (Microsoft 365, WeChat, Zoom and others in the Level 2 run). A signal to
+ * a process of another app is not sent (wl_may_signal).
  */
+/*
+ * Whether this process may signal pid, which adapter.activity.AppProcesses.maySignal decides as
+ * Android's kernel does by uid: every Westlake process runs under the one OH uid, so the kernel
+ * lets any of them signal any other (imo's SIGKILL ended the shared Play services host). A process
+ * whose boot classes lack the check signals as before.
+ */
+static int wl_may_signal(JNIEnv* env, jint pid, jint sig)
+{
+    jboolean may = JNI_TRUE;
+    jclass check = (*env)->FindClass(env, "adapter/activity/AppProcesses");
+    jmethodID m = check != NULL ? (*env)->GetStaticMethodID(env, check, "maySignal", "(II)Z") : NULL;
+    if (m != NULL) may = (*env)->CallStaticBooleanMethod(env, check, m, pid, sig);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        may = JNI_TRUE;
+    }
+    if (check != NULL) (*env)->DeleteLocalRef(env, check);
+    return may == JNI_TRUE;
+}
+
 static void wl_send_signal(JNIEnv* env, jclass c, jint pid, jint sig)
 {
     (void) c;
     if (pid <= 0) return;
+    if (pid != getpid() && !wl_may_signal(env, pid, sig)) return;
     if (pid == getpid()) {
         char line[96];
         jclass t = (*env)->FindClass(env, "java/lang/Throwable");
@@ -1562,6 +1703,10 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int pr = normalize_thread_priority(env);
         int fs = bind(env, "java/io/UnixFileSystem", kUnixFileSystem,
                       (int) (sizeof(kUnixFileSystem) / sizeof(kUnixFileSystem[0])));
+        if (getenv("WESTLAKE_TRACE_DELETE") != NULL) {
+            bind(env, "libcore/io/Linux", kLinuxRemove, 1);
+            note("[WL-NATIVES] tracing removes (WESTLAKE_TRACE_DELETE)\n");
+        }
         int tx = wl_register_text(env);
         int ar = wl_register_audiorecord(env);
         int ap = wl_register_audio_ports(env);
@@ -1572,6 +1717,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int cv = wl_register_surface_canvas(env);
         int sc = wl_register_sqlite_collations(env);
         int ns = wl_register_notification_switch(env);
+        int lo = wl_register_location(env);
         wl_register_socket_binder(env);
         int ex = wl_register_extractor(env);
         int vc = wl_register_video_codec(env);
@@ -1586,12 +1732,12 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),
-                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d MediaExtractor=%d VideoCodec=%d ImageReader=%d cmdline=%d more=%d\n",
+                 "[WL-NATIVES] bound Math=%d/%d StrictMath=%d/%d SurfaceControl=%d/%d VM=%d/%d environ=%d Memory=%d/%d ActivityThread=%d/%d SQLiteGlobal=%d SystemProperties-wrapped=%d thread-priority-was=%d UnixFileSystem=%d AndroidCharacter=%d AudioRecord=%d AudioPorts=%d ExpatParser=%d jni-lookup-log=%d ojluni-nio=%d LocalSocketImpl=%d Surface-canvas=%d SQLite-collations=%d/2 NotificationSwitch=%d Location=%d MediaExtractor=%d VideoCodec=%d ImageReader=%d cmdline=%d more=%d\n",
                  m, (int) (sizeof(kMath) / sizeof(kMath[0])),
                  s, (int) (sizeof(kStrictMath) / sizeof(kStrictMath[0])),
                  v, (int) (sizeof(kSurfaceControl) / sizeof(kSurfaceControl[0])),
                  t, (int) (sizeof(kVm) / sizeof(kVm[0])), e, mem, (int) (sizeof(kMemory) / sizeof(kMemory[0])),
-                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, ex, vc, ir, cl, more);
+                 at, (int) (sizeof(kActivityThread) / sizeof(kActivityThread[0])), sq, sp, pr, fs, tx, ar, ap, xp, jl, mb, ls, cv, sc, ns, lo, ex, vc, ir, cl, more);
         note(line);
     }
     {

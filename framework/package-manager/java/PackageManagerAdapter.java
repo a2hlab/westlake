@@ -89,7 +89,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         ai.scanSourceDir = apkPath;
         ai.scanPublicSourceDir = apkPath;
         ai.dataDir = dataDir;
-        ai.deviceProtectedDataDir = dataDir;
+        ai.deviceProtectedDataDir = DataDirs.deviceProtected(dataDir);
         ai.credentialProtectedDataDir = dataDir;
         ai.nativeLibraryDir = libDir;
         ai.nativeLibraryRootDir = libDir;
@@ -246,7 +246,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public String[] getAppOpPermissionPackages(String permissionName, int userId) {
-        return null;
+        return new String[0]; // none, as Android answers; PackageManager passes it to the caller as is
     }
 
     @Override
@@ -281,9 +281,14 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         return null;
     }
 
+    /**
+     * None: Westlake's framework isn't made of mainline modules. Empty, as Android answers a device
+     * without them; ApplicationPackageManager hands this list to the app as it comes, and the Play
+     * Store streams it while it starts (a null one ended its process).
+     */
     @Override
     public List<ModuleInfo> getInstalledModules(int flags) {
-        return null;
+        return new java.util.ArrayList<>();
     }
 
     @Override
@@ -886,6 +891,10 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (RemotePackages.contains(packageName)) {
             return RemotePackages.packageInfo(packageName, flags);
         }
+        if (InstalledPackages.contains(packageName)) {   // published by an installer's session (ADR-0006)
+            sAbsentPackages.remove(packageName);
+            return InstalledPackages.packageInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             System.err.println("[WESTLAKE-WEBVIEW] IPackageManager.getPackageInfo -> "
                     + System.getenv("ASX_WEBVIEW_APK"));
@@ -947,6 +956,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         if (RemotePackages.contains(packageName)) {
             return GuestPackages.besideDefaults(packageName, RemotePackages.applicationInfo(packageName, flags));
         }
+        if (InstalledPackages.contains(packageName)) {
+            return InstalledPackages.applicationInfo(packageName, flags);
+        }
         if (isSideloadedWebViewPackage(packageName)) {
             return getSideloadedWebViewPackageInfo().applicationInfo;
         }
@@ -989,6 +1001,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         String self = SourcePackageRegistry.packageName();
         if (self != null) answered.add(self);
         answered.addAll(GuestPackages.names());
+        answered.addAll(InstalledPackages.names());
         for (String play : PLAY_PACKAGES) {
             if (RemotePackages.contains(play)) answered.add(play);
         }
@@ -1230,10 +1243,18 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      */
     private static final int VULKAN_API_VERSION = (1 << 22) | (2 << 12);  // VK_MAKE_API_VERSION(0, 1, 2, 0)
 
-    /** Every claimed feature and its version, for hasSystemFeature and getSystemAvailableFeatures. */
+    /**
+     * Every claimed feature and its version, for hasSystemFeature and getSystemAvailableFeatures. Each is
+     * backed by a working service. faketouch comes with the touchscreen, as Android's touchscreen.xml
+     * declares both. The microphone is AudioRecord over OH's audio capturer (the host holds OH's microphone
+     * permission). Google Play filters apps against this list, implied features included: faketouch for
+     * every app, and the microphone for any app requesting RECORD_AUDIO.
+     */
     private static final java.util.Map<String, Integer> CLAIMED_FEATURES = new java.util.LinkedHashMap<>();
     static {
         CLAIMED_FEATURES.put("android.hardware.touchscreen", 0);
+        CLAIMED_FEATURES.put("android.hardware.faketouch", 0);
+        CLAIMED_FEATURES.put("android.hardware.microphone", 0);
         CLAIMED_FEATURES.put("android.hardware.wifi", 0);
         CLAIMED_FEATURES.put("android.hardware.screen.portrait", 0);
         CLAIMED_FEATURES.put("android.hardware.screen.landscape", 0);
@@ -1320,36 +1341,42 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public boolean isPackageAvailable(java.lang.String arg0, int arg1) throws android.os.RemoteException {
-        logStub("isPackageAvailable", "");
-        return false;
+        // Installed, and neither hidden nor suspended, which no package here is.
+        return arg0 != null && getPackageInfo(arg0, 0, arg1) != null;
     }
 
 
     @Override
     public android.content.pm.PackageInfo getPackageInfoVersioned(android.content.pm.VersionedPackage arg0, long arg1, int arg2) throws android.os.RemoteException {
-        logStub("getPackageInfoVersioned", "");
-        return null;
+        // PackageManager.getPackageInfo(VersionedPackage, flags): the installed package if it is that version,
+        // or any version with VERSION_CODE_HIGHEST. It answered null for every package.
+        if (arg0 == null) return null;
+        PackageInfo info = getPackageInfo(arg0.getPackageName(), arg1, arg2);
+        long wanted = arg0.getLongVersionCode();
+        return info != null && (wanted == android.content.pm.PackageManager.VERSION_CODE_HIGHEST
+                || wanted == info.getLongVersionCode()) ? info : null;
     }
 
 
     @Override
     public int[] getPackageGids(java.lang.String arg0, long arg1, int arg2) throws android.os.RemoteException {
-        logStub("getPackageGids", "");
-        return null;
+        // No permission here maps to a supplementary group: an installed package has none, an unknown one null.
+        return arg0 != null && getPackageInfo(arg0, 0, arg2) != null ? new int[0] : null;
     }
 
 
     @Override
     public java.lang.String[] currentToCanonicalPackageNames(java.lang.String[] arg0) throws android.os.RemoteException {
-        logStub("currentToCanonicalPackageNames", "");
-        return null;
+        // No package here was renamed (original-package), so each name is its own: an array as long as the
+        // one asked about, as Android answers. ApplicationPackageManager hands the result to the app as is.
+        return arg0 == null ? null : arg0.clone();
     }
 
 
     @Override
     public java.lang.String[] canonicalToCurrentPackageNames(java.lang.String[] arg0) throws android.os.RemoteException {
-        logStub("canonicalToCurrentPackageNames", "");
-        return null;
+        // See currentToCanonicalPackageNames.
+        return arg0 == null ? null : arg0.clone();
     }
 
 
@@ -1449,7 +1476,16 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public java.lang.String[] getPackagesForUid(int arg0) throws android.os.RemoteException {
         String sourcePackage = SourcePackageRegistry.packageForUid(arg0);
-        if (sourcePackage != null) return new String[] {sourcePackage};
+        if (sourcePackage != null) {
+            // In the shared Play services process, the packages whose code runs there under its uid
+            // too (Companion's asset module service), as a uid shared by several packages answers.
+            java.util.List<String> code = arg0 == android.os.Process.myUid()
+                    ? GuestPackages.codePackages() : java.util.Collections.<String>emptyList();
+            java.util.List<String> all = new java.util.ArrayList<>();
+            all.add(sourcePackage);
+            for (String name : code) if (!all.contains(name)) all.add(name);
+            return all.toArray(new String[0]);
+        }
         String remotePackage = RemotePackages.packageForUid(arg0);
         if (remotePackage != null) return new String[] {remotePackage};
         logStub("getPackagesForUid", "");
@@ -1470,8 +1506,11 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.lang.String[] getNamesForUids(int[] arg0) throws android.os.RemoteException {
-        logStub("getNamesForUids", "");
-        return null;
+        // One name per uid, null for a uid no package has, as Android answers.
+        if (arg0 == null) return null;
+        String[] names = new String[arg0.length];
+        for (int i = 0; i < arg0.length; i++) names[i] = getNameForUid(arg0[i]);
+        return names;
     }
 
 
@@ -1859,15 +1898,32 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * PackageManager.deletePackage (DELETE_PACKAGES, which no Westlake app holds): an uninstall the user confirms, of a
+     * package an installer published here (InstallerSessions.uninstall). The outcome goes to the observer.
+     */
     @Override
-    public void deletePackageAsUser(java.lang.String arg0, int arg1, android.content.pm.IPackageDeleteObserver arg2, int arg3, int arg4) throws android.os.RemoteException {
-        logStub("deletePackageAsUser", "");
+    public void deletePackageAsUser(java.lang.String packageName, int versionCode, android.content.pm.IPackageDeleteObserver observer, int userId, int flags) throws android.os.RemoteException {
+        logBridged("deletePackageAsUser", packageName);
+        InstallerSessions.uninstall(packageName, versionCode, android.app.ActivityThread.currentPackageName(), (code, message) -> {
+            try {
+                if (observer != null) observer.packageDeleted(packageName, code);
+            } catch (android.os.RemoteException | RuntimeException ignored) {
+            }
+        });
     }
 
 
     @Override
-    public void deletePackageVersioned(android.content.pm.VersionedPackage arg0, android.content.pm.IPackageDeleteObserver2 arg1, int arg2, int arg3) throws android.os.RemoteException {
-        logStub("deletePackageVersioned", "");
+    public void deletePackageVersioned(android.content.pm.VersionedPackage target, android.content.pm.IPackageDeleteObserver2 observer, int userId, int flags) throws android.os.RemoteException {
+        logBridged("deletePackageVersioned", target.getPackageName());
+        InstallerSessions.uninstall(target.getPackageName(), target.getLongVersionCode(),
+                android.app.ActivityThread.currentPackageName(), (code, message) -> {
+            try {
+                if (observer != null) observer.onPackageDeleted(target.getPackageName(), code, message);
+            } catch (android.os.RemoteException | RuntimeException ignored) {
+            }
+        });
     }
 
 
@@ -1882,12 +1938,25 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      * from Google Play, which is where the apps run here come from. The Play Store is installed (the
      * microG Companion, or the Play Store guest beside shared Play services), so the name resolves.
      * Packages installed with the system image report no installer, as on a phone.
+     *
+     * A host answers the same for the apps connected to it (RemotePackages clients): each is the launched
+     * app of its own process, and the Play Store host must see what that app sees of itself. Asked about a
+     * client, it got null, and the Play Store judged the app not installed from Play: split installs failed
+     * with APP_NOT_OWNED (-15) and every asset pack was "unavailable".
      */
     private static final String PLAY_STORE_PACKAGE = "com.android.vending";
 
+    /** Whether a package is presented as installed by the Play Store: this process's app or a client's. */
+    private static boolean installedByPlayStore(String packageName) {
+        return packageName != null
+                && (SourcePackageRegistry.contains(packageName) || RemotePackages.uidOf(packageName) >= 0);
+    }
+
     @Override
     public java.lang.String getInstallerPackageName(java.lang.String arg0) throws android.os.RemoteException {
-        if (arg0 != null && SourcePackageRegistry.contains(arg0)) return PLAY_STORE_PACKAGE;
+        // A package an installer published here: what its install record says (ADR-0006 decision 4).
+        if (arg0 != null && InstalledPackages.contains(arg0)) return InstalledPackages.recorded(arg0, "installer");
+        if (installedByPlayStore(arg0)) return PLAY_STORE_PACKAGE;
         logStub("getInstallerPackageName", arg0 == null ? "" : arg0);
         return null;
     }
@@ -1901,7 +1970,17 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         // reports what PackageManagerService records for a Play Store install on Android 14 and
         // later: the Play Store initiated and installed it, owns its updates, and the source is a
         // store. Its signing info stays unknown (null), which Android also reports when it has none.
-        if (arg0 != null && SourcePackageRegistry.contains(arg0)) {
+        // A package an installer published here answers from its install record instead: the installer that
+        // committed the session initiated and installed it, the update owner is the one the commit settled, and the
+        // source is what the installer declared (ADR-0006 decision 4).
+        if (arg0 != null && InstalledPackages.contains(arg0)) {
+            String installer = InstalledPackages.recorded(arg0, "installer");
+            String source = InstalledPackages.recorded(arg0, "packageSource");
+            return new android.content.pm.InstallSourceInfo(installer, null, null, installer,
+                    InstalledPackages.recorded(arg0, InstallerSessions.UPDATE_OWNER),
+                    source != null ? Integer.parseInt(source) : android.content.pm.PackageInstaller.PACKAGE_SOURCE_UNSPECIFIED);
+        }
+        if (installedByPlayStore(arg0)) {
             return new android.content.pm.InstallSourceInfo(PLAY_STORE_PACKAGE, null, null, PLAY_STORE_PACKAGE,
                     PLAY_STORE_PACKAGE, android.content.pm.PackageInstaller.PACKAGE_SOURCE_STORE);
         }
@@ -2182,10 +2261,34 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    /**
+     * The builtin shared libraries this runtime provides: the jars in <runtime root>/framework, where
+     * uses-library names resolve (AppSchedulerBridge.sharedLibraryJars), as Android's are in
+     * /system/framework. It was null, which Android returns only on a device with no shared libraries.
+     * Google's Play Store builds its device configuration with
+     * Arrays.asList(getSystemSharedLibraryNames()), so the null threw there, the configuration's
+     * device-attribute sections were never synced, and every table-of-contents request asked for them
+     * again until the Play Store gave up ("Failed to converge on device attributes for TOC").
+     */
     @Override
     public java.lang.String[] getSystemSharedLibraryNames() throws android.os.RemoteException {
-        logStub("getSystemSharedLibraryNames", "");
-        return null;
+        return systemSharedLibraries().keySet().toArray(new String[0]);
+    }
+
+    /** Library name to jar path for each builtin shared library (see getSystemSharedLibraryNames). */
+    private static java.util.Map<String, String> systemSharedLibraries() {
+        java.util.TreeMap<String, String> libraries = new java.util.TreeMap<>();
+        String root = System.getenv("WESTLAKE_RUNTIME_ROOT");
+        java.io.File[] jars = root != null ? new java.io.File(root, "framework").listFiles() : null;
+        if (jars != null) {
+            for (java.io.File jar : jars) {
+                String name = jar.getName();
+                if (jar.isFile() && name.endsWith(".jar")) {
+                    libraries.put(name.substring(0, name.length() - ".jar".length()), jar.getPath());
+                }
+            }
+        }
+        return libraries;
     }
 
 
@@ -2362,7 +2465,7 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public java.util.Map<java.lang.String,java.lang.String> getSystemSharedLibraryNamesAndPaths() throws android.os.RemoteException {
-        return java.util.Collections.emptyMap();
+        return systemSharedLibraries();
     }
 
     @Override

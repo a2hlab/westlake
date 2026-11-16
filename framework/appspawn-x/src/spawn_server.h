@@ -9,8 +9,10 @@
 #pragma once
 
 #include "spawn_msg.h"
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace appspawnx {
 
@@ -45,8 +47,18 @@ private:
     int listenFd_;
     SpawnHandler spawnHandler_;
 
+    // The last OH binary request from the launcher that started a process, and its uid. A
+    // request from that application's own processes gets these credentials, never its own.
+    std::vector<uint8_t> launchRequest_;
+    int32_t launchUid_ = -1;
+
     // Handle a single client connection
     void handleConnection(int clientFd);
+
+    // Decides whether the peer may make this request. The launcher (root) chooses credentials;
+    // a process this spawner started may only name another process of its application, and its
+    // request is rebuilt from the launch request. Sets fromLauncher; false refuses (logged).
+    bool admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher);
 
     // Parse raw message buffer into SpawnMsg
     // In real implementation, this would use appspawn protocol parser

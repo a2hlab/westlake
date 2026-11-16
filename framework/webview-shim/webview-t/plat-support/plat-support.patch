@@ -1,0 +1,248 @@
+--- a/draw_fn.h
++++ b/draw_fn.h
+@@ -10,9 +10,11 @@
+ #ifndef ANDROID_WEBVIEW_PUBLIC_BROWSER_DRAW_FN_H_
+ #define ANDROID_WEBVIEW_PUBLIC_BROWSER_DRAW_FN_H_
+ 
+-#include <android/surface_control.h>
+ #include <vulkan/vulkan.h>
+ 
++typedef void* ASurfaceControl;
++typedef void* ASurfaceTransaction;
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -23,8 +25,7 @@
+ // 1 is Android Q. This matches kAwDrawGLInfoVersion version 3.
+ // 2 Adds transfer_function_* and color_space_toXYZD50 to AwDrawFn_DrawGLParams.
+ // 3 Adds SurfaceControl related functions.
+-// 4 Adds AwDrawFn_ReportRenderingThreads to AwDrawFnFunctionTable.
+-static const int kAwDrawFnVersion = 4;
++static const int kAwDrawFnVersion = 3;
+ 
+ // Returns parent ASurfaceControl for WebView overlays. It will be have same
+ // geometry as the surface we draw into and positioned below it (underlay).
+@@ -269,10 +270,6 @@
+ // released, and it should be considered alive & active until that point.
+ typedef void AwDrawFn_ReleaseFunctor(int functor);
+ 
+-// Report the list of threads critical for frame production for the given
+-// functor. Must be called on render thread.
+-typedef void AwDrawFn_ReportRenderingThreads(int functor, const int32_t* thread_ids, size_t size);
+-
+ struct AwDrawFnFunctionTable {
+   int version;
+   AwDrawFn_QueryRenderMode* query_render_mode;
+@@ -281,8 +278,6 @@
+   AwDrawFn_ReleaseFunctor* release_functor;
+   // Added in version 3.
+   AwDrawFn_CreateFunctor_v3* create_functor_v3;
+-  // Added in version 4.
+-  AwDrawFn_ReportRenderingThreads* report_rendering_threads;
+ };
+ 
+ #ifdef __cplusplus
+--- a/draw_functor.cpp
++++ b/draw_functor.cpp
+@@ -17,6 +17,8 @@
+ #include "draw_fn.h"
+ 
+ #include <jni.h>
++#include <atomic>
++#include <cstdio>
+ #include <private/hwui/WebViewFunctor.h>
+ #include <utils/Log.h>
+ 
+@@ -76,6 +78,18 @@
+ void draw_gl(int functor, void* data,
+              const uirenderer::DrawGlInfo& draw_gl_params,
+              const uirenderer::WebViewOverlayData& overlay_params) {
++  static std::atomic<unsigned> calls{0};
++  const unsigned call = calls.fetch_add(1, std::memory_order_relaxed) + 1;
++  if (call <= 32) {
++    fprintf(stderr,
++            "[WESTLAKE-WEBFUNCTOR-741] draw #%u functor=%d data=%p "
++            "clip=%d,%d-%d,%d size=%dx%d\n",
++            call, functor, data, draw_gl_params.clipLeft,
++            draw_gl_params.clipTop, draw_gl_params.clipRight,
++            draw_gl_params.clipBottom, draw_gl_params.width,
++            draw_gl_params.height);
++    fflush(stderr);
++  }
+   float gabcdef[7];
+   if (draw_gl_params.color_space_ptr) {
+       draw_gl_params.color_space_ptr->transferFn(gabcdef);
+@@ -267,6 +281,11 @@
+   int functor = uirenderer::WebViewFunctor_create(
+       support, webview_functor_callbacks,
+       uirenderer::WebViewFunctor_queryPlatformRenderMode());
++  fprintf(stderr,
++          "[WESTLAKE-WEBFUNCTOR-741] create version=%d data=%p support=%p "
++          "callbacks=%p functor=%d\n",
++          version, data, support, functor_callbacks, functor);
++  fflush(stderr);
+   if (functor <= 0) delete support;
+   return functor;
+ }
+@@ -290,20 +309,20 @@
+   }
+ }
+ 
+-void ReportRenderingThreads(int functor, const int32_t* thread_ids, size_t size) {
+-    uirenderer::WebViewFunctor_reportRenderingThreads(functor, thread_ids, size);
+-}
+-
+ jlong GetDrawFnFunctionTable() {
+-    static AwDrawFnFunctionTable function_table = {
+-            .version = kAwDrawFnVersion,
+-            .query_render_mode = &QueryRenderMode,
+-            .create_functor = &CreateFunctor,
+-            .release_functor = &ReleaseFunctor,
+-            .create_functor_v3 = &CreateFunctor_v3,
+-            .report_rendering_threads = &ReportRenderingThreads,
+-    };
+-    return reinterpret_cast<intptr_t>(&function_table);
++  static AwDrawFnFunctionTable function_table = {
++    .version = kAwDrawFnVersion,
++    .query_render_mode = &QueryRenderMode,
++    .create_functor = &CreateFunctor,
++    .release_functor = &ReleaseFunctor,
++    .create_functor_v3 = &CreateFunctor_v3,
++  };
++  fprintf(stderr,
++          "[WESTLAKE-WEBFUNCTOR-741] table=%p version=%d create=%p create_v3=%p\n",
++          &function_table, function_table.version, function_table.create_functor,
++          function_table.create_functor_v3);
++  fflush(stderr);
++  return reinterpret_cast<intptr_t>(&function_table);
+ }
+ 
+ const char kClassName[] = "com/android/webview/chromium/DrawFunctor";
+--- a/graphic_buffer_impl.h
++++ b/graphic_buffer_impl.h
+@@ -20,7 +20,7 @@
+ #ifndef ANDROID_GRAPHIC_BUFFER_IMPL_H
+ #define ANDROID_GRAPHIC_BUFFER_IMPL_H
+ 
+-#include <ui/GraphicBuffer.h>
++#include <stdint.h>
+ 
+ #include "draw_gl.h"
+ 
+@@ -28,24 +28,12 @@
+ 
+ class GraphicBufferImpl {
+  public:
+-  ~GraphicBufferImpl();
+-
+   static long Create(int w, int h);
+   static void Release(long buffer_id);
+   static int MapStatic(long buffer_id, AwMapMode mode, void** vaddr);
+   static int UnmapStatic(long buffer_id);
+   static void* GetNativeBufferStatic(long buffer_id);
+   static uint32_t GetStrideStatic(long buffer_id);
+-
+- private:
+-  status_t Map(AwMapMode mode, void** vaddr);
+-  status_t Unmap();
+-  status_t InitCheck() const;
+-  void* GetNativeBuffer() const;
+-  uint32_t GetStride() const;
+-  GraphicBufferImpl(uint32_t w, uint32_t h);
+-
+-  sp<android::GraphicBuffer> mBuffer;
+ };
+ 
+ }  // namespace android
+--- a/graphics_utils.cpp
++++ b/graphics_utils.cpp
+@@ -23,6 +23,8 @@
+ #include "draw_sw.h"
+ 
+ #include <cstdlib>
++#include <atomic>
++#include <cstdio>
+ #include <jni.h>
+ #include <utils/Log.h>
+ #include "GraphicsJNI.h"
+@@ -53,7 +55,15 @@
+ }
+ 
+ AwPixelInfo* GetPixels(JNIEnv* env, jobject java_canvas) {
++  static std::atomic<unsigned> calls{0};
++  const unsigned call = calls.fetch_add(1, std::memory_order_relaxed) + 1;
+   android::Canvas* nativeCanvas = GraphicsJNI::getNativeCanvas(env, java_canvas);
++  if (call <= 32) {
++    fprintf(stderr,
++            "[WESTLAKE-WEBPIXELS-741] get #%u javaCanvas=%p nativeCanvas=%p\n",
++            call, java_canvas, nativeCanvas);
++    fflush(stderr);
++  }
+   if (!nativeCanvas)
+     return NULL;
+ 
+@@ -62,10 +72,23 @@
+       delete pixels;
+       pixels = NULL;
+   }
++  if (call <= 32) {
++    fprintf(stderr,
++            "[WESTLAKE-WEBPIXELS-741] result #%u pixels=%p state=%p\n",
++            call, pixels, pixels != nullptr ? pixels->state : nullptr);
++    fflush(stderr);
++  }
+   return pixels;
+ }
+ 
+ void ReleasePixels(AwPixelInfo* pixels) {
++  static std::atomic<unsigned> calls{0};
++  const unsigned call = calls.fetch_add(1, std::memory_order_relaxed) + 1;
++  if (call <= 32) {
++    fprintf(stderr, "[WESTLAKE-WEBPIXELS-741] release #%u pixels=%p\n",
++            call, pixels);
++    fflush(stderr);
++  }
+   delete static_cast<PixelInfo*>(pixels);
+ }
+ 
+@@ -74,6 +97,11 @@
+   function_table.version = kAwDrawSWFunctionTableVersion;
+   function_table.access_pixels = &GetPixels;
+   function_table.release_pixels = &ReleasePixels;
++  fprintf(stderr,
++          "[WESTLAKE-WEBPIXELS-741] SW table=%p access=%p release=%p\n",
++          &function_table, function_table.access_pixels,
++          function_table.release_pixels);
++  fflush(stderr);
+   return reinterpret_cast<intptr_t>(&function_table);
+ }
+ 
+--- a/jni_entry_point.cpp
++++ b/jni_entry_point.cpp
+@@ -17,6 +17,7 @@
+ #define LOG_TAG "webviewchromium_plat_support"
+ 
+ #include <jni.h>
++#include <cstdio>
+ #include <utils/Log.h>
+ 
+ namespace android {
+@@ -28,6 +29,8 @@
+ }  // namespace android
+ 
+ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
++  fprintf(stderr, "[WESTLAKE-WEBPLAT-741] JNI_OnLoad enter vm=%p\n", vm);
++  fflush(stderr);
+   JNIEnv* env = NULL;
+   jint ret = vm->AttachCurrentThread(&env, NULL);
+   LOG_ALWAYS_FATAL_IF(ret != JNI_OK, "AttachCurrentThread failed");
+@@ -35,5 +38,8 @@
+   android::RegisterDrawGLFunctor(env);
+   android::RegisterGraphicsUtils(env);
+ 
++  fprintf(stderr, "[WESTLAKE-WEBPLAT-741] JNI_OnLoad registered all tables\n");
++  fflush(stderr);
++
+   return JNI_VERSION_1_4;
+ }

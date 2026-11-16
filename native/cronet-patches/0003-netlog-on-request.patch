@@ -1,0 +1,43 @@
+NetLog on request: WESTLAKE_CRONET_NETLOG=<directory>.
+
+Each Cronet context writes its NetLog to <directory>/cronet-netlog-<pid>-<n>.json, as the app's own
+startNetLogToFile would, in the default capture mode (credentials and cookies elided). Westlake runs
+unmodified apps; this lets an app's HTTP traffic (statuses, net errors, DNS, QUIC) be looked at
+without changing the app. Off unless the variable is set.
+
+--- a/components/cronet/cronet_context.cc
++++ b/components/cronet/cronet_context.cc
+@@ -7,6 +7,7 @@
+ #include <limits.h>
+ #include <stddef.h>
+ #include <stdint.h>
++#include <stdlib.h>
+ 
+ #include <limits>
+ #include <map>
+@@ -25,6 +26,8 @@
+ #include "base/memory/raw_ptr.h"
+ #include "base/message_loop/message_pump_type.h"
+ #include "base/metrics/statistics_recorder.h"
++#include "base/process/process_handle.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/threading/thread_restrictions.h"
+@@ -262,6 +265,16 @@
+                      base::Unretained(network_tasks_), GetNetworkTaskRunner(),
+                      GetFileThread()->task_runner(),
+                      std::move(proxy_config_service)));
++  // Westlake: WESTLAKE_CRONET_NETLOG=<directory> writes each context's NetLog to
++  // <directory>/cronet-netlog-<pid>-<n>.json, as an app's own startNetLogToFile would, in the
++  // default capture mode (credentials and cookies elided). The app needs no change to be looked at.
++  if (const char* dir = getenv("WESTLAKE_CRONET_NETLOG")) {
++    static int contexts = 0;
++    StartNetLogToFile(std::string(dir) + "/cronet-netlog-" +
++                          base::NumberToString(base::GetCurrentProcId()) + "-" +
++                          base::NumberToString(++contexts) + ".json",
++                      /*log_all=*/false);
++  }
+ }
+ 
+ void CronetContext::NetworkTasks::ConfigureNetworkQualityEstimatorForTesting(

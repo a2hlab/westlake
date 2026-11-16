@@ -141,6 +141,9 @@ public final class SocketBinder {
     private volatile int mCallerUid;
     private volatile int mCallerPid;
 
+    /** Per caller uid set with setCaller: {pid, elapsedRealtime of its latest incoming call}. */
+    private static final ConcurrentHashMap<Integer, long[]> sRecentCallers = new ConcurrentHashMap<>();
+
     private static final class DeathLink {
         final Proxy proxy;
         final IBinder.DeathRecipient recipient;
@@ -209,6 +212,21 @@ public final class SocketBinder {
     /** Makes Binder's calling identity answer from setCaller. Once per process, in the serving process. */
     public static void installCallingIdentity() {
         SocketBinderNative.installCallingIdentity();
+    }
+
+    /**
+     * The peers that called into this process within the last windowMillis: uid to pid. A host
+     * reports them as running in its process table (CallerProcess), as Android reports a caller that
+     * is in use.
+     */
+    public static Map<Integer, Integer> recentCallers(long windowMillis) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        Map<Integer, Integer> callers = new HashMap<>();
+        for (Map.Entry<Integer, long[]> entry : sRecentCallers.entrySet()) {
+            long[] seen = entry.getValue();
+            if (now - seen[1] <= windowMillis) callers.put(entry.getKey(), (int) seen[0]);
+        }
+        return callers;
     }
 
     /** The uid setCaller gave the peer that owns this object, or 0 if it isn't a remote object. */
@@ -575,6 +593,9 @@ public final class SocketBinder {
         Inbound outer = sInbound.get();
         sInbound.set(new Inbound(this, call.txn, outer));
         long identity = mCallerUid != 0 ? SocketBinderNative.setCallingIdentity(mCallerUid, mCallerPid) : 0;
+        if (mCallerUid != 0) {
+            sRecentCallers.put(mCallerUid, new long[] {mCallerPid, android.os.SystemClock.elapsedRealtime()});
+        }
         Frame answer = new Frame();
         answer.type = TYPE_REPLY;
         answer.txn = call.txn;

@@ -49,6 +49,7 @@
     "westlake/framework/package-manager/jni/apk_manifest_parser.cpp",
     "westlake/framework/package-manager/jni/axml_parser.cpp",
     "westlake/framework/package-manager/jni/permission_mapper.cpp",
+    "westlake/framework/core/jni/oh_notification_client.cpp",
     "upstream/aosp-11/external/zlib/contrib/minizip/unzip.c",
     "upstream/aosp-11/external/zlib/contrib/minizip/ioapi.c"
   ],
@@ -539,6 +540,10 @@
       "android-source/frameworks-native/libs/nativedisplay/surfacetexture",
       "android-source/frameworks-native/libs/nativewindow/include",
       "android-source/frameworks-base/native/android/include"
+    ],
+    "westlake/framework/core/jni/oh_notification_client.cpp": [
+      "westlake/native/include/oh-notification-standin",
+      "android-source/oh61-notification-headers/include"
     ]
   },
   "source_replacements": {

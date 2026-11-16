@@ -9,6 +9,8 @@ import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.IInterface;
+import android.os.Parcel;
+import android.os.RemoteException;
 import android.os.UserHandle;
 import android.util.Log;
 
@@ -85,12 +87,84 @@ public final class LocalIntentSenders {
         }
     }
 
+    /**
+     * A Westlake call on a sender's binder, answered in the process that made the sender: the package that made
+     * it, whether it is immutable, and its type. On Android the activity manager knows that of every sender
+     * (getInfoForIntentSender); here the process that made one does. A sender can reach a process through
+     * another (an app's sender passed on by Play services' main process to its persistent one), and the binder
+     * call goes back to its maker through each of them. Inside the range of user codes, apart from
+     * IIntentSender's own.
+     */
+    static final int INFO_TRANSACTION = 0x574c49;
+
+    /**
+     * The other Westlake call on a sender's binder: send it, in the process that made it (one-way: code, the
+     * intent to fill in, its resolved type). A process that holds an app's sender only through another
+     * process (Play services' persistent one, given it by the main one) has no channel to that app of its own;
+     * the call goes back to the maker through each process the binder passed.
+     */
+    static final int SEND_TRANSACTION = 0x574c53;
+
     /** A sender's binder: it leads back to its record for as long as a PendingIntent holds it. */
     private static final class SenderBinder extends Binder {
         final Record record;
 
         SenderBinder(Record record) {
             this.record = record;
+        }
+
+        @Override
+        protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            if (code == SEND_TRANSACTION) {
+                data.enforceInterface(SENDER_DESCRIPTOR);
+                int sendCode = data.readInt();
+                Intent fillIn = data.readTypedObject(Intent.CREATOR);
+                String resolvedType = data.readString();
+                send((IIntentSender) queryLocalInterface(SENDER_DESCRIPTOR), sendCode, fillIn, resolvedType, null);
+                return true;
+            }
+            if (code != INFO_TRANSACTION) return super.onTransact(code, data, reply, flags);
+            data.enforceInterface(SENDER_DESCRIPTOR);
+            reply.writeNoException();
+            reply.writeString(record.key.packageName);
+            reply.writeBoolean(record.immutable);
+            reply.writeInt(record.key.type);
+            return true;
+        }
+    }
+
+    /** What a sender made in another process says of itself (INFO_TRANSACTION). */
+    static final class Facts {
+        final String packageName;
+        final boolean immutable;
+        final int type;
+
+        Facts(String packageName, boolean immutable, int type) {
+            this.packageName = packageName;
+            this.immutable = immutable;
+            this.type = type;
+        }
+    }
+
+    /** Asks a sender from another process who made it; null for a sender of this process or one that can't say. */
+    static Facts ask(IIntentSender sender) {
+        IBinder binder = sender == null ? null : sender.asBinder();
+        if (binder == null || binder instanceof SenderBinder) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(SENDER_DESCRIPTOR);
+            if (!binder.transact(INFO_TRANSACTION, data, reply, 0)) return null;
+            reply.readException();
+            String packageName = reply.readString();
+            boolean immutable = reply.readBoolean();
+            int type = reply.readInt();
+            return packageName == null ? null : new Facts(packageName, immutable, type);
+        } catch (RemoteException | RuntimeException e) {
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
         }
     }
 
@@ -143,12 +217,19 @@ public final class LocalIntentSenders {
         if (record != null) remove(record);
     }
 
-    /** IActivityManager.getInfoForIntentSender. */
-    public static synchronized ActivityManager.PendingIntentInfo info(IIntentSender sender) {
-        Record record = find(sender);
-        if (record == null) return PlayServicesChannel.remoteSenderInfo(sender);
-        return new ActivityManager.PendingIntentInfo(record.key.packageName,
-                android.os.Process.myUid(), record.immutable, record.key.type);
+    /**
+     * IActivityManager.getInfoForIntentSender. Another process's sender is asked outside this class's lock: the
+     * question is a binder call to its maker.
+     */
+    public static ActivityManager.PendingIntentInfo info(IIntentSender sender) {
+        synchronized (LocalIntentSenders.class) {
+            Record record = find(sender);
+            if (record != null) {
+                return new ActivityManager.PendingIntentInfo(record.key.packageName,
+                        android.os.Process.myUid(), record.immutable, record.key.type);
+            }
+        }
+        return PlayServicesChannel.remoteSenderInfo(sender);
     }
 
     /** IActivityManager.getIntentForIntentSender. */

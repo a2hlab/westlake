@@ -41,9 +41,12 @@ DEPENDENCIES = {
                   'liboh_skia_rtti_shim.so', 'liboh_adapter_bridge.so', 'liboh_android_runtime.so'],
     'liboh_adapter_bridge.so': ['libbase.so', 'liblog.so', 'libnativehelper.so', 'libutils.so',
                                 'libz.so', 'libhwui.so', 'liboh_android_runtime.so', 'liboh_hwui_shim.so'],
+    # libandroid.so registers android.hardware.HardwareBuffer and libwestlake_libcore_linux.so the
+    # Linux memory natives that AndroidRuntime.cpp's table names; the deployed library needs both.
     'liboh_android_runtime.so': ['libandroidfw.so', 'libnativehelper.so', 'libutils.so',
                                  'libcutils.so', 'libbase.so', 'liblog.so', 'libicuuc.so',
-                                 'libicui18n.so', 'libhwui.so', 'liboh_adapter_bridge.so', 'libwestlake_binder.so'],
+                                 'libicui18n.so', 'libhwui.so', 'liboh_adapter_bridge.so', 'libwestlake_binder.so',
+                                 'libandroid.so', 'libwestlake_libcore_linux.so'],
     'liboh_hwui_shim.so': ['libminikin.so', 'libutils.so', 'libbase.so', 'liblog.so',
                           'libhwui.so', 'liboh_adapter_bridge.so', 'liboh_skia_rtti_shim.so'],
     'liboh_skia_rtti_shim.so': [],

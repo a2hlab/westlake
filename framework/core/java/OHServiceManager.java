@@ -155,6 +155,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // RoleManager's constructor requires it; Fossify Messages asks whether it holds the
             // SMS role before its first screen.
             case "role":
+            // The Play Store requires a RollbackManager ("Android is missing rollback service" from
+            // its main thread ended its process once its :background process answered); no rollbacks.
+            case "rollback":
             // Play services casts SafetyCenterManager non-null and asks whether it is enabled; it is not.
             case "safety_center":
             // Settings.System.getConfiguration reads the user's grammatical gender from this manager
@@ -203,6 +206,10 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // androidx.slice's provider and Calendar's Application.onCreate; see LocalServiceBinders.
             case "slice":
             case "crossprofileapps":
+            // PermissionCheckerManager's constructor requires it. A content provider asks it about a
+            // caller of another uid, which a provider served to an app over a Play channel has:
+            // without it every such query died with a NullPointerException in the provider's process.
+            case "permission_checker":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

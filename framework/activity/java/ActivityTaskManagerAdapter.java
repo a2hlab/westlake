@@ -151,6 +151,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         // startActivityForResult: the started activity's result goes back to resultTo when it
         // finishes (ActivityResults). Only the app's own activities launch here to answer it.
         final ActivityResults.Request request = ActivityResults.requested(resultTo, resultWho, requestCode);
+        // ADR-0002: one of the app's activities declared for its launched process, started from another of its
+        // processes, starts in the launched process (PlayServicesChannel.startInHome). With a result asked for,
+        // here, as before: a result does not cross processes yet.
+        if (request == null && startsOwnActivity(intent) && PlayServicesChannel.startInHome(intent)) {
+            return ActivityManager.START_SUCCESS;
+        }
         // In-process launch executes the launch transaction on the calling thread. From a worker
         // thread that builds the activity off the main looper, and its lifecycle registry throws
         // ("addObserver must be called on the main thread", "Can't create handler inside thread"):
