@@ -14,6 +14,7 @@
 // ============================================================================
 
 #include "AndroidRuntime.h"
+#include "PrivateLogCapture.h"
 
 #include <android/log.h>
 #include <cstring>
@@ -80,7 +81,10 @@ Log_isLoggable(JNIEnv* env, jclass /*clazz*/, jstring tagObj, jint level) {
     // Credential experiments use their explicit, value-free stderr events.
     // Third-party Log messages may contain auth tokens, check-in secrets or URLs.
     const char* privateLogs = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
-    if (privateLogs && std::strcmp(privateLogs, "1") == 0) return JNI_FALSE;
+    if (privateLogs && std::strcmp(privateLogs, "1") == 0) {
+        const char* capture = std::getenv("WESTLAKE_ANDROID_LOG_CAPTURE_DIR");
+        return capture && capture[0] == '/' && level >= ANDROID_LOG_DEBUG ? JNI_TRUE : JNI_FALSE;
+    }
     if (tagObj == nullptr) {
         return JNI_FALSE;
     }
@@ -107,6 +111,18 @@ Log_println_native(JNIEnv* env, jclass /*clazz*/,
     }
     const char* privateLogs = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
     if (privateLogs && std::strcmp(privateLogs, "1") == 0) {
+        const char* capture = std::getenv("WESTLAKE_ANDROID_LOG_CAPTURE_DIR");
+        if (capture && capture[0] == '/') {
+            const char* tag = tagObj ? env->GetStringUTFChars(tagObj, nullptr) : nullptr;
+            if (tagObj && !tag) return -1;
+            const char* message = env->GetStringUTFChars(msgObj, nullptr);
+            if (message) {
+                westlake::capturePrivateAndroidLog(capture, priority, tag, message);
+                env->ReleaseStringUTFChars(msgObj, message);
+            }
+            if (tag) env->ReleaseStringUTFChars(tagObj, tag);
+            if (!message) return -1;
+        }
         return env->GetStringUTFLength(msgObj);
     }
 

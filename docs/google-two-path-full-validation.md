@@ -725,3 +725,48 @@ offsets for incoming coordinates, surface rotation is reported unknown, and
 MotionEvent Parcel I/O is unimplemented. Full application acceptance remains open.
 See [candidate67.json](../tests/google-auth/full48/candidate67.json) and the
 [native input test instructions](../tests/parity/native/README-input-transform.md).
+
+### Candidate 68: capture private logs and identify Gmail loading/version gaps
+
+An opt-in native Android Log sink allows this credential test to capture app
+logs without sending them to HiLog or stderr. The launcher must supply a private
+directory owned by the app UID (0700). The sink accepts only a regular 0600 file
+with one link, refuses final symlinks, bounds records to 4096 bytes and the file
+to 8 MiB, and drops contended writes instead of blocking application work. The
+existing muted behavior remains the default. Raw logs may contain credentials;
+only fixed findings and hashes are included here.
+
+Fourteen host checks pass, including permissions, symlinks, hardlinks, FIFO
+refusal and concurrent size-limit enforcement. The native library compiles and
+links with candidate 67's other inputs hash-verified. Only Gmail receives the
+native overlay; its Java artifacts, original APK and app data are retained.
+The process launches and writes an app-owned 0600 capture. ART method tracing
+is disabled for this retry. GMS and microG are not restarted.
+
+The capture records two concrete failures. Gmail asks for GMS version 250200000
+but receives 244034029. Separately, the package manager supplies GMS base and
+configuration-split paths under the other host's private runtime; Gmail cannot
+open those assets or instantiate GmsAppComponentFactory. Dynamite cannot load
+its loader from that context, so Cronet and ProviderInstaller module loading
+also fail. `PlayServicesChannel.localize()` currently translates remote paths
+to the host's real filesystem path. A native probe outside the app SELinux
+context can open the hash-verified APK after dropping to Gmail's UID. Unix UID
+permissions alone are therefore not established as the cause; the actual app
+security context, native path handling and AssetManager loader still need
+isolation.
+
+Gmail still displays the status-9 compatibility warning and Account not synced.
+Dismissing the dialog and tapping Sync now does not establish mailbox loading.
+The new evidence identifies loading and version gaps, not their exact share of
+the downstream failure, and does not demonstrate a Google registration refusal.
+No version number, certification result or API success is substituted. A proper
+repair must establish APK/resource loading in the actual client context while
+preserving private GMS data, then test an official GMS version meeting the app's requirement
+and revalidate the pinned authentication routing.
+
+Status remains 3 with no override; check-in identity, provider grants and account
+store bytes are unchanged. Full app/backend acceptance remains unproven. Gmail
+disables one internal logger backend, and the bounded capture can drop records;
+absence of a log is not proof that an operation did not occur.
+
+See [candidate68.json](../tests/google-auth/full48/candidate68.json).

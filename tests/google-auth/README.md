@@ -366,3 +366,22 @@ content view. The fixed native implementation passes 40 host checks and board
 preload. The same sync tap now runs the real button listener and internal sync
 entry; mailbox sync remains incomplete. See [candidate67.json](full48/candidate67.json)
 and the [native input test instructions](../parity/native/README-input-transform.md).
+
+Candidate 68 adds an opt-in native Android log capture for local debugging:
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1` plus `WESTLAKE_ANDROID_LOG_CAPTURE_DIR` naming
+a pre-created app-owned 0700 directory. It writes only `android.log` (0600),
+refuses shared/symlink/hardlink sinks, caps the file at 8 MiB and drops contended
+writes. Treat the raw file as credential-bearing test data; do not commit it.
+Without this opt-in, private-mode Android logging stays muted.
+
+Host verification:
+
+```sh
+c++ -std=c++17 -pthread -Wall -Wextra -Werror \
+  -I framework/android-runtime/include \
+  tests/parity/native/private_log_capture_test.cpp -o /tmp/private-log-test
+/tmp/private-log-test
+```
+
+See [candidate68.json](full48/candidate68.json) for the Gmail loading/version
+failures found with this capture; it is not a full Gmail pass.
