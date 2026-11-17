@@ -17,7 +17,13 @@ Historical results below retain their original build boundaries.
 Candidate 72 fixes native ABI classification for GMS libraries loaded through
 verified APK descriptors. FotMob initializes Cronet 129 and retains its local
 Facebook signed-in menu after a client restart. Cloud synchronization and token
-renewal remain unproven. See [candidate72.json](full48/candidate72.json).
+renewal were unproven in that candidate. See [candidate72.json](full48/candidate72.json).
+Candidate 73 now observes an in-app favorite change reaching FotMob's server,
+then restores both favorites after clearing their local files and app cache
+while retaining the Facebook login. The dataset GET also succeeds with an
+invalid token, so its status alone does not prove credential validation.
+Google delegation and token renewal are not retested by this Facebook flow.
+See [candidate73.json](full48/candidate73.json).
 
 Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
 The board now accepts the request into mediation while continuing to deny

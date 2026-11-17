@@ -6,11 +6,12 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 72 fixes an ABI classification failure when Google's
-Cronet library loads through a verified APK descriptor. FotMob now initializes
-Cronet 129 and survives the previously crashing startup. Its retained Facebook
-signed-in menu is also visible after a controlled client restart. This does not
-yet establish cloud preference synchronization or token renewal.
+Latest result: candidate 73 validates a live favorite-team cloud round trip in
+FotMob's retained Facebook session. An in-app change appears on the server;
+after backing up and clearing the local favorite files and cache, the restarted
+app downloads the same dataset and displays both favorites. This is a concrete
+feature result, not proof of Google delegation or token renewal. Candidate 72's
+native APK-descriptor classification fix keeps Cronet 129 past its earlier crash.
 
 Candidate 71 accepts Gmail's bounded native OAuth scope list while still denying
 ungranted token access; candidate 70 fixes its GMS APK loading. The mailbox
@@ -951,3 +952,46 @@ full application acceptance remain incomplete.
 See [candidate72.json](../tests/google-auth/full48/candidate72.json) for exact
 artifact boundaries and the current-source build follow-up. Raw traces, account
 identifiers, tokens and screenshots remain private.
+
+### Candidate 73: FotMob cloud favorites survive loss of their local cache
+
+The original FotMob APK continues with the Facebook session established in
+candidate 47 and the current-source shim validated in candidate 72. The stored
+account identifier matches the SDK token, whose local expiry fields have not
+elapsed. No credentials, additional permissions, signup or new login are used
+in this continuation.
+
+A controlled test first reads the test account's team dataset from FotMob's
+server. Tapping Follow in the original app adds a second team; a subsequent
+read shows that exact addition. The host only reads the dataset and does not
+write it. The client is then stopped, and its favorite-team JSON, ordering JSON,
+team ETag and application cache are moved to a private rollback directory.
+Four login/SDK preference files remain byte-identical. The original APK's team
+manager code identifies these files as its local favorite store.
+
+After restarting with an empty cache, the app creates a new incoming dataset
+file, byte-identical to the independent 134-byte server response. It restores
+both favorite-team records and displays both teams in Following. Three SDK
+preference files remain byte-identical after restart; the app preference file
+changes only its normal launch counter, with login fields unchanged. This
+validates outgoing synchronization and
+in-app restoration for this retained Facebook session, beyond the earlier
+local Sign out menu observation.
+
+A read control is important to interpreting the result: the dataset GET returns
+the same HTTP 200 body with the real token and an intentionally invalid token.
+Only the authorized test account is queried. Therefore that GET response cannot
+prove credential validation or access-control enforcement. The observed app
+write and restoration establish feature behavior; they do not establish the
+server's authentication policy. Raw URLs, account identifiers, tokens, response
+bodies and captures remain private.
+
+GMS and microG remain running, status stays 3 without an override, and check-in
+identity, provider grants and account-store bytes remain unchanged. No source
+change or new build is needed for this candidate. A fresh Facebook login on this
+exact build, actual token expiry/renewal, FotMob's Google cloud flow, general
+window/input behavior and the other planned applications remain incomplete.
+The temporary favorite markers are retained for continued testing, with cleanup
+pending. No full application pass is added.
+
+See [candidate73.json](../tests/google-auth/full48/candidate73.json).
