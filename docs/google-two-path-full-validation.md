@@ -6,7 +6,14 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 76 completes fresh FotMob Facebook login and restart.
+Latest result: candidate 77 fixes Gmail's Contacts-client compatibility warning.
+The original client combines People and Feedback APIs; adding services 5 and 29
+to the existing opt-in local eligibility policy removes the status-9 dialog in
+two fresh Gmail processes. Gmail now calls IPeopleService, but its mailbox remains
+unsynced. The user-approved provider scopes are applied; native scoped account
+authorization still denies its token read. Certification remains 3.
+
+Candidate 76 completes fresh FotMob Facebook login and restart.
 The app saves a different token for the same account. An independent read-only
 Facebook Graph identity request accepts that token before and after restart;
 an invalid-token control returns HTTP 401 with error 190. Candidate 75 adds
@@ -25,9 +32,8 @@ application and isolation plan remains incomplete.
 
 Candidate 71 accepts Gmail's bounded native OAuth scope list while still denying
 ungranted token access; candidate 70 fixes its GMS APK loading. The mailbox
-remains unsynced. The operator has now approved Gmail's requested scopes;
-applying that authorization and native account-selection mediation remain
-work in progress. The GMS-version gap and remaining service eligibility
+remains unsynced. The operator-approved Gmail provider scopes are now applied;
+native account-selection mediation remains work in progress. The GMS-version gap and remaining service eligibility
 failures are still open.
 No full application pass is established.
 
@@ -1142,3 +1148,56 @@ favorites remain pending cleanup. Raw credentials, account identifiers, tokens,
 logs, API bodies and screenshots stay private.
 
 See [candidate76.json](../tests/google-auth/full48/candidate76.json).
+
+### Candidate 77: fix the Contacts-client compatibility warning
+
+A fresh original Gmail launch reproduces the exact Device not compatible
+dialog with ConnectionResult 9. The app's own stderr identifies Contacts as
+the failing client. Original-APK inspection connects that label to
+AbstractPlayServicesHelper's connection-failure handler and the dialog builder.
+That composite client includes People.API_1P and Feedback.API; their original
+constructors use service IDs 5 and 29. The independent version check still
+reports required GMS 250200000 versus installed 244034029.
+
+The existing opt-in, version-pinned local service eligibility policy now appends
+5 and 29. It retains all prior entries and the original rollback journal.
+It changes no certification status, token response, requested scope or Google
+backend verdict. Twenty-three host checks pass, including unchanged status and
+other flag keys; the previous policy fails the new People/Feedback expectation.
+All 140 Java sources compile to 293 classes. Runtime packaging and boot-image
+builds pass. Nine GMS Java/boot files are replaced with verified source-built
+artifacts; exact prior host artifacts and private policy snapshots provide
+rollback. The original APKs and native runtime remain unchanged. No separate
+preload is claimed.
+
+After the user's explicit approval, the provider receives a Gmail grant pinned
+to the original APK's current signer: its 14-scope native request plus the
+observed People read-only request. Existing app grants are preserved. This
+records operator scope permission only; it does not invent native account
+selection or a successful Google Sign-In activity.
+
+Two fresh Gmail processes now render Account not synced without the invalid-
+device dialog. Neither captured run logs the Contacts connection failure or
+the status-9 dialog. Both invoke the actual IPeopleService interface. The first
+run also records broker status 0 associated with 5 and 29; numeric association
+remains approximate under overlapping calls, and only People has a subsequent
+called-interface observation. No contact-list/backend feature pass is claimed.
+The second launch initially has a black frame and recovers after explicitly
+foregrounding the host; automatic window routing remains unvalidated.
+
+Sync now sends the original 14-scope request through parsing, but the account-
+scoped token read is still denied locally. No Gmail token issuance or mailbox
+acceptance is established. The action is correlated using the board's whole-
+second clock and shared-host logs. Native account authorization, the provider's
+older scope parser, the GMS version gap and other service refusals remain open.
+
+The preservation check keeps uncertified status 3, no certification override,
+the same check-in identity, the explicitly approved provider grant, one provider
+account and both service hosts alive. Provider account-store bytes are unchanged
+across this policy test. The eligibility list gains exactly 5 and 29; other
+Phenotype metadata also changes while GMS runs, so the whole preference file is
+not claimed byte-identical. This is a specific warning/service-connection fix,
+not a full Gmail or production-isolation pass. Private logs, policy snapshots,
+account data and screenshots are excluded.
+
+See [candidate77.json](../tests/google-auth/full48/candidate77.json).

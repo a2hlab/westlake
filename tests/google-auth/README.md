@@ -47,6 +47,12 @@ Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
 The board now accepts the request into mediation while continuing to deny
 ungranted token access. No Gmail OAuth grant or mailbox acceptance is claimed;
 see [candidate71.json](full48/candidate71.json) and the full validation report.
+Candidate 77 applies the operator-approved Gmail provider scopes and fixes the
+Contacts-client status-9 dialog by adding People (5) and Feedback (29) to the
+existing opt-in service eligibility policy. Two fresh Gmail processes reach
+IPeopleService and display no incompatible-device dialog. Native account-scoped
+token access and mailbox sync remain unvalidated; certification stays 3.
+See [candidate77.json](full48/candidate77.json).
 
 Candidate 59 separately grants the verified official GMS broker access to the
 existing account's Google ID. Drive receives account-ID replies after the GMS

@@ -8,17 +8,20 @@ public final class GoogleIdentityServicePolicyTest {
     }
     public static void main(String[] args) {
         String key = GoogleIdentityServicePolicy.KEY;
-        eq("151,130,40,25,257,185,51,218,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, null));
-        eq("212,213,91,44", GoogleIdentityServicePolicy.adapt(key, ""));
-        eq("51,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "51"));
-        eq("51,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "51,212"));
-        eq("51,213,212,91,44", GoogleIdentityServicePolicy.adapt(key, "51,213"));
-        eq("51,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "51,212,213"));
-        eq("91,51,212,213,44", GoogleIdentityServicePolicy.adapt(key, "91,51"));
-        eq("51,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "51,212,213,91"));
-        eq("8,91,212,213,44", GoogleIdentityServicePolicy.adapt(key, "8,91"));
-        eq("44,91,212,213", GoogleIdentityServicePolicy.adapt(key, "44,91"));
-        eq("212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "212,213,91,44"));
+        eq("151,130,40,25,257,185,51,218,212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, null));
+        eq("212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, ""));
+        eq("51,212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "51"));
+        eq("51,212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "51,212"));
+        eq("51,213,212,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "51,213"));
+        eq("51,212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "51,212,213"));
+        eq("91,51,212,213,44,5,29", GoogleIdentityServicePolicy.adapt(key, "91,51"));
+        eq("51,212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "51,212,213,91"));
+        eq("8,91,212,213,44,5,29", GoogleIdentityServicePolicy.adapt(key, "8,91"));
+        eq("44,91,212,213,5,29", GoogleIdentityServicePolicy.adapt(key, "44,91"));
+        eq("212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "212,213,91,44"));
+        eq("5,29,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "5,29"));
+        eq("212,213,91,44,5,29", GoogleIdentityServicePolicy.adapt(key, "212,213,91,44,5,29"));
+        eq("29,5,212,213,91,44", GoogleIdentityServicePolicy.adapt(key, "29,5,212,213,91,44"));
         eq(" 51", GoogleIdentityServicePolicy.adapt(key, " 51"));
         eq("1".repeat(4097), GoogleIdentityServicePolicy.adapt(key, "1".repeat(4097)));
         eq("bad", GoogleIdentityServicePolicy.adapt(key, "bad"));

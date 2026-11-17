@@ -1,0 +1,112 @@
+{
+  "candidate": 77,
+  "phase": "Fix Gmail Contacts service eligibility and apply approved provider scopes",
+  "baseCommit": "a2ca9198e989a06e08a68e29a81ec296f4a8769a",
+  "warningDiagnosis": {
+    "originalApkUnchanged": true,
+    "gmailApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "dialogConnectionResult": 9,
+    "loggedFailedClient": "Contacts",
+    "originalApkFailureHandlerShowsDialog": true,
+    "compositeClientApis": [
+      {
+        "api": "People.API_1P",
+        "serviceId": 5,
+        "binderInterface": "com.google.android.gms.people.internal.IPeopleService"
+      },
+      {
+        "api": "Feedback.API",
+        "serviceId": 29,
+        "binderInterface": "com.google.android.gms.feedback.internal.IFeedbackService"
+      }
+    ],
+    "versionMismatchIsSeparate": true
+  },
+  "implementation": {
+    "change": "Append People and Feedback to existing opt-in local service eligibility policy",
+    "newEligibilityServiceIds": [
+      5,
+      29
+    ],
+    "gmsVersionPin": 244034029,
+    "certificationOverrideAdded": false,
+    "globalServiceBypassAdded": false,
+    "oauthAuthorizationAutomaticallyCreated": false,
+    "originalPolicyRollbackJournalRetained": true
+  },
+  "userApprovedProviderGrant": {
+    "applied": true,
+    "originalGmailSignerPinned": true,
+    "mainNativeRequestScopes": 14,
+    "additionalObservedScope": "peopleapi.readonly",
+    "totalScopeCount": 15,
+    "existingGrantsPreserved": true,
+    "nativeAccountSelectionCreated": false,
+    "googleServerConsentFabricated": false,
+    "credentialsPublished": false
+  },
+  "hostTests": {
+    "policyChecks": 23,
+    "allPassed": true,
+    "oldPolicyFailsNewExpectation": true
+  },
+  "build": {
+    "javaSources": 140,
+    "javaClasses": 293,
+    "javaCompilationPassed": true,
+    "runtimePackagingPassed": true,
+    "bootImageBuildPassed": true,
+    "gmsAdapterSha256": "297083279678f39a2f649d7176a6b9cc7a7b67c85aeb13387232d218fcf72e87",
+    "gmsCodeFilesReplaced": 9,
+    "exactHostRollbackArtifactsVerified": true,
+    "policySnapshotRollbackCaptured": true,
+    "nativeArtifactsRebuilt": false,
+    "standalonePreloadRun": false,
+    "sourceSha256": {
+      "framework/core/java/GoogleIdentityServicePolicy.java": "f9d48e67e3bab618c761468bc5e5d50ec4b2235297c38a08ad44c88aac37b727",
+      "tests/google-auth/host/GoogleIdentityServicePolicyTest.java": "8ae93752c3c235d4bacb59837bd70312c25e3155384482dffc36e49d3f72964d"
+    }
+  },
+  "board": {
+    "officialGmsAdapter": 77,
+    "gmailAdapter": "70b",
+    "providerAdapter": 59,
+    "originalGmsAndGmailApksRetained": true,
+    "twoFreshGmailProcessesAfterChange": true,
+    "contactsFailureAbsentInBothCapturedRuns": true,
+    "status9DialogAbsentInBothUiChecks": true,
+    "peopleInterfaceCalledInBothRuns": true,
+    "brokerStatusZeroObservedForPeopleAndFeedbackInFirstRun": true,
+    "brokerServiceAttributionCaveat": "Numeric afterService attribution is process-global and approximate; only People has a subsequent called-interface observation. Broker status 0 alone is not a backend feature pass.",
+    "manualHostForegroundNeeded": true,
+    "afterSyncTap": {
+      "native14ScopeRequestAcceptedIntoMediation": true,
+      "nativeOAuthReadDenied": true,
+      "tokenIssuanceObserved": false,
+      "cutoffBasis": "Board-clock whole second before isolated tap; shared-host time correlation"
+    },
+    "accountNotSyncedScreenRemains": true,
+    "gmsRequiredVersion": 250200000,
+    "gmsInstalledVersion": 244034029,
+    "otherServiceStatus9RepliesRemain": true
+  },
+  "preservation": {
+    "uncertifiedPolicyStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerGrantsMatchExplicitGmailApproval": true,
+    "providerAccountStoreUnchangedAcrossPolicyTest": true,
+    "providerAccountCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true
+  },
+  "remaining": {
+    "nativeAccountScopedAuthorization": true,
+    "provider59ScopeParserNotYetUpgraded": true,
+    "mailboxSynced": false,
+    "fullApplicationPassed": false,
+    "allPlannedApplicationsPassed": false,
+    "productionIsolationValidated": false,
+    "generalWindowRoutingPassed": false
+  }
+}
