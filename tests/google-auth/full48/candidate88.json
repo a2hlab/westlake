@@ -27,7 +27,10 @@
       "account ID future",
       "remote service connection"
     ],
-    "backendRefusalEstablished": false
+    "backendRefusalEstablished": false,
+    "sampledGmsConnectionStatuses": [
+      0
+    ]
   },
   "guestOnboarding": "Temporarily removed only the Maps Play services and Play Store connections. The app showed onboarding and offered a settings link. Returned to Maps, dismissed the install dialog and selected Skip. Maps drew tiles with network access. Both connections were restored for the following two restarts.",
   "appInitiatedRuns": [
@@ -46,7 +49,8 @@
         "ACCESS_COARSE_LOCATION": "denied",
         "ACCESS_FINE_LOCATION": "denied"
       },
-      "firstOhLocationFix": false
+      "firstOhLocationFix": false,
+      "sampledGmsConnectionStatuses": []
     },
     {
       "phase": "first connected restart after Skip",
@@ -63,7 +67,11 @@
         "ACCESS_COARSE_LOCATION": "denied",
         "ACCESS_FINE_LOCATION": "denied"
       },
-      "firstOhLocationFix": false
+      "firstOhLocationFix": false,
+      "sampledGmsConnectionStatuses": [
+        0,
+        9
+      ]
     },
     {
       "phase": "second connected restart after Skip",
@@ -80,7 +88,11 @@
         "ACCESS_COARSE_LOCATION": "denied",
         "ACCESS_FINE_LOCATION": "denied"
       },
-      "firstOhLocationFix": false
+      "firstOhLocationFix": false,
+      "sampledGmsConnectionStatuses": [
+        0,
+        9
+      ]
     }
   ],
   "separateSystemControls": {
@@ -107,5 +119,6 @@
     "Separate host UIDs and private directory modes were observed. Cross-UID file access and production lifecycle isolation were not tested.",
     "Automatic return to Maps from native Settings was not verified.",
     "Full app validation remains open."
-  ]
+  ],
+  "callbackEvidence": "Distinct numeric status values in sampled inbound IGmsCallbacks log entries for each Maps process. Status 0 denotes a successful service connection and 9 denotes SERVICE_INVALID. These are local connection replies. The trace does not establish which policy caused a refusal or whether Google accepted sign-in."
 }

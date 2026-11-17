@@ -1744,6 +1744,13 @@ Maps restart. The tests cover this onboarding sequence and the settings button.
 Signed-in acceptance, a first launch with clean data and a live location fix
 remain open.
 
+The Maps process received Play services connection callbacks on both connected
+restarts. Each had status 0 (success) and status 9 (SERVICE_INVALID). No such
+callback appeared during disconnected onboarding. The sampled replies establish
+that some service connections worked and others were refused. The cause of
+the refusal and the Google account outcome remain unknown.
+[Google Play services connection codes](https://developers.google.com/android/reference/com/google/android/gms/common/ConnectionResult)
+
 Maps, Drive, official Play services and microG ran concurrently under four
 different Linux UIDs. The Maps data and host-control directories were owned by
 the dedicated UID with mode 0700. The test used a signed development HAP paired
