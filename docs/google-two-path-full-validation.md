@@ -329,9 +329,38 @@ All three hosts remain alive. Certification status stays 3 without an override,
 and the official check-in identity is unchanged. The provider still has one
 Google account with its ID metadata. Its account-store bytes changed during
 restart, so byte-for-byte store preservation is **not** claimed; a fresh OAuth
-renewal after this provider restart also remains untested. Shared client host
+renewal after this provider restart also remains unvalidated. Shared client host
 UIDs still prevent a production per-app isolation claim.
 
 Exact build pins and sanitized results are in
 [candidate59.json](../tests/google-auth/full48/candidate59.json). Raw captures
 and configuration backups remain private.
+
+### Wattpad follow-up after the candidate-59 provider restart
+
+The subsequent Wattpad retry does not reproduce the earlier candidate-54 OAuth
+success. The original APK, candidate-52 client adapter and fixed native watchdog
+shim start and reach the login page, but modern sign-in returns status 16 and
+legacy sign-in returns status 4 twice, with no account. No OAuth request reaches
+the provider in the observed login window. No authenticated activity result or
+new Wattpad account is produced. This is a failed follow-up checkpoint, not
+evidence that Google rejected a newly issued token.
+
+Read-only comparison finds that Wattpad's SDK cache used the account's email as
+its `GoogleSignInAccount.id`. Its stored email matches the provider account, but
+that cached ID differs from the numeric `GoogleUserId` now supplied to GMS.
+This identifies a migration mismatch without proving it is the sole cause.
+
+Two manual recovery attempts are recorded separately. First, only Wattpad's
+Google sign-in preference file is backed up and removed before a client restart.
+Second, only its three keys in GMS `common.selected_account_prefs.xml` are
+backed up and removed, preserving nine other entries, before restarting GMS and
+the client. Both attempts still produce status 4 without an OAuth provider
+exchange. Account data and OAuth grants are retained. Therefore neither
+uninterrupted restart acceptance nor successful manual migration is claimed.
+
+The next diagnostic comparison must isolate the metadata opt-in from the other
+service/runtime changes and trace the missing chooser/recovery transition.
+The provider still has one account; all three hosts remain alive; status remains
+3 without an override. The temporary screen-timeout override is restored.
+See [candidate59-followup.json](../tests/google-auth/full48/candidate59-followup.json).

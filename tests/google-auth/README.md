@@ -19,6 +19,10 @@ existing account's Google ID. Drive receives account-ID replies after the GMS
 and microG restart, while its OAuth requests remain denied and its file list
 does not load. This metadata result is not an OAuth or application acceptance
 pass. See [candidate59.json](full48/candidate59.json) for the exact boundaries.
+The [Wattpad follow-up](full48/candidate59-followup.json) after this provider
+restart still returns sign-in-required before token issuance, including after
+manual cached-choice recovery. The earlier Wattpad successes are historical
+results, not current full-stack restart acceptance.
 
 This probe tests the official GMS token implementation and a separate direct
 microG positive control. It does not fake a result or claim full OAuth login.
