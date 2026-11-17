@@ -1813,3 +1813,34 @@ The trip link did not produce a fare or an authenticated rider session in this
 run. No ride was requested. This test selected the APK explicitly. System-wide
 HTTPS link dispatch remains a separate test. [Uber link format](https://developer.uber.com/docs/riders/ride-requests/tutorials/deep-links/introduction)
 and [board results](../tests/google-auth/full48/uber-trip-link89.json).
+
+## Video formats Android apps can select
+
+In the two recorded attempts to play **Me at the zoo**, YouTube queried the
+Android decoder list before displaying a player error. Its trace did not
+identify the selected stream or record a platform decoder starting. To test
+the list itself, a separate Android process on the board loaded the same
+media shim used by YouTube. A second process ran the same probe with the
+rebuilt shim. Both used the same Android framework. Neither needed an
+account, a network connection or a foreground window.
+
+| Format | Previous Android capability | Rebuilt Android capability | Local MP4 decoding |
+| --- | --- | --- | --- |
+| H.264 Baseline and Main | Both rejected at level 5.1 | Both accepted at 5.1 | Each 320×240 clip returned all 12 frames on both builds, with matching per-clip checksums. |
+| H.264 High | Accepted at 5.1 | Accepted at 5.1 | All 12 frames matched across builds. |
+| HEVC Main | Accepted up to main-tier 5.1 | No matching profile in the preferred OH decoder’s list | Neither Android build returned a frame from the 8-bit clip. |
+| HEVC Main 10 | Rejected at main-tier 5 | Accepted at main-tier 5, rejected at 5.1 | Neither Android build returned a frame from the 10-bit clip. |
+
+Westlake now translates each profile and maximum known level reported by the
+preferred OpenHarmony decoder. It uses the same profile numbers for extracted
+tracks and decoder capabilities. The board’s H.264 software fallback advertises
+level 6.2. Westlake exposes the preferred decoder’s 5.1 maximum. The H.264
+clips themselves were level 1.1.
+
+A separate test passed the 10-bit clip directly to OpenHarmony’s video decoder.
+It started and reported error 6 with zero output frames in default buffer,
+NV12 buffer and off-screen surface mode. OpenHarmony decoded the 12-frame
+H.264 control. The rebuilt shim corrects Android’s format queries. HEVC
+playback and online playback in the original YouTube APK remain open.
+[Android test source](../tests/parity/VideoDecoderProfileProbe.java) ·
+[Board results and fixture hashes](../tests/google-auth/full48/candidate90.json)

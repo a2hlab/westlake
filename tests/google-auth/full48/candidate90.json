@@ -1,0 +1,408 @@
+{
+  "schema": 1,
+  "candidate": 90,
+  "scope": "Compare the Android decoder capabilities queried by YouTube with native OH declarations and independent local decoding on the same board.",
+  "originalYouTube": {
+    "version": "21.43.523",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "priorRun": "candidate86.json",
+    "previousPlayerErrors": 2,
+    "platformConfigureOrStartObserved": false,
+    "originalAppRerunWithThisShim": false,
+    "selectedStreamAndCodecKnown": false,
+    "onlinePlaybackVerified": false
+  },
+  "boardRuntime": {
+    "frameworkJarSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "baselineShimSha256": "44e11a5f518c3811bce63058a9af2bfe5bc65de8616ee3f41a834b40000115d7",
+    "candidateShimSha256": "cf9a0ded88e5c515f34d2330f8dbd907bd17d991388e3c35b2257412ffe6e112",
+    "androidTestDexJarSha256": "f02fd9ae28cd86b1aabdf3cd0e6565e728a99811aadb6458902cab16b0b01367",
+    "dedicatedTestLauncherSha256": "ddb2fd6db136e50aebb09933dc86a972cf4afbe025799df756ac654269de8fcd",
+    "method": "Separate ART process per library with the same framework and a fresh data directory. The Android probe loaded each shim, queried MediaCodecList and decoded local MP4 files through MediaExtractor and synchronous MediaCodec into buffers. No UI or accounts involved."
+  },
+  "nativeDeclarations": {
+    "avcDefault": {
+      "name": "OMX.sprd.h264.decoder",
+      "profiles": [
+        0,
+        8,
+        4
+      ],
+      "levelsPerProfile": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    },
+    "avcSoftware": {
+      "name": "OH.Media.Codec.Decoder.Video.AVC",
+      "profiles": [
+        0,
+        8,
+        4
+      ],
+      "levelsPerProfile": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ]
+    },
+    "hevcDefault": {
+      "name": "OMX.sprd.hevc.decoder",
+      "profiles": [
+        1
+      ],
+      "levelsPerProfile": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    "hevcSoftware": null
+  },
+  "fixtures": {
+    "baseline": {
+      "codec_name": "h264",
+      "profile": "Constrained Baseline",
+      "width": 320,
+      "height": 240,
+      "pix_fmt": "yuv420p",
+      "level": 11,
+      "nb_frames": "12",
+      "sha256": "884d698e004fc7df4a4ed8c644c25560df0f2165a316194a1a120624cf4e144b"
+    },
+    "main": {
+      "codec_name": "h264",
+      "profile": "Main",
+      "width": 320,
+      "height": 240,
+      "pix_fmt": "yuv420p",
+      "level": 11,
+      "nb_frames": "12",
+      "sha256": "048739b3de1f8a08ee643fad0a462376ae49c11b0b8d7025215f9d6cc4efa962"
+    },
+    "high": {
+      "codec_name": "h264",
+      "profile": "High",
+      "width": 320,
+      "height": 240,
+      "pix_fmt": "yuv420p",
+      "level": 11,
+      "nb_frames": "12",
+      "sha256": "91c9f577665daa44604dee4b24f02da6b2fecc3a0b1d6cf774645c8251e5b70a"
+    },
+    "hevc-main": {
+      "codec_name": "hevc",
+      "profile": "Main",
+      "width": 320,
+      "height": 240,
+      "pix_fmt": "yuv420p",
+      "level": 60,
+      "nb_frames": "12",
+      "sha256": "47e9f3e2366453a5c9278c31026c7233443b95921a85f448e3e8f82d8f4fbb50"
+    },
+    "main10": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "width": 320,
+      "height": 240,
+      "pix_fmt": "yuv420p10le",
+      "level": 60,
+      "nb_frames": "12",
+      "sha256": "3080e51b1cc315f107198375c13c198a92185d3e2c67737a69e59afe3f7a5267"
+    }
+  },
+  "baseline": {
+    "profileLevels": {
+      "video/avc": [
+        {
+          "profile": 8,
+          "level": 32768
+        }
+      ],
+      "video/hevc": [
+        {
+          "profile": 1,
+          "level": 65536
+        }
+      ]
+    },
+    "formatChecks640x360": [
+      {
+        "mime": "video/avc",
+        "profile": 1,
+        "level": 32768,
+        "supported": false
+      },
+      {
+        "mime": "video/avc",
+        "profile": 2,
+        "level": 32768,
+        "supported": false
+      },
+      {
+        "mime": "video/avc",
+        "profile": 8,
+        "level": 32768,
+        "supported": true
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 1,
+        "level": 16384,
+        "supported": true
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 1,
+        "level": 65536,
+        "supported": true
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 2,
+        "level": 16384,
+        "supported": false
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 2,
+        "level": 65536,
+        "supported": false
+      }
+    ],
+    "fixtureDecode": {
+      "baseline": {
+        "decoder": "OH.video.avc.decoder",
+        "samples": 12,
+        "frames": 12,
+        "bytes": 1382400,
+        "crc": 3117990295,
+        "eos": true
+      },
+      "main": {
+        "decoder": "OH.video.avc.decoder",
+        "samples": 12,
+        "frames": 12,
+        "bytes": 1382400,
+        "crc": 4236291165,
+        "eos": true
+      },
+      "high": {
+        "decoder": "OH.video.avc.decoder",
+        "samples": 12,
+        "frames": 12,
+        "bytes": 1382400,
+        "crc": 1037594565,
+        "eos": true
+      },
+      "hevc-main": {
+        "decoder": "OH.video.hevc.decoder",
+        "samples": 4,
+        "frames": 0,
+        "bytes": 0,
+        "crc": 0,
+        "eos": false
+      },
+      "main10": {
+        "decoder": "OH.video.hevc.decoder",
+        "samples": 4,
+        "frames": 0,
+        "bytes": 0,
+        "crc": 0,
+        "eos": false
+      }
+    }
+  },
+  "candidateShim": {
+    "profileLevels": {
+      "video/avc": [
+        {
+          "profile": 1,
+          "level": 32768
+        },
+        {
+          "profile": 2,
+          "level": 32768
+        },
+        {
+          "profile": 8,
+          "level": 32768
+        }
+      ],
+      "video/hevc": [
+        {
+          "profile": 2,
+          "level": 16384
+        }
+      ]
+    },
+    "formatChecks640x360": [
+      {
+        "mime": "video/avc",
+        "profile": 1,
+        "level": 32768,
+        "supported": true
+      },
+      {
+        "mime": "video/avc",
+        "profile": 2,
+        "level": 32768,
+        "supported": true
+      },
+      {
+        "mime": "video/avc",
+        "profile": 8,
+        "level": 32768,
+        "supported": true
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 1,
+        "level": 16384,
+        "supported": false
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 1,
+        "level": 65536,
+        "supported": false
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 2,
+        "level": 16384,
+        "supported": true
+      },
+      {
+        "mime": "video/hevc",
+        "profile": 2,
+        "level": 65536,
+        "supported": false
+      }
+    ],
+    "fixtureDecode": {
+      "baseline": {
+        "decoder": "OH.video.avc.decoder",
+        "samples": 12,
+        "frames": 12,
+        "bytes": 1382400,
+        "crc": 3117990295,
+        "eos": true
+      },
+      "main": {
+        "decoder": "OH.video.avc.decoder",
+        "samples": 12,
+        "frames": 12,
+        "bytes": 1382400,
+        "crc": 4236291165,
+        "eos": true
+      },
+      "high": {
+        "decoder": "OH.video.avc.decoder",
+        "samples": 12,
+        "frames": 12,
+        "bytes": 1382400,
+        "crc": 1037594565,
+        "eos": true
+      },
+      "hevc-main": {
+        "decoder": "OH.video.hevc.decoder",
+        "samples": 4,
+        "frames": 0,
+        "bytes": 0,
+        "crc": 0,
+        "eos": false
+      },
+      "main10": {
+        "decoder": "OH.video.hevc.decoder",
+        "samples": 4,
+        "frames": 0,
+        "bytes": 0,
+        "crc": 0,
+        "eos": false
+      }
+    }
+  },
+  "nativeControl": {
+    "method": "Public OpenHarmony NDK. A fresh process per fixture and output configuration. The demuxer supplied the track format and samples directly to OH_VideoDecoder. Pixel -1 means default buffer, 2 requests NV12 and -2 supplies an off-screen consumer surface. Exit code alone does not indicate successful decoding. See frames, eos and the callback error.",
+    "results": {
+      "baseline,-1": [
+        "NATIVE_PIXELS video/avc 2 3",
+        "NATIVE_DECODE video/avc profile=-1 pixel=-1 start=0 samples=12 frames=12 bytes=1382400 eos=1 error=0",
+        "EXITCODE=0"
+      ],
+      "hevc-main,-1": [
+        "NATIVE_PIXELS video/hevc 2 3",
+        "NATIVE_STAGE create",
+        "EXITCODE=2"
+      ],
+      "hevc-main,2": [
+        "NATIVE_PIXELS video/hevc 2 3",
+        "NATIVE_STAGE create",
+        "EXITCODE=2"
+      ],
+      "hevc-main,-2": [
+        "NATIVE_PIXELS video/hevc 2 3",
+        "NATIVE_STAGE create",
+        "EXITCODE=2"
+      ],
+      "main10,-1": [
+        "NATIVE_PIXELS video/hevc 2 3",
+        "NATIVE_DECODE video/hevc profile=-1 pixel=-1 start=0 samples=5 frames=0 bytes=0 eos=0 error=6",
+        "EXITCODE=0"
+      ],
+      "main10,2": [
+        "NATIVE_PIXELS video/hevc 2 3",
+        "NATIVE_DECODE video/hevc profile=-1 pixel=2 start=0 samples=5 frames=0 bytes=0 eos=0 error=6",
+        "EXITCODE=0"
+      ],
+      "main10,-2": [
+        "NATIVE_PIXELS video/hevc 2 3",
+        "NATIVE_DECODE video/hevc profile=-1 pixel=-2 start=0 samples=5 frames=0 bytes=0 eos=0 error=6",
+        "EXITCODE=0"
+      ]
+    }
+  },
+  "limits": [
+    "H.264 fixtures are 320x240 level 1.1. Reading the advertised maximum did not test a level 5.1 bitstream.",
+    "The two HEVC clips produced no frames. The platform declaration and Android isFormatSupported answer do not establish working playback.",
+    "The original YouTube player error has no observed decoder selection, media response, or platform configure/start event. Its selected stream could use a bundled codec."
+  ],
+  "goalComplete": false
+}

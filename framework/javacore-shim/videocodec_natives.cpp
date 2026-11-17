@@ -67,6 +67,8 @@
 #include <utility>
 #include <vector>
 
+extern "C" int wl_android_codec_profile(const char* mime, int32_t profile);
+
 namespace {
 
 void vlog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -138,6 +140,7 @@ struct Oh : CodecApi {
     OH_AVCapability* (*capabilityByCategory)(const char*, bool, int);
     const char* (*capabilityName)(OH_AVCapability*);
     int (*capabilityProfiles)(OH_AVCapability*, const int32_t**, uint32_t*);
+    int (*levelsForProfile)(OH_AVCapability*, int32_t, const int32_t**, uint32_t*);
     int (*widthRange)(OH_AVCapability*, OH_AVRange*);
     int (*heightRange)(OH_AVCapability*, OH_AVRange*);
     const char* const* keyWidth;
@@ -193,6 +196,7 @@ bool loadCoreLocked()
     SYM(capabilityByCategory, base, "OH_AVCodec_GetCapabilityByCategory");
     SYM(capabilityName, base, "OH_AVCapability_GetName");
     SYM(capabilityProfiles, base, "OH_AVCapability_GetSupportedProfiles");
+    SYM(levelsForProfile, base, "OH_AVCapability_GetSupportedLevelsForProfile");
     SYM(widthRange, base, "OH_AVCapability_GetVideoWidthRange");
     SYM(heightRange, base, "OH_AVCapability_GetVideoHeightRange");
     SYM(keyWidth, base, "OH_MD_KEY_WIDTH");
@@ -302,7 +306,7 @@ bool loadAudio()
 struct Offered {
     const char* mime;
     const char* name;           /* MediaCodecList's name for it */
-    int profile, level;         /* a CodecProfileLevel the capabilities are derived from */
+    std::vector<std::pair<int, int>> videoProfileLevels;  /* Android profile and maximum level */
     int minWidth, maxWidth, minHeight, maxHeight;
     /* OH's software decoder for the type, when it has one: the board's hardware decoder refuses
      * frames below its minimum (176x144), which small clips and thumbnails are. */
@@ -318,8 +322,6 @@ struct Offered {
     int maxChannels;
 };
 
-/* Android's own profile and level constants (MediaCodecInfo.CodecProfileLevel): High@5.1 for AVC,
- * Main@Main-tier 5.1 for HEVC, the levels a 1080p and 4K stream need. */
 std::vector<Offered> g_offered;
 bool g_offeredDone = false;
 std::mutex g_offeredLock;
@@ -340,17 +342,43 @@ std::string profileList(const std::vector<int32_t>& profiles)
     return out.empty() ? "?" : out;
 }
 
+void readVideoLevels(OH_AVCapability* capability, Offered& offered)
+{
+    if (!oh.levelsForProfile) return;
+    const bool avc = strcmp(offered.mime, "video/avc") == 0;
+    for (int32_t profile : offered.profiles) {
+        const int androidProfile = wl_android_codec_profile(offered.mime, profile);
+        if (androidProfile < 0) continue;
+        const int32_t* levels = nullptr;
+        uint32_t count = 0;
+        if (oh.levelsForProfile(capability, profile, &levels, &count) != 0 || !levels) continue;
+        int maxLevel = -1;
+        for (uint32_t i = 0; i < count; ++i) {
+            /* OH enumerates AVC levels 1 through 6.2 as 0..19 and HEVC levels as 0..12. */
+            if (levels[i] >= 0 && levels[i] <= (avc ? 19 : 12)) maxLevel = std::max(maxLevel, levels[i]);
+        }
+        if (maxLevel >= 0) {
+            /* Android uses one bit per AVC level and two per HEVC level (main, high tier).
+             * OH reports no tier here, so only advertise the main tier. */
+            const int androidLevel = 1 << (avc ? maxLevel : 2 * maxLevel);
+            offered.videoProfileLevels.emplace_back(androidProfile, androidLevel);
+        }
+    }
+}
+
 void findVideo()
 {
-    static const Offered kCandidates[] = {
-        { "video/avc", "OH.video.avc.decoder", 8, 0x8000, 0, 0, 0, 0, "", 0, 0, 0, 0, {}, {}, false, "", {}, {}, 0 },
-        { "video/hevc", "OH.video.hevc.decoder", 1, 0x10000, 0, 0, 0, 0, "", 0, 0, 0, 0, {}, {}, false, "", {}, {}, 0 },
+    static const struct { const char* mime; const char* name; } kCandidates[] = {
+        { "video/avc", "OH.video.avc.decoder" },
+        { "video/hevc", "OH.video.hevc.decoder" },
     };
     if (!loadOh() || oh.capability == nullptr) return;
-    for (const Offered& candidate : kCandidates) {
+    for (const auto& candidate : kCandidates) {
         OH_AVCapability* capability = oh.capability(candidate.mime, false);
         if (capability == nullptr) continue;
-        Offered offered = candidate;
+        Offered offered{};
+        offered.mime = candidate.mime;
+        offered.name = candidate.name;
         OH_AVRange width{0, 0}, height{0, 0};
         if (oh.widthRange != nullptr && oh.widthRange(capability, &width) == 0) {
             offered.minWidth = width.minVal; offered.maxWidth = width.maxVal;
@@ -374,6 +402,7 @@ void findVideo()
             }
         }
         offered.profiles = profilesOf(capability);
+        readVideoLevels(capability, offered);
         offered.swProfiles = sw != nullptr ? profilesOf(sw) : std::vector<int32_t>();
         g_offered.push_back(offered);
         vlog("[WL-VIDEOCODEC] %s profiles: hardware %s; software %s", candidate.mime,
@@ -1793,12 +1822,17 @@ jobject lCapabilities(JNIEnv* env, jclass c, jint index, jstring type)
         env->ExceptionClear();
         return nullptr;
     }
-    jobject level = env->NewObject(levelClass, levelInit);
-    jobjectArray levels = env->NewObjectArray(1, levelClass, nullptr);
-    if (level == nullptr || levels == nullptr) { env->ExceptionClear(); return nullptr; }
-    env->SetIntField(level, profileField, offered->profile);
-    env->SetIntField(level, levelField, offered->level);
-    env->SetObjectArrayElement(levels, 0, level);
+    jobjectArray levels = env->NewObjectArray(offered->videoProfileLevels.size(), levelClass, nullptr);
+    if (!levels) return nullptr;
+    for (size_t i = 0; i < offered->videoProfileLevels.size(); ++i) {
+        jobject level = env->NewObject(levelClass, levelInit);
+        if (!level) return nullptr;
+        env->SetIntField(level, profileField, offered->videoProfileLevels[i].first);
+        env->SetIntField(level, levelField, offered->videoProfileLevels[i].second);
+        env->SetObjectArrayElement(levels, i, level);
+        env->DeleteLocalRef(level);
+        if (env->ExceptionCheck()) return nullptr;
+    }
     const jint kColors[] = {COLOR_YUV420_FLEXIBLE, COLOR_YUV420_SEMIPLANAR, COLOR_SURFACE};
     jintArray colors = env->NewIntArray(3);
     if (colors != nullptr) env->SetIntArrayRegion(colors, 0, 3, kColors);
