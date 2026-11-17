@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "status": "in_progress",
+  "westlakeRevision": "61209fc78dc0728193167f73a3abb688f2b466a7",
+  "manifestRevision": "d0fe141c6002bba64bb6a2a6be010564742a36dd",
+  "frameworkArtifacts": "../lifecycle41/artifacts43.json",
+  "mergedLauncherUnitTests": 50,
+  "authHostSuites": 7,
+  "windowPolicySuitePassed": true,
+  "preflightFotMob43Alive": false,
+  "preflightFotMob43FatalSignal": "SIGTRAP",
+  "preflightGmsAndProviderAlive": true,
+  "newApplicationSignupAllowed": false,
+  "fullApplicationPasses": 0
+}

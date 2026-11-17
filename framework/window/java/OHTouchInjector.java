@@ -10,6 +10,8 @@ import android.os.SystemClock;
 import android.text.Editable;
 import android.text.Selection;
 import android.widget.TextView;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
 
 /**
  * Posts OH-boundary touch injection onto the Android view hierarchy's owning thread.
@@ -26,6 +28,16 @@ public final class OHTouchInjector {
     public static String lastEx = "none";
     public static int textCommitCount = 0;
     public static String lastTextCommit = "none";
+    private static final boolean INPUT_DIAGNOSTICS =
+            "1".equals(System.getenv("WESTLAKE_INPUT_DIAGNOSTICS"));
+
+    private static void reportTextCommit(String result) {
+        lastTextCommit = result;
+        if (INPUT_DIAGNOSTICS) {
+            // Editor classes and outcomes only. Never retain or log entered text.
+            System.err.println("[WL-TEXT-INPUT] " + result);
+        }
+    }
 
     // Legacy pacing is opt-in only. Android View handles an UP while PREPRESSED;
     // delaying every release adds latency and can reorder UP after the next DOWN.
@@ -75,7 +87,8 @@ public final class OHTouchInjector {
     }
 
     /**
-     * Commits text into the currently focused TextView on Android's main thread.
+     * Resolves the focused editor on Android's main thread, then delivers text
+     * on the thread required by that editor.
      *
      * The OH board has no attached IME and its synthetic virtual keyboard has no
      * resolvable KeyCharacterMap, so per-key KeyEvents carry unicode 0.  This is
@@ -88,6 +101,7 @@ public final class OHTouchInjector {
             return;
         }
         TextTask task = new TextTask(root, text);
+        reportTextCommit("queued:" + root.getClass().getName());
         try {
             Looper mainLooper = Looper.getMainLooper();
             if (mainLooper != null && Handler.createAsync(mainLooper).post(task)) {
@@ -101,14 +115,14 @@ public final class OHTouchInjector {
         }
     }
 
-    /** The focused TextView of the window that has input focus, as an IME would target. */
+    /** The focused editor of the window that has input focus, as an IME would target. */
     private static View focusedEditable() {
         View fallback = null;
         try {
             for (View root : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
                 if (root == null || !root.isAttachedToWindow()) continue;
                 View focus = root.findFocus();
-                if (!(focus instanceof TextView) || !((TextView) focus).onCheckIsTextEditor()) continue;
+                if (focus == null || !focus.onCheckIsTextEditor()) continue;
                 if (root.hasWindowFocus()) return focus;
                 fallback = focus;
             }
@@ -131,13 +145,34 @@ public final class OHTouchInjector {
         public void run() {
             try {
                 View focused = root.findFocus();
-                if (!(focused instanceof TextView) || !root.hasWindowFocus()) {
+                if (focused == null || !focused.onCheckIsTextEditor() || !root.hasWindowFocus()) {
                     View other = focusedEditable();
                     if (other != null) focused = other;
                 }
+                if (focused == null || !focused.onCheckIsTextEditor()) {
+                    reportTextCommit("not-editor:"
+                            + (focused == null ? "null" : focused.getClass().getName()));
+                    return;
+                }
+                // HTML fields are edited by WebView's InputConnection, not a TextView.
+                // Let the focused editor handle composition and selection through the same
+                // contract an Android IME uses.
                 if (!(focused instanceof TextView)) {
-                    lastTextCommit = "focused="
-                            + (focused == null ? "null" : focused.getClass().getName());
+                    InputConnection connection = focused.onCreateInputConnection(new EditorInfo());
+                    if (connection == null) {
+                        reportTextCommit("no-input-connection:" + focused.getClass().getName());
+                        return;
+                    }
+                    TextConnectionTask commit = new TextConnectionTask(connection, text,
+                            focused.getClass().getName());
+                    // WebView can supply a dedicated IME handler. Creating the connection
+                    // belongs on the view thread; editing belongs on the connection's thread.
+                    Handler handler = connection.getHandler();
+                    if (handler != null && handler.getLooper() != Looper.myLooper()) {
+                        if (!handler.post(commit)) reportTextCommit("connection-post-rejected");
+                    } else {
+                        commit.run();
+                    }
                     return;
                 }
                 TextView target = (TextView) focused;
@@ -162,9 +197,38 @@ public final class OHTouchInjector {
                     target.setText(committed);
                 }
                 textCommitCount++;
-                lastTextCommit = "ok:" + target.getClass().getName() + ":" + committed;
+                reportTextCommit("ok:" + target.getClass().getName());
             } catch (Throwable throwable) {
-                lastTextCommit = String.valueOf(throwable);
+                reportTextCommit("exception:" + throwable.getClass().getName());
+            }
+        }
+    }
+
+    static final class TextConnectionTask implements Runnable {
+        private final InputConnection connection;
+        private final String text;
+        private final String editorClass;
+
+        TextConnectionTask(InputConnection connection, String text, String editorClass) {
+            this.connection = connection;
+            this.text = text;
+            this.editorClass = editorClass;
+        }
+
+        @Override
+        public void run() {
+            try {
+                boolean accepted;
+                connection.beginBatchEdit();
+                try {
+                    accepted = connection.commitText(text, 1);
+                } finally {
+                    connection.endBatchEdit();
+                }
+                if (accepted) textCommitCount++;
+                reportTextCommit((accepted ? "ok:" : "rejected:") + editorClass);
+            } catch (Throwable throwable) {
+                reportTextCommit("connection-exception:" + throwable.getClass().getName());
             }
         }
     }

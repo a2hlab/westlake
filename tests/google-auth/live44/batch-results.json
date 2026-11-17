@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "status": "in_progress",
+  "sourceRevisions": {
+    "westlake": "61209fc78dc0728193167f73a3abb688f2b466a7",
+    "manifest": "d0fe141c6002bba64bb6a2a6be010564742a36dd"
+  },
+  "deviceCertification": "uncertified_status=3; no override",
+  "identityExceptionsAdded": [
+    212,
+    213
+  ],
+  "providerGrantsExpanded": false,
+  "googleTests": [
+    {
+      "package": "com.mobilefootie.wc2010",
+      "name": "FotMob",
+      "status": "partial",
+      "interactiveGoogleResultOk": true,
+      "silentTokenRepliesObserved": true,
+      "privatePreferenceWritten": true,
+      "cloudPreferenceRoundTripProven": false,
+      "explanation": "Fresh app data login returned RESULT_OK and tokenDetails; onboarding showed default team selection instead of the written favorite. Backend round trip remains unproven; late prior SIGTRAP also unresolved."
+    },
+    {
+      "package": "com.spotify.music",
+      "name": "Spotify",
+      "status": "failed",
+      "googleSignInAttempted": true,
+      "accountChooserReached": false,
+      "explanation": "Google sign-in UI handoff accepted; legacy sign-in service 91 returned status 9, RESULT_CANCELED, app displays Something went wrong. Current identity exceptions cover 212/213 only."
+    },
+    {
+      "package": "wp.wattpad",
+      "name": "Wattpad",
+      "status": "failed",
+      "googleSignInAttempted": true,
+      "explanation": "Google login displays Play services not supported. Service 91 returns status 9; service 212 handshake returns 0. No account chooser or successful token reply."
+    },
+    {
+      "package": "com.google.android.youtube",
+      "name": "YouTube",
+      "status": "pending"
+    },
+    {
+      "package": "com.google.android.gm",
+      "name": "Gmail",
+      "status": "pending"
+    },
+    {
+      "package": "com.google.android.apps.docs",
+      "name": "Google Drive",
+      "status": "prepared",
+      "explanation": "Downloaded with apkeep; base/split signatures and signing-key rotation verified; legacy signing certificate matches Google Drive assetlinks; exact input pinned in manifest."
+    },
+    {
+      "package": "com.google.android.apps.maps",
+      "name": "Google Maps",
+      "status": "pending"
+    },
+    {
+      "package": "com.ubercab",
+      "name": "Uber",
+      "status": "pending"
+    }
+  ],
+  "facebookTests": {
+    "wp.wattpad": {
+      "webLoginRendered": true,
+      "authenticatedReturn": "pending_account_identity_confirmation",
+      "webViewInputAssertionObserved": true,
+      "credentialsSubmitted": true,
+      "webViewInputFixedAndValidated": true,
+      "facebookResponseReceived": true,
+      "exactAccountMatch": false,
+      "suggestedAccountRequiresUserConfirmation": true,
+      "separateAppAccountSignupCompleted": false
+    },
+    "com.spotify.music": {
+      "status": "not_tested"
+    },
+    "com.mobilefootie.wc2010": {
+      "status": "not_tested"
+    }
+  },
+  "fullApplicationPasses": 0,
+  "caveats": [
+    "Broker status 0 is not backend acceptance.",
+    "afterService attribution is process-global and approximate.",
+    "All clients share one development HAP UID; GMS has a separate dedicated HAP UID.",
+    "Long-run prior FotMob43 SIGTRAP remains unresolved.",
+    "Location is disabled in the current authentication test configuration."
+  ]
+}

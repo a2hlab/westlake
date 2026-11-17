@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "scope": "Client input helper change only; GMS/provider remain on earlier artifacts",
+  "source": {
+    "framework/window/java/OHTouchInjector.java": "c6854f78550f2a612abc77252a837490ca23dedaa884bdebf8b23ff075b0e1b3"
+  },
+  "changedAdapterSources": [
+    "framework/window/java/OHTouchInjector.java"
+  ],
+  "adapterRuntimeSha256": "659def98035fc54fbbe2219400725bc8681e080aeb715134d5e2e6977263fa22",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "nativeBridgeSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+  "preloadExitCode": 0,
+  "classInitializationFailures": [],
+  "liveTextInputValidated": false,
+  "firstWattpadLaunch": {
+    "exited": true,
+    "parentReportedSignal": 13,
+    "signalName": "SIGPIPE",
+    "textEntryAttempted": false,
+    "causeEstablished": false
+  },
+  "markerMailboxConsumed": true,
+  "markerVisibleInHtmlField": false,
+  "ownLogMarkerMatches": 0,
+  "systemLogMarkerMatches": 0,
+  "credentialsSubmitted": false,
+  "retryReachedFacebookLogin": true
+}

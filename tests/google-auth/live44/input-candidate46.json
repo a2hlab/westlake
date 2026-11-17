@@ -1,0 +1,66 @@
+{
+  "candidate": 46,
+  "sourceRevision": "61209fc78dc0728193167f73a3abb688f2b466a7",
+  "changedSource": {
+    "path": "framework/window/java/OHTouchInjector.java",
+    "sha256": "ae00510ca459903730a192be6fffdb7650a8a2516f582a7caa88884eba20a256"
+  },
+  "adapterClasses": {
+    "westlake-unrelocated.classes.jar": {
+      "bytes": 720590,
+      "sha256": "afb64bf3edb9440828941e4e355a57f95c67cfeab10edb0be729bac46e2f4ea4"
+    }
+  },
+  "runtimeJars": {
+    "adapter-runtime-bcp.classes.jar": {
+      "bytes": 720590,
+      "sha256": "afb64bf3edb9440828941e4e355a57f95c67cfeab10edb0be729bac46e2f4ea4"
+    },
+    "adapter-runtime-bcp.jar": {
+      "bytes": 388653,
+      "sha256": "3e6ac19b7cd8293b1687cb8c3fc49b4eb59472eaefbf92d30de95688f6ee3b16"
+    },
+    "framework.classes.jar": {
+      "bytes": 48623168,
+      "sha256": "428a3410775f7ca450fee2c3f9ac0738260c4b528411fd5e53ac0492c8ea2c61"
+    },
+    "framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    }
+  },
+  "unchangedFrameworkReusedFrom": 45,
+  "frameworkReuseInputsAndCompilerArgumentsVerified": true,
+  "preloadPassed": true,
+  "preloadExitCode": 0,
+  "nativeArtifactsReused": true,
+  "liveTextInputValidated": true,
+  "credentialsSubmitted": true,
+  "firstStartupExitSignal": 13,
+  "firstStartupReachedTextInput": false,
+  "controlledRespawns": 1,
+  "startupExitsBeforeSignalExperiment": [
+    13,
+    13
+  ],
+  "launcherContainsSigpipeFixDiagnostic": true,
+  "missingLauncherFixEstablished": false,
+  "signalExperiment": "Ignore SIGPIPE before starting ART; previous child status did not list SIGPIPE ignored",
+  "productionLauncherRebuilt": false,
+  "sigpipeIgnoredImmediatelyAfterSpawn": true,
+  "sigpipeIgnoredAfterStartup": false,
+  "signalExperimentFixedStartupEstablished": false,
+  "composeEditorMarkerVisible": true,
+  "composeEditorClass": "androidx.compose.ui.platform.AndroidComposeView",
+  "ownLogMarkerMatches": 0,
+  "systemLogMarkerMatches": 0,
+  "markerVisibleInHtmlField": true,
+  "webViewEditorClass": "android.webkit.WebView",
+  "inputMethodScope": "Private test input mailbox; full physical keyboard and production IME acceptance not established",
+  "facebookResponseReceived": true,
+  "facebookAuthenticatedReturn": false,
+  "commentOnlySourceFollowup": {
+    "sourceSha256": "3cee9e9a5c5d77c5c95033d5bcc843add4ece7da1c3109da9226670f5ff25b8a",
+    "compiledArtifactsIdenticalToTestedCandidate": true
+  }
+}
