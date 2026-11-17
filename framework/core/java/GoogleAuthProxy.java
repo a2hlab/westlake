@@ -495,17 +495,36 @@ public final class GoogleAuthProxy {
                             throw new SecurityException("unsupported token option");
                         }
                     }
+                    boolean official = "1".equals(System.getenv("WESTLAKE_GOOGLE_NATIVE_ACCOUNT_BRIDGE"))
+                            && !"com.google.android.gms".equals(own);
+                    if (official && options.getBoolean("westlake.forceRefresh", false))
+                        throw new SecurityException("official account force refresh unsupported");
+                    if (official && "1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE")))
+                        event("client_account_token_request=true owner=" + own + " "
+                                + GoogleAuthBoundaryTrace.requestService(scope) + " route=official_gms");
                     REQUESTS.execute(() -> {
                         try {
-                            Parcel reply = call(TOKEN, data -> {
-                                data.writeTypedObject(account, 0); data.writeString(scope);
-                                data.writeBoolean(options.getBoolean("westlake.forceRefresh", false));
-                            });
                             Bundle result;
-                            try { result = reply.readBundle(GoogleAuthProxy.class.getClassLoader()); }
-                            finally { reply.recycle(); }
+                            if (official) {
+                                result = (Bundle) Class.forName("adapter.activity.PlayServicesChannel")
+                                        .getMethod("nativeAccountToken", Account.class, String.class)
+                                        .invoke(null, account, scope);
+                                event("client_account_token=true owner=" + own + " route=official_gms");
+                            } else {
+                                Parcel reply = call(TOKEN, data -> {
+                                    data.writeTypedObject(account, 0); data.writeString(scope);
+                                    data.writeBoolean(options.getBoolean("westlake.forceRefresh", false));
+                                });
+                                try { result = reply.readBundle(GoogleAuthProxy.class.getClassLoader()); }
+                                finally { reply.recycle(); }
+                            }
                             callback.onResult(result);
                         } catch (Exception e) {
+                            if (official) {
+                                Throwable cause = e instanceof InvocationTargetException ? e.getCause() : e;
+                                event("client_account_token_failed=true route=official_gms type="
+                                        + (cause == null ? e : cause).getClass().getSimpleName());
+                            }
                             try { callback.onError(AccountManager.ERROR_CODE_REMOTE_EXCEPTION, "auth proxy request failed"); }
                             catch (RemoteException ignored) {}
                         }

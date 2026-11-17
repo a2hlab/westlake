@@ -1,0 +1,94 @@
+{
+  "candidate": 82,
+  "variant": "82b",
+  "phase": "Route native AccountManager requests through the verified official GMS service",
+  "baseCommit": "482bdea33db0763abc570a93b9f4284fd86e7f45",
+  "implementation": {
+    "newBridgeOptIn": "WESTLAKE_GOOGLE_NATIVE_ACCOUNT_BRIDGE=1",
+    "defaultBootstrapPathRetained": true,
+    "clientTokenRequestsForwardToOfficialGetTokenTransaction": 5,
+    "sameGmsDeclaredServiceProcessSelectionAsSdk": true,
+    "claimedPackageDoesNotBecomeAuthority": true,
+    "existingGmsOriginAndNativeConsentChecksRetained": true,
+    "noFallbackToDirectProviderAfterOfficialFailure": true,
+    "explicitForceRefreshRefusedOnNewBridge": true,
+    "testAccountOrGrantsChanged": false,
+    "tokenDataPinnedFormatEvidence": {
+      "artifact": "com.google.android.gms:play-services-auth-base:18.1.0",
+      "class": "com.google.android.gms.auth.TokenData",
+      "tokenField": 2,
+      "expirySecondsField": 3,
+      "formatVerifiedBy": "javap on pinned original SDK classes.jar"
+    },
+    "hostTokenDataTests": 107,
+    "javaSources": 143,
+    "javaClasses": 297,
+    "buildVariant": "82b"
+  },
+  "build": {
+    "adapterJarSha256": "5016be949c97bafd80d3bdf84218ee2fa03798bc68f91cb3eb4873f7f827c7b0",
+    "frameworkJarSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "sourceSha256": {
+      "framework/activity/java/PlayServicesChannel.java": "b3118dee68ee3f64c54e949ef62e14cac34fb0e588fe429fdff4c7c1c8ebd7e5",
+      "framework/core/java/GoogleAuthProxy.java": "f8359855d5066eb5c0f1b062d8dc1614f1c0298af96011a8ec5e57d42401ddb7",
+      "framework/core/java/GoogleAccountTokenData.java": "9aec7b8f62212a63339c4b0d0bf21f7afdbf4b5d1b85785ce7558447451cf06e",
+      "tests/google-auth/host/GoogleAccountTokenDataTest.java": "af39d946918dc67f8af7ead2d778e981aa21e608017af47d1e627518eb2f8267"
+    },
+    "javaCompilationPassed": true,
+    "runtimePackagingAndBootImagePassed": true,
+    "exactUnchangedFrameworkOutputsReusedWithInputAndCompilerChecks": true,
+    "nativeLibrariesRebuilt": false
+  },
+  "device": {
+    "originalDriveApkUnchanged": true,
+    "serviceHostsRemainCandidate81": true,
+    "newBridgeReceivesOriginalDriveAccountManagerCalls": true,
+    "originalClientProviderTokenTracesAfterRouting": 0,
+    "broaderRequestsReachOfficialGmsWithVerifiedOrigin": true,
+    "preApprovalProviderScopeDenials": 123,
+    "preApprovalEightScopeRequestsStillIssueTokens": 5,
+    "endToEndAccountManagerPositiveTokenObserved": false,
+    "fileListingPassed": false,
+    "fileOpenPassed": false,
+    "fileScreen": "Cannot refresh"
+  },
+  "consent": {
+    "initialApprovedScopes": 8,
+    "subsequentExplicitAdditionalScopeApproval": 19,
+    "currentApprovedScopeCount": 27,
+    "onlyDelegateAndNativeScopeFieldsChanged": true,
+    "originalSignerAccountEpochAndExpiryRetained": true,
+    "directBootstrapClientTokenGrantAdded": false,
+    "postResponseScopeMismatch": "Google normalizes/expands the actual token scopes to include drive.labels.readonly; strict returned-scope checking refuses release",
+    "tokeninfoHttpStatus": 200,
+    "tokeninfoReturnedScopes": 19,
+    "outsideApprovedScopeSet": [
+      "https://www.googleapis.com/auth/drive.labels.readonly"
+    ],
+    "additionalReadOnlyLabelConsentPending": true,
+    "scopeMismatchNotCountedAsGoogleBackendRejection": true
+  },
+  "separatelyApprovedTestFile": {
+    "explicitAdditionalScopeApproval": true,
+    "separateOneFileUploadApproval": true,
+    "tokenOrigin": "Original Drive APK native-account token",
+    "fileName": "Westlake-Drive-validation.txt",
+    "createdOneLabelledFile": true,
+    "reusedExistingOwnFixture": false,
+    "fileBytes": 107,
+    "fileSha256": "bb1aaa517e9c48bea77f4102e386e2968b3c087b87873689c6c87c647600f4aa",
+    "backendReadHttpStatus": 200,
+    "backendReadBytesMatchApprovedContent": true,
+    "otherFilesUploadedEditedOrDeleted": false,
+    "fileLeftInPlace": true,
+    "applicationFileListingPassed": false,
+    "applicationFileOpenPassed": false
+  },
+  "securityAndAcceptanceLimits": [
+    "No token release with unapproved returned scopes",
+    "No production per-app UID isolation claim",
+    "Native consent remains operator provisioned",
+    "Positive AccountManager token delivery, original app listing/opening, renewal and restart acceptance remain incomplete"
+  ],
+  "goalComplete": false
+}

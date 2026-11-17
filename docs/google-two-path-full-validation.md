@@ -1504,3 +1504,52 @@ three token-bearing replies, with no fatal signal or prior DNS-name failure. Thi
 does not validate a new-message delta. Overlapping callers, sustained use and the
 wider Google/Facebook acceptance plan remain open. Sanitized evidence
 is in [candidate81.json](../tests/google-auth/full48/candidate81.json).
+
+
+## Candidate 82: AccountManager uses the verified official native-auth route
+
+The unchanged Drive APK uses two token entry points. Its GMS SDK already reaches
+the consent-bound official service; direct `AccountManager.getAuthToken` calls
+previously reached the restricted bootstrap provider and failed. An explicit
+`WESTLAKE_GOOGLE_NATIVE_ACCOUNT_BRIDGE=1` client opt-in now routes those calls to
+the same original `com.google.android.gms.auth.GetToken` service, preserving its
+declared service-process selection, launch/certificate checks and transaction-5
+native-auth operation. Claimed packages still cannot override the originating
+app. An official failure never falls back to the direct provider. The provider
+and official service retain candidate-81 code and authorization.
+
+The client translates the authenticated GMS TokenData into AccountManager's
+result without caching a reusable credential or fabricating a token/expiry.
+The pinned original SDK serializer identifies token field 2 and optional expiry
+seconds field 3. Bounded parsing passes 107 checks, including malformed fields,
+duplicate token/expiry fields, bad string encodings, missing values, overflow
+and every truncated prefix. The complete 143-source/297-class adapter compiles;
+runtime packaging and all nine boot-image JARs pass. Existing framework outputs
+are reused only after input/compiler checks, retaining candidate-80b's sync port.
+
+The live original APK now uses the official route for both 22- and 23-scope legacy
+requests, with no direct provider token trace in the client. With the original
+eight-scope consent retained, 123 broader requests fail the provider's scope
+check and five already-approved requests still obtain tokens. The user then
+explicitly approves the additional 19 legacy scopes. Only the two Drive scope
+fields expand to 27; signer/account/epoch and original expiry remain. No direct
+bootstrap token grant is added.
+
+Google accepts the broader request and issues a token, but normalizes its scope
+set to include `drive.labels.readonly`, which was not in the APK's requested
+list. Independent token introspection returns HTTP 200 and identifies that sole
+extra scope. The strict post-response check continues to withhold the token.
+Approval for that additional read-only label permission is pending. This is a
+local consent mismatch, not evidence that Google rejected the account/device.
+Google documents its meaning in the
+[Drive Labels scope guide](https://developers.google.com/workspace/drive/labels/guides/authorize).
+The exact approved legacy list is in [Drive consent review](drive-consent-review.md).
+
+The user separately approves creating and opening one labelled, harmless text
+fixture. Its backend creation succeeds using the Drive-origin token, and a GET
+returns exactly the approved 107 bytes with HTTP 200. The file is left in place;
+no other upload, file edit or deletion occurs. This independent backend operation
+is not a successful AccountManager callback or an application file-open result.
+The original Drive UI still cannot refresh. Positive bridge token delivery,
+original-app listing/opening, actual renewal and restart acceptance remain open.
+Sanitized evidence is in [candidate82.json](../tests/google-auth/full48/candidate82.json).

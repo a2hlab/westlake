@@ -337,6 +337,8 @@ javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java tes
 java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 64
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleIdentityClaims.java tests/google-auth/host/GoogleIdentityClaimsTest.java
 java -cp $out/delegation adapter.core.GoogleIdentityClaimsTest                 # ..._PASS 17
+javac -d $out/account-token framework/core/java/GoogleAccountTokenData.java tests/google-auth/host/GoogleAccountTokenDataTest.java
+java -cp $out/account-token adapter.core.GoogleAccountTokenDataTest           # GOOGLE_ACCOUNT_TOKEN_DATA_PASS 107
 javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/google-auth/host/GoogleAuthBoundaryTraceTest.java
 java -cp $out/trace GoogleAuthBoundaryTraceTest                                # ..._TEST_PASS
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java

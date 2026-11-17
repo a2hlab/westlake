@@ -781,6 +781,81 @@ public final class PlayServicesChannel {
         finally { provider.close(); }
     }
 
+    /** AccountManager clients use the same verified GetToken call as the app's GMS SDK. */
+    public static android.os.Bundle nativeAccountToken(android.accounts.Account account, String scope)
+            throws RemoteException {
+        String own = ActivityThread.currentPackageName();
+        if (!isClient() || adapter.core.GoogleAuthProxy.provider() || "com.google.android.gms".equals(own)
+                || account == null || !"com.google".equals(account.type) || scope == null
+                || scope.isEmpty() || scope.length() > adapter.core.GoogleAuthDelegationPolicy.MAX_KEY_LENGTH)
+            throw new SecurityException("native account client required");
+        Intent intent = new Intent().setComponent(new ComponentName("com.google.android.gms",
+                "com.google.android.gms.auth.GetToken"));
+        List<ResolveInfo> found = RemotePackages.queryServices(intent, null, 0);
+        if (found.isEmpty() || found.get(0).serviceInfo == null
+                || !"com.google.android.gms".equals(found.get(0).serviceInfo.packageName))
+            throw new RemoteException("official auth service not declared");
+        ServiceInfo info = found.get(0).serviceInfo;
+        Channel channel = channelFor(info.packageName);
+        Channel process = remoteProcess(channel, info.packageName, AppProcesses.processOf(info));
+        IBinder remote = root(process == null ? channel : process);
+        if (remote == null) throw new RemoteException("official auth channel unavailable");
+        IBinder service;
+        Parcel bind = Parcel.obtain(), bound = Parcel.obtain();
+        try {
+            bind.writeTypedObject(intent, 0);
+            bind.writeInt(0);
+            if (!remote.transact(BIND, bind, bound, 0)) throw new RemoteException("official auth bind unsupported");
+            bound.readException();
+            service = bound.readStrongBinder();
+        } finally { bind.recycle(); bound.recycle(); }
+        final String descriptor = "com.google.android.auth.IAuthManagerService";
+        if (service == null || !descriptor.equals(service.getInterfaceDescriptor()))
+            throw new RemoteException("official auth service unavailable");
+        Parcel request = Parcel.obtain(), reply = Parcel.obtain();
+        android.os.Bundle response;
+        try {
+            android.os.Bundle extras = new android.os.Bundle();
+            extras.putString("androidPackageName", own);
+            extras.putString("clientPackageName", own);
+            request.writeInterfaceToken(descriptor);
+            request.writeTypedObject(account, 0);
+            request.writeString(scope);
+            request.writeTypedObject(extras, 0);
+            if (!service.transact(5, request, reply, 0)) throw new RemoteException("official token call unsupported");
+            reply.readException();
+            response = reply.readTypedObject(android.os.Bundle.CREATOR);
+        } finally { request.recycle(); reply.recycle(); }
+        if (response == null) throw new RemoteException("official token reply absent");
+        ClassLoader loader = ActivityThread.currentApplication().getClassLoader();
+        response.setClassLoader(loader);
+        String token = response.getString("authtoken");
+        Long expiry = null;
+        if (token == null || token.isEmpty()) {
+            android.os.Bundle details = response.getBundle("tokenDetails");
+            if (details == null) throw new RemoteException("official token not issued");
+            details.setClassLoader(loader);
+            android.os.Parcelable value = details.getParcelable("TokenData");
+            if (value == null || !"com.google.android.gms.auth.TokenData".equals(value.getClass().getName()))
+                throw new RemoteException("official token encoding unsupported");
+            Parcel encoded = Parcel.obtain();
+            try {
+                value.writeToParcel(encoded, 0);
+                adapter.core.GoogleAccountTokenData parsed = adapter.core.GoogleAccountTokenData.parse(encoded.marshall());
+                token = parsed.token;
+                expiry = parsed.expiryMillis;
+            } finally { encoded.recycle(); }
+        }
+        if (expiry != null && expiry <= System.currentTimeMillis())
+            throw new RemoteException("official token expired");
+        android.os.Bundle result = new android.os.Bundle();
+        result.putString(android.accounts.AccountManager.KEY_ACCOUNT_NAME, account.name);
+        result.putString(android.accounts.AccountManager.KEY_ACCOUNT_TYPE, account.type);
+        result.putString(android.accounts.AccountManager.KEY_AUTHTOKEN, token);
+        if (expiry != null) result.putLong("android.accounts.expiry", expiry);
+        return result;
+    }
+
     public static IBinder remoteAuthService() {
         IBinder root = root(AUTH);
         if (root == null) return null;
