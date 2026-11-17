@@ -407,3 +407,68 @@ retry. Certification status remains 3 without an override. No account signup,
 renewal pass or full application pass is claimed.
 
 See [candidate60.json](../tests/google-auth/full48/candidate60.json).
+
+### Candidate 61: distinguish token retrieval from interactive login
+
+The callback diagnostic now records the callback implementation class. An
+additional opt-in ART method trace requires `WESTLAKE_GOOGLE_SIGNIN_METHOD_TRACE=1`
+as well as the existing diagnostic and private-log flags. It starts only for the
+first legacy sign-in response, writes inside a private app directory, and records
+method execution rather than argument values. It materially perturbs timing:
+the requested three-second capture actually spans 46.09 seconds on this board.
+The 329,256 decoded records match the trace header, with no overflow or unknown
+method records. The Java/runtime/boot builds and board preload pass.
+
+The legacy status-4 replies reach `GoogleManager$getAuthenticationToken`'s
+callback and its failure handler. The captured interval does not execute the
+separate interactive-login callback. Original-APK analysis explains the branch:
+when `silentSignIn()` has not completed, Wattpad's `isLoggedIn()` treats a non-null
+`google_username` preference as a logged-in session. Its token-retrieval failure
+handler does not open the chooser. The preference was present while the SDK's
+cached Google selection had expired. The trace starts after that earlier branch;
+the branch diagnosis combines static code, cache inspection and the recovery
+experiment rather than claiming it was directly traced.
+
+With execution and queue tracing disabled, removing only `google_username`
+restores the interactive activity launch. The exact preference is backed up and
+ten other entries are preserved. This first retry does not deliver a Wattpad
+OAuth token in the observed interval. A second targeted recovery backs up and
+removes only Wattpad's three remembered GMS-choice entries, preserving nine
+others, then restarts GMS and the client. The account chooser appears. Selecting
+the already authorized test account produces three successful interactive OAuth
+reads, a saved OAuth selection, a successful follow-up legacy-auth token reply,
+and Google's `RESULT_OK` return to Wattpad. The provider records four Wattpad
+OAuth issuances. Wattpad reaches **Create an Account**; no signup is submitted.
+
+This recovers live OAuth delivery with both GMS and microG on candidate 59 and
+account-ID metadata enabled. It does not establish automatic recovery or renewal
+after expiry. The original-app legacy `silentSignIn` service-91 path remains
+different from the synchronous `IAuthManagerService` transaction-5 path currently
+covered by `GoogleAuthOperations`. The device remains uncertified (3), with no
+override or change to check-in identity. Provider grants are unchanged from the
+approved configuration, including the earlier birth-date permission. The
+account-ID metadata reply is counted separately from the four OAuth issuances.
+
+A subsequent client-only restart preserves all app preferences and again reaches
+the signup page through the existing-account Google-login button. No chooser or
+new remote activity result is needed. The provider issues one fresh OAuth token,
+the synchronous legacy-auth reply carries it back to Wattpad, and all three hosts
+remain alive. The active SDK selection now has a numeric ID and an unexpired
+timestamp. This is authorization reuse across that restart, not a completed
+Wattpad account session or an expiry-renewal result.
+
+A controlled expiry check changes only the active SDK selection's
+`expirationTime` to ten minutes before the board clock, preserving its numeric
+ID, account fields, scopes, app username, GMS choices and provider grants. The
+next client restart returns modern status 16 and legacy status 4 twice, with no
+interactive activity launch, follow-up transaction-5 request or Wattpad provider
+OAuth exchange. The login form remains visible. Thus the newer numeric ID alone
+does not recover the expired-SDK path. This is a local SDK-expiry simulation;
+Google-issued tokens and server state were not expired. The exact preference
+backup is restored after the test. After another client-only restart, that
+restored cache again yields one live provider OAuth issuance and a token-bearing
+transaction-5 reply, reaching signup without a chooser. The sequence is therefore
+working unexpired cache, failing expired cache, working restored cache. No GMS or
+provider restart or permission change occurs between these three checks.
+
+See [candidate61.json](../tests/google-auth/full48/candidate61.json).

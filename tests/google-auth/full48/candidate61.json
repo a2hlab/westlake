@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "candidate": 61,
+  "implementationRevisionBeforeDiagnostic": "d2ed95e8a855aafc12952d939e496708ff44c202",
+  "phase": "Wattpad callback branch diagnosis and manual recovery",
+  "package": "wp.wattpad",
+  "originalApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+  "clientAdapterSha256": "09c62d57897f33c95e69127deea56c75214a61947deeb566a3e16aea5c5d7a9c",
+  "gmsAndProviderAdapterCandidate": 59,
+  "nativeWatchdogFixCandidate": 54,
+  "diagnostic": {
+    "javaRuntimeBootBuildPassed": true,
+    "boardPreloadPassed": true,
+    "callbackTarget": "com.google.android.gms.auth.api.signin.internal.zbf",
+    "modernStatus": 16,
+    "legacyStatuses": [
+      4,
+      4
+    ],
+    "traceRequestedDurationMillis": 3000,
+    "traceActualDurationMicros": 46089465,
+    "traceRecordCount": 329256,
+    "recordCountMatchesHeader": true,
+    "overflow": false,
+    "unknownMethodRecords": 0,
+    "tokenRetrievalCallbackExecuted": true,
+    "interactiveLoginCallbackObserved": false,
+    "argumentValuesRecorded": false,
+    "timingPerturbation": true,
+    "sourceSha256": "297adf76ba8b523e10676a696cf4de7664417635531508ee7e2eded8cdff4a47"
+  },
+  "diagnosis": {
+    "usernameCachePresent": true,
+    "sdkSelectionExpired": true,
+    "isLoggedInFallback": "When silentSignIn is pending, a cached non-null google_username selects the token-retrieval path",
+    "tokenFailureHandlerOpensChooser": false,
+    "limit": "Earlier isLoggedIn branch is established by static code and cache/recovery evidence, not captured directly in the callback trace"
+  },
+  "manualRecovery": {
+    "methodAndQueueTraceDisabled": true,
+    "clientKeysRemoved": [
+      "google_username"
+    ],
+    "otherClientPreferenceEntriesPreserved": 10,
+    "usernameOnlyAttempt": {
+      "interactiveActivityLaunchObserved": true,
+      "wattpadProviderOAuthObserved": false,
+      "visibleResultDuringObservedWindow": "blank activity"
+    },
+    "gmsWattpadChoiceEntriesRemoved": 3,
+    "otherGmsPreferenceEntriesPreserved": 9,
+    "exactBackupsVerified": true,
+    "gmsAndClientRestarted": true,
+    "providerRestartedForThisRecovery": false,
+    "accountChooserObserved": true,
+    "existingAuthorizedAccountSelected": true,
+    "metadataEnabled": true,
+    "scopeGrantsChanged": false,
+    "interactiveOAuthReadsWithToken": 3,
+    "providerWattpadOAuthIssuances": 4,
+    "savedOAuthSelection": true,
+    "followupTransaction5TokenDelivered": true,
+    "authenticatedActivityReturn": true,
+    "visibleResult": "Create an Account",
+    "newAppSignupCreated": false
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "onlyProviderGrantAddedIsAccountId": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": false,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "09c62d57897f33c95e69127deea56c75214a61947deeb566a3e16aea5c5d7a9c",
+    "clientApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372"
+  },
+  "fullApplicationPassed": false,
+  "automaticExpiredSessionRenewalPassed": false,
+  "fullApplicationPassCount": 0,
+  "remaining": [
+    "Automatic recovery from expired SDK selection and cached app username",
+    "Legacy service-91 asynchronous renewal coverage",
+    "Separate account/session/reading acceptance",
+    "Production per-client UID isolation"
+  ],
+  "privacy": "Fixed outcomes, source/artifact hashes and public package or class names only; raw traces, account data, tokens and captures remain private.",
+  "clientRestart": {
+    "appPreferencesPreserved": true,
+    "providerOAuthTokenIssued": true,
+    "followupTransaction5TokenDelivered": true,
+    "chooserObserved": false,
+    "newRemoteActivityResult": false,
+    "activeSdkSelectionNumericId": true,
+    "activeSdkSelectionExpired": false,
+    "visibleResult": "Create an Account",
+    "allThreeHostsAlive": true,
+    "newAppSignupCreated": false,
+    "fullApplicationPassed": false
+  },
+  "controlledSdkExpiry": {
+    "modifiedOnlyField": "active GoogleSignInAccount.expirationTime",
+    "forcedExpiresBeforeBoardClockSeconds": 600,
+    "numericAccountIdPreserved": true,
+    "otherAccountFieldsAndScopesPreserved": true,
+    "appUsernamePreserved": true,
+    "gmsPreferencesUnchanged": true,
+    "providerGrantsUnchanged": true,
+    "methodAndQueueTraceDisabled": true,
+    "modernStatus": 16,
+    "legacyStatuses": [
+      4,
+      4
+    ],
+    "followupTransaction5Observed": false,
+    "providerWattpadOAuthObserved": false,
+    "interactiveActivityLaunchObserved": false,
+    "visibleResult": "Existing-account login form",
+    "actualGoogleTokenExpiryTested": false,
+    "exactSdkPreferenceBackupRestored": true,
+    "restoreControlResult": "One live provider OAuth issuance and transaction-5 token reply; signup visible without chooser",
+    "gmsOrProviderRestartBetweenControls": false,
+    "allThreeHostsAliveAfterRestore": true
+  }
+}

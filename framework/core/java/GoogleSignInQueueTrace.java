@@ -10,13 +10,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Opt-in read-only diagnosis of a callback received without a subsequent UI transition. */
 final class GoogleSignInQueueTrace {
     private static final AtomicInteger SAMPLES = new AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicBoolean METHOD_TRACE =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     private GoogleSignInQueueTrace() {}
 
-    static void schedule() {
+    static void schedule(String descriptor, int code, Object target) {
         if (!"1".equals(System.getenv("WESTLAKE_GOOGLE_SIGNIN_QUEUE_TRACE"))
                 || !"1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))
                 || SAMPLES.incrementAndGet() > 8) return;
+        System.err.println("[WL-SIGNIN-QUEUE] callback_target=" + type(target) + " code=" + code);
+        if (code == 101 && "com.google.android.gms.auth.api.signin.internal.ISignInCallbacks".equals(descriptor))
+            startMethodTrace();
         Thread reader = new Thread(() -> {
             try {
                 Thread.sleep(2_000);
@@ -29,6 +34,38 @@ final class GoogleSignInQueueTrace {
         }, "signin-queue-diagnostic");
         reader.setDaemon(true);
         reader.start();
+    }
+
+    /** Short ART instrumentation trace for callback control flow; opt-in and timing-perturbing. */
+    private static void startMethodTrace() {
+        if (!"1".equals(System.getenv("WESTLAKE_GOOGLE_SIGNIN_METHOD_TRACE"))
+                || !METHOD_TRACE.compareAndSet(false, true)) return;
+        try {
+            java.io.File directory = new java.io.File(
+                    android.app.ActivityThread.currentApplication().getFilesDir(), "westlake-signin-diagnostic");
+            if (!directory.isDirectory() && !directory.mkdirs()) throw new IllegalStateException();
+            android.system.Os.chmod(directory.getPath(), 0700);
+            String name = "callback-" + SystemClock.uptimeMillis() + ".trace";
+            java.io.File file = new java.io.File(directory, name);
+            if (file.exists()) throw new IllegalStateException();
+            android.os.Debug.startMethodTracing(file.getPath(), 64 * 1024 * 1024, 0);
+            System.err.println("[WL-SIGNIN-QUEUE] method_trace_started=true file=" + name);
+            Thread stopper = new Thread(() -> {
+                try { Thread.sleep(3_000); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                try {
+                    android.os.Debug.stopMethodTracing();
+                    android.system.Os.chmod(file.getPath(), 0600);
+                    System.err.println("[WL-SIGNIN-QUEUE] method_trace_written=true file=" + name);
+                } catch (Exception unavailable) {
+                    System.err.println("[WL-SIGNIN-QUEUE] method_trace_stop_failed=true");
+                }
+            }, "signin-method-diagnostic");
+            stopper.setDaemon(true);
+            stopper.start();
+        } catch (Exception unavailable) {
+            System.err.println("[WL-SIGNIN-QUEUE] method_trace_unavailable=true");
+        }
     }
 
     private static String type(Object value) {
