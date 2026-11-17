@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "candidate": 89,
+  "drive": {
+    "package": "com.google.android.apps.docs",
+    "version": "2.26.457.0.all.alldpi",
+    "unmodifiedApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "lockedSplitCount": 19,
+    "runtimeAdapterBcpSha256": "5016be949c97bafd80d3bdf84218ee2fa03798bc68f91cb3eb4873f7f827c7b0",
+    "hostUid": 20010060,
+    "fixture": {
+      "name": "Westlake-Drive-validation.txt",
+      "bytes": 107,
+      "previouslyVerifiedSha256": "bb1aaa517e9c48bea77f4102e386e2968b3c087b87873689c6c87c647600f4aa",
+      "newUploads": 0,
+      "edited": false,
+      "deleted": false
+    },
+    "localConsent": {
+      "approvedAdditionalScope": "https://www.googleapis.com/auth/drive.labels.readonly",
+      "scopesBefore": 27,
+      "scopesAfter": 28,
+      "onlyDriveScopeListsChanged": true,
+      "signerAccountEpochAndOriginalExpiryRetained": true,
+      "directClientTokenScopesAdded": false
+    },
+    "alreadyRunningApp": {
+      "initialFilesMessage": "Can’t refresh",
+      "searchResultVisible": true,
+      "selectedSearchResultOpenedInDrivePreview": true,
+      "expectedBodyLinesOnScreen": 3,
+      "sampledClientRequests": 2,
+      "sampledSuccessfulAccountManagerReplies": 2,
+      "sampledFailedAccountManagerReplies": 0
+    },
+    "afterProcessRestart": {
+      "sameApplicationData": true,
+      "myDriveListedFixture": true,
+      "openedByTappingMyDriveRow": true,
+      "expectedBodyLinesOnScreen": 3,
+      "sampledClientRequests": 2,
+      "sampledSuccessfulAccountManagerReplies": 2,
+      "sampledFailedAccountManagerReplies": 0
+    },
+    "acceptance": {
+      "fileListing": true,
+      "fileOpen": true,
+      "listingAndOpeningSurvivedClientRestart": true,
+      "silentRenewalAfterTokenExpiryVerified": false,
+      "freshDownloadAfterRestartVerified": false
+    },
+    "evidenceMethod": "On-board app UI. Search or filename alone did not pass opening. All three fixture lines were matched in the rendered preview on both attempts. Only known labels and aggregate callback counts are retained here."
+  }
+}

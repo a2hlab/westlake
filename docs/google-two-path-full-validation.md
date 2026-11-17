@@ -1778,3 +1778,22 @@ problem on this build. The system event does not name Maps as its caller, so
 we cannot attribute its missing fix to that event alone. The board has demonstrated an independent
 approximate grant and its revocation. Delivery of a physical location remains
 open. [Board evidence](../tests/google-auth/full48/candidate88.json)
+
+## Drive lists and opens the test file
+
+The operator approved the additional read-only Drive labels scope. Westlake
+added it to the original Drive APK’s two local consent lists, bringing the
+total to 28. The signer, account, revocation epoch and original expiry were
+preserved. The earlier run with 27 scopes had reached Drive’s file-opening
+activity and recorded 23 failed account callbacks in its observation window.
+
+| On-board test with 28 scopes | Original Drive APK result |
+| --- | --- |
+| Search in the running app | The Files screen initially still said **Can’t refresh**. Searching for the existing fixture returned its filename. Selecting it opened a preview with all three expected lines. |
+| Restart Drive with the same app data | **Files → My Drive** listed the fixture. Selecting it opened the preview and displayed the same three lines. |
+
+The observed client windows each contained two successful AccountManager replies
+and zero failed replies. The file already existed. This test made no new upload,
+edit or deletion. It verifies listing, opening and retention across a Drive
+process restart. The restart could reuse cached file data. Token renewal after
+expiry still needs a separate observation. [Board results](../tests/google-auth/full48/candidate89.json)

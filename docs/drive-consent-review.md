@@ -33,13 +33,15 @@ or deletion.
 - `https://www.googleapis.com/auth/drive.file`
 - `https://www.googleapis.com/auth/drive.activity.readonly`
 
-The approved consent contains 27 scopes. The original APK is unchanged.
-App file listing/opening and a positive AccountManager token result remain
-unvalidated until a broader request is actually approved and tested.
+The first two approvals covered 27 scopes. Google also returned
+`https://www.googleapis.com/auth/drive.labels.readonly`. Westlake initially
+withheld this broader response. The operator then explicitly approved the
+additional read-only scope for the existing Drive test, bringing the total
+to 28. Both of Drive's local scope lists were updated. Its package and signer
+binding, test account, revocation epoch and original expiry were retained.
 
-Google subsequently returned `drive.labels.readonly`, which is outside this set.
-The strict returned-scope check withholds the token. Separate explicit approval
-for that one read-only scope is pending; it has not been added. The user also
-separately approved one labelled 107-byte text-file creation/opening test; its
-backend creation and exact-content read-back succeeded, with no other file
-changes. Original-app listing/opening remain incomplete.
+The authorized file operation is to list and open the existing
+`Westlake-Drive-validation.txt`. Its creation was a separate one-time
+approval. The original Drive APK subsequently opened the existing file and
+displayed all three expected lines. The latest [board results](../tests/google-auth/full48/candidate89.json)
+distinguish that app result from the earlier 107-byte Drive API read-back.
