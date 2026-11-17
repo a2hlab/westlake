@@ -5,11 +5,15 @@ microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-official-auth-validation.md) and
 [validation.json](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/tests/google-auth/validation.json).
 
-Latest run: [silent ID-token authorization, builds 28–29](../../docs/google-two-path-continuation.md#continuing-id-token-authorization-builds-2829),
-with results under `silent-session29/`. Earlier [delegation validation](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-auth-delegation-validation.md)
-is preserved under `delegation-validation/`. The build-04 setup below describes
-the historical baseline; current runs use the pinned adapter in their provenance
-record with the additional feature and trace flags described below.
+Latest run: [restricted-identity service eligibility, builds 30–33](../../docs/google-two-path-continuation.md#restricted-identity-local-service-eligibility-builds-3033),
+with results under `restricted-policy30/`. Build 33 adds only identity services
+212 and 213 to the pinned GMS build's local exception list, keeps policy 3 and
+its check-in identity, and exercises the real FotMob account chooser and silent
+token requests. This is an explicit compatibility policy, not certification.
+Earlier [silent ID-token authorization, builds 28–29](../../docs/google-two-path-continuation.md#continuing-id-token-authorization-builds-2829)
+is preserved in `silent-session29/`, and [delegation validation](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-auth-delegation-validation.md)
+is preserved in `delegation-validation/`. The build-04 setup below describes the
+historical baseline; use the exact artifacts and flags in each later provenance record.
 
 The subsequent [26-app service retest](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-service-retest.md)
 uses the same build 11 and adds an authorized FotMob sign-in attempt. Its
@@ -194,8 +198,37 @@ pins the current probe source/APK and manifest input `google-official-auth-probe
 
 This run validates the synchronous audience ID-token path on policy 1. Backend
 acceptance, actual token expiry, app sign-out/account removal, the visibility-API
-revocation hook, silent-request caller death/concurrency and policy 3 remain open.
+revocation hook, silent-request caller death/concurrency remain open. Policy 3 is tested separately below.
 The revocation test was an operator generation update, not an app logout test.
+
+## Restricted identity, builds 30–33
+
+Use the provenance in `restricted-policy30/provenance33.json` for official GMS
+and the client. The microG provider remains unchanged. Preserve the original GMS
+package data, including its check-in identity, Gservices state, Phenotype preferences
+and the `westlake-identity-service-compat` rollback journal. Enable
+`WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT=1` only in the official-GMS host with the
+existing guarded delegation, identity-claims and silent-auth features. It adds
+212 and 213 to one local service exception list; it never changes certification
+status. Disable it and restart to restore the previous value when still owned
+by the adaptation. The [broker setup](../../docs/google-auth-broker.md#switches)
+describes version pinning and failure behavior.
+
+Run the original signed FotMob APK against that restricted host and its live Store.
+Record the identity-service callbacks, actual activity result, subsequent client
+token replies and matching broker/provider events. Verify token claims and signature
+locally using Google's public keys, without sending the token to a verification
+service. Keep account screenshots and raw logs private. The four v5 negative probe
+cases use the same existing grants and signer as build 29. Their exact outcomes
+are in `restricted-policy30/negative-probe33.json`.
+
+This fixture required manual foreground transfer between the Play host and source
+host. It validates the authentication path with that intervention, not automatic
+window handoff or per-APK isolation. A valid token and an absent reauthentication
+warning do not establish FotMob backend acceptance or behavior after actual expiry.
+The preserved-data redeployment succeeded without another selection; direct in-place
+restarts aborted in native WebView/rendering and remain unaccepted. See both records
+in `restricted-policy30/` rather than treating redeployment as proof of restart stability.
 
 ## Host tests
 
@@ -213,6 +246,8 @@ javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/googl
 java -cp $out/trace GoogleAuthBoundaryTraceTest                                # ..._TEST_PASS
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
 java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
+javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.java tests/google-auth/host/GoogleIdentityServicePolicyTest.java
+java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 15
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
 java -cp $out/files adapter.core.PrivateFilesTest                              # PRIVATE_FILES_PASS 6
 ```

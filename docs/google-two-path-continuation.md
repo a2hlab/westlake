@@ -3,14 +3,15 @@
 This iteration continues the existing microG account broker plus official Play services design.
 The product target remains an uncertified OpenHarmony device with an existing Google account,
 official services in an OS-enforced sandbox, and independently replaceable services such as location.
-These changes do not establish certification, remove Google's policy restrictions, or complete that sandbox.
+These changes do not establish certification or complete that sandbox. Google server policy remains independent.
 
-Latest result: builds 28–29 fix FotMob's post-picker silent ID-token failure on
-the policy-1 host. Board tests cover successful replies, process restart,
-unrelated-app denial, operator revocation and explicit re-selection. See
-[continuing ID-token authorization](#continuing-id-token-authorization-builds-2829)
-for evidence and limits. Earlier build sections below retain their historical
-results; policy-3 service availability and full app/backend acceptance remain open.
+Latest result: build 33 completes FotMob's Google sign-in on the preserved
+policy-3 identity after adding two local identity-service exceptions. Eleven
+subsequent silent ID-token replies passed through official GMS and the microG
+broker; four unrelated-app requests were denied. The device stayed uncertified.
+See [restricted-identity validation](#restricted-identity-local-service-eligibility-builds-3033).
+The earlier policy-1 restart/revocation tests remain below. Automatic cross-host
+window handoff, in-place restart stability, broad service availability and app/backend acceptance remain open.
 
 ## Implemented behavior
 
@@ -503,8 +504,79 @@ and caller death during a silent token request.
 
 The original official-GMS identity and provider operator-grant hash remained
 unchanged, and no separate app signup occurred. The tested host retained policy
-1 with no certification override. The policy-3 service refusal was not retested
-or resolved. Raw logs and account screenshots remain private local evidence.
+1 with no certification override. Those builds did not retest or resolve the policy-3 service refusal; the later
+restricted-identity results follow below. Raw logs and account screenshots remain private local evidence.
+
+## Restricted identity: local service eligibility, builds 30–33
+
+The original restricted installation still refused service 212 after upgrading to
+build 29. Diagnostic build 30 then traced the immediate refusal to GMS's local
+service preprocessor. It reads the saved `uncertified_status=3`, consults the
+service exception list and constructs status 9 before the account broker runs.
+The trace does not establish why Google originally assigned that saved policy,
+and does not show a new server refusal for each service request. See the
+[baseline](../tests/google-auth/restricted-policy30/baseline29.json) and
+[local gate trace](../tests/google-auth/restricted-policy30/local-refusal-trace.json).
+
+Inspection of the pinned GMS 24.40.34 APK identified two different stores:
+`uncertified_status` is read through Gservices, while
+`uncertified_exceptions_whitelist` is read from device-protected
+`gms_chimera_phenotype_flags` preferences. This flag explicitly skips the
+Gservices fallback in that build. Changing a same-named Gservices value therefore
+would not change this gate. Raw APK disassembly remains private.
+
+Build 31 added only service 212. The callback changed from 9 to 0 and official
+`GoogleSignInActivity` presented the account chooser. Selecting the existing
+account exposed another dependency: internal identity service 213 returned 9,
+and the activity returned cancellation. This is a partial result, recorded in
+[the dependency test](../tests/google-auth/restricted-policy30/chooser-dependency31.json).
+Build 33 adds exactly 212 and 213, retaining all existing service exceptions.
+It does not add Maps, location, ads, Integrity, billing or a wildcard exemption.
+
+`GoogleIdentityServiceConfig` runs before the main GMS application binds, only
+for the pinned version and with `WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT=1` plus
+the existing delegation/identity/private-log guards. The feature defaults off.
+It atomically updates the one preference and keeps a private rollback journal.
+Upgrading from the 212-only configuration preserves the original rollback value.
+Disabling the switch and restarting GMS restores that value when it still matches
+the adapter's last write; a newer Google value is left intact. The check-in
+identity, certification status and provider token grants are not rewritten.
+Unsupported versions and malformed configuration with the feature active withhold
+application bind. A live Google flag refresh may replace the startup adaptation.
+
+This is an explicit local compatibility policy alongside the two-path broker.
+The broker supplies authorized tokens; the separate policy lets the tested
+identity services reach that broker. It is neither Google registration nor
+certification, and cannot guarantee that a Google backend accepts a request.
+It is narrower than general GrapheneOS-like Play services availability.
+
+Build 33 passed Java compilation, framework packaging, boot-image generation,
+board framework preload and 15 policy host checks. Its exact source and artifact
+pins are in [provenance33.json](../tests/google-auth/restricted-policy30/provenance33.json).
+Native runtime, ART and shim inputs were reused; this is not full source closure.
+
+| Test | Result | Evidence |
+| --- | --- | --- |
+| Restricted identity, real FotMob chooser | Services 212 and 213 returned 0; selecting the existing account produced `RESULT_OK`. Eleven subsequent silent token replies matched broker and provider events. The saved ID-token signature and claims verified using Google public keys, and no reauthentication warning was visible. | [Sign-in](../tests/google-auth/restricted-policy30/fotmob-policy3-signin33.json) |
+| Unrelated signed probe | Requesting FotMob's audience under the probe's identity returned no token; claiming FotMob in extras and directly calling UI/provider delegation were denied. No provider token event for that probe in the test window. | [Four negative cases](../tests/google-auth/restricted-policy30/negative-probe33.json) |
+| Disable and restart GMS | Both added exceptions disappeared and the original preference value was restored, including across the upgrade from the 212-only journal. Other preferences, identity, policy 3 and grants remained unchanged. No new interactive sign-in was attempted during this rollback check. | [Rollback](../tests/google-auth/restricted-policy30/rollback33.json) |
+| Restart FotMob in the same staged runtime | Both off/on attempts aborted in native `RenderThread`, with an earlier Chromium `check.cc:297` NOTREACHED failure. Root cause is not established; this is not an authentication restart pass. | [In-place failure](../tests/google-auth/restricted-policy30/in-place-restart33.json) |
+| Restart GMS, normally redeploy FotMob with carried package data | Ten new silent replies matched broker/provider events without another account selection. The warning remained absent. The launcher clears app code cache and uses fresh WebView runtime data, so this does not resolve the in-place failure. | [Preserved-data relaunch](../tests/google-auth/restricted-policy30/preserved-data-relaunch33.json) |
+
+The saved token after relaunch may predate that relaunch; the new request/reply
+and broker/provider events establish continued authorization. Actual token expiry,
+FotMob backend acceptance and fresh Google account enrollment were not tested.
+No new application signup form was encountered. Policy remained 3 without a
+certification-status override, the original check-in identity matched, and provider
+grants were unchanged. Other Google service callbacks still included status 9.
+Raw logs, account screenshots, token values and proprietary disassembly remain private.
+
+The two OH host bundles in this restricted test have different kernel UIDs.
+The chooser was created under the Play host but stayed behind FotMob's source
+host. Bringing the Play host forward exposed the chooser; bringing the source
+host forward returned to FotMob. These were manual test-harness foreground
+operations. They must not be counted as automatic cross-host window handoff,
+or as per-APK kernel isolation within either bundle.
 
 ## Remaining product boundaries
 
@@ -530,9 +602,12 @@ or resolved. Raw logs and account screenshots remain private local evidence.
    app sign-out, the account-visibility revocation hook, and concurrent/caller-death behavior during
    silent requests. OAuth access tokens, server codes and asynchronous APIs need separate contracts
    and tests. Initial profile UI or a cryptographically valid Google token alone is insufficient.
-2. Keep the policy-3 identity as the product-target control. Any proposed account/check-in integration must
-   demonstrate service availability on that preserved identity without overriding certification policy or
-   resetting identifiers. The current broker does not meet this gate.
+2. Keep the policy-3 identity as the product-target control. Build 33 demonstrates the narrow identity
+   flow with explicit local service exceptions while preserving certification status and identifiers.
+   Validate other services separately, fresh account enrollment, later Google flag updates and GMS upgrades.
+   Diagnose the native WebView abort on in-place FotMob restart. Complete automatic foreground
+   transfer between the two OH host bundles; this test used manual
+   host foreground operations. The full GrapheneOS-like product target is not yet accepted.
 3. Validate process/data isolation with distinct kernel identities and enforceable policy, then independently
    validate replaceable services such as location. Neither a broker handshake nor the fixture proves these.
 

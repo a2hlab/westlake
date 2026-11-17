@@ -1,0 +1,17 @@
+{
+  "candidate": 31,
+  "testRun": 32,
+  "app": "com.mobilefootie.wc2010",
+  "policy": 3,
+  "service212Status": 0,
+  "service213Status": 9,
+  "googleActivityLaunched": true,
+  "accountChooserVisibleAfterHostForeground": true,
+  "manualHostForegroundRequired": true,
+  "existingAccountSelected": true,
+  "googleResultCode": 0,
+  "completedSignIn": false,
+  "cause": "The identity chooser requested internal GIS service 213, which remained outside the local uncertified-service exception list.",
+  "certificationStatusModified": false,
+  "backendAcceptance": "not reached"
+}

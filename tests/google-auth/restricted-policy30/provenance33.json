@@ -1,0 +1,30 @@
+{
+  "nativeRuntimeSha256": "12506b24d30f51fd0e8e0678ad2184512e2ca9c42f6f74fba199d79c9edec6f1",
+  "officialGmsApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "officialGmsVersion": "24.40.34",
+  "fotmobApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+  "providerMicrogApkSha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+  "providerAdapterRuntimeSha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3",
+  "candidate": 33,
+  "adapterRuntimeSha256": "7b15b3e02ec0ebd989da22d502d8b5e79ff989e085ff89da194d75cd067713b1",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "frameworkPreloadPassed": true,
+  "policyHostTestsPassed": 15,
+  "sources": {
+    "framework/core/java/GoogleIdentityServicePolicy.java": "bdea8c6668251d70403312b5ecd5aef94309fefff31dc8619d3fc88e3a2ce81d",
+    "framework/core/java/GoogleIdentityServiceConfig.java": "6558b48941f93d4f6c043ef36518242f04896dfac6726497b87487acf3bc4f6f",
+    "framework/activity/java/AppSchedulerBridge.java": "968c00df5f07e7d2c4f8a7d9a2f052c7d2439e44c3459dafbfec5cc0601a21e7",
+    "framework/activity/java/LocalGservices.java": "b1117f9542d4d6883015aae4c525d55f1de36eb2913c6ae8cf4d5e9535ad581c",
+    "framework/core/java/SocketBinder.java": "2212b729265c344f3c97473c302489e8027dd6caf93a5ad806826b4771d629e0"
+  },
+  "defaultEnabled": false,
+  "providerRuntimeChanged": false,
+  "fullSourceClosure": false,
+  "baselineAdapter30Sha256": "275d2a80aea5d55601dfc030bb12f40060346a9342c47d86eda62448d8360a40",
+  "featureFlag": "WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT",
+  "eligibleServiceIdsAdded": [
+    212,
+    213
+  ],
+  "certificationStatusModified": false
+}

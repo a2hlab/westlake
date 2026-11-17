@@ -295,6 +295,7 @@ public final class SocketBinder {
     /** The API most recently asked for. Approximate when two threads connect at the same moment. */
     private static volatile int sLastService = -1;
     private static final AtomicLong sRawShown = new AtomicLong();
+    private static final AtomicLong sPolicyReplies = new AtomicLong();
 
     private static String tokenOf(Parcel data) {
         int position = data.dataPosition();
@@ -473,6 +474,27 @@ public final class SocketBinder {
             }
             int service = "com.google.android.gms.common.internal.IGmsServiceBroker".equals(descriptor)
                     ? serviceIdOf(data) : -1;
+            if ((code == 1 || code == 3) && "com.google.android.gms.common.internal.IGmsCallbacks".equals(descriptor)
+                    && "1".equals(System.getenv("WESTLAKE_GOOGLE_POLICY_TRACE"))
+                    && "1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))
+                    && sPolicyReplies.getAndIncrement() < 64) {
+                int position = data.dataPosition();
+                try {
+                    String status = statusAfterToken(data, descriptor);
+                    StringBuilder event = new StringBuilder("[WL-GOOGLE-POLICY] time=")
+                            .append(System.currentTimeMillis()).append(" callback_status=").append(status);
+                    int count = 0;
+                    for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+                        String name = frame.getClassName();
+                        if (name.equals(Thread.class.getName()) || name.startsWith(SocketBinder.class.getName())) continue;
+                        event.append(" frame").append(count++).append('=').append(name).append('.').append(frame.getMethodName());
+                        if (count == 24) break;
+                    }
+                    System.err.println(event);
+                } catch (RuntimeException ignored) {
+                    // Diagnostics must not alter a completed service callback.
+                } finally { data.setDataPosition(position); }
+            }
             trace("out", descriptor, code, service, result);
         }
 

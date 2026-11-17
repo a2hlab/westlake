@@ -1,0 +1,17 @@
+{
+  "identityPreserved": true,
+  "policyStatus": [
+    "3"
+  ],
+  "certificationOverridePresent": false,
+  "exception212Present": false,
+  "exception213Present": false,
+  "originalExceptionValueRestored": true,
+  "otherPhenotypeValuesUnchanged": true,
+  "providerGrantsUnchanged": true,
+  "candidate": 33,
+  "featureEnabled": false,
+  "upgradeFrom212OnlyJournalTested": true,
+  "restoredOriginalFlagOnRestart": true,
+  "newInteractiveSignInAttempted": false
+}

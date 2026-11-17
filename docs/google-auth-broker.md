@@ -22,6 +22,9 @@ caller, and not for Play services.
 
 The broker does not certify the device. microG's check-in is not Google's uncertified-device registration,
 and official Play services enforces its own identity's `uncertified_status` whoever holds the account.
+The optional identity-service compatibility layer separately changes local service eligibility for
+the tested GMS build. It preserves that status and the check-in identity; it does not register the
+board, change Google's server decisions, or remove other service restrictions.
 
 ## Pieces
 
@@ -63,9 +66,23 @@ and official Play services enforces its own identity's `uncertified_status` whoe
 | `WESTLAKE_GOOGLE_AUTH_DELEGATION=1` | Original-app delegation, on microG and official Play services |
 | `WESTLAKE_CHANNEL_IDENTITY=enforce`, `WESTLAKE_GOOGLE_PRIVATE_LOGS=1` | Required by the provider and by delegation |
 | `WESTLAKE_REMOTE_ACTIVITIES=1` | The interactive sign-in UI runs in Play services' declared process |
+| `WESTLAKE_GOOGLE_IDENTITY_CLAIMS=1` | Adapt the supported interactive identity claim request; see the continuation report |
+| `WESTLAKE_GOOGLE_SILENT_AUTH=1` | Authorize the supported synchronous ID-token request using a persisted, revocable app/account/audience selection |
+| `WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT=1` | On pinned GMS 244034029, add identity services 212 and 213 to its local uncertified-service exceptions before main-process application bind |
+| `WESTLAKE_GOOGLE_POLICY_TRACE=1` | With private logs, trace fixed policy categories and service-callback stacks; callback tracing also requires Play tracing |
 
 Start microG, then official Play services, then the Store, then the app. Pin the provider again whenever
 microG is redeployed.
+
+The identity-service switch is off by default and requires the delegation/identity/private-log guards.
+It writes only `uncertified_exceptions_whitelist` in the device-protected
+`gms_chimera_phenotype_flags` preferences. This GMS build does not read that flag through Gservices.
+It preserves existing exceptions and journals the old value in private GMS data. Disabling the switch
+and restarting GMS restores the old value if the current value still matches the adapter's write;
+a newer Google value is preserved. Carry the journal with the package data across upgrades. Unsupported
+GMS versions or unreadable/malformed configuration with this feature active withhold application bind.
+A later live Google flag refresh can replace the startup adaptation; this is a pinned experiment,
+not an update-resilient compatibility guarantee. Token authorization and provider grants are unchanged.
 
 ## Limits
 

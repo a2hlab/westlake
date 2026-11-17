@@ -251,6 +251,7 @@ public class AppSchedulerBridge {
             // application under its own name.
             AppProcesses.identify(pkg, sLaunchProcessName);
             if (AppProcesses.isSecondary()) sLaunchProcessName = AppProcesses.self();
+            if (!AppProcesses.isSecondary()) adapter.core.GoogleIdentityServiceConfig.prepare(ai);
             android.app.ActivityThread at = android.app.ActivityThread.currentActivityThread();
             MainThreadGuards.install(at);
             ensureBindApplication(at, pkg, null);

@@ -1,0 +1,12 @@
+{
+  "candidate": 30,
+  "testRun": 31,
+  "phase": "exception_disabled",
+  "identityServiceCallbackStatuses": [
+    9
+  ],
+  "originalIdentityPreserved": true,
+  "uncertifiedStatus": 3,
+  "accountPickerObserved": false,
+  "completedSignIn": false
+}

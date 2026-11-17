@@ -1,0 +1,69 @@
+{
+  "candidate": 30,
+  "observations": [
+    {
+      "status": 3,
+      "override": false,
+      "frames": [
+        "dalvik.system.VMStack.getThreadStackTrace",
+        "android.content.ContentProvider.query",
+        "android.content.ContentProvider.query",
+        "android.content.ContentProvider$Transport.query",
+        "android.content.ContentProviderClient.query",
+        "android.content.ContentProviderClient.query",
+        "android.content.ContentProviderClient.query",
+        "dyht.b",
+        "dyhx.b",
+        "dyhn.d",
+        "dyhn.c",
+        "anqm.c",
+        "anrm.d",
+        "bqhj.a",
+        "bqgt.a",
+        "amuh.z",
+        "ambi.run",
+        "android.os.Handler.handleCallback",
+        "android.os.Handler.dispatchMessage",
+        "brnl.mz",
+        "brnl.dispatchMessage",
+        "android.os.Looper.loopOnce",
+        "android.os.Looper.loop",
+        "android.os.HandlerThread.run"
+      ]
+    },
+    {
+      "status": 3,
+      "override": false,
+      "frames": [
+        "dalvik.system.VMStack.getThreadStackTrace",
+        "android.content.ContentProvider.query",
+        "android.content.ContentProvider.query",
+        "android.content.ContentProvider$Transport.query",
+        "android.content.ContentProviderClient.query",
+        "android.content.ContentProviderClient.query",
+        "android.content.ContentProviderClient.query",
+        "dyht.b",
+        "dyhx.b",
+        "dyhn.d",
+        "dyhn.c",
+        "anqm.c",
+        "anrm.d",
+        "bqhj.a",
+        "bqgt.a",
+        "amuh.z",
+        "ambi.run",
+        "android.os.Handler.handleCallback",
+        "android.os.Handler.dispatchMessage",
+        "brnl.mz",
+        "brnl.dispatchMessage",
+        "android.os.Looper.loopOnce",
+        "android.os.Looper.loop",
+        "android.os.HandlerThread.run"
+      ]
+    }
+  ],
+  "installedApkInspection": "The matched service preprocessor reads the local restriction check, consults the service exception list and constructs status 9 for non-exempt services.",
+  "observedGoogleServerRefusalForThisServiceRequest": false,
+  "policyOrigin": "Previously stored check-in policy; this trace does not establish its original server-side cause.",
+  "rawAccountDataOrDisassemblyPublished": false
+}

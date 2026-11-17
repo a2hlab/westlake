@@ -1,0 +1,56 @@
+{
+  "candidate": 33,
+  "app": "com.mobilefootie.wc2010",
+  "appVersion": "239.17834.20261016",
+  "policy": 3,
+  "service212Status": 0,
+  "service213Status": 0,
+  "googleResultCode": -1,
+  "accountChooserVisible": true,
+  "manualHostForegroundRequired": true,
+  "separateApplicationSignupEncountered": false,
+  "reauthenticationWarningVisible": false,
+  "postPickerTokenReplyCount": 11,
+  "silentReplyOffsetsMs": [
+    1962,
+    4911,
+    5321,
+    6281,
+    6497,
+    7855,
+    8040,
+    10069,
+    10270,
+    11594,
+    11854
+  ],
+  "matchingBrokerTokenEventCount": 11,
+  "matchingProviderIdTokenEventCount": 11,
+  "tokenVerification": {
+    "signatureVerifiedWithGoogleJwks": true,
+    "issuerRecognized": true,
+    "audienceMatchesApprovedClient": true,
+    "tokenUnexpired": true,
+    "issuedAtNotFuture": true,
+    "emailClaimPresent": true,
+    "emailVerified": true,
+    "emailMatchesStoredAccountName": true,
+    "subjectMatchesStoredId": true,
+    "mustReauthenticate": "false",
+    "tokenAgeSeconds": 19
+  },
+  "preservation": {
+    "identityPreserved": true,
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "exception212Present": true,
+    "exception213Present": true,
+    "originalExceptionValueRestored": false,
+    "otherPhenotypeValuesUnchanged": true,
+    "providerGrantsUnchanged": true
+  },
+  "backendAcceptance": "unmeasured",
+  "actualTokenExpiryTested": false
+}
