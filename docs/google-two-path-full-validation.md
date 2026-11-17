@@ -15,6 +15,11 @@ Wattpad OAuth token. This is a local SDK-expiry test, not actual server-token
 expiry or a full application pass. Drive's OAuth/file-listing gap and the wider
 Google/Facebook acceptance plan remain open.
 
+Candidate 63 fixes Gmail's account-list connection in the test configuration.
+Gmail now sees the account and reaches its main screen, but mail does not sync.
+The deployed content service has no sync execution, and separate GMS eligibility
+and scoped-token gaps remain.
+
 ## Candidate 48: legacy Google sign-in eligibility
 
 The restricted official GMS build rejected Spotify and Wattpad's legacy sign-in
@@ -535,3 +540,53 @@ status remains 3 without an override, and check-in identity and provider grants
 are unchanged.
 
 See [candidate62.json](../tests/google-auth/full48/candidate62.json).
+
+### Candidate 63: separate Gmail account visibility from sync and eligibility
+
+Gmail is retested with candidate-62 Java/boot artifacts and the candidate-54
+native watchdog fix. The original base APK and three splits verify with their
+Google signing lineage; the app data is retained. GMS stays on 62 and microG on
+59. With the original client configuration, Gmail renders its welcome/setup
+screens, lists no account, and displays **Device not compatible**. This
+configuration has a Play-services connection but no auth-provider connection;
+`LocalServiceBinders.accountService()` therefore supplies its empty-account
+fallback.
+
+The comparison adds Gmail's connection and pins to the existing auth provider,
+plus only `client.com.google.android.gm.sha256` in the private provider grant.
+The signer comes from the verified original APK's current certificate. No OAuth
+scope or account-ID permission is added for Gmail. With the same binaries and
+after a client-only restart, Gmail displays the existing test account. The
+provider records successful account and feature queries from the verified Gmail
+process. GMS and microG remain running. Explicit host foreground actions are
+needed after black captures; automatic window handoff is not claimed.
+
+The compatibility dialog persists with the account visible. Original-APK
+resource analysis maps that text to the Google API status-9 branch. Several
+service connections return 9, but the current process-global `afterService`
+diagnostic is approximate during overlapping requests; this test does not
+identify one required service as the sole cause. Account discovery and the
+compatibility warning are distinct failures.
+
+After dismissing the warning and selecting **Take me to Gmail**, Gmail renders
+its main account screen with **Account not synced**. **Sync now** does not
+produce a mailbox in the observed interval. The deployed candidate-62 build's
+source hash for `AppSpawnXInit.java` matches the current file. Its
+`installContentServiceAdapter()` handles content observers but supplies false,
+zero, empty or null defaults for sync queries and does nothing for sync
+requests. This is a concrete missing sync implementation, consistent with the
+visible behavior; this run does not trace which sync method Gmail invokes at
+that tap. A real sync-adapter path and its lifecycle still need implementation
+and board validation.
+
+Official GMS also records four Gmail OAuth requests for `peopleapi.readonly`
+and four local scoped-auth refusals in the captured interval, alongside four
+account-ID requests. No Gmail OAuth issuance or mailbox sync is accepted.
+Account-ID metadata and account enumeration are not OAuth or backend passes.
+The next work must cover first-party account/scope authorization, required GMS
+service eligibility and actual sync execution, without treating an account-list
+fix or a generic compatibility message as evidence of Google registration.
+Status remains uncertified (3), without an override, and check-in identity is
+unchanged. The sole provider-grant change is Gmail's signer pin.
+
+See [candidate63.json](../tests/google-auth/full48/candidate63.json).
