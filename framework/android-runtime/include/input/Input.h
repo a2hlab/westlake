@@ -13,15 +13,13 @@
 // etc.) that conflict with the OH device-side equivalents and produce ABI
 // drift (SIGBUS in libicu_jni.so:ScopedCharArrayRO observed 2026-05-18).
 //
-// PHASE 1 SCOPE: HelloWorld single-tap.  multi-touch / pointer pool /
-// historical samples / transform composition are stubbed but the API surface
-// matches AOSP MotionEvent.cpp's call sites so Phase 2 can grow without
-// changing the JNI binding.
+// Current input support includes raw/history samples and composed view transforms.
+// Rebuild all consumers of this private layout together; it is not the device's
+// system libinput ABI.
 //
 // PHASE 2 EXTENSIONS:
 //   - add real history samples (mSampleEventTimes / mSamplePointerCoords)
-//   - implement real Transform matrix composition (replace simple xOffset/
-//     yOffset with std::array<float,9> stored matrix)
+//   - complete transformed batching and surface-rotation reporting
 //   - implement real Parcel read/write (writeToParcel / readFromParcel are
 //     no-ops now)
 // ============================================================================
@@ -32,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <sys/types.h>
 #include <vector>
 
 namespace android {
@@ -164,13 +163,13 @@ public:
     void setButtonState(int32_t b) { mButtonState = b; }
     MotionClassification getClassification() const { return mClassification; }
 
-    float getXOffset() const { return mXOffset; }
-    float getYOffset() const { return mYOffset; }
+    float getXOffset() const { return mTransform[2]; }
+    float getYOffset() const { return mTransform[5]; }
     float getXPrecision() const { return mXPrecision; }
     float getYPrecision() const { return mYPrecision; }
-    float getXCursorPosition() const { return mXCursorPosition; }
-    float getYCursorPosition() const { return mYCursorPosition; }
-    void setCursorPosition(float x, float y) { mXCursorPosition = x; mYCursorPosition = y; }
+    float getXCursorPosition() const;
+    float getYCursorPosition() const;
+    void setCursorPosition(float x, float y);
 
     int64_t getDownTime() const { return mDownTime; }
     void setDownTime(int64_t t) { mDownTime = t; }
@@ -221,8 +220,9 @@ private:
     int32_t mMetaState = 0;
     int32_t mButtonState = 0;
     MotionClassification mClassification = MotionClassification::NONE;
-    float mXOffset = 0.f;
-    float mYOffset = 0.f;
+    // View transforms affect local axes while preserving raw samples. Every native
+    // consumer of this private header must be rebuilt when its layout changes.
+    std::array<float, 9> mTransform = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     float mXPrecision = 1.f;
     float mYPrecision = 1.f;
     float mXCursorPosition;  // initialized to NaN in initialize()

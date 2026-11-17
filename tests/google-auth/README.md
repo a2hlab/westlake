@@ -351,3 +351,18 @@ entered text, key codes, coordinates, titles, view text and exception messages.
 A handled touch is not a completed click listener or an accepted backend action.
 Keep the trace disabled for ordinary use; the candidate-65 record separates
 input delivery from the still-unvalidated Gmail click and sync work.
+
+Candidate 67 adds `WESTLAKE_INPUT_QUEUE_TRACE=1` to sample at most eight releases,
+with up to 32 queued messages per snapshot and bounded structural hit candidates.
+It reads message target/callback classes, not payloads. Optionally set
+`WESTLAKE_INPUT_METHOD_TRACE_PRESS=2` or `WESTLAKE_INPUT_METHOD_TRACE_RELEASE=2`
+to instrument the selected press or release once per process. The ART trace uses
+a private application directory and requests a stop after three seconds; actual
+shutdown can be delayed and execution timing is perturbed. Keep the raw trace
+private and do not treat it as a performance measurement.
+
+This exposed empty native `MotionEvent` transforms beneath Gmail's translated
+content view. The fixed native implementation passes 40 host checks and board
+preload. The same sync tap now runs the real button listener and internal sync
+entry; mailbox sync remains incomplete. See [candidate67.json](full48/candidate67.json)
+and the [native input test instructions](../parity/native/README-input-transform.md).

@@ -680,3 +680,48 @@ GMS and microG remain alive; their identity, grants and provider account-store
 bytes are preserved. Status remains 3 without an override. Full application
 acceptance remains open. Exact results are in
 [candidate65.json](../tests/google-auth/full48/candidate65.json).
+
+### Candidate 67: repair missing input transforms; Gmail's sync listener now runs
+
+Diagnostic iterations 66 and 66b ruled out a stranded click in the main queue.
+The compatibility dialog's queued click drained normally, but the manual-sync
+tap left no click queued and never entered Gmail's listener. Structural metadata
+placed the enabled, clickable button under the tap, beneath a transformed parent
+view. The original native library's `MotionEvent::transform` and `applyTransform`
+were verified as single return instructions. Drawing used the parent's transform;
+the event passed into that parent did not receive the matching coordinate change.
+
+The native implementation now composes view transforms while keeping raw samples
+separate, implements explicit raw-sample transformation and returns transformed
+JNI pointer coordinates. Copying and history retain the transform. Global scaling
+preserves normalized pressure and size. The private C++ object layout changes, so
+the build audits compiler dependency files and rebuilds both consumers together.
+Other native inputs, including the existing privacy and BLAST fixes, are retained
+with hash verification.
+
+Forty host checks pass; the old source fails the first translation check. Java
+compilation, native linking, runtime packaging, boot generation and board preload
+pass, with no class-initialization failures. Gmail keeps its original APK and app
+data. After the same tap, the fixed trace records `View.PerformClick.run`, the
+Material button's `performClick`, Gmail's `pai.onClick`, `oly.j`, and the account
+component's `okv.c`/`okv.m`. This validates the missing-click repair. A subsequent
+tap without ART method tracing also queues and drains `PerformClick`.
+
+The method trace perturbs execution: although it requests a stop after three
+seconds, the recorded interval is about 17 seconds. It does not overflow. The
+queue and hit diagnostics are bounded, default off, and require private logging;
+they do not inspect message payloads or view text. Raw traces remain private.
+
+Mail still does not load. The trace has not established completion of the account
+future or execution of the later sync callback body. No content-service sync
+request, sync-adapter execution or mailbox content is observed. There are no new
+auth-proxy/delegation diagnostic events in the captured post-click window; that
+is not proof of no network or authentication activity. No mail is sent.
+
+GMS and microG remain alive. Status stays 3 without an override, and check-in
+identity, provider grants and provider account-store bytes are unchanged. Input
+parity also remains incomplete: transformed JNI batching still uses translation
+offsets for incoming coordinates, surface rotation is reported unknown, and
+MotionEvent Parcel I/O is unimplemented. Full application acceptance remains open.
+See [candidate67.json](../tests/google-auth/full48/candidate67.json) and the
+[native input test instructions](../tests/parity/native/README-input-transform.md).

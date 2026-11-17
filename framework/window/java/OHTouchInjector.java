@@ -276,6 +276,8 @@ public final class OHTouchInjector {
                 View target = targetFor(view, event)[0];
                 traceRoots(traceId, target);
                 event.offsetLocation(-gestureLeft, -gestureTop);
+                if (action == MotionEvent.ACTION_DOWN) InputQueueTrace.beforePress(traceId, target, event);
+                if (action == MotionEvent.ACTION_UP) InputQueueTrace.beforeRelease(traceId);
                 android.view.InputQueue queue = takenInputQueue(target);
                 if (queue != null) {
                     sendToInputQueue(queue, target, event);
@@ -284,6 +286,7 @@ public final class OHTouchInjector {
                     lastHandled = target.dispatchTouchEvent(event) ? 1 : 0;
                 }
                 InputEventBridge.trace(traceId, lastHandled == 1 ? "helper_handled" : "helper_unhandled", null);
+                if (action == MotionEvent.ACTION_UP) InputQueueTrace.afterRelease(traceId);
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     gestureView = null;
                 }
