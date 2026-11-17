@@ -1,0 +1,146 @@
+{
+  "candidate": 85,
+  "phase": "YouTube watch activity task reset on the OpenHarmony board",
+  "baseCommit": "d91e7c0a6330a726f2b98e653b952dc9616d111f",
+  "clientBuild": {
+    "compiledSources": 143,
+    "compiledClasses": 297,
+    "adapterSha256": "80d27bb763d40e15cba2f803c321a4e65c0a88bd887ad860ecee0bfe1bdc81b5",
+    "frameworkSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "frameworkBootArtSha256": "ff1d7caa5cb57d61edaf4cfdcbfb90a2293adc3f73629c5f923d595ca41f477a",
+    "bootJarCount": 9,
+    "officialGmsBuild": 81,
+    "providerBuild": 81,
+    "initialAdapterSha256": "aee82a9211ea189c20d010be35013f34d9582bb9895c73ef4b09815c77246b38",
+    "originalYouTubeApkModified": false,
+    "adapterSourcesVerified": 143
+  },
+  "youtube": {
+    "package": "com.google.android.youtube",
+    "version": "21.43.523",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "publicVideoId": "jNQXAC9IVRw",
+    "entry": "Existing candidate-84 explicit choice of the original APK for a public HTTPS link",
+    "beforeFix": {
+      "externalUrlHandlerStarts": 1,
+      "watchActivityStartsInCompleteTrace": 68,
+      "diagnosticBuildAdapterSha256": "37e3bfab0e393e34446be1abe0623754884e7ea46add8ca0ff77f792724dbf4f",
+      "firstIntentFlags": "0x14000000",
+      "nextFourIntentFlags": "0x14008000",
+      "nextFourHadCallingActivityToken": false,
+      "binderStartFlags": "0x0"
+    },
+    "connectedAfterFix": {
+      "externalUrlHandlerStarts": 1,
+      "watchActivityStarts": 2,
+      "activitiesRemoved": 2,
+      "lastObservedProcessAgeSeconds": 128,
+      "signInErrorAtSeconds": 71,
+      "homeRenderedAfterDismissingDialog": true,
+      "userRecoverableAuthMarkers": 2,
+      "badAuthenticationMarkers": 2,
+      "verifiedPublicGmsApkCount": 9
+    },
+    "disconnectedAfterFix": {
+      "connectionsDisabledInClient": [
+        "Play services",
+        "Play Store"
+      ],
+      "serviceHostsContinuedRunning": true,
+      "externalUrlHandlerStarts": 1,
+      "watchActivityStarts": 2,
+      "installGooglePlayServicesPromptAtSeconds": 57,
+      "systemBarsOnlyAfterDismissingPrompts": true,
+      "playbackObserved": false
+    },
+    "accountSessionVerified": false,
+    "videoPlaybackVerified": false,
+    "backendCauseOfSignInErrorEstablished": false,
+    "initialFixSecondConnectedRun": {
+      "watchActivityStarts": 2,
+      "clientAgeSecondsAtFinalObservation": 123,
+      "signInErrorReproduced": true
+    },
+    "finalConnectedBuild": {
+      "playerErrorLogCount": 4,
+      "distinctFailedPlaybackAttempts": 2,
+      "clearedActivities": [
+        2
+      ],
+      "watchActivityStarts": 2,
+      "externalLinkActivityStarts": 1,
+      "videoTitle": "Me at the zoo",
+      "channelHandle": "@jawed",
+      "publicCommentsDisplayed": true,
+      "sponsoredCardDisplayed": true,
+      "signInErrorDialogDisplayed": true,
+      "retryIssuedInPlayer": true,
+      "playerDisplayedErrorAfterRetry": true,
+      "audioOrVideoPlaybackVerified": false,
+      "causeOfPlayerErrorProven": false,
+      "clientAliveAtLastCaptureSeconds": 146
+    }
+  },
+  "taskResetBoundary": {
+    "handled": "An in-process start in the direct source-APK host, with NEW_TASK and CLEAR_TASK, without a result request, for existing standard/singleTop activities with matching declared task affinity.",
+    "outsideVerifiedCase": [
+      "OH-managed ability tokens",
+      "remote activity origins",
+      "new document and multiple-task requests",
+      "other task affinities",
+      "starts for result"
+    ]
+  },
+  "offlineFixture": {
+    "apkSha256": "03cfb9bde57e6ff54b9b288167db9faf352a715572a4f799cf4698616dadb753",
+    "sameApkBothRuns": true,
+    "hasNetworkOrAccountPermissions": false,
+    "before": [
+      "PASS request=41",
+      "PASS request=42",
+      "PASS request=43",
+      "PASS all=3",
+      "FAIL replace_task rootDestroyed=false middleDestroyed=false isTaskRoot=false"
+    ],
+    "after": [
+      "PASS request=41",
+      "PASS request=42",
+      "PASS request=43",
+      "PASS all=3",
+      "PASS replace_task rootDestroyed=true middleDestroyed=true isTaskRoot=true"
+    ],
+    "replacementPayloadRetained": true,
+    "afterVisibleFourChecksPassed": true,
+    "bothProcessesSurvived": true,
+    "guardRegression": {
+      "apkSha256": "f79bfc6fbef06cfd160065768e9d714d7c496a437ab20ac78f3a5cc814d3b437",
+      "scope": "When existing activities requested a separate task and the test host cannot identify it, preserve both screens. This does not verify support for multiple OH missions.",
+      "beforeFinalGuard": [
+        "PASS request=41",
+        "PASS request=42",
+        "PASS request=43",
+        "PASS all=3",
+        "PASS replace_task rootDestroyed=true middleDestroyed=true isTaskRoot=true",
+        "FAIL preserve_separate_task"
+      ],
+      "afterFinalGuard": [
+        "PASS request=41",
+        "PASS request=42",
+        "PASS request=43",
+        "PASS all=3",
+        "PASS replace_task rootDestroyed=true middleDestroyed=true isTaskRoot=true",
+        "PASS preserve_separate_task"
+      ],
+      "clearedActivityCountsBefore": [
+        2,
+        2
+      ],
+      "clearedActivityCountsAfter": [
+        2
+      ],
+      "finalScreen": "Five activity checks passed",
+      "finalProcessAlive": true
+    }
+  },
+  "goalComplete": false
+}

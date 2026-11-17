@@ -9,6 +9,8 @@ import android.widget.TextView;
 /** Local lifecycle tests with synthetic extras and no network or account permissions. */
 public final class Fixture {
     static int redirectCreates, redirectDestroyed, topCreates, normalCreates;
+    static boolean rootDestroyed, middleDestroyed;
+    static boolean replacementDestroyed, separateDestroyed;
     static void event(String value) { System.err.println("[WL-REUSE-TEST] " + value); }
     static void show(Activity activity, String text) {
         TextView view = new TextView(activity);
@@ -37,7 +39,55 @@ public final class Fixture {
             else if (request == 43) {
                 event("PASS all=3");
                 show(this, "PASS: clear-top redirect, single-top, normal new instance");
+                new Handler(getMainLooper()).post(() -> startActivity(new Intent(this, Middle.class)));
             }
+        }
+        @Override protected void onDestroy() { rootDestroyed = true; super.onDestroy(); }
+    }
+
+    public static class Middle extends Activity {
+        @Override protected void onCreate(Bundle state) {
+            super.onCreate(state);
+            new Handler(getMainLooper()).post(() -> getApplicationContext().startActivity(
+                    new Intent(this, Replacement.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            .putExtra("payload", "replacement")));
+        }
+        @Override protected void onDestroy() { middleDestroyed = true; super.onDestroy(); }
+    }
+
+    public static class Replacement extends Activity {
+        @Override protected void onCreate(Bundle state) {
+            super.onCreate(state);
+            boolean pass = isTaskRoot() && rootDestroyed && middleDestroyed
+                    && "replacement".equals(getIntent().getStringExtra("payload"));
+            event((pass ? "PASS" : "FAIL") + " replace_task rootDestroyed=" + rootDestroyed
+                    + " middleDestroyed=" + middleDestroyed + " isTaskRoot=" + isTaskRoot());
+            show(this, pass ? "Four activity checks passed" : "Task replacement failed");
+            if (pass) new Handler(getMainLooper()).post(() -> getApplicationContext().startActivity(
+                    new Intent(this, Separate.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)));
+        }
+        @Override protected void onDestroy() { replacementDestroyed = true; super.onDestroy(); }
+    }
+
+    public static class Separate extends Activity {
+        @Override protected void onCreate(Bundle state) {
+            super.onCreate(state);
+            new Handler(getMainLooper()).post(() -> getApplicationContext().startActivity(
+                    new Intent(this, CheckSeparate.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK)));
+        }
+        @Override protected void onDestroy() { separateDestroyed = true; super.onDestroy(); }
+    }
+
+    public static class CheckSeparate extends Activity {
+        @Override protected void onCreate(Bundle state) {
+            super.onCreate(state);
+            // The direct host cannot assign the mixed list to separate task IDs.
+            boolean preserved = !replacementDestroyed && !separateDestroyed;
+            event((preserved ? "PASS" : "FAIL") + " preserve_separate_task");
+            show(this, preserved ? "Five activity checks passed" : "A separate task was cleared");
         }
     }
 

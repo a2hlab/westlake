@@ -1632,3 +1632,42 @@ requires no component permission. An unrelated `.invalid` host was refused
 before any activity launch. This tests link handling *inside the chosen APK*.
 System-wide app-link registration is still unvalidated. The structured results
 are in [the board evidence](../tests/google-auth/full48/candidate84.json).
+
+## Candidate 85 fixes the YouTube watch-screen restart loop
+
+The public link for **Me at the zoo** entered YouTube’s exported URL activity
+once. The complete pre-fix trace contains 68 starts of its internal watch
+activity. A second run logged the first five launch requests. The initial one
+requested a new task and a clear to the top of its stack. Each of the next four
+also set `FLAG_ACTIVITY_CLEAR_TASK`. Those requests came without a calling
+activity token. Android defines this combination to finish the existing target
+task’s activities and make the new activity its root.
+
+Westlake now handles that reset for a local, same-affinity task in the source
+APK host. Once the replacement transaction is ready, it finishes the previous
+activities from top to bottom. The original YouTube APK then started its watch
+activity twice in total. The adapter cleared the two previous activities on the
+second start. The count held through 128 seconds. At 71 seconds YouTube showed
+its sign-in error, and dismissing the dialog exposed Home. No moving video or
+player-time progression appeared. The app still logged `BadAuthentication`.
+On a connected restart the watch activity count again stayed at two. Disconnecting
+the client from Play services and the Store brought up YouTube’s install prompt.
+
+The final guarded build reached the original watch page after the sign-in
+dialog was dismissed. It displayed **Me at the zoo**, the channel **@jawed**,
+public comments and a sponsored card. The player displayed a playback error.
+Tapping **Tap to retry** produced a different playback attempt identifier and
+the same error. The app logged `PlaybackServiceException(PLAYER_ERROR)` for
+two distinct attempts. The cause remains undetermined. Loading watch-page
+metadata is verified. Account acceptance, moving video and audio remain open.
+
+A separately signed test APK with no network or account permissions reproduced
+the lifecycle failure. Without the fix, both old screens survived and the
+replacement reported that it was below the root. With the fix, both screens
+reported destruction, the replacement became root and received its payload,
+and the three earlier lifecycle tests still passed. A fifth check requested a
+separate task before a later clear. The initial fix cleared both screens. The
+final build preserved them, and the board displayed **Five activity checks
+passed**. The direct host still lacks separate task IDs. OH-managed activities,
+document tasks and tasks with different affinities are outside this board test.
+See the [structured board results](../tests/google-auth/full48/candidate85.json).

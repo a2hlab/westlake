@@ -12,5 +12,9 @@
         <activity android:name=".Fixture$Redirect" android:exported="false" />
         <activity android:name=".Fixture$Top" android:exported="false" />
         <activity android:name=".Fixture$Normal" android:exported="false" />
+        <activity android:name=".Fixture$Middle" android:exported="false" />
+        <activity android:name=".Fixture$Replacement" android:exported="false" />
+        <activity android:name=".Fixture$Separate" android:exported="false" />
+        <activity android:name=".Fixture$CheckSeparate" android:exported="false" />
     </application>
 </manifest>

@@ -2281,6 +2281,10 @@ public class AppSchedulerBridge {
                 aiApp.roundIconRes = 0;
             }
             // Schedule the transaction — triggers the full activity launch sequence
+            if (ohTokenAddr == 0L && pending != null && launchRequest == null
+                    && "1".equals(System.getenv("ASX_DIRECT_LAUNCH"))) {
+                LocalActivityLaunch.clearTaskIfSelected(activityThread, intent);
+            }
             System.err.println("[B47-SLA] BEFORE scheduleTransaction className="
                     + activityInfo.name);
             // The standalone OHOS boundary has no Binder/Looper wake integration. If a launch is
