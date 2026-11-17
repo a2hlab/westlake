@@ -400,6 +400,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             int flagsMask, int flagsValues, Bundle options) throws RemoteException {
         logBridged("startActivityIntentSender", "-> the sender's own intent");
         if (RemoteActivities.enabled()) {
+            Integer remote = RemoteActivities.startPending(target, fillInIntent, flagsMask, flagsValues,
+                    resultTo, ActivityResults.requested(resultTo, resultWho, requestCode));
+            if (remote != null) return remote;
             Intent prepared = LocalIntentSenders.prepareActivity(target, fillInIntent, flagsMask, flagsValues);
             java.util.List<android.content.pm.ResolveInfo> own = adapter.packagemanager.SourcePackageRegistry
                     .queryActivities(prepared, prepared == null ? null : prepared.getType(),

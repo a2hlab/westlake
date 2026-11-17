@@ -1,0 +1,21 @@
+{
+  "runs": [
+    {
+      "iteration": 1,
+      "ohPolicyMatchesHost": true,
+      "inputTreeUnmodified": false
+    },
+    {
+      "iteration": 2,
+      "ohPolicyMatchesHost": false,
+      "inputTreeUnmodified": false
+    },
+    {
+      "iteration": 3,
+      "ohPolicyMatchesHost": false,
+      "inputTreeUnmodified": false
+    }
+  ],
+  "hostPolicyUnchanged": true,
+  "binarySha256": "93d7be2e8a6a04ca9de9eb37bc5cb1f810847d81bca6e60889890a65be93f16b"
+}

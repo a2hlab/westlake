@@ -1,0 +1,14 @@
+{
+  "candidate": 29,
+  "testRun": 30,
+  "app": "com.mobilefootie.wc2010",
+  "identityServiceRequested": true,
+  "identityServiceCallbackStatuses": [
+    9
+  ],
+  "accountPickerResultReturned": false,
+  "originalIdentityPreserved": true,
+  "uncertifiedStatus": 3,
+  "compatibilityExceptionEnabled": false,
+  "fullSignInAccepted": false
+}

@@ -1,0 +1,26 @@
+{
+  "expiredSessionRestoredWithoutSignIn": true,
+  "savedTokenExpiredBeforeLaunch": true,
+  "carriedAccountPreserved": true,
+  "clientReplyFingerprints": 5,
+  "uniqueMatchedTokens": 1,
+  "verifiedTokens": [
+    {
+      "signatureVerifiedWithGoogleJwks": true,
+      "exactTokenMatchedClientReply": true,
+      "audienceMatchesApprovedFotMobClient": true,
+      "issuerRecognized": true,
+      "sameSubject": true,
+      "emailMatchesCarriedAccount": true,
+      "issuedAfterSavedTokenExpired": true,
+      "replyAfterSavedTokenExpired": true,
+      "unexpiredAtReply": true,
+      "unexpiredAtVerification": true,
+      "issuedAtNotFuture": true,
+      "matchedReplyCount": 1
+    }
+  ],
+  "interactiveSuccessResults": 0,
+  "fingerprintParseFailures": 0,
+  "backendAcceptanceVerified": false
+}

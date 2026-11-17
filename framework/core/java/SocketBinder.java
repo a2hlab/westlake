@@ -141,6 +141,19 @@ public final class SocketBinder {
     private volatile int mCallerUid;
     private volatile int mCallerPid;
 
+    /** Optional verified per-connection policy. A scope ends even when the target throws. */
+    public interface CallScope extends AutoCloseable { @Override void close(); }
+    public interface CallScopes {
+        CallScope enter(IBinder target, int code, Parcel data, int flags) throws RemoteException;
+    }
+    private volatile CallScopes mCallScopes;
+    public void setCallScopes(CallScopes scopes) { mCallScopes = scopes; }
+
+    public static boolean isCallingChannel(SocketBinder channel) {
+        Inbound inbound = sInbound.get();
+        return inbound != null && inbound.channel == channel;
+    }
+
     /** Per caller uid set with setCaller: {pid, elapsedRealtime of its latest incoming call}. */
     private static final ConcurrentHashMap<Integer, long[]> sRecentCallers = new ConcurrentHashMap<>();
 
@@ -254,6 +267,16 @@ public final class SocketBinder {
         return inbound != null && inbound.channel.mVerifiedSameApp;
     }
 
+    /** Provenance of a remote capability, not the package name it claims in a reply. */
+    public static boolean isSameAppObject(IBinder binder) {
+        return binder instanceof Proxy && ((Proxy) binder).channel.mVerifiedSameApp;
+    }
+
+    /** Return a capability through the connection which delivered it, preserving its forwarding path. */
+    public static IBinder peerRootOf(IBinder binder) {
+        return binder instanceof Proxy ? ((Proxy) binder).channel.getRemoteRoot() : null;
+    }
+
     /** The process id of a connected socket's peer, as the kernel reports it. */
     public static int peerPid(int fd) throws IOException {
         return SocketBinderNative.peerPid(fd);
@@ -272,6 +295,7 @@ public final class SocketBinder {
     /** The API most recently asked for. Approximate when two threads connect at the same moment. */
     private static volatile int sLastService = -1;
     private static final AtomicLong sRawShown = new AtomicLong();
+    private static final AtomicLong sPolicyReplies = new AtomicLong();
 
     private static String tokenOf(Parcel data) {
         int position = data.dataPosition();
@@ -408,11 +432,53 @@ public final class SocketBinder {
             try {
                 boolean known = channel.call(id, code, data, reply, flags);
                 traceOutbound(code, data, known ? firstInt(reply) : "unknown-code");
+                if (known && code == 5) traceAuthReply(reply);
                 return known;
             } catch (RemoteException | RuntimeException e) {
                 traceOutbound(code, data, e.getClass().getSimpleName());
                 throw e;
             }
+        }
+
+        /** Diagnose the legacy getTokenWithAccount result without recording any credential values. */
+        private void traceAuthReply(Parcel reply) {
+            if (reply == null || !"1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))
+                    || !"1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) return;
+            int position = reply.dataPosition();
+            String summary;
+            try {
+                if (!"com.google.android.auth.IAuthManagerService".equals(getInterfaceDescriptor())) return;
+                reply.setDataPosition(0);
+                reply.readException();
+                android.os.Bundle result = reply.readInt() == 0 ? null : android.os.Bundle.CREATOR.createFromParcel(reply);
+                if (result == null) summary = "bundle_present=false";
+                else {
+                    result.setClassLoader(android.app.ActivityThread.currentApplication().getClassLoader());
+                    summary = "bundle_present=true error=" + GoogleAuthBoundaryTrace.responseError(result.getString("Error"))
+                            + " token_details_present=" + result.containsKey("tokenDetails")
+                            + " auth_token_present=" + result.containsKey("authtoken")
+                            + " recovery_intent_present=" + result.containsKey("userRecoveryIntent");
+                    if ("1".equals(System.getenv("WESTLAKE_GOOGLE_TOKEN_FINGERPRINT"))) {
+                        String fingerprint = "token_fingerprint_unavailable=true";
+                        Parcel tokenParcel = Parcel.obtain();
+                        try {
+                            android.os.Bundle details = result.getBundle("tokenDetails");
+                            if (details != null) {
+                                details.setClassLoader(android.app.ActivityThread.currentApplication().getClassLoader());
+                                android.os.Parcelable tokenData = details.getParcelable("TokenData");
+                                if (tokenData != null && "com.google.android.gms.auth.TokenData".equals(tokenData.getClass().getName())) {
+                                    tokenData.writeToParcel(tokenParcel, 0);
+                                    fingerprint = GoogleAuthBoundaryTrace.tokenFingerprint(tokenParcel.marshall());
+                                }
+                            }
+                        } catch (Exception ignored) { /* Diagnostics must not change the auth result. */ }
+                        finally { tokenParcel.recycle(); }
+                        summary += " " + fingerprint;
+                    }
+                }
+            } catch (Exception error) { summary = "reply_parse_failed=true"; }
+            finally { reply.setDataPosition(position); }
+            System.err.println("[WL-AUTH-REPLY] time=" + System.currentTimeMillis() + " code=5 " + summary);
         }
 
         /** Asked after the call, so that the question can't change what the call found. */
@@ -425,6 +491,27 @@ public final class SocketBinder {
             }
             int service = "com.google.android.gms.common.internal.IGmsServiceBroker".equals(descriptor)
                     ? serviceIdOf(data) : -1;
+            if ((code == 1 || code == 3) && "com.google.android.gms.common.internal.IGmsCallbacks".equals(descriptor)
+                    && "1".equals(System.getenv("WESTLAKE_GOOGLE_POLICY_TRACE"))
+                    && "1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))
+                    && sPolicyReplies.getAndIncrement() < 64) {
+                int position = data.dataPosition();
+                try {
+                    String status = statusAfterToken(data, descriptor);
+                    StringBuilder event = new StringBuilder("[WL-GOOGLE-POLICY] time=")
+                            .append(System.currentTimeMillis()).append(" callback_status=").append(status);
+                    int count = 0;
+                    for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+                        String name = frame.getClassName();
+                        if (name.equals(Thread.class.getName()) || name.startsWith(SocketBinder.class.getName())) continue;
+                        event.append(" frame").append(count++).append('=').append(name).append('.').append(frame.getMethodName());
+                        if (count == 24) break;
+                    }
+                    System.err.println(event);
+                } catch (RuntimeException ignored) {
+                    // Diagnostics must not alter a completed service callback.
+                } finally { data.setDataPosition(position); }
+            }
             trace("out", descriptor, code, service, result);
         }
 
@@ -656,10 +743,13 @@ public final class SocketBinder {
     }
 
     /** As Binder.execTransact would: a failure the Parcel can carry goes back to the caller. */
-    private static boolean invoke(IBinder target, Frame call, Parcel data, Parcel reply, boolean oneway, Frame answer) {
+    private boolean invoke(IBinder target, Frame call, Parcel data, Parcel reply, boolean oneway, Frame answer) {
         try {
             if (TRACE) traceInbound(target, call.code, data);
-            return target.transact(call.code, data, reply, call.flags);
+            CallScopes scopes = mCallScopes;
+            CallScope scope = scopes == null ? null : scopes.enter(target, call.code, data, call.flags);
+            try { return target.transact(call.code, data, reply, call.flags); }
+            finally { if (scope != null) scope.close(); }
         } catch (RemoteException | RuntimeException e) {
             if (oneway) {
                 System.err.println("SocketBinder: oneway call failed: " + e);

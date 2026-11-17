@@ -1,0 +1,13 @@
+{
+  "signatureVerifiedWithGoogleJwks": true,
+  "issuerRecognized": true,
+  "audienceMatchesApprovedClient": true,
+  "tokenUnexpired": true,
+  "issuedAtNotFuture": true,
+  "emailClaimPresent": true,
+  "emailVerified": true,
+  "emailMatchesStoredAccountName": true,
+  "subjectMatchesStoredId": true,
+  "mustReauthenticate": "false",
+  "tokenAgeSeconds": 34
+}

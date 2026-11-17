@@ -242,6 +242,7 @@ public final class LocalServiceBinders {
      * answers: no accounts.
      */
     private static IBinder accountService() throws ClassNotFoundException {
+        if (GoogleAuthProxy.client()) return new AccountManagerStub();
         if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
         if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
             IBinder remote = playServicesHostService("account");

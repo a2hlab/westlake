@@ -1,0 +1,15 @@
+{
+  "accountNamePresent": false,
+  "emailClaimPresent": false,
+  "tokenAgeSeconds": 13.074456691741943,
+  "tokenUnexpired": true,
+  "mustReauthenticate": "true",
+  "subjectMatchesStored": true,
+  "candidate": "24",
+  "adapterRuntimeSha256": "441b4cff673741f2c67cfd9d25a14cefdd527d07378d06bdc83dd6c23f9a6ab1",
+  "aggregateAdaptationFixedMissingEmail": false,
+  "googleResultOk": true,
+  "automaticChooserVisible": true,
+  "aggregateImplementationRetained": false,
+  "policy3Accepted": false
+}

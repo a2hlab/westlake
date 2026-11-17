@@ -1,0 +1,42 @@
+{
+  "app": "com.mobilefootie.wc2010",
+  "appVersion": "239.17834.20261016",
+  "candidateBuild": 17,
+  "uncertifiedStatus": 1,
+  "identityFilePreserved": true,
+  "googleSignInButtonPresent": true,
+  "service212BrokerStatusObserved": 0,
+  "serviceAttribution": "process-global afterService trace; not full API acceptance",
+  "foreignPendingIntentSent": true,
+  "officialActivity": "com.google.android.gms.auth.api.credentials.assistedsignin.ui.GoogleSignInActivity",
+  "verifiedCallerObserved": "com.mobilefootie.wc2010",
+  "activityLaunched": true,
+  "resultCode": 0,
+  "accountPickerObserved": false,
+  "signedIn": false,
+  "newAppAccountCreated": false,
+  "credentialOrGrantPolicyChanged": false,
+  "hostsAtEnd": {
+    "google-allowed-official17": {
+      "alive": true,
+      "threadSamplesByProcess": {
+        "com.google.android.gms": 93,
+        "com.google.android.gms.persistent": 85,
+        "com.google.android.gms.unstable": 55,
+        "com.google.android.gms.ui": 33
+      },
+      "carriedAppData": true
+    },
+    "google-allowed-store17": {
+      "alive": true,
+      "threadSamplesByProcess": {
+        "com.android.vending": 134,
+        "com.android.vending:background": 66,
+        "com.android.vending:quick_launch": 41,
+        "com.android.vending:instant_app_installer": 51
+      },
+      "carriedAppData": true
+    }
+  },
+  "rawLogsPublished": false
+}

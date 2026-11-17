@@ -1,0 +1,31 @@
+{
+  "candidate": "29",
+  "officialGmsProcessesRestarted": true,
+  "fotmobProcessRestarted": true,
+  "newSignInPerformed": false,
+  "savedSelectionCarriedForward": true,
+  "silentRepliesWithTokens": 5,
+  "silentRepliesWithErrors": 0,
+  "reauthenticationWarningVisible": false,
+  "tokenVerificationOfSavedToken": {
+    "signatureVerifiedWithGoogleJwks": true,
+    "issuerRecognized": true,
+    "audienceMatchesApprovedClient": true,
+    "tokenUnexpired": true,
+    "issuedAtNotFuture": true,
+    "emailClaimPresent": true,
+    "emailVerified": true,
+    "emailMatchesStoredAccountName": true,
+    "subjectMatchesStoredId": true,
+    "mustReauthenticate": "false",
+    "tokenAgeSeconds": 365
+  },
+  "backendAcceptance": "unmeasured",
+  "actualTokenExpiryTested": false,
+  "originalGmsIdentityPreserved": true,
+  "uncertifiedStatus": 1,
+  "certificationOverridePresent": false,
+  "operatorGrantsUnchanged": true,
+  "providerAlive": true,
+  "officialAlive": true
+}

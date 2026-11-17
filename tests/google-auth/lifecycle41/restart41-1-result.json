@@ -1,0 +1,10 @@
+{
+  "iteration": "1",
+  "sameRuntimeAndPackageData": true,
+  "appLive": true,
+  "selinuxTransitionSucceeded": true,
+  "fatalSignal": false,
+  "policyMatchesHost": true,
+  "dataCleared": false,
+  "chromiumNotreachedLogged": true
+}

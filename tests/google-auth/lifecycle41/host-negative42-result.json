@@ -1,0 +1,17 @@
+[
+  {
+    "case": "background",
+    "denied": true,
+    "reason": "background"
+  },
+  {
+    "case": "wrong_destination",
+    "denied": true,
+    "reason": "invalid"
+  },
+  {
+    "case": "expired",
+    "denied": true,
+    "reason": "invalid"
+  }
+]

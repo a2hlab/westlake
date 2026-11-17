@@ -1,0 +1,29 @@
+{
+  "nativeRuntimeSha256": "12506b24d30f51fd0e8e0678ad2184512e2ca9c42f6f74fba199d79c9edec6f1",
+  "officialGmsApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "officialGmsVersion": "24.40.34",
+  "fotmobApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+  "providerMicrogApkSha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+  "providerAdapterRuntimeSha256": "59864362f89b0f9d01a02bec9e1582b67d988cd5c546f22ec2321355f03ff2f3",
+  "candidate": "27",
+  "baseSourceCommit": "6bd4904",
+  "adapterRuntimeSha256": "46871680a54f9b832cf7435ed7655c7d9b604fba989c98c33911833e4c8a9c70",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "frameworkPreloadPassed": true,
+  "hostBoundaryTraceTest": "PASS",
+  "authBehaviorChanged": false,
+  "providerRuntimeChanged": false,
+  "defaultTraceEnabled": false,
+  "fullSourceClosure": false,
+  "sources": {
+    "framework/core/java/GoogleAuthBoundaryTrace.java": "fb543cacb1854caf1c5eeb77ada27f6b9e1874997a7d190a5e9d69fdee59bbab",
+    "framework/core/java/GoogleAuthDelegation.java": "dd366afe5bb6bedde79830504265965c7bd6afc91ce320b447f60a5b6e52b65e",
+    "framework/core/java/GoogleAuthProxy.java": "4bd325fcf3b3e8f28eb5936c51ab01eb212028764ea69b7b4d817222dcbf6746",
+    "framework/core/java/SocketBinder.java": "c48a483c44344c6aeeba5627491a22d5e5d21fa8051ef7520f994534291241d0",
+    "framework/activity/java/RemoteActivities.java": "8c03816d4c7612307995b1887ad1d48dc931303a502049fbd4cb79ffef3c5fe0",
+    "framework/activity/java/PlayServicesChannel.java": "d06fcc40ba63fce471b30df1670de82d208e5389099d8b6e6c06257c0b6a97b6",
+    "tests/google-auth/host/GoogleAuthBoundaryTraceTest.java": "b0ff10b8ad04535460f90181745bf604678ae21de031e2f0f296377638704fb1"
+  },
+  "recordedAtUtc": "2026-11-16T22:45:58.392917+00:00",
+  "rawCredentialsScreenshotsOrDisassemblyPublished": false
+}

@@ -1,0 +1,12 @@
+{
+  "identityPreserved": true,
+  "policyStatus": [
+    "3"
+  ],
+  "certificationOverridePresent": false,
+  "exception212Present": true,
+  "exception213Present": true,
+  "originalExceptionValueRestored": false,
+  "otherPhenotypeValuesUnchanged": true,
+  "providerGrantsUnchanged": true
+}

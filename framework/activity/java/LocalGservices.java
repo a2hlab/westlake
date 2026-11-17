@@ -38,6 +38,7 @@ final class LocalGservices extends ContentProvider {
 
     private final Properties mValues = new Properties();
     private final Properties mOverrides = new Properties();
+    private final java.util.Set<String> mPolicyTraced = new java.util.HashSet<>();
 
     /** The holder getContentProvider answers with. Null if Services Framework isn't known here. */
     static synchronized ContentProviderHolder holder() {
@@ -87,7 +88,32 @@ final class LocalGservices extends ContentProvider {
     /** A key's value as readers see it: an override wins over the table. */
     private String value(String key) {
         String override = mOverrides.getProperty(key);
-        return override != null ? override : mValues.getProperty(key);
+        String result = override != null ? override : mValues.getProperty(key);
+        tracePolicy(key, result, override != null);
+        return result;
+    }
+
+    /** Diagnosis only: fixed policy keys, numeric status and class/method frames; no account data. */
+    private void tracePolicy(String key, String result, boolean overridden) {
+        if (!"1".equals(System.getenv("WESTLAKE_GOOGLE_POLICY_TRACE"))
+                || !"1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) return;
+        if (!"uncertified_status".equals(key) && !"uncertified_exceptions_whitelist".equals(key)
+                && !"enable_uncertified_device_check".equals(key)) return;
+        if (!mPolicyTraced.add(key) || mPolicyTraced.size() > 3) return;
+        String summary = "uncertified_status".equals(key)
+                ? " status=" + (result != null && result.matches("[0-3]") ? result : "other")
+                : " value_present=" + (result != null);
+        StringBuilder event = new StringBuilder("[WL-GOOGLE-POLICY] time=")
+                .append(System.currentTimeMillis()).append(" key=").append(key)
+                .append(summary).append(" override=").append(overridden);
+        int count = 0;
+        for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+            String name = frame.getClassName();
+            if (name.equals(Thread.class.getName()) || name.equals(LocalGservices.class.getName())) continue;
+            event.append(" frame").append(count++).append('=').append(name).append('.').append(frame.getMethodName());
+            if (count == 24) break;
+        }
+        System.err.println(event);
     }
 
     private TreeSet<String> keys() {

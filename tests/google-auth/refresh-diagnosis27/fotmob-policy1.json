@@ -1,0 +1,73 @@
+{
+  "candidate": "27",
+  "app": "com.mobilefootie.wc2010",
+  "appVersion": "239.17834.20261016",
+  "officialGmsVersion": "24.40.34",
+  "purpose": "Diagnose the silent token failure; no authorization behavior change",
+  "automaticAccountRowVisible": true,
+  "extraChooserRedrawTapUsed": false,
+  "googleResultCode": -1,
+  "originalGmsIdentityPreserved": true,
+  "uncertifiedStatus": 1,
+  "certificationOverridePresent": false,
+  "operatorGrantsUnchanged": true,
+  "providerAlive": true,
+  "officialAlive": true,
+  "tokenVerification": {
+    "signatureVerifiedWithGoogleJwks": true,
+    "issuerRecognized": true,
+    "audienceMatchesApprovedClient": true,
+    "tokenUnexpired": true,
+    "issuedAtNotFuture": true,
+    "emailClaimPresent": true,
+    "emailVerified": true,
+    "emailMatchesStoredAccountName": true,
+    "subjectMatchesStoredId": true,
+    "mustReauthenticate": "true",
+    "tokenAgeSeconds": 29
+  },
+  "silentTokenInterface": "com.google.android.auth.IAuthManagerService",
+  "silentTokenTransaction": 5,
+  "silentRequestShape": {
+    "scopeKind": "audience_server_client",
+    "includeEmail": "1",
+    "includeProfile": "absent",
+    "opaqueOptions": false,
+    "otherOptions": false,
+    "source": "First silent burst; boundary classifications are deduplicated per process"
+  },
+  "timelineRelativeToGoogleResultMs": {
+    "providerIdToken": -1072,
+    "googleResult": 0,
+    "firstNoSelection": 455,
+    "firstWithheldCredentialRead": 458,
+    "clientBadAuthenticationReplies": [
+      477,
+      881,
+      1284,
+      1928,
+      2267
+    ]
+  },
+  "silentReply": {
+    "error": "BadAuthentication",
+    "tokenDetailsPresent": false,
+    "authTokenPresent": false,
+    "recoveryIntentPresent": true
+  },
+  "livePickerRequestsAtFirstDenial": 0,
+  "providerTokenEventsInInteractiveFlow": 3,
+  "providerTokenEventsAfterGoogleResult": 0,
+  "traceCorrelation": "Process and device timestamps plus source/DEX path; no shared end-to-end request identifier",
+  "localGmsMissingCredentialBranchConfirmedByDex": true,
+  "networkPacketCapturePerformed": false,
+  "appSavedTokenFallbackConfirmedByDex": true,
+  "fotmobBackendAcceptance": "unmeasured",
+  "expiredTokenRefresh": "not tested",
+  "durableAppSessionAccepted": false,
+  "policy3Retested": false,
+  "policy3Accepted": false,
+  "newApplicationSignupFormEncountered": false,
+  "rawPrivateEvidencePublished": false,
+  "observationCapturedAtUtc": "2026-11-16T22:45:58.392917+00:00"
+}

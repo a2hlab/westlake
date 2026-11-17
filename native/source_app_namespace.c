@@ -17,52 +17,70 @@ static int owned_directory(const char* path, uid_t uid) {
     return lstat(path, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == uid;
 }
 
-// Android files the runtime carries at their Android paths, merged over OH's: <root>/etc over
-// /system/etc (fonts.xml and font_fallback.xml, security/cacerts -- Dart's TLS reads that fixed path)
-// and <root>/fonts over /system/fonts (Android's fonts beside OH's). Skia, in Flutter, reads the font
-// list from /system/etc/fonts.xml; OH's is a symlink an app may not follow, so it saw no system
-// fonts and drew no text. Each OH entry the runtime does not replace is bound into the runtime's
-// copy -- a symlink as the file it names -- and the merged directory then covers OH's.
-static int merge(const char* replacement, const char* original) {
-    char from[PATH_MAX], to[PATH_MAX];
-    struct stat st, mine;
-    DIR* dir = opendir(original);
-    if (!dir) return -1;
-    struct dirent* entry;
-    int rc = 0;
-    while (rc == 0 && (entry = readdir(dir)) != NULL) {
-        const char* name = entry->d_name;
-        if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
-        if (snprintf(from, sizeof(from), "%s/%s", original, name) >= (int) sizeof(from) ||
-            snprintf(to, sizeof(to), "%s/%s", replacement, name) >= (int) sizeof(to)) {
-            rc = -1;
-            break;
-        }
-        if (stat(from, &st)) continue;  /* dangling or unreadable: nothing to show */
-        if (lstat(to, &mine) == 0) {
-            /* The runtime replaces it; a directory both have is merged one level down. */
-            if (S_ISDIR(mine.st_mode) && S_ISDIR(st.st_mode)) rc = merge(to, from);
-            continue;
-        }
-        if (S_ISDIR(st.st_mode) ? mkdir(to, 0755) : close(open(to, O_WRONLY | O_CREAT, 0644))) {
-            rc = -1;
-            break;
-        }
-        if (mount(from, to, NULL, MS_BIND, NULL)) rc = -1;
+// Build the merged system view in a fresh directory for each mount namespace.
+// Never put bind-mount placeholders in the runtime's input directories: after
+// the namespace exits those placeholders are empty, and a restart would mistake
+// them for runtime overrides (including fonts and the OH SELinux policy files).
+static int bind_entry(const char* target, const char* source) {
+    struct stat st;
+    if (stat(source, &st)) return errno == ENOENT ? 0 : -1;
+    if (S_ISDIR(st.st_mode)) {
+        if (mkdir(target, 0755)) return -1;
+    } else {
+        int fd = open(target, O_WRONLY | O_CREAT | O_EXCL, 0644);
+        if (fd < 0) return -1;
+        if (close(fd)) return -1;
     }
-    closedir(dir);
-    return rc;
+    return mount(source, target, NULL, MS_BIND | (S_ISDIR(st.st_mode) ? MS_REC : 0), NULL);
 }
 
-static int overlay(const char* root, const char* mine, const char* system, const char* saved) {
-    char replacement[PATH_MAX], original[PATH_MAX];
+static int merge_view(const char* view, const char* replacement, const char* original) {
+    // Visit OH entries first and choose the runtime override where one exists.
+    // Then add runtime-only entries. Both input trees remain unchanged.
+    for (int pass = 0; pass < 2; ++pass) {
+        DIR* dir = opendir(pass ? replacement : original);
+        if (!dir) return -1;
+        struct dirent* entry;
+        int rc = 0;
+        while (rc == 0 && (entry = readdir(dir)) != NULL) {
+            const char* name = entry->d_name;
+            char base[PATH_MAX], mine[PATH_MAX], target[PATH_MAX];
+            struct stat original_st, mine_st, target_st;
+            if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
+            if (snprintf(base, sizeof(base), "%s/%s", original, name) >= (int) sizeof(base) ||
+                snprintf(mine, sizeof(mine), "%s/%s", replacement, name) >= (int) sizeof(mine) ||
+                snprintf(target, sizeof(target), "%s/%s", view, name) >= (int) sizeof(target)) {
+                errno = ENAMETOOLONG;
+                rc = -1;
+                break;
+            }
+            if (pass && lstat(target, &target_st) == 0) continue;
+            int has_original = stat(base, &original_st) == 0;
+            int has_mine = stat(mine, &mine_st) == 0;
+            if (has_original && has_mine && S_ISDIR(original_st.st_mode) && S_ISDIR(mine_st.st_mode)) {
+                rc = mkdir(target, 0755);
+                if (rc == 0) rc = merge_view(target, mine, base);
+            } else if (has_mine || has_original) {
+                rc = bind_entry(target, has_mine ? mine : base);
+            }
+        }
+        int saved_errno = errno;
+        closedir(dir);
+        if (rc != 0) { errno = saved_errno; return -1; }
+    }
+    return 0;
+}
+
+static int overlay(const char* root, const char* mine, const char* system) {
+    char replacement[PATH_MAX], view[PATH_MAX];
     struct stat st;
     if (snprintf(replacement, sizeof(replacement), "%s/%s", root, mine) >= (int) sizeof(replacement) ||
-        snprintf(original, sizeof(original), "%s/%s", root, saved) >= (int) sizeof(original)) return -1;
+        snprintf(view, sizeof(view), "%s/namespace-%s-XXXXXX", root, mine) >= (int) sizeof(view)) return -1;
     if (lstat(replacement, &st) || !S_ISDIR(st.st_mode)) return 0;
-    if ((mkdir(original, 0755) && errno != EEXIST) || mount(system, original, NULL, MS_BIND, NULL) ||
-        merge(replacement, original) ||
-        mount(replacement, system, NULL, MS_BIND | MS_REC, NULL)) return -1;
+    if (mkdtemp(view) == NULL || chmod(view, 0755) || merge_view(view, replacement, system) ||
+        mount(view, system, NULL, MS_BIND | MS_REC, NULL)) return -1;
+    // The directory belongs to this launch. Its mount targets can be removed by
+    // the harness with the staged runtime once that runtime's processes stop.
     return 1;
 }
 
@@ -109,8 +127,13 @@ static int install_dir(const char* root, uid_t uid) {
     for (const char* c = leaf; c < leaf + leaf_length - 25; c++) {
         if (!isalnum((unsigned char) *c) && *c != '.' && *c != '_') return install_fail("check", target);
     }
-    if (snprintf(source, sizeof(source), "%s/android-app", root) >= (int) sizeof(source) ||
-        !owned_directory(source, uid)) return install_fail("check", source);
+    struct stat system_app, installed;
+    if (stat("/data/app", &system_app) ||
+        snprintf(source, sizeof(source), "%s/android-app", root) >= (int) sizeof(source) ||
+        lstat(source, &installed) || !S_ISDIR(installed.st_mode) ||
+        (installed.st_uid != uid &&
+         (installed.st_uid != system_app.st_uid || installed.st_gid != system_app.st_gid ||
+          (installed.st_mode & 07777) != 0775))) return install_fail("check", source);
     memcpy(parent, target, (size_t) (leaf - target - 1));
     parent[leaf - target - 1] = '\0';
     DIR* dir = opendir("/data/app");
@@ -126,11 +149,11 @@ static int install_dir(const char* root, uid_t uid) {
         snprintf(names[count++], sizeof(names[0]), "%s", entry->d_name);
     }
     closedir(dir);
-    if (snprintf(cover, sizeof(cover), "%s/data-app", root) >= (int) sizeof(cover)) {
+    if (snprintf(cover, sizeof(cover), "%s/namespace-app-XXXXXX", root) >= (int) sizeof(cover)) {
         errno = ENAMETOOLONG;
         return install_fail("name", root);
     }
-    if (mkdir(cover, 0755)) return install_fail("make", cover);
+    if (mkdtemp(cover) == NULL) return install_fail("make", cover);
     int rc = -1;
     int mine = -1, made = -1, oh = open("/data/app", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (oh < 0) {
@@ -149,7 +172,6 @@ static int install_dir(const char* root, uid_t uid) {
     }
     // As Android 15 leaves them: /data/app as OH has it (system, 0771: an app may pass through it
     // but not list it), the install's parent system-owned 0771 and the install directory 0775.
-    struct stat system_app;
     if (fstat(oh, &system_app) || fchown(made, system_app.st_uid, system_app.st_gid) ||
         fchmod(made, system_app.st_mode & 07777)) {
         install_fail("own", cover);
@@ -215,9 +237,9 @@ int main(int argc, char** argv) {
         !realpath(argv[1], root) || strcmp(root, argv[1]) ||
         strncmp(root, prefix, strlen(prefix)) ||
         !strstr(root, "/files/a2hlab-source-") || !owned_directory(root, uid) ||
-        snprintf(temporary, sizeof(temporary), "%s/private-tmp", root) >= sizeof(temporary) ||
-        snprintf(parent, sizeof(parent), "%s/app-data", root) >= sizeof(parent) ||
-        snprintf(icu_data, sizeof(icu_data), "%s/i18n/etc/icu", root) >= sizeof(icu_data) ||
+        snprintf(temporary, sizeof(temporary), "%s/private-tmp", root) >= (int) sizeof(temporary) ||
+        snprintf(parent, sizeof(parent), "%s/app-data", root) >= (int) sizeof(parent) ||
+        snprintf(icu_data, sizeof(icu_data), "%s/i18n/etc/icu", root) >= (int) sizeof(icu_data) ||
         !owned_directory(temporary, uid) || !owned_directory(parent, uid) ||
         !owned_directory(icu_data, uid)) return 2;
     struct stat before, after;
@@ -230,8 +252,8 @@ int main(int argc, char** argv) {
         mount(icu_data, "/system/usr/icu", NULL, MS_BIND, NULL)) {
         perror("source application namespace"); return 1;
     }
-    int etc = overlay(root, "etc", "/system/etc", "system-etc-oh");
-    int fonts = etc < 0 ? -1 : overlay(root, "fonts", "/system/fonts", "system-fonts-oh");
+    int etc = overlay(root, "etc", "/system/etc");
+    int fonts = etc < 0 ? -1 : overlay(root, "fonts", "/system/fonts");
     if (etc < 0 || fonts < 0) {
         perror("source application system files"); return 1;
     }

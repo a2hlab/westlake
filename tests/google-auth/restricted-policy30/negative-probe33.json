@@ -1,0 +1,76 @@
+{
+  "silent-ungranted": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "silent-ungranted",
+    "scope": "audience_id_token",
+    "startTime": 1794875369231,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "entry": "IAuthManagerService.getTokenWithAccount",
+      "spoofPackageTest": false,
+      "silentNegativeTest": true,
+      "expectedDescriptor": true,
+      "outcome": "token_not_returned",
+      "tokenPresent": false,
+      "errorCode": "BadAuthentication",
+      "recoveryIntentPresent": true
+    },
+    "endTime": 1794875370348
+  },
+  "silent-spoof": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "silent-spoof",
+    "scope": "audience_id_token",
+    "startTime": 1794875375485,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "outcome": "failed",
+      "errorType": "SecurityException",
+      "errorCode": "unclassified",
+      "entry": "IAuthManagerService.getTokenWithAccount",
+      "spoofPackageTest": true
+    },
+    "endTime": 1794875375533
+  },
+  "delegation-ui": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "delegation-ui",
+    "scope": "ac2dm",
+    "startTime": 1794875376442,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "entry": "PlayServicesChannel.delegation-ui",
+      "actualIdentity": "org.westlake.googlebootstrap.probe",
+      "outcome": "security_exception",
+      "denied": true
+    },
+    "endTime": 1794875376462
+  },
+  "delegation-provider": {
+    "schema": "westlake-official-auth-v1",
+    "mode": "delegation-provider",
+    "scope": "ac2dm",
+    "startTime": 1794875377455,
+    "gmsVersion": 244034029,
+    "accountCount": 1,
+    "operation": {
+      "entry": "PlayServicesChannel.delegation-provider",
+      "actualIdentity": "org.westlake.googlebootstrap.probe",
+      "outcome": "security_exception",
+      "denied": true
+    },
+    "endTime": 1794875377509
+  },
+  "candidate": 33,
+  "officialGmsPolicy": 3,
+  "probeApkSha256": "67ed0d05f9a8d177a67b78be5e29035f46e3723ddf63bb916bbbb37dd36be842",
+  "probeSignerUnchanged": true,
+  "actualProbePackage": "org.westlake.googlebootstrap.probe",
+  "ungrantedRequestDeniedByBrokerTrace": true,
+  "spoofedRequestDeniedAtAuthTransactionBoundary": true,
+  "providerTokenEventsForProbeDuringNegativeWindow": 0,
+  "sharedHostUidIsolationAccepted": false
+}

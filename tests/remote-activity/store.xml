@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.android.vending" android:versionCode="1" android:versionName="fixture">
+ <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="34"/>
+ <application android:label="Discovery fixture store" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Host" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+  <service android:name="org.westlake.remoteactivity.fixture.Fixture$DiscoveryService" android:exported="true"><intent-filter><action android:name="westlake.test.DISCOVERY"/></intent-filter></service>
+  <provider android:name="org.westlake.remoteactivity.fixture.Fixture$DiscoveryProvider" android:authorities="westlake.fixture.store" android:exported="true"/>
+ </application>
+</manifest>

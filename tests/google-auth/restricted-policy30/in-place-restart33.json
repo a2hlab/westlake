@@ -1,0 +1,22 @@
+{
+  "candidate": 33,
+  "test": "in-place runtime restart",
+  "attempts": [
+    {
+      "featureEnabled": false,
+      "clientPid": 4988
+    },
+    {
+      "featureEnabled": true,
+      "clientPid": 6197
+    }
+  ],
+  "app": "com.mobilefootie.wc2010",
+  "outcome": "client_native_abort_before_authentication_acceptance",
+  "signal": "SIGABRT",
+  "thread": "RenderThread",
+  "precedingChromiumCheck": "check.cc:297 NOTREACHED",
+  "authRestartAccepted": false,
+  "rootCause": "not established",
+  "rawCrashLogPublished": false
+}

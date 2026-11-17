@@ -2,6 +2,7 @@
  <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="34"/>
  <queries><package android:name="com.google.android.gms"/></queries>
  <application android:label="Remote activity contract test" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Resize" android:exported="true"/>
   <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Client" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
  </application>
 </manifest>

@@ -1,0 +1,18 @@
+{
+  "candidate": "22",
+  "package": "com.mobilefootie.wc2010",
+  "accountRowVisible": true,
+  "extraHeaderTapRequired": true,
+  "existingAccountSelected": true,
+  "oauthTokensReturned": 2,
+  "idTokensReturned": 1,
+  "tokenValuesPublished": false,
+  "googleActivityResult": -1,
+  "callerReceivedResult": -1,
+  "signInPromptGone": true,
+  "profileMenuHasSignOut": true,
+  "separateSignupPresented": false,
+  "grantsUnchanged": true,
+  "originalGmsIdentityUnchanged": true,
+  "fullProductTargetPassed": false
+}

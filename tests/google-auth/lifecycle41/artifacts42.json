@@ -1,0 +1,17 @@
+{
+  "scope": "In-place restart control and development host handoff; other runtime inputs reused",
+  "sources": {
+    "native/source_app_namespace.c": "034aeb829da73098cf001a592b8102e75986b21e380e256c4200aaac4d02e749",
+    "apps/imehost/EntryAbility.js": "1f6f3001dae254b33f6201a715e511823b2fac046794d39d5261ba9f9a581021",
+    "framework/activity/java/RemoteHostWindows.java": "933e3681b4a0019149c449d0de131db548558e23869941852821e9562119cffd",
+    "framework/activity/java/RemoteActivities.java": "060bafd79d1571d54101ba387e73d427a5062ca2bdd90933b0e3ac3ecdbf791b"
+  },
+  "artifacts": {
+    "framework-runtime-two-path-next42/adapter-runtime-bcp.jar": "cbb448f01c997352fdbe78b689b323882f80207cfcd2838705e5edfd3cb822ca",
+    "framework-runtime-two-path-next42/framework.jar": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+    "authclient42-signed/source-host.hap": "049c857e15be08318acc2b0473572763aa75c7cbe64ba78f90ae30f936ad0991",
+    "authservice42-signed/source-host.hap": "bf25ff5f61535fb93bd554a365dbebea076004a444fa828ad73a168767c816d7",
+    "bionic-shim-nw157/libwebview_bionic_shim.so": "ab8282f6d2cda34c49712b8d2c64d4d76eccf12cb4fd1af4c01e4416e55bad1c",
+    "google-bootstrap-runtime-resize22/liboh_android_runtime.so": "12506b24d30f51fd0e8e0678ad2184512e2ca9c42f6f74fba199d79c9edec6f1"
+  }
+}

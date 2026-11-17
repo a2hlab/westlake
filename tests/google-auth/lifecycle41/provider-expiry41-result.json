@@ -1,0 +1,30 @@
+{
+  "savedAppTokenExpired": true,
+  "providerTokens": [
+    {
+      "signatureVerified": true,
+      "audienceMatchesFotMob": true,
+      "unexpired": false,
+      "issuedAfterSavedTokenExpired": false,
+      "sameSubject": true,
+      "ageSeconds": 13511
+    },
+    {
+      "signatureVerified": true,
+      "audienceMatchesFotMob": true,
+      "unexpired": true,
+      "issuedAfterSavedTokenExpired": true,
+      "sameSubject": true,
+      "ageSeconds": 435
+    },
+    {
+      "signatureVerified": true,
+      "audienceMatchesFotMob": true,
+      "unexpired": false,
+      "issuedAfterSavedTokenExpired": false,
+      "sameSubject": true,
+      "ageSeconds": 4292
+    }
+  ],
+  "exactTokenInClientReplyVerified": false
+}

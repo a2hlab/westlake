@@ -1,0 +1,27 @@
+{
+  "candidateBuild": 18,
+  "frameworkPreloadPassed": true,
+  "exitCode": 0,
+  "frameworkContractsRequested": false,
+  "fullStackAccepted": false,
+  "adapterRuntimeSha256": "380587f43d2a6dd0add0702397f2fefafd14e4a112e05848dcc1adda1ba93f24",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "nativeRuntimeArtAndShimReused": true,
+  "finalFixtures": {
+    "targetDeath": 27,
+    "callerDeath": 28
+  },
+  "googleRuntimeBuilds": {
+    "microgProvider": 11,
+    "allowedOfficialGms": 18,
+    "allowedStore": 17,
+    "allowedFotMob": 18,
+    "restrictedOfficialGms": 17,
+    "restrictedStore": 17,
+    "restrictedFotMob": 17
+  },
+  "identityResetForSuccess": false,
+  "workingTreeBuildInputsMatched": 124,
+  "fixtureCodeAndManifestsMatchBuild": true,
+  "manifestFixtureArtifactPinsMatched": true
+}
