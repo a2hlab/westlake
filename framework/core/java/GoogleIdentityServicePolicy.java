@@ -1,6 +1,11 @@
 package adapter.core;
 
-/** Opt-in local service eligibility adaptation for the separately pinned GMS build, not certification. */
+/**
+ * Widens Play services' own uncertified-device exception list (opt-in, pinned GMS build). The added services
+ * pass Play services' uncertified-device check although Google still treats the device as uncertified: a local
+ * workaround of Google's device policy, not certification. The project owner approved it on 2026-11-17 for a
+ * fixed set of services (docs/google-auth-broker.md); adding any other service needs the owner's sign-off.
+ */
 public final class GoogleIdentityServicePolicy {
     public static final String KEY = "uncertified_exceptions_whitelist";
     // Default service exceptions in the tested 244034029 build; the value lives in Phenotype preferences.
