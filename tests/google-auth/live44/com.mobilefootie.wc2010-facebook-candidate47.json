@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "package": "com.mobilefootie.wc2010",
+  "track": "facebook",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "manifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "apkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+  "observation": {
+    "status": "passed_login_and_return",
+    "webLoginRendered": true,
+    "credentialsSubmitted": true,
+    "correctedIdentifierAccepted": true,
+    "facebookConsentReached": true,
+    "facebookConsentAccepted": true,
+    "localActivityReused": true,
+    "facebookSdkResultOk": true,
+    "applicationSignInActivityResultOk": true,
+    "authenticatedReturn": true,
+    "signedInUiObserved": true,
+    "matchListRendered": true,
+    "separateApplicationSignupPrompted": false,
+    "restartPersistenceTested": false,
+    "cloudPreferenceRoundTripProven": false,
+    "fullApplicationAcceptance": false,
+    "explanation": "Facebook accepts the corrected authorized credentials and ordinary profile/email consent. Candidate47 reuses CustomTabMainActivity and delivers RESULT_OK through FacebookActivity into FotMob SignInActivity. FotMob returns to a populated match list, and its account menu offers Sign out. This passes live login and return with visible signed-in application state. No separate signup form was submitted. Cloud preference round trip, restart persistence and full application acceptance remain unproven."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 73,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 0,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "localReuse": {
+    "class": "com.facebook.CustomTabMainActivity",
+    "cleared": 1
+  },
+  "resultCallbacks": [
+    {
+      "class": "com.facebook.FacebookActivity",
+      "requestCode": 273169276,
+      "resultCode": -1,
+      "dataPresent": true
+    },
+    {
+      "class": "com.fotmob.android.feature.userprofile.ui.SignInActivity",
+      "requestCode": 64206,
+      "resultCode": -1,
+      "dataPresent": true
+    }
+  ],
+  "rawLogsAndScreenshotsPublic": false
+}
