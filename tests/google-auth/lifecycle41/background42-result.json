@@ -1,0 +1,6 @@
+{
+  "setupChooserFocused": true,
+  "thirdHostFocusConfirmedBeforeCancel": true,
+  "thirdHostKeptFocusAfterCancel": true,
+  "manualForegroundOnlyForNegativeTest": true
+}

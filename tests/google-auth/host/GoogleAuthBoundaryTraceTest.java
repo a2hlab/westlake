@@ -25,7 +25,46 @@ public final class GoogleAuthBoundaryTraceTest {
         require(GoogleAuthBoundaryTrace.responseError("BadAuthentication").equals("BadAuthentication"));
         require(GoogleAuthBoundaryTrace.responseError("private@example.invalid\nINJECT").equals("other"));
         require(GoogleAuthBoundaryTrace.responseError(null).equals("absent"));
+        fingerprint();
         System.out.println("GOOGLE_AUTH_BOUNDARY_TRACE_TEST_PASS");
+    }
+
+    private static byte[] tokenParcel(String token) {
+        byte[] text = token.getBytes(java.nio.charset.StandardCharsets.UTF_16LE);
+        int fieldSize = (4 + text.length + 2 + 3) & ~3;
+        java.nio.ByteBuffer data = java.nio.ByteBuffer.allocate(24 + fieldSize)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        data.putInt(0xffff4f45).putInt(data.capacity() - 8);
+        data.putInt(0x00040001).putInt(1); // unrelated version field
+        data.putInt(0xffff0002).putInt(fieldSize).putInt(token.length()).put(text).putShort((short) 0);
+        return data.array();
+    }
+
+    private static void fingerprint() {
+        String token = "private.claims.signature";
+        byte[] encoded = tokenParcel(token);
+        String result = GoogleAuthBoundaryTrace.tokenFingerprint(encoded);
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(token.getBytes("UTF-8"));
+            String expected = new java.math.BigInteger(1, hash).toString(16);
+            while (expected.length() < 64) expected = "0" + expected;
+            require(result.equals("token_fingerprint_sha256=" + expected));
+        } catch (Exception e) { throw new AssertionError(e); }
+        require(!result.contains(token));
+        for (int n = 0; n < encoded.length; n++) unavailable(java.util.Arrays.copyOf(encoded, n));
+        unavailable(null); unavailable(new byte[65537]); unavailable(tokenParcel("private@example.invalid"));
+        byte[] bad = encoded.clone(); bad[0] = 0; unavailable(bad);
+        bad = encoded.clone(); bad[20] = (byte) 255; unavailable(bad); // field length overflow
+        bad = encoded.clone(); bad[24] = (byte) 255; unavailable(bad); // string length overflow
+        bad = encoded.clone(); bad[28 + token.length() * 2] = 1; unavailable(bad); // no terminator
+        byte[] duplicate = java.util.Arrays.copyOf(encoded, encoded.length + encoded.length - 16);
+        System.arraycopy(encoded, 16, duplicate, encoded.length, encoded.length - 16);
+        java.nio.ByteBuffer.wrap(duplicate).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(4, duplicate.length - 8);
+        unavailable(duplicate);
+    }
+
+    private static void unavailable(byte[] encoded) {
+        require(GoogleAuthBoundaryTrace.tokenFingerprint(encoded).equals("token_fingerprint_unavailable=true"));
     }
     private static void require(boolean ok) { if (!ok) throw new AssertionError(); }
 }

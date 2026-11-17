@@ -1,0 +1,13 @@
+{
+  "automaticChooserForeground": true,
+  "automaticReturnAfterCancellation": true,
+  "automaticReturnAfterSuccess": true,
+  "successfulResultReceived": true,
+  "silentRepliesWithTokenDetails": 11,
+  "brokerSilentTokenReplies": 11,
+  "manualHostForegroundWithinSuccessfulFlow": false,
+  "separateApplicationSignupPerformed": false,
+  "backendAcceptanceVerified": false,
+  "backgroundReturnDenied": true,
+  "inputReplayControlsExcluded": true
+}

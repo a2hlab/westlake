@@ -72,6 +72,7 @@ public final class RemoteActivities {
         try {
             host.linkToDeath(pending, 0);
             Intent selected = new Intent(intent).setComponent(new ComponentName(target.packageName, target.name));
+            if (!RemoteHostWindows.launch(target.packageName)) { pending.abandon(); return ActivityManager.START_CANCELED; }
             IBinder cancellation = PlayServicesChannel.startRemoteActivity(host, selected,
                     caller.getComponentName(), request != null, pending);
             if (cancellation == null) {
@@ -108,6 +109,7 @@ public final class RemoteActivities {
         }
         try {
             host.linkToDeath(pending, 0);
+            if (!RemoteHostWindows.launch(facts.packageName)) { pending.abandon(); return ActivityManager.START_CANCELED; }
             pending.cancellation = PlayServicesChannel.startPendingActivity(host, sender.asBinder(), fillIn,
                     mask, values, caller.getComponentName(), request != null, pending);
             if (pending.cancellation == null) { pending.abandon(); return ActivityManager.START_CANCELED; }
@@ -375,6 +377,7 @@ public final class RemoteActivities {
                 adapter.core.GoogleAuthProxy.clearInteractiveVisibility(caller.getPackageName());
                 callback.unlinkToDeath(this, 0);
                 if (notify) {
+                    if (wantsResult) RemoteHostWindows.returnTo(caller.getPackageName());
                     Parcel data = Parcel.obtain();
                     try {
                         data.writeInterfaceToken(RESULT); data.writeInt(result); data.writeTypedObject(intent, 0);

@@ -5,13 +5,15 @@ The product target remains an uncertified OpenHarmony device with an existing Go
 official services in an OS-enforced sandbox, and independently replaceable services such as location.
 These changes do not establish certification or complete that sandbox. Google server policy remains independent.
 
-Latest result: build 33 completes FotMob's Google sign-in on the preserved
-policy-3 identity after adding two local identity-service exceptions. Eleven
-subsequent silent ID-token replies passed through official GMS and the microG
-broker; four unrelated-app requests were denied. The device stayed uncertified.
-See [restricted-identity validation](#restricted-identity-local-service-eligibility-builds-3033).
-The earlier policy-1 restart/revocation tests remain below. Automatic cross-host
-window handoff, in-place restart stability, broad service availability and app/backend acceptance remain open.
+Latest result: candidates 41–42 fix the repeated-launch overlay corruption and demonstrate
+an opt-in OH host-window bridge. FotMob opens Google's chooser and returns automatically after
+success or cancellation. Three in-place FotMob restarts and a restart of both GMS and FotMob pass.
+The paired restart yields ten silent token replies without another account selection. The original
+policy-3 identity and uncertified status remain unchanged. Candidate 43 additionally verifies an
+exact renewed ID token in a silent client reply after the carried session token expired. Only the previously described local
+identity-service exceptions are enabled. See [lifecycle validation](#in-place-restart-and-host-window-continuation-candidates-4142).
+This is development integration. Production isolation, broad service availability and app/backend
+acceptance remain open.
 
 ## Implemented behavior
 
@@ -578,11 +580,98 @@ host forward returned to FotMob. These were manual test-harness foreground
 operations. They must not be counted as automatic cross-host window handoff,
 or as per-APK kernel isolation within either bundle.
 
+## In-place restart and host-window continuation, candidates 41–42
+
+The staged launcher was not restart-safe. Its original system overlay merged OH files by making
+empty mount targets inside the runtime's `etc` and `fonts` inputs. When the mount namespace exited,
+those empty targets remained. Later launches treated them as intentional Android overrides. The
+failed FotMob runtime's `sehap_contexts` was zero bytes; the firmware's file was 2,510 bytes. This
+explains the later pre-ART `HapDomainSetcontext` failures without weakening SELinux.
+
+`native/source_app_namespace.c` now constructs a fresh merged directory per launch and leaves both
+input trees untouched. The optional Android install-path cover is also unique per launch, and its
+ownership check accepts either the initial app-owned directory or the system-owned directory left
+by a successful prior installation. Existing polluted runtime inputs must be restaged from verified
+artifacts; carry the app data, not the old overlay placeholders. Per-launch mount directories remain
+with the disposable runtime until harness cleanup. This remains a development launcher.
+
+| Check | Observed result |
+| --- | --- |
+| Original launcher, repeated mount fixture | Modifies its input tree on the first run and hides the real OH policy on later runs. |
+| Revised launcher, three launches of the same fixture | Preserves the OH policy, runtime override and Android install-path payload every time; input trees and host policy remain unchanged. |
+| FotMob, three restarts of the same candidate-41 runtime | All remain alive, pass the normal SELinux transition, render, and retain app/WebView data; no cache or account reset between restarts. |
+| Chromium `check.cc:297` message | Also appears in surviving runs. It is not sufficient evidence of the earlier RenderThread abort's cause; no usable abort backtrace was obtained. |
+| Restricted GMS control | Original identity preserved, status remains 3, no certification override, service exceptions remain exactly as configured, and provider grants remain unchanged. |
+| Token expiry observation | FotMob's saved token expired. The provider cache contains a Google-signed token for the approved FotMob audience and same subject, issued after that expiry and still valid. Silent replies contained token details. The exact token bytes in those replies and backend acceptance were not verified. |
+
+The initial window prototype called OH StartAbility from the standalone Android process and received
+`ERR_INVALID_CALLER` (2097205). Candidate 42 instead routes a small window-only request to the
+registered HAP. Its `UIAbilityContext.startAbility()` supplies the real ability token and retains OH's
+ordinary permission checks. The caller's foreground host starts the chooser host; the chooser's
+foreground host returns to the caller after completion. The mailbox contains only a request ID,
+destination and timestamp. Google accounts, tokens, Intents and result payloads stay on the existing
+verified activity/auth channels.
+
+This is opt-in development integration, restricted to `org.westlake.authclienthost` and
+`org.westlake.authservicehost`, installed with distinct OH UIDs. It requires the manifest launcher's
+`--host-window-bridge --host-build ...`, plus an explicit `WESTLAKE_REMOTE_HOST_ROUTES` mapping.
+The HAP checks its foreground lifecycle state, destination, size, age and recent request IDs. The
+Java caller uses a bounded wait. Mailboxes share the host UID's trust boundary; this is not a
+production per-APK policy, a general activity-task implementation, or proof of atomic foreground
+ownership through every transition. Production integration needs installer-owned routing and
+lifecycle IPC rather than this polling development mailbox.
+
+On the board, FotMob opens the chooser and returns after both cancellation and successful sign-in
+without manual host activation within those flows. The success result is `RESULT_OK`; FotMob
+shows its signed-in profile, its saved Google JWT passes signature/audience/expiry/identity checks,
+and 11 subsequent silent token replies match 11 broker token returns. No separate application
+account signup was performed. Restarting both candidate-42 runtimes in place, without clearing
+app data or caches, also succeeds: ten silent token replies match ten broker returns, with no
+account chooser. This does not independently verify FotMob backend acceptance.
+
+The host policy unit test covers opt-in, background denial, wrong destination, expiry, replay,
+malformed requests and OH rejection. Board tests also deny background, wrong-destination and
+expired requests. After explicitly verifying another host owns WindowManager's focused window,
+cancelling the chooser delivers cancellation while keeping that third host focused. A first attempt
+at that test was invalid: the root-owned input file replayed the cancel tap repeatedly. Correcting
+its ownership and checking actual focus removed that test artifact.
+
+Sanitized evidence and build pins are under [lifecycle41](../tests/google-auth/lifecycle41/).
+Raw logs, account stores and screenshots remain private. The native runtime, ART and Bionic shim
+were reused; these results do not establish a complete fresh-source build.
+
+### Exact expired-session reply verification, candidate 43
+
+Candidate 43 restores the preserved FotMob-41 application data whose saved Google ID token had
+already expired before launch. Official GMS uses the preserved candidate-42 identity/data; the
+microG provider and its grants are unchanged. Neither an account chooser nor a new sign-in is used.
+FotMob renders its matches screen and receives five observed silent auth replies with parseable
+fingerprints. One of those exact reply tokens matches the provider's current token at verification.
+That token passes Google's public-key signature check, issuer, approved FotMob audience, same
+account subject/email, issue time after the saved token expired, and validity at both reply and
+verification time. The other four reply tokens were not independently signature-verified in this
+snapshot; a cache entry can be replaced by a later request.
+
+The opt-in diagnostic hashes the token from the client's actual `tokenDetails.TokenData` response,
+using the serializer inspected in the pinned FotMob APK. It does not modify the response or make an
+authorization decision. Fingerprints remain private, alongside the existing private logs; repository
+evidence contains only counts and validation booleans. Malformed encodings fail to an unavailable
+marker, and the new host tests cover truncation, duplicate fields and invalid lengths. Candidate 43
+passes Java compilation, framework packaging, boot-image construction and framework preload on the
+OH board. A further in-place FotMob restart with fingerprinting disabled produces five silent
+replies and no fingerprint markers, without clearing data/cache or selecting an account again.
+This closes the narrower exact-reply expiry gap; it does not establish FotMob backend
+acceptance, account enrollment, arbitrary OAuth scopes or general Play services compatibility.
+
+See [exact reply evidence](../tests/google-auth/lifecycle41/exact-expiry43-result.json) and
+[candidate-43 pins](../tests/google-auth/lifecycle41/artifacts43.json).
+
 ## Remaining product boundaries
 
-- The official GMS and test applications still share OH UIDs within host bundles. Verified Java channels
-  and namespaces do not establish protection against hostile native code sharing a UID. Per-app kernel
-  UIDs, SELinux enforcement, data-directory ownership and lifecycle supervision remain prerequisites.
+- Candidate 42 gives official GMS and FotMob separate dedicated HAP UIDs. Packages placed inside
+  one host still share its UID. This test does not establish a production installer or hostile-native-code
+  containment. Per-app kernel identities, SELinux/data-directory policy and lifecycle supervision
+  still need independent acceptance.
 - A diagnostic Store UI launch with incorrectly carried data rendered its catalog, then crashed with
   `This method must be called in primary profile`. That fresh-data launch is excluded from identity-continuity evidence.
   Background-only service testing does not prove Store UI stability. Android/OH user-profile translation
@@ -598,16 +687,17 @@ or as per-APK kernel isolation within either bundle.
 
 1. Policy-1 chooser/result handoff, identity-claim repair and the narrow synchronous silent ID-token
    path now pass on the board, including process restart, operator revocation, explicit re-selection
-   and unrelated-app denial. Still validate backend acceptance, actual token expiry, account removal,
+   and unrelated-app denial. Candidate 43 also verifies an exact renewed client-reply token after the carried session token expires.
+   Still validate backend acceptance, account removal,
    app sign-out, the account-visibility revocation hook, and concurrent/caller-death behavior during
    silent requests. OAuth access tokens, server codes and asynchronous APIs need separate contracts
    and tests. Initial profile UI or a cryptographically valid Google token alone is insufficient.
 2. Keep the policy-3 identity as the product-target control. Build 33 demonstrates the narrow identity
    flow with explicit local service exceptions while preserving certification status and identifiers.
    Validate other services separately, fresh account enrollment, later Google flag updates and GMS upgrades.
-   Diagnose the native WebView abort on in-place FotMob restart. Complete automatic foreground
-   transfer between the two OH host bundles; this test used manual
-   host foreground operations. The full GrapheneOS-like product target is not yet accepted.
+   Candidate 41 passes three in-place FotMob restarts. Candidate 42 adds a development host-window
+   bridge with successful sign-in and cancellation; production lifecycle/isolation acceptance remains separate.
+   The full GrapheneOS-like product target is not yet accepted.
 3. Validate process/data isolation with distinct kernel identities and enforceable policy, then independently
    validate replaceable services such as location. Neither a broker handshake nor the fixture proves these.
 

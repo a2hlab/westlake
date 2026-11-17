@@ -1,0 +1,10 @@
+{
+  "sameRuntimeRestart": true,
+  "appDataOrCacheReset": false,
+  "gmsAndFotMobAliveAfterRestart": true,
+  "silentRepliesWithTokenDetails": 10,
+  "brokerSilentTokenReplies": 10,
+  "chooserRequired": false,
+  "renderedAfterRestart": true,
+  "exactReplyTokenVerified": false
+}

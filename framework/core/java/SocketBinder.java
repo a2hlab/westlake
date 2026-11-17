@@ -458,6 +458,23 @@ public final class SocketBinder {
                             + " token_details_present=" + result.containsKey("tokenDetails")
                             + " auth_token_present=" + result.containsKey("authtoken")
                             + " recovery_intent_present=" + result.containsKey("userRecoveryIntent");
+                    if ("1".equals(System.getenv("WESTLAKE_GOOGLE_TOKEN_FINGERPRINT"))) {
+                        String fingerprint = "token_fingerprint_unavailable=true";
+                        Parcel tokenParcel = Parcel.obtain();
+                        try {
+                            android.os.Bundle details = result.getBundle("tokenDetails");
+                            if (details != null) {
+                                details.setClassLoader(android.app.ActivityThread.currentApplication().getClassLoader());
+                                android.os.Parcelable tokenData = details.getParcelable("TokenData");
+                                if (tokenData != null && "com.google.android.gms.auth.TokenData".equals(tokenData.getClass().getName())) {
+                                    tokenData.writeToParcel(tokenParcel, 0);
+                                    fingerprint = GoogleAuthBoundaryTrace.tokenFingerprint(tokenParcel.marshall());
+                                }
+                            }
+                        } catch (Exception ignored) { /* Diagnostics must not change the auth result. */ }
+                        finally { tokenParcel.recycle(); }
+                        summary += " " + fingerprint;
+                    }
                 }
             } catch (Exception error) { summary = "reply_parse_failed=true"; }
             finally { reply.setDataPosition(position); }

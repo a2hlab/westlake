@@ -1,0 +1,10 @@
+{
+  "sameRuntimeRestart": true,
+  "appDataOrCacheReset": false,
+  "fingerprintDiagnosticEnabled": false,
+  "silentRepliesWithTokenDetails": 5,
+  "tokenFingerprintMarkers": 0,
+  "interactiveSuccessResults": 0,
+  "fatalSignalMarkers": 0,
+  "clientAliveAfterRestart": true
+}

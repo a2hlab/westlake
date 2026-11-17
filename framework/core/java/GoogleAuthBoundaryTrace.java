@@ -4,6 +4,50 @@ package adapter.core;
 public final class GoogleAuthBoundaryTrace {
     private GoogleAuthBoundaryTrace() {}
 
+    /** Private, opt-in test correlation only; never a token, claim, or authorization decision.
+     * The inspected FotMob TokenData serializer uses SafeParcelable object 20293, string field 2.
+     * Unknown/malformed encodings fail closed. Callers must enforce the private-log guards.
+     */
+    public static String tokenFingerprint(byte[] encoded) {
+        final String unavailable = "token_fingerprint_unavailable=true";
+        if (encoded == null || encoded.length < 8 || encoded.length > 65536) return unavailable;
+        try {
+            java.nio.ByteBuffer data = java.nio.ByteBuffer.wrap(encoded).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            int header = data.getInt();
+            if ((header & 65535) != 20293) return unavailable;
+            int size = fieldSize(data, header);
+            if (size != data.remaining()) return unavailable;
+            String token = null;
+            while (data.hasRemaining()) {
+                header = data.getInt();
+                size = fieldSize(data, header);
+                if (size < 0 || size > data.remaining()) return unavailable;
+                int end = data.position() + size;
+                if ((header & 65535) == 2) {
+                    if (token != null || size < 8) return unavailable;
+                    int chars = data.getInt();
+                    if (chars <= 0 || chars > 16384 || ((4 + (chars + 1) * 2 + 3) & ~3) != size)
+                        return unavailable;
+                    byte[] text = new byte[chars * 2]; data.get(text);
+                    if (data.getShort() != 0) return unavailable;
+                    token = new String(text, java.nio.charset.StandardCharsets.UTF_16LE);
+                    if (!token.matches("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+")) return unavailable;
+                }
+                data.position(end);
+            }
+            if (token == null) return unavailable;
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : digest) hex.append(Character.forDigit((b >>> 4) & 15, 16)).append(Character.forDigit(b & 15, 16));
+            return "token_fingerprint_sha256=" + hex;
+        } catch (Exception invalid) { return unavailable; }
+    }
+
+    private static int fieldSize(java.nio.ByteBuffer data, int header) {
+        return (header >>> 16) == 65535 ? data.getInt() : header >>> 16;
+    }
+
     public static String responseError(String error) {
         if (error == null) return "absent";
         for (String known : new String[] {"OK", "BadAuthentication", "NeedsBrowser", "NetworkError",

@@ -5,8 +5,10 @@ microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-official-auth-validation.md) and
 [validation.json](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/tests/google-auth/validation.json).
 
-Latest run: [restricted-identity service eligibility, builds 30–33](../../docs/google-two-path-continuation.md#restricted-identity-local-service-eligibility-builds-3033),
-with results under `restricted-policy30/`. Build 33 adds only identity services
+Latest lifecycle tests and artifact pins are under [lifecycle41](lifecycle41/), with the
+[restart and host-window report](../../docs/google-two-path-continuation.md#in-place-restart-and-host-window-continuation-candidates-4142).
+The underlying [restricted-identity service eligibility, builds 30–33](../../docs/google-two-path-continuation.md#restricted-identity-local-service-eligibility-builds-3033)
+has results under `restricted-policy30/`. Build 33 adds only identity services
 212 and 213 to the pinned GMS build's local exception list, keeps policy 3 and
 its check-in identity, and exercises the real FotMob account chooser and silent
 token requests. This is an explicit compatibility policy, not certification.
@@ -123,6 +125,25 @@ deduplicated and capped at 512 per process; absence of a duplicate line is not
 absence of a repeated call. Classification is diagnostic and never authorizes
 a request. A separate host Java test exercises redaction with synthetic private
 strings in malformed keys and OAuth parameters.
+
+For exact silent ID-token reply correlation, additionally enable
+`WESTLAKE_GOOGLE_TOKEN_FINGERPRINT=1` on the test client, with
+`WESTLAKE_PLAY_TRACE=1`, `WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE=1` and
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1`. This diagnostic defaults off. It hashes the
+token in `tokenDetails.TokenData` after a completed official auth transaction;
+it leaves the original reply position and contents intact. The serializer was
+checked in the pinned FotMob APK: SafeParcelable object 20293, string field 2.
+Unknown classes, non-JWT strings and malformed encodings produce only an
+unavailable marker. No credential or claim value is printed. Fingerprints can
+correlate private sessions, so keep them in private logs too.
+
+An expiry test must establish that the carried client session's token has already
+expired before launch, then match a client reply fingerprint against a privately
+held provider token. Verify that exact token against Google's public signing keys,
+the approved audience, issuer, account subject, issue time and expiry. A token merely
+present in the provider cache is insufficient. Publish only validation booleans and
+counts, and report application backend acceptance separately. The host trace test
+also covers fingerprint encoding, truncation, duplicate fields and malformed lengths.
 
 A control success with an SDK failure is an experiment result, not a test-suite
 pass for the hybrid. A recovery Intent's presence does not prove its activity
