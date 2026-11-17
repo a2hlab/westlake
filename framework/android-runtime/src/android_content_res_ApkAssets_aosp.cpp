@@ -284,13 +284,17 @@ static jlong NativeLoad(JNIEnv* env, jclass /*clazz*/, const format_type_t forma
   const char* private_logs = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
   const char* prefix = std::getenv("WESTLAKE_ASSET_DIAGNOSTIC_PREFIX");
   static std::atomic<unsigned> samples{0};
+  bool descriptor_path = effective_path.compare(0, 14, "/proc/self/fd/") == 0
+      && effective_path.size() > 14 && effective_path.find_first_not_of("0123456789", 14) == std::string::npos;
   if (diagnostic && std::string(diagnostic) == "1"
       && private_logs && std::string(private_logs) == "1" && prefix && prefix[0] == '/'
       && effective_path.compare(0, std::string(prefix).size() + 1, std::string(prefix) + "/") == 0
-      && effective_path.size() >= 4 && effective_path.compare(effective_path.size() - 4, 4, ".apk") == 0
+      && ((effective_path.size() >= 4 && effective_path.compare(effective_path.size() - 4, 4, ".apk") == 0)
+          || (descriptor_path && format == FORMAT_APK))
       && samples.fetch_add(1) < 32) {
     int saved_errno = errno;
-    int fd = open(effective_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    // A selected /proc/self/fd path intentionally names a retained descriptor.
+    int fd = open(effective_path.c_str(), O_RDONLY | O_CLOEXEC | (descriptor_path ? 0 : O_NOFOLLOW));
     int open_errno = fd < 0 ? errno : 0;
     struct stat metadata{};
     bool regular = fd >= 0 && fstat(fd, &metadata) == 0 && S_ISREG(metadata.st_mode);

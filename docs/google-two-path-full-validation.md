@@ -794,3 +794,53 @@ This diagnostic does not yet implement that repair, meet Gmail's newer GMS
 version requirement, or establish mailbox/backend acceptance.
 
 See [candidate69.json](../tests/google-auth/full48/candidate69.json).
+
+### Candidate 70: give Gmail verified read-only access to GMS package code
+
+The default-off client route uses the existing root spawner protocol to verify
+the connected GMS process and obtain its launch APK descriptors. The launcher
+pins the spawner and the original base APK SHA-256. The client checks descriptor
+type, read-only access, APK filenames and bounds, then verifies the base hash
+with positional reads. It maps only GMS source, scan and split APK paths to the
+retained descriptors. GMS private data and native-library directory paths are
+not exposed or remapped by this change. There is no package-version or
+certification substitution.
+
+The descriptors live for the client process because loaded code can outlive a
+Binder connection. Reconnection must present the same files; a changed code set
+requires a client restart. A terminal verification refusal is cached until
+restart. The initial wrong-hash test refused code access but repeated the large
+base hash on later package queries; the final build removes that retry loop.
+
+Initial board validation verifies nine GMS APK descriptors and successfully
+opens, creates ZIP providers for and loads the base plus both configuration
+splits. Their direct-path baseline failed with EACCES in the same client UID.
+GmsAppComponentFactory and Dynamite loader error markers disappear; the Cronet
+install-time split is mapped and ProviderInstaller reports installing
+GmsCore_OpenSSL. These are code-loading/provider milestones, not proof of
+network operation or mailbox sync. Gmail still shows Account not synced,
+status-9 service failures and the separate requirement for GMS 250200000 while
+the actual installed version is 244034029.
+
+The original positive/wrong-hash/restored-pin sequence succeeds, refuses code
+access, then reproduces successful asset loads. The final cached-rejection build
+repeats that sequence: the valid pin loads all three assets; the wrong pin
+produces exactly one refusal in both initial and later captures, no verified
+code set, no successful asset loads and no GMS-owned regular descriptors;
+restoring the valid pin reproduces all three successful loads. No uncaught
+exception or fatal-signal markers appear in these control captures.
+Native code uses the verified candidate-70 APK diagnostic; Java compilation
+covers 140 sources and 293 classes, runtime packaging and boot-image builds
+pass. This candidate is tested through real Gmail launches, without a separate
+standalone preload run.
+
+The base APK is explicitly hash-pinned; the split set is supplied by the trusted
+root spawner rather than individually configured hash pins. Production code
+installation/update integrity, native-library mapping, general reconnect
+behavior and full application acceptance remain unvalidated.
+
+GMS and microG remain alive throughout the client controls. Certification stays
+3 with no override; provider grants, account-store bytes and check-in identity
+are unchanged. No new Gmail OAuth scope or account-ID permission is granted.
+
+See [candidate70.json](../tests/google-auth/full48/candidate70.json).

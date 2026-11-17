@@ -385,3 +385,15 @@ c++ -std=c++17 -pthread -Wall -Wextra -Werror \
 
 See [candidate68.json](full48/candidate68.json) for the Gmail loading/version
 failures found with this capture; it is not a full Gmail pass.
+
+Candidate 70 adds optional verified public GMS APK descriptors. The client
+launcher sets `WESTLAKE_PLAY_CODE_SPAWNER` to the official GMS root spawner and
+`WESTLAKE_PLAY_CODE_APK_SHA256` to that installation's verified base APK hash.
+These pins are separate from the microG authentication-provider pins. The
+connected socket peer must be vouched for by the selected root spawner. Only
+public APK paths are mapped; private GMS data and native-library paths retain
+their existing boundaries. A code verification failure is cached until client
+restart, and a changed code set on reconnect also requires a client restart.
+
+The board's positive/wrong-hash/restored-pin controls and remaining Gmail/GMS
+version gaps are recorded in [candidate70.json](full48/candidate70.json).

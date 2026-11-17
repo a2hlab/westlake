@@ -150,6 +150,11 @@ public final class PlayServicesChannel {
         SocketBinder binder;
         volatile String remoteRoot;
         volatile String remoteRealRoot;
+        // Kept until client process exit: cached LoadedApk instances can outlive a channel.
+        volatile RemoteApkCode code;
+        // Launcher pins cannot be repaired in this running client. Fail closed once
+        // instead of rehashing a large APK on every subsequent package query.
+        boolean codeRejected;
         /** The uid the host gave this app's channel (0 from a host that doesn't say). */
         volatile int uid;
 
@@ -522,20 +527,25 @@ public final class PlayServicesChannel {
 
     private static ApplicationInfo localize(Channel c, ApplicationInfo info) {
         if (info == null) return null;
-        info.sourceDir = localPath(c, info.sourceDir);
-        info.publicSourceDir = localPath(c, info.publicSourceDir);
+        RemoteApkCode code = "com.google.android.gms".equals(info.packageName) ? c.code : null;
+        info.sourceDir = codePath(c, code, info.sourceDir);
+        info.publicSourceDir = codePath(c, code, info.publicSourceDir);
         info.nativeLibraryDir = localPath(c, info.nativeLibraryDir);
         info.nativeLibraryRootDir = localPath(c, info.nativeLibraryRootDir);
         info.secondaryNativeLibraryDir = localPath(c, info.secondaryNativeLibraryDir);
-        info.scanSourceDir = localPath(c, info.scanSourceDir);
-        info.scanPublicSourceDir = localPath(c, info.scanPublicSourceDir);
+        info.scanSourceDir = codePath(c, code, info.scanSourceDir);
+        info.scanPublicSourceDir = codePath(c, code, info.scanPublicSourceDir);
         if (info.splitSourceDirs != null) {
-            for (int i = 0; i < info.splitSourceDirs.length; i++) info.splitSourceDirs[i] = localPath(c, info.splitSourceDirs[i]);
+            for (int i = 0; i < info.splitSourceDirs.length; i++) info.splitSourceDirs[i] = codePath(c, code, info.splitSourceDirs[i]);
         }
         if (info.splitPublicSourceDirs != null) {
-            for (int i = 0; i < info.splitPublicSourceDirs.length; i++) info.splitPublicSourceDirs[i] = localPath(c, info.splitPublicSourceDirs[i]);
+            for (int i = 0; i < info.splitPublicSourceDirs.length; i++) info.splitPublicSourceDirs[i] = codePath(c, code, info.splitPublicSourceDirs[i]);
         }
         return info;
+    }
+
+    private static String codePath(Channel c, RemoteApkCode code, String path) {
+        return code == null ? localPath(c, path) : code.path(path, c.remoteRoot, c.remoteRealRoot);
     }
 
     private static PackageInfo localize(Channel c, PackageInfo info) {
@@ -640,9 +650,18 @@ public final class PlayServicesChannel {
         String name = c.socket();
         if (name == null) return null;
         synchronized (CLIENT_LOCK) {
+            if (c.codeRejected) return null;
             if (c.binder != null && c.binder.isAlive()) return c.binder.getRemoteRoot();
             try {
                 int fd = SocketBinder.connect(name);
+                if (c == SERVICES && System.getenv("WESTLAKE_PLAY_CODE_SPAWNER") != null) {
+                    try { verifyRemoteCode(c, fd); }
+                    catch (IOException | RuntimeException e) {
+                        if (e instanceof SecurityException) c.codeRejected = true;
+                        android.os.ParcelFileDescriptor.adoptFd(fd).close();
+                        throw e;
+                    }
+                }
                 if (c == AUTH) {
                     try { verifyAuthProvider(fd); }
                     catch (IOException | RuntimeException e) {
@@ -669,6 +688,21 @@ public final class PlayServicesChannel {
                 System.err.println(TAG + "cannot reach " + name + ": " + e);
                 return null;
             }
+        }
+    }
+
+    /** Public APKs only. Neither host data directories nor native-library paths are exposed here. */
+    private static void verifyRemoteCode(Channel c, int fd) throws IOException {
+        RemoteApkCode verified = RemoteApkCode.open(System.getenv("WESTLAKE_PLAY_CODE_SPAWNER"),
+                System.getenv("WESTLAKE_PLAY_CODE_APK_SHA256"), SocketBinder.peerPid(fd));
+        if (c.code == null) {
+            c.code = verified;
+            System.err.println("[WL-PLAY-CODE] host_verified=true apk_count=" + verified.size());
+        } else {
+            try {
+                if (!c.code.sameFiles(verified))
+                    throw new SecurityException("remote APK set changed; client restart required");
+            } finally { verified.close(); }
         }
     }
 
