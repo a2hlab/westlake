@@ -1797,3 +1797,19 @@ and zero failed replies. The file already existed. This test made no new upload,
 edit or deletion. It verifies listing, opening and retention across a Drive
 process restart. The restart could reuse cached file data. Token renewal after
 expiry still needs a separate observation. [Board results](../tests/google-auth/full48/candidate89.json)
+
+## Uber trip link reaches sign-in
+
+The original Uber rider APK 4.653.10004 declares an HTTPS handler for
+`m.uber.com/looking`. On the board, choosing that APK for a link passed the
+complete URL to its exported RootActivity. The pickup and destination were
+fixed public places in San Francisco. Uber’s dedicated HAP had neither
+approximate nor precise location permission. The original Drive APK and both
+service hosts stayed alive under separate UIDs.
+
+On fresh app data, Uber displayed **Go anywhere with Uber**. **Continue with
+Google** opened **Sign in to continue to Uber** and asked for an email or phone.
+The trip link did not produce a fare or an authenticated rider session in this
+run. No ride was requested. This test selected the APK explicitly. System-wide
+HTTPS link dispatch remains a separate test. [Uber link format](https://developer.uber.com/docs/riders/ride-requests/tutorials/deep-links/introduction)
+and [board results](../tests/google-auth/full48/uber-trip-link89.json).

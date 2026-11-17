@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "test": "Uber rider destination and fare preview entry with fixed public locations",
+  "package": "com.ubercab",
+  "apkVersion": "4.653.10004",
+  "originalApkSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+  "lockedSplitCount": 28,
+  "runtimeAdapterBcpSha256": "cf393eee1f78b640552b6f2f21c286d78a0281a48ae748231294b2192f836dd4",
+  "dedicatedHostHapSha256": "d0c433786ee1e0ded614a7dfe16152be1c7840447ff208c3a56874d4664d158f",
+  "hostUid": 20010063,
+  "activePeerUids": {
+    "drive": 20010060,
+    "officialPlayServices": 20010061,
+    "microG": 20010056
+  },
+  "testSetup": {
+    "freshUberAppData": true,
+    "entry": "Operator-selected original APK, HTTPS VIEW, m.uber.com/looking",
+    "publicOrigin": "1455 Market Street, San Francisco",
+    "publicDestination": "Coit Tower, San Francisco",
+    "uberLinkReference": "https://developer.uber.com/docs/riders/ride-requests/tutorials/deep-links/introduction",
+    "uberHostLocationPermissions": {
+      "approximate": "denied",
+      "precise": "denied"
+    }
+  },
+  "observed": {
+    "manifestHttpsPathPrefix": "/looking",
+    "activity": "com.ubercab.presidio.app.core.root.RootActivity",
+    "fullFixedUrlInDispatchTrace": true,
+    "firstInteractivePage": "Go anywhere with Uber",
+    "continueWithGoogle": "Sign in to continue to Uber, with an Email or phone field",
+    "rideRequested": false,
+    "newAccountCreated": false
+  },
+  "acceptance": {
+    "publicTripLinkDispatchedInsideOriginalApk": true,
+    "systemWideAppLinkOwnershipVerified": false,
+    "newGoogleSignInCompletedThisRun": false,
+    "signedInUberSessionVerified": false,
+    "destinationSearchVerified": false,
+    "farePreviewVerified": false,
+    "restartAfterAuthenticatedSessionVerified": false
+  }
+}
