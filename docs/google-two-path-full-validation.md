@@ -1603,3 +1603,32 @@ returned-scope check continues to withhold the token containing the extra
 read-only labels permission.
 
 Sanitized board evidence is in [candidate83.json](../tests/google-auth/full48/candidate83.json).
+
+## Opening the Drive fixture and a public YouTube video
+
+The approved `Westlake-Drive-validation.txt` exists in the test account. The
+saved HTTP 200 response still matches all 107 approved bytes. The exact-name
+search in Drive had yielded no file, so this round opened the existing file’s
+ordinary HTTPS link with the original APK. Its manifest selected
+`DriveOpenUrlActivityAlias`. The process remained alive, but the screen still
+showed only the system bars at 99 seconds. One sample contained 22 account-token
+requests and 21 failed callbacks reporting `BadAuthentication`. The previous
+run identified an extra returned permission, `drive.labels.readonly`, for a
+broader request. The individual callbacks in this run do not identify the cause
+of each failure. No file was uploaded during this retest. App listing, file
+opening and token renewal remain open.
+
+| Original YouTube 21.43.523 test | Observed on the board |
+| --- | --- |
+| Sign in with Play services connected | YouTube displayed a sign-in error. GMS received the interactive request and logged a `SecurityException`. YouTube received a canceled result. The OH service host stayed in front, leaving a black screen. Bringing the client host to the foreground restored YouTube’s controls. |
+| Search and open Accounts | Searching for **Me at the zoo** stayed on a spinner. Accounts returned to the sign-in error. The source of the authentication rejection remains undetermined. |
+| Disconnect the client from Play services and the Store | YouTube prompted to install Play services. Dismissing the prompt closed its app window. The process and both service hosts stayed alive. |
+| Open the public watch link | The board’s implicit link resolver returned error `10103101` for the HTTPS URL. Explicitly choosing the original APK in the test launcher reached its exported URL activity. The trace then recorded 35 launches of the internal watch activity in one sample. The screen was black at 52 seconds. There was no observed playback. |
+
+The source-APK launcher accepts an optional `WESTLAKE_TEST_VIEW_HTTPS` when
+testing a specific APK. It resolves a browsable HTTPS intent against that APK’s
+manifest and selects an enabled, exported activity in the bound process that
+requires no component permission. An unrelated `.invalid` host was refused
+before any activity launch. This tests link handling *inside the chosen APK*.
+System-wide app-link registration is still unvalidated. The structured results
+are in [the board evidence](../tests/google-auth/full48/candidate84.json).

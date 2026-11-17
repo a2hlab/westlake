@@ -304,11 +304,49 @@ public class AppSchedulerBridge {
             // The launch transaction resumes the activity too, as Android's does when no OH ability
             // stands behind it (nativeOnScheduleLaunchAbility with no token). A resume of its own
             // after it was refused as a second resume, and still reported the activity resumed again.
-            nativeOnScheduleLaunchAbility(null, pkg, activityFqn, 1, null, null, 0L);
+            String want = null;
+            String link = System.getenv("WESTLAKE_TEST_VIEW_HTTPS");
+            if (link != null) {
+                // The source APK probe has no registered OH ability. Model an operator
+                // choosing this APK for a web link, using its own manifest filters.
+                activityFqn = resolveTestWebActivity(pkg, link);
+                if (activityFqn == null) {
+                    System.err.println("[DIRECT-LAUNCH] no eligible public web activity");
+                    return;
+                }
+                want = new org.json.JSONObject().put("action", Intent.ACTION_VIEW)
+                        .put("entities", new org.json.JSONArray().put(Intent.CATEGORY_BROWSABLE))
+                        .put("uri", link).toString();
+            }
+            nativeOnScheduleLaunchAbility(null, pkg, activityFqn, 1, null, want, 0L);
             System.err.println("[DIRECT-LAUNCH] scheduleLaunchAbility posted for " + activityFqn);
         } catch (Throwable t) {
             reportThrowable("[DIRECT-LAUNCH] FAILED", t);
         }
+    }
+
+    private static String resolveTestWebActivity(String pkg, String link) {
+        if (link.length() > 8192) return null;
+        try {
+            java.net.URI uri = new java.net.URI(link);
+            if (!"https".equals(uri.getScheme()) || uri.getHost() == null
+                    || uri.getRawUserInfo() != null) return null;
+        } catch (java.net.URISyntaxException invalid) {
+            return null;
+        }
+        Intent view = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link));
+        view.setPackage(pkg).addCategory(Intent.CATEGORY_BROWSABLE);
+        for (android.content.pm.ResolveInfo match :
+                adapter.packagemanager.SourcePackageRegistry.queryActivities(view, null,
+                        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)) {
+            android.content.pm.ActivityInfo activity = match.activityInfo;
+            if (activity != null && pkg.equals(activity.packageName) && activity.exported
+                    && activity.enabled && activity.applicationInfo.enabled
+                    && activity.permission == null && AppProcesses.self().equals(activity.processName)) {
+                return activity.name;
+            }
+        }
+        return null;
     }
     /**
      * ART sampling method trace, on request, for asking what the app's own code actually ran.
