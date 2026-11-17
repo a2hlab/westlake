@@ -14,6 +14,12 @@ pass. Neither app has a validated application account session or full applicatio
 pass. See the linked validation report for the exact evidence boundaries.
 Historical results below retain their original build boundaries.
 
+Candidate 59 separately grants the verified official GMS broker access to the
+existing account's Google ID. Drive receives account-ID replies after the GMS
+and microG restart, while its OAuth requests remain denied and its file list
+does not load. This metadata result is not an OAuth or application acceptance
+pass. See [candidate59.json](full48/candidate59.json) for the exact boundaries.
+
 This probe tests the official GMS token implementation and a separate direct
 microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-official-auth-validation.md) and

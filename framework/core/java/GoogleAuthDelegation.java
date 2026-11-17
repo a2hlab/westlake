@@ -178,7 +178,9 @@ public final class GoogleAuthDelegation {
         for (String known : new String[] {"origin mismatch", "origin not granted", "client id not granted", "scope not granted",
                 "opaque option not granted", "broker not granted", "key identity", "key query", "unsupported option",
                 "scope syntax", "unsupported service", "selection no longer active", "wrong witness peer",
-                "cache signer differs from origin", "origin signer mismatch", "origin launch mismatch", "origin is not live"}) {
+                "cache signer differs from origin", "origin signer mismatch", "origin launch mismatch", "origin is not live",
+                "silent options unsupported", "silent origin mismatch", "silent request unsupported",
+                "silent timing invalid", "silent oneway unsupported", "silent service unsupported"}) {
             if (known.equals(message)) detail += " reason=" + known.replace(' ', '_');
         }
         if (message != null) for (String code : new String[] {"BadAuthentication", "NeedsBrowser", "NeedsPermission",

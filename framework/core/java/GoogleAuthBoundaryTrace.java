@@ -4,6 +4,63 @@ package adapter.core;
 public final class GoogleAuthBoundaryTrace {
     private GoogleAuthBoundaryTrace() {}
 
+    /** Fixed public categories only; never print a service, scope, client ID or option value. */
+    public static String requestService(String service) {
+        if (service == null) return "request_kind=null";
+        if (service.length() > 4096) return "request_kind=oversize";
+        if (service.startsWith("audience:server:client_id:")) return "request_kind=id_token";
+        if (service.startsWith("oauth2:server:client_id:")) return "request_kind=server_code";
+        if (!service.startsWith("oauth2:")) {
+            if ("^^_account_id_^^".equals(service)) return "request_kind=account_id";
+            for (String known : new String[] {"ac2dm", "androidmarket", "writely"})
+                if (known.equals(service)) return "request_kind=" + known;
+            if ("https://docs.google.com/feeds".equals(service)) return "request_kind=docs_feed";
+            if ("https://docs.google.com/feeds/".equals(service)) return "request_kind=docs_feed_slash";
+            return "request_kind=other";
+        }
+        String body = service.substring(7).split("\\?", 2)[0];
+        java.util.Set<String> labels = new java.util.TreeSet<>();
+        int unknown = 0, empty = 0;
+        for (String scope : body.split(" ", -1)) {
+            if (scope.isEmpty()) { empty++; continue; }
+            String label = null;
+            for (String known : new String[] {"openid", "email", "profile"})
+                if (known.equals(scope)) label = known;
+            for (String known : new String[] {"drive", "drive.readonly", "drive.file", "drive.appdata",
+                    "drive.metadata.readonly", "espresso", "photos.image.readonly", "cloud_search.query",
+                    "workspace_ui", "userinfo.email", "userinfo.profile", "user.birthday.read",
+                    "youtube", "youtube.readonly", "gmail.readonly", "notifications", "subscriptions",
+                    "supportcontent", "apps.growth.promotion.read", "apps.signup", "activity", "cloudprint",
+                    "discussions", "discussions.readonly", "docs", "drive.activity", "drive.activity.readonly",
+                    "drive.apps", "drive.apps.readonly", "drive.categories.readonly", "drive.meet.readonly",
+                    "drive.metadata", "drive.photos.readonly", "drive.resource", "drive.scripts", "games",
+                    "games_lite", "memento", "peopleapi.readonly", "peopleapi.readwrite", "spreadsheets", "vouchers"})
+                if (("https://www.googleapis.com/auth/" + known).equals(scope)) label = known.replace('.', '_');
+            if ("https://docs.google.com/feeds".equals(scope)) label = "docs_feed";
+            if ("https://docs.google.com/feeds/".equals(scope)) label = "docs_feed_slash";
+            if (label == null) unknown++; else labels.add(label);
+        }
+        return "request_kind=oauth2 scope_categories=" + (labels.isEmpty() ? "none" : String.join(",", labels))
+                + " unknown_scope_count=" + unknown + " empty_scope_count=" + empty;
+    }
+
+    public static String requestExtras(java.util.Collection<String> keys) {
+        if (keys == null) return "extras_categories=none unknown_extra_count=0";
+        java.util.Set<String> labels = new java.util.TreeSet<>();
+        int unknown = 0;
+        for (String key : keys) {
+            String label = null;
+            for (String known : new String[] {"androidPackageName", "clientPackageName",
+                    "service_connection_start_time_millis", "handle_notification", "suppressProgressScreen",
+                    "callerUid", "callerPid", "isCalledFromAccountManager", "request_visible_actions",
+                    "forceRefresh", "TokenData", "oauth2_client_id", "scope", "authAccount"})
+                if (known.equals(key)) label = known;
+            if (label == null) unknown++; else labels.add(label);
+        }
+        return "extras_categories=" + (labels.isEmpty() ? "none" : String.join(",", labels))
+                + " unknown_extra_count=" + unknown;
+    }
+
     /** Private, opt-in test correlation only; never a token, claim, or authorization decision.
      * The inspected FotMob TokenData serializer uses SafeParcelable object 20293, string field 2.
      * Unknown/malformed encodings fail closed. Callers must enforce the private-log guards.
@@ -105,7 +162,10 @@ public final class GoogleAuthBoundaryTrace {
         String owner = "org.westlake.googlebootstrap.probe".equals(fields[0]) ? "probe"
                 : "com.spotify.music".equals(fields[0]) ? "spotify"
                 : "com.google.android.gms".equals(fields[0]) ? "gms"
-                : "com.android.vending".equals(fields[0]) ? "store" : "other";
+                : "com.android.vending".equals(fields[0]) ? "store"
+                : "com.google.android.apps.docs".equals(fields[0]) ? "drive"
+                : "com.google.android.gm".equals(fields[0]) ? "gmail"
+                : "com.google.android.youtube".equals(fields[0]) ? "youtube" : "other";
         String scope = fields[2].split("\\?", 2)[0];
         String kind = "ac2dm".equals(scope) ? "ac2dm"
                 : "androidmarket".equals(scope) ? "androidmarket"
@@ -116,6 +176,6 @@ public final class GoogleAuthBoundaryTrace {
         return "cache_shape=package_signer_scope owner=" + owner
                 + " signer_sha1_shape=" + fields[1].matches("[0-9a-fA-F]{40}")
                 + " scope_kind=" + kind + " options_present=" + (fields[2].indexOf('?') >= 0)
-                + options(fields[2]);
+                + options(fields[2]) + " " + requestService(fields[2]);
     }
 }

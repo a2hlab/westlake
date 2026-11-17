@@ -24,6 +24,25 @@ public final class GoogleAuthPolicyTest {
         deny(() -> GoogleAuthPolicy.require(grants, packageName, certificate, "AC2DM"));
         grants.remove("client." + packageName + ".sha256");
         deny(() -> GoogleAuthPolicy.require(grants, packageName, certificate, "ac2dm"));
+        String broker = "com.google.android.gms";
+        grants.setProperty("client." + broker + ".sha256", certificate);
+        grants.setProperty("delegation.broker.sha256", certificate);
+        deny(() -> GoogleAuthPolicy.requireAccountId(grants, broker, certificate));
+        grants.setProperty("client." + broker + ".account_id", "true");
+        GoogleAuthPolicy.requireAccountId(grants, broker, certificate); passed++;
+        deny(() -> GoogleAuthPolicy.require(grants, broker, certificate, "oauth2:openid"));
+        deny(() -> GoogleAuthPolicy.requireAccountId(grants, broker, "b".repeat(64)));
+        grants.setProperty("client." + packageName + ".sha256", certificate);
+        grants.setProperty("client." + packageName + ".account_id", "true");
+        deny(() -> GoogleAuthPolicy.requireAccountId(grants, packageName, certificate));
+        grants.setProperty("delegation.broker.sha256", "b".repeat(64));
+        deny(() -> GoogleAuthPolicy.requireAccountId(grants, broker, certificate));
+        grants.setProperty("delegation.broker.sha256", certificate);
+        grants.setProperty("client." + broker + ".account_id", "false");
+        deny(() -> GoogleAuthPolicy.requireAccountId(grants, broker, certificate));
+        grants.setProperty("client." + broker + ".account_id", "true");
+        grants.remove("client." + broker + ".sha256");
+        deny(() -> GoogleAuthPolicy.requireAccountId(grants, broker, certificate));
         System.out.println("GOOGLE_AUTH_POLICY_PASS " + passed);
     }
 }

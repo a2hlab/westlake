@@ -6,12 +6,13 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest observed result: Wattpad reuses its candidate-52 Google authorization
-after restarting both GMS and the client, and reaches its separate account-creation form. Candidate
-54 also localizes the intermittent native startup exit to OpenHarmony's watchdog
-removing ART's inherited signal blocks, and preserves those blocks. No Wattpad
-account has been created; reading, an app session and full application acceptance
-remain unvalidated. See the candidate-54 section for exact test boundaries.
+Latest observed result: candidate 59 supplies the Google account ID to the pinned
+official GMS broker through a separate, explicitly granted metadata operation.
+Drive now receives three successful account-ID replies, then encounters denied
+OAuth requests. Its file list remains unvalidated. Earlier, Wattpad reused its
+Google authorization after restarting GMS and the client, and candidate 54
+fixed its traced native watchdog signal-mask exit. Spotify and Wattpad still
+stop at separate signup. No full application pass is claimed.
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -262,3 +263,75 @@ expiry renewal and production per-app isolation remain incomplete.
 
 The native observer and controlled-library probe are documented in
 [native watchdog signal validation](native-watchdog-signal-validation.md).
+
+## Candidates 55–59: Drive account identity and OAuth are separate gates
+
+Drive's original APK starts with its existing account and Files tab, but the
+candidate-55/57 runs cannot refresh the file list. Fixed-category diagnostics
+on the verified legacy-auth transaction identify five requests for
+`^^_account_id_^^`. The delegation parser rejects that service as unsupported.
+The other observed requests are OAuth scopes for `supportcontent` and
+`notifications`; their request format is accepted, but token reads are denied.
+Drive has neither a saved OAuth account-selection record nor a provider scope
+grant. These observations do not establish a Google server refusal.
+
+The account-ID request is distinct from an OAuth access token. In the inspected
+microG implementation, `AuthManager.requestAuth` handles it by reading the
+account's `GoogleUserId` metadata. Westlake previously withheld that field along
+with other user data. Candidate 59 adds an explicit `ACCOUNT_ID` operation to
+the existing private auth-provider interface, with these boundaries:
+
+- Only `com.google.android.gms`, matching both the configured client certificate
+  and broker certificate, can use it. The provider additionally requires
+  `client.com.google.android.gms.account_id=true`.
+- The official GMS host must opt in with
+  `WESTLAKE_GOOGLE_ACCOUNT_ID_METADATA=1`, alongside enforced identity,
+  delegation and private logging. Other account metadata retains its existing
+  behavior. A missing grant or unavailable provider withholds the ID.
+- The operation accepts one exact existing Google account, rejects extra parcel
+  data and one-way calls, rechecks the grant and account before replying, and
+  returns only a bounded numeric identifier. It creates no OAuth selection,
+  adds no OAuth scope and provides no password or reusable credential.
+- Diagnostics emit fixed categories and presence booleans. Account identifiers,
+  unknown scope values, tokens and request-option values are not logged.
+
+The updated provider policy passes 16 host checks, including absent permission,
+wrong signer, wrong broker, a different client with the same certificate,
+revocation, and rejection of OAuth access despite the metadata grant. Existing
+delegation-policy, ID-session and OAuth-session suites pass 36, 23 and 44 checks;
+the diagnostic privacy suite also passes. Adapter packaging, boot-image build
+and board preload succeed without class-initialization failures.
+
+Official GMS and microG restart with the candidate-59 adapter in their existing
+runtimes. Drive retains its candidate-55 diagnostic adapter and original APK;
+its native watchdog fix from candidate 54 remains installed. The provider's
+older native runtime is preserved explicitly. No account or application data is
+cleared. The only provider-grant addition is the broker account-ID permission.
+
+In the recorded post-restart window, the provider serves 15 account-ID reads to
+official GMS, and GMS records 15 successful metadata reads. Three owner-tagged
+Drive account-ID requests align with three successful legacy-auth replies
+containing `authtoken`/`tokenDetails`. Those fields carry the account-ID result
+for this API; their presence alone must not be counted as an OAuth token or a
+successful application session. The delegated provider issues no OAuth token
+for Drive in this window.
+
+Drive then makes two `peopleapi.readonly`, two `supportcontent`, and one
+`notifications` OAuth request. Their formats pass validation, but all five
+reads remain denied; the client receives `BadAuthentication` with recovery
+intents. Several GMS service connections also retain status 9. No additional
+scope or service exception was granted in this test. The observed Files view
+still spins; file listing, file opening, renewal and restart acceptance remain
+incomplete. Further work must distinguish account permission/recovery from
+service eligibility and other local sync errors.
+
+All three hosts remain alive. Certification status stays 3 without an override,
+and the official check-in identity is unchanged. The provider still has one
+Google account with its ID metadata. Its account-store bytes changed during
+restart, so byte-for-byte store preservation is **not** claimed; a fresh OAuth
+renewal after this provider restart also remains untested. Shared client host
+UIDs still prevent a production per-app isolation claim.
+
+Exact build pins and sanitized results are in
+[candidate59.json](../tests/google-auth/full48/candidate59.json). Raw captures
+and configuration backups remain private.

@@ -21,14 +21,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Opt-in, token-only microG provider. Separate package namespaces retain their own APK and data.
+ * Opt-in microG token provider with a separately granted broker account-ID operation.
+ * Separate package namespaces retain their own APK and data.
  * Launch attestation and certificate checks are mandatory in PlayServicesChannel before this binder
  * can be obtained. No operation exposes the reusable credential, arbitrary user data or token cache.
  * Only the explicitly granted account scopes are supported; other auth protocols fail closed.
  */
 public final class GoogleAuthProxy {
     public static final String DESCRIPTOR = "org.westlake.IGoogleAuthProxy.v1";
-    private static final int ACCOUNTS = 1, TOKEN = 2, INVALIDATE = 3, FEATURES = 4;
+    private static final int ACCOUNTS = 1, TOKEN = 2, INVALIDATE = 3, FEATURES = 4, ACCOUNT_ID = 5;
     private static final ExecutorService REQUESTS = Executors.newCachedThreadPool();
     private static final AtomicLong IDS = new AtomicLong();
     private static final Object TOKEN_LOCK = new Object();
@@ -114,6 +115,23 @@ public final class GoogleAuthProxy {
             try {
                 Properties policy = grants(); // revocation takes effect without restarting the provider
                 GoogleAuthPolicy.require(policy, owner, sha256, null);
+                if (code == ACCOUNT_ID) {
+                    GoogleAuthPolicy.requireAccountId(policy, owner, sha256);
+                    Account requested = data.readTypedObject(Account.CREATOR);
+                    if (requested == null || data.dataAvail() != 0 || (flags & IBinder.FLAG_ONEWAY) != 0)
+                        throw new SecurityException("invalid account ID request");
+                    Account selected = account(requested);
+                    String id = AccountManager.get(ActivityThread.currentApplication())
+                            .getUserData(selected, "GoogleUserId");
+                    if (id != null && !id.matches("[0-9]{1,32}"))
+                        throw new SecurityException("invalid account ID metadata");
+                    GoogleAuthPolicy.requireAccountId(grants(), owner, sha256);
+                    account(selected); // Account deletion also revokes the read.
+                    reply.writeNoException(); reply.writeString(id);
+                    event("request=" + request + " operation=account_id owner=" + owner
+                            + " metadata_present=" + (id != null));
+                    return true;
+                }
                 if (code == ACCOUNTS) {
                     Account selected = account(null);
                     reply.writeNoException(); reply.writeTypedArray(new Account[] {selected}, 0);
@@ -288,6 +306,18 @@ public final class GoogleAuthProxy {
         try { return reply.readBoolean(); } finally { reply.recycle(); }
     }
 
+    private static String accountId(Account account) throws Exception {
+        if (account == null || !"com.google".equals(account.type))
+            throw new SecurityException("invalid account ID account");
+        Parcel reply = call(ACCOUNT_ID, data -> data.writeTypedObject(account, 0));
+        try {
+            String id = reply.readString();
+            if (reply.dataAvail() != 0 || (id != null && !id.matches("[0-9]{1,32}")))
+                throw new SecurityException("invalid account ID reply");
+            return id;
+        } finally { reply.recycle(); }
+    }
+
     private static void accountFeatures(String method, Object[] args) {
         IAccountManagerResponse callback = (IAccountManagerResponse) args[0];
         REQUESTS.execute(() -> {
@@ -415,6 +445,20 @@ public final class GoogleAuthProxy {
                 case "peekAuthToken":
                 case "getUserData":
                     traceBoundary(method, args);
+                    if ("getUserData".equals(method) && "GoogleUserId".equals(args[1])
+                            && "1".equals(System.getenv("WESTLAKE_GOOGLE_ACCOUNT_ID_METADATA"))
+                            && GoogleAuthDelegation.enabled() && !provider()
+                            && "com.google.android.gms".equals(ActivityThread.currentPackageName())) {
+                        try {
+                            String id = accountId((Account) args[0]);
+                            event("client_account_id=true metadata_present=" + (id != null));
+                            return id;
+                        } catch (Exception unavailable) {
+                            // A missing grant, removed account or old/offline provider keeps the value withheld.
+                            event("client_account_id=false failed=" + unavailable.getClass().getSimpleName());
+                            return null;
+                        }
+                    }
                     if (GoogleAuthDelegation.enabled()) {
                         String value = GoogleAuthDelegation.read(method, (Account) args[0], (String) args[1]);
                         if (value != null) return value;

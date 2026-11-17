@@ -70,6 +70,11 @@ public final class GoogleAuthOperations {
             operation.account = data.readTypedObject(Account.CREATOR);
             operation.service = data.readString();
             Bundle extras = data.readTypedObject(Bundle.CREATOR);
+            if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))) {
+                GoogleAuthDelegation.event("silent_request_metadata=true owner=" + origin.packageName + " "
+                        + adapter.core.GoogleAuthBoundaryTrace.requestService(operation.service) + " "
+                        + adapter.core.GoogleAuthBoundaryTrace.requestExtras(extras == null ? null : extras.keySet()));
+            }
             if (data.dataAvail() != 0 || operation.account == null || !"com.google".equals(operation.account.type)
                     || operation.service == null || operation.service.length() > 512)
                 throw new SecurityException("silent request unsupported");
@@ -86,6 +91,8 @@ public final class GoogleAuthOperations {
             }
             operation.epoch = generation(origin.packageName);
             operation.accepted = true;
+            if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE")))
+                GoogleAuthDelegation.event("silent_request_accepted=true owner=" + origin.packageName);
         } catch (Exception error) {
             // Still install a denying scope so an unsupported foreign call cannot borrow a live picker.
             GoogleAuthDelegation.event("silent_request_denied=true " + GoogleAuthDelegation.failure(error));
