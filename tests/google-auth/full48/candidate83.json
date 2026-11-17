@@ -1,0 +1,164 @@
+{
+  "candidate": 83,
+  "phase": "Drive fixture search and Maps startup, tiles and place search on OpenHarmony",
+  "maps": {
+    "package": "com.google.android.apps.maps",
+    "version": "26.43.00.1002020710",
+    "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+    "clientAdapterSha256": "840302552e0918da7a0f99a9870e21627139112b223e317871fca2e02ff74f9a",
+    "clientBuild": 47,
+    "officialServiceBuild": 81,
+    "providerBuild": 81,
+    "sameApkAndAppDataAcrossRuns": true,
+    "firstConnectedRun": {
+      "blackScreenAtCapture": true,
+      "threadsInDump": 28,
+      "mainWaitingOnMapsFuture": true,
+      "workerWaitingOnAccountIdFuture": true,
+      "workerWaitingOnServiceConnectionQueue": true,
+      "accountIdBinderRequestReachedInBlockedStack": false,
+      "backendRejectionEstablished": false
+    },
+    "disconnectedControl": {
+      "changedClientSettings": [
+        "removed WESTLAKE_PLAY_SERVICES_CONNECT",
+        "removed WESTLAKE_PLAY_STORE_CONNECT"
+      ],
+      "onboardingRendered": true,
+      "installServicesDialogDismissed": true,
+      "skippedSignIn": true,
+      "labeledNorthAmericaMapRendered": true,
+      "panRevealedGreenlandIcelandAndAtlantic": true,
+      "subsequentLaunchQuery": "Hong Kong Central Station",
+      "publicQuerySubmittedInApp": true,
+      "mapMovedToCentralHongKong": true,
+      "observedLabels": [
+        "LANDMARK",
+        "HSBC Building",
+        "St John’s Cathedral",
+        "Hong Kong Park"
+      ],
+      "transitStopsRendered": true,
+      "textSearchWithServiceLinksDisconnected": true
+    },
+    "connectedAfterSkippingOnboarding": {
+      "exploreRendered": true,
+      "labeledMapRendered": true,
+      "publicQuery": "Hong Kong Central Station",
+      "queryEntered": true,
+      "placeReturned": false,
+      "visibleError": "Something went wrong. Check your internet connection and try again.",
+      "startupFromCleanAppDataVerified": false,
+      "tileSourceCacheOrNetworkDistinguished": false
+    },
+    "connectedNetworkExperiment": {
+      "singleAdditionalTarget": "libmainlinecronet.121.0.6167.71.so",
+      "targetSha256": "89fba013d87bf05bf5953615426b6ba4e79dabc0d317d01be942168774f74fde",
+      "adapterTraceLinesBefore": 0,
+      "adapterTraceLinesWithTarget": 51,
+      "queryFailureReproduced": true,
+      "changeRecommendedOnThisEvidence": false
+    },
+    "realLocationVerified": false,
+    "routePreviewVerified": false,
+    "privateLogControl": {
+      "clientDiagnosticNativeSha256": "8e5d7304fc4aa46db3c1c4deba45dfcd69b9839eeac5762e27095492a0280a5d",
+      "originalJavaAdapterRetained": true,
+      "mapsGaiaTokenWarningTag": "GMM-GaiaAuthToken",
+      "recoverableGoogleAuthExceptionMentionsBeforeSearchSubmission": 38,
+      "recoverableGoogleAuthExceptionMentionsAfterSearchSubmission": 43,
+      "lastSegmentBadAuthenticationMentions": 5,
+      "lastSegmentIoExceptionOrigin": "ApkAssets.nativeLoad / ResourcesManager.loadApkAssets",
+      "rawAccountIdentifiersPublished": false,
+      "causeOrRejectingPartyEstablished": false,
+      "packagesNamedInResourceWarnings": [
+        "official GMS base APK",
+        "English language split",
+        "xxhdpi density split"
+      ]
+    },
+    "currentJavaWithOldNativeLibraries": {
+      "adapterSha256": "5016be949c97bafd80d3bdf84218ee2fa03798bc68f91cb3eb4873f7f827c7b0",
+      "verifiedOfficialPublicApkCount": 9,
+      "childExited": true,
+      "terminalObservation": "SIGTRAP in the official CronetDynamite split during startup",
+      "publicCodeOnlyInsideClientNamespace": true,
+      "acceptedAsWorkingCurrentRuntime": false
+    },
+    "matchedCurrentRuntime": {
+      "adapterSha256": "5016be949c97bafd80d3bdf84218ee2fa03798bc68f91cb3eb4873f7f827c7b0",
+      "frameworkSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+      "androidRuntimeSha256": "8e5d7304fc4aa46db3c1c4deba45dfcd69b9839eeac5762e27095492a0280a5d",
+      "bionicShimSha256": "3d6375f177816c403038b026e4656bd75605b9ac5e8ed51c9bac333f9fd4b0a7",
+      "networkAdapterSha256": "6e265ecbde12dd30acc853e1ed84c232ae6ecbb081b1d49b6b7991a66849afa1",
+      "verifiedOfficialPublicApkCount": 9,
+      "exploreRendered": true,
+      "labeledTilesRendered": true,
+      "priorCronetTrapSeenInObservedWindow": false,
+      "newQuery": "Hong Kong City Hall",
+      "placeReturned": false,
+      "screenReportedConnectionError": true,
+      "applicationLogMarkersBeforeQuery": {
+        "GMM-GaiaAuthToken:": 14,
+        "UserRecoverableAuthException": 14,
+        "BadAuthentication": 14,
+        "ERR_NAME_NOT_RESOLVED": 0,
+        "PERMISSION_DENIED": 0,
+        "DEADLINE_EXCEEDED": 0,
+        "UNAUTHENTICATED": 0,
+        "CronetException": 0,
+        "ERR_TIMED_OUT": 0,
+        "SSLHandshakeException": 0,
+        "java.io.IOException": 0,
+        "ApkAssets.nativeLoad": 0,
+        "FATAL EXCEPTION": 0
+      },
+      "applicationLogMarkersAfterQuery": {
+        "GMM-GaiaAuthToken:": 29,
+        "UserRecoverableAuthException": 29,
+        "BadAuthentication": 29,
+        "ERR_NAME_NOT_RESOLVED": 0,
+        "PERMISSION_DENIED": 0,
+        "DEADLINE_EXCEEDED": 0,
+        "UNAUTHENTICATED": 0,
+        "CronetException": 0,
+        "ERR_TIMED_OUT": 0,
+        "SSLHandshakeException": 0,
+        "java.io.IOException": 0,
+        "ApkAssets.nativeLoad": 0,
+        "FATAL EXCEPTION": 0
+      },
+      "changesToAccountGrants": false
+    },
+    "locationConfiguration": {
+      "clientGnssEnabled": false,
+      "hostDeclaresForegroundLocation": true,
+      "hostDeclaresApproximateLocation": true,
+      "ohLocatorAndGnssSystemAbilitiesListed": true,
+      "physicalFixObserved": false
+    },
+    "sameConnectedRuntimeWithAccountDeselected": {
+      "accountSelection": "Maps > profile > Switch account > Use this app without an account",
+      "gmsAndProviderRemainedRunning": true,
+      "appChangedAccountSelectionViaItsOwnUi": true,
+      "mapSearchQuery": "Hong Kong City Hall",
+      "sameQueryPreviouslyFailedWithAccountSelected": true,
+      "observed": "Map moved to Central, Hong Kong and rendered a red pin in the City Hall block on Edinburgh Place, by City Hall Public Library and City Gallery.",
+      "placeSearchVerified": true,
+      "authenticatedSearchVerified": false,
+      "certificationOrRegistrationFailureEstablished": false
+    }
+  },
+  "drive": {
+    "fileName": "Westlake-Drive-validation.txt",
+    "existingFixtureReusedForSearch": true,
+    "backendFixtureReadPreviouslyVerified": true,
+    "exactFileNameEnteredInOriginalApp": true,
+    "filesTabMessage": "Can’t refresh",
+    "fileListed": false,
+    "fileOpened": false,
+    "approvedScopeCount": 27,
+    "additionalReadOnlyLabelScopePending": true
+  },
+  "fullValidationComplete": false
+}

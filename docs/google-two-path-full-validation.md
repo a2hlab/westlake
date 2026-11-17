@@ -1553,3 +1553,45 @@ is not a successful AccountManager callback or an application file-open result.
 The original Drive UI still cannot refresh. Positive bridge token delivery,
 original-app listing/opening, actual renewal and restart acceptance remain open.
 Sanitized evidence is in [candidate82.json](../tests/google-auth/full48/candidate82.json).
+
+## Board retest of Maps and the Drive fixture
+
+The original Maps APK 26.43.00.1002020710 resolved the public search **Hong
+Kong Central Station** with its Play services and Play Store connections
+disabled. The map moved from North America to Central and displayed LANDMARK,
+the HSBC Building, St John’s Cathedral, Hong Kong Park and local transit stops.
+This used the app’s search field and a tap on the result inside Maps. The board
+kept ordinary network access throughout the experiment.
+
+| Maps test | On-board result |
+| --- | --- |
+| Original connected startup on client build 47 | A black screen. The UI thread was waiting on a Maps initialization future. One worker was waiting for an account ID and another was waiting for the Android service connection before it could make the corresponding Binder call. |
+| Same app data and APK, both service connections disabled | The original app offered sign-in. After dismissing the install-services dialog and choosing **Skip**, it drew a labeled map. A horizontal pan revealed Greenland, Iceland and the Atlantic. |
+| Restore both connections and relaunch after onboarding | Explore and labeled tiles appeared. Searching for Hong Kong Central Station produced the app’s connection-error dialog. A further launch reproduced the failure with the platform Cronet library explicitly selected for Bionic network compatibility. |
+| Repeat the connected search with private diagnostic logging | Maps’ Gaia token warnings included five more recoverable authentication errors across submission. The recent log contained `BadAuthentication`. The repeated Java I/O exceptions originated in resource loading and referenced the official GMS base APK and two configuration splits. The warning does not identify which side rejected the account operation. |
+
+The mixed-version control loaded nine verified public GMS APKs using the current
+Java adapter and stopped in the CronetDynamite split with `SIGTRAP` on the older
+native stack. With the matching Bionic shim and network adapter, Maps reached
+Explore and drew tiles. The diagnostic log showed zero APK asset-load errors
+through a fresh search for **Hong Kong City Hall**. The app still displayed the
+connection error. Recoverable authentication warnings increased from 14 to 29
+across the query window. This run kept the client, official GMS and microG in
+their existing hosts and made no account-grant changes.
+
+**The same query succeeded with both service connections active after changing
+the account selection in Maps.** In the profile menu, **Switch account → Use
+this app without an account** replaced the account avatar with the guest icon.
+Hong Kong City Hall then produced a red pin on Edinburgh Place alongside City
+Hall Public Library and City Gallery. The connected profile with the test
+account selected had shown the connection-error dialog for that same query.
+The test establishes guest place search on this board. Signed-in search and the
+origin of the authentication refusal remain open.
+
+Drive’s Files tab still showed **Can’t refresh**. The original app accepted
+`Westlake-Drive-validation.txt` in search, but never displayed or opened the
+file. The earlier Drive API check read the approved 107 bytes. The local
+returned-scope check continues to withhold the token containing the extra
+read-only labels permission.
+
+Sanitized board evidence is in [candidate83.json](../tests/google-auth/full48/candidate83.json).
