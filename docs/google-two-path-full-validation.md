@@ -6,7 +6,10 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 74 validates FotMob's Google favorite-team cloud round
+Latest result: candidate 75 adds fresh FotMob Google app sign-in through the
+official account chooser and persistence after another client restart. The
+token saved by the app is independently verified with Google's signing keys.
+Candidate 74 validates FotMob's Google favorite-team cloud round
 trip and silent delivery of a fresh Google-signed ID token after its saved login
 token expired. An app-side reply fingerprint matches the independently verified,
 unexpired token from microG. The original APK uploads a favorite change and
@@ -1057,3 +1060,38 @@ login on this exact build, general window routing, other planned applications
 and production isolation remain open. No full application pass is added.
 
 See [candidate74.json](../tests/google-auth/full48/candidate74.json).
+
+### Candidate 75: fresh Google app sign-in on the repaired runtime
+
+Using the same original APK and artifacts as candidate 74, FotMob's own Sign
+out action clears its login provider and shows its Sign in button. The ordinary
+Google sign-in button opens the official GMS account chooser. After a loading
+delay, selecting the already authorized Google test account returns a successful
+activity result (`RESULT_OK`, -1) to FotMob and restores its signed-in screen.
+No separate signup form, additional scope grant or account-password entry is
+needed. This is fresh application sign-in with the existing microG account,
+not a new microG account-registration test.
+
+The auth trace records FotMob-owned OAuth and ID-token issuance and a new saved
+selection grant. FotMob stores a different ID token from the expired pretest
+value. Its signature verifies with Google's public keys; its issuer, original
+account subject and FotMob audience match, and it is newly issued and unexpired
+at board time. These checks examine the app's saved token, independently of
+the sign-in screen and service handshake.
+
+After stopping the client with process identity checks, another process starts
+with the same account ID, verified login token and favorite files. Its signed-in
+UI returns without another account chooser. This closes the fresh-app-sign-in
+check left open in candidate 74. Together, candidates 74 and 75 cover FotMob's
+planned Google sign-in, cloud preference round trip, fresh silent token delivery
+and client-restart behavior on the repaired runtime.
+
+The device remains at uncertified policy 3 without an override. Check-in
+identity and provider grants remain unchanged, with one provider account and
+separate live official-GMS/microG hosts. Some GMS service status-9 replies and
+the version gap remain; general window behavior, every expiry/revocation case,
+the other planned apps and production isolation are not established. No full
+application pass is added. Test favorites remain pending cleanup. No production
+code change or rebuild is required for this follow-up.
+
+See [candidate75.json](../tests/google-auth/full48/candidate75.json).

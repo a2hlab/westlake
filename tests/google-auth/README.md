@@ -32,6 +32,10 @@ signing keys. The app restores both cloud favorites after local cache removal.
 The provider account store changes during renewal; certification stays 3,
 check-in identity and grants stay unchanged. This is feature validation, not a
 full application or production-isolation pass. See [candidate74.json](full48/candidate74.json).
+Candidate 75 adds fresh FotMob Google app sign-in through the official chooser,
+verification of the token saved by the app, and another successful client
+restart. Existing Google account authorization is reused; no new microG account
+registration or separate app signup is performed. See [candidate75.json](full48/candidate75.json).
 
 Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
 The board now accepts the request into mediation while continuing to deny

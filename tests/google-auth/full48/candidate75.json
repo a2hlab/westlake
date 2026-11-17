@@ -1,0 +1,77 @@
+{
+  "candidate": 75,
+  "phase": "Fresh FotMob Google app sign-in and restart on the repaired runtime",
+  "baseCommit": "95a48896012b6fcffd0ead8f7f0fe50a873b9fd9",
+  "newImplementationChange": false,
+  "rebuiltArtifacts": false,
+  "artifactPins": "candidate74.json",
+  "app": {
+    "package": "com.mobilefootie.wc2010",
+    "originalApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "originalApkModified": false,
+    "clientJavaAdapter": 71,
+    "nativeAndroidRuntime": 70,
+    "nativeShim": "Current repository build validated in candidate72"
+  },
+  "interactiveSignIn": {
+    "originalAppSignOutActionUsed": true,
+    "signedOutPreferenceAndUiObserved": true,
+    "accountDeletionSelected": false,
+    "originalGoogleSignInButtonUsed": true,
+    "officialGmsAccountChooserShown": true,
+    "existingAuthorizedGoogleTestAccountSelected": true,
+    "successfulActivityResultCode": -1,
+    "returnedToOriginalAppSignedInScreen": true,
+    "separateSignupFormShown": false,
+    "googleAccountPasswordReentered": false,
+    "freshMicrogAccountLoginTested": false,
+    "newScopeGrantsAdded": false,
+    "savedSessionGrantObservedForFotmob": true,
+    "googleOauthAndIdTokenIssuanceObservedForFotmob": true
+  },
+  "appSavedToken": {
+    "differentFromExpiredPretestToken": true,
+    "googleRs256SignatureVerified": true,
+    "googleIssuerAccepted": true,
+    "subjectMatchesOriginalAccount": true,
+    "audienceMatchesOriginalFotmobToken": true,
+    "issuedAfterInteractiveTestBegan": true,
+    "unexpiredAtBoardTime": true,
+    "rawTokenClaimsAndAccountIdentifiersPublished": false
+  },
+  "restart": {
+    "clientStoppedWithIdentityChecks": true,
+    "freshClientProcess": true,
+    "sameAccountId": true,
+    "sameVerifiedGoogleSignedLoginToken": true,
+    "favoriteAndOrderFilesUnchanged": true,
+    "signedInUiRetained": true,
+    "newCredentialsOrAccountChoiceNeeded": false
+  },
+  "preservation": {
+    "uncertifiedPolicyStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "providerAccountCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "separateOfficialGmsAndMicrogHosts": true
+  },
+  "combinedFotmobGoogleEvidence": {
+    "freshAppSignIn": "candidate75",
+    "cloudPreferenceRoundTrip": "candidate74",
+    "freshSilentIdTokenDeliveryAfterSavedTokenExpiry": "candidate74",
+    "restartPersistenceAfterFreshSignIn": "candidate75"
+  },
+  "limitations": {
+    "someGmsServiceStatus9RepliesRemain": true,
+    "gmsVersionGapRemains": true,
+    "generalWindowRoutingPassed": false,
+    "allExpiryAndRevocationCasesValidated": false,
+    "productionIsolationValidated": false,
+    "fullApplicationPassed": false,
+    "allPlannedApplicationsPassed": false,
+    "temporaryFavoriteCleanupComplete": false
+  }
+}
