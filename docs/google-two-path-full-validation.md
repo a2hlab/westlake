@@ -6,11 +6,12 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest observed result: candidate 52 supplies Wattpad's follow-up OAuth access
-token after Google's successful interactive return. Wattpad reaches its separate
-account-creation form. No Wattpad account has been created; reading, an app
-session and full application acceptance remain unvalidated. See the candidate
-52 follow-up below for the manual recovery and startup limitations.
+Latest observed result: Wattpad reuses its candidate-52 Google authorization
+after restarting both GMS and the client, and reaches its separate account-creation form. Candidate
+54 also localizes the intermittent native startup exit to OpenHarmony's watchdog
+removing ART's inherited signal blocks, and preserves those blocks. No Wattpad
+account has been created; reading, an app session and full application acceptance
+remain unvalidated. See the candidate-54 section for exact test boundaries.
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -199,3 +200,65 @@ artifact was deployed in these comparisons.
 Exact sanitized observations are in
 [candidate52-followup.json](../tests/google-auth/full48/candidate52-followup.json).
 Raw logs, account screenshots and the preference backups remain private.
+
+## Candidate 54: retain ART's signal blocks in the OpenHarmony watchdog
+
+A surviving candidate-52 client restart reuses the saved authorization without
+clearing preferences or displaying an account chooser. Official GMS records
+`silent_token=true owner=wp.wattpad`, the provider returns an OAuth token, and the
+client receives a token-bearing reply. Wattpad reaches its separate signup form.
+This establishes authorization reuse after a client restart, not an application
+account session or expired-token renewal.
+
+Two further unmodified starts terminate with SIGPIPE before authentication. A
+signal-only native observer catches one in `OS_DfxWatchdog`. Its stack resolves
+to the board's `pthread_sigmask` returning from `rt_sigprocmask`, called by
+`OHOS::HiviewDFX::WatchdogInner::Start()`. The actual board library queries the
+inherited mask, removes its sampler signal from that set, and uses `SIG_UNBLOCK`
+on the remaining set. ART's `Runtime::BlockSignals` deliberately blocks SIGPIPE,
+SIGQUIT and SIGUSR1. The observed delivery occurs when the watchdog removes those
+blocks. The original signal-generation site has not been identified; this trace
+does not establish a failing `write` call or a deliberate watchdog termination.
+
+The shim now preserves these inherited ART blocks only for `SIG_UNBLOCK` from
+`libhicollie.z.so` on `OS_DfxWatchdog` in an Android launch with `ASX_APK_PATH`.
+Other signals and callers retain their requested semantics. A signal already
+unblocked remains unblocked. The change neither changes the process-wide signal
+disposition nor disables watchdog tasks.
+
+A controlled child queues its own SIGPIPE and invokes the installed board
+library's `SetTimerRust`. The unmodified control dies with signal 13. With the
+production adapter header compiled into a minimal test preload, the real
+watchdog callback runs: SIGPIPE, SIGQUIT and SIGUSR1 remain blocked, SIGUSR2 is
+unblocked, and the sampler signal retains the library's expected block. Without
+the Android-launch marker, the same test retains the original signal-13 behavior.
+All three expected outcomes pass. The full Android preload requires its normal
+launch environment; standalone attempts with both old and new full preloads
+produced SIGSEGV before the probe's diagnostic markers and are not counted as
+integration passes.
+
+The complete current-branch shim builds. For the live comparison, the earlier
+deployed native sources were reconstructed from `02a8f2a` plus the APK-caller
+change `2d410bb`; all five rebuilt artifacts match the deployed baseline hashes.
+Only the signal-mask fix was then applied to that baseline. This avoids mixing
+the branch's separate Android-fidelity loader changes into the comparison.
+The fixed shim is deployed to the stopped Wattpad runtime with a verified backup;
+the Java adapter remains candidate 52. Official GMS retains its earlier native
+artifacts. Exact source, binary and board-library hashes are in
+[candidate54.json](../tests/google-auth/full48/candidate54.json).
+
+The fixed live client reaches onboarding without a debugger. Its watchdog emits
+the adaptation marker and has mask `0x1204`, retaining the three ART blocks.
+After both GMS and the client have restarted, another Google login tap produces
+one owner-tagged silent OAuth provider token and a token-bearing client reply.
+No account chooser or preference reset is needed. Wattpad again reaches
+**Create an Account**, where testing stops without entering signup information.
+A second ordinary client restart also reaches onboarding with the adaptation
+marker and all three blocks retained. Neither fixed start uses a debugger.
+Startup still takes time; this does not establish broad performance or sustained
+reliability. Recorded certification status remains 3 with no override, and the
+check-in identity and provider grants are unchanged. Account creation, reading,
+expiry renewal and production per-app isolation remain incomplete.
+
+The native observer and controlled-library probe are documented in
+[native watchdog signal validation](native-watchdog-signal-validation.md).

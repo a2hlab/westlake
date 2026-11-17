@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "candidate": 54,
+  "package": "wp.wattpad",
+  "adapterCandidate": 52,
+  "originalApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+  "sourceBeforeChange": "740fe53a3b8959a78b74e2036516266251991f2a",
+  "diagnosis": {
+    "verifiedUnmodifiedRestartExitSignals": [
+      13,
+      13
+    ],
+    "signalThread": "OS_DfxWatchdog",
+    "signalCode": 0,
+    "signalSenderIsSameProcess": true,
+    "signalDeliveredAt": "pthread_sigmask returning from rt_sigprocmask",
+    "caller": "OHOS::HiviewDFX::WatchdogInner::Start()",
+    "pcFileOffset": "0x132a44",
+    "pcElfVirtualAddress": "0x133a44",
+    "callerFileOffset": "0x17c10",
+    "callerElfVirtualAddress": "0x18c10",
+    "initialSignalGenerationSiteLocated": false,
+    "observerForwardedSignalUnchanged": true
+  },
+  "fix": {
+    "scope": "Native libhicollie OS_DfxWatchdog SIG_UNBLOCK calls in processes with ASX_APK_PATH",
+    "preserveInheritedBlocks": [
+      "SIGPIPE",
+      "SIGQUIT",
+      "SIGUSR1"
+    ],
+    "changesProcessSignalDisposition": false,
+    "disablesWatchdog": false,
+    "otherUnblockRequestsPreserved": true
+  },
+  "nativeBuild": {
+    "boardBuildBaseRevision": "02a8f2adbed90509cf7dcd193ea950000f445e0a",
+    "boardBuildApkCallerPatchRevision": "2d410bbd6a9745ace6331f8a262f4b40d0912fe5",
+    "reconstructedBaselineMatchesDeployedBinary": true,
+    "deployedBaselineSha256": "ab8282f6d2cda34c49712b8d2c64d4d76eccf12cb4fd1af4c01e4416e55bad1c",
+    "builtFromCurrentHeadAlso": true,
+    "boardBuildSources": {
+      "webview_bionic_shim.c": "7b3007611007f7c5e4629662e3be3ab1480e6b74740924cd12ab0e6b19f7238e",
+      "hicollie_signal_mask.h": "ab9d96c0d5e6d9746c341c78342e7983d0626be6db111bf78c3748018fd17f9b",
+      "android_relocs.c": "487e1114a9cdf8c14cd02903a9b5677310967fc2b4be45b75838fb6adc1e0f63"
+    },
+    "actualBoardLibraries": {
+      "board-ld-musl-aarch64.so.1": "fd3c4701acf719738fbd14cf1d419e4dd222c06a6df41f53d973354d648af7e2",
+      "board-libhicollie.z.so": "4a60bd132b21c90b07f106b1ec9d953455f69da0d40d5f2023f70791f19e0e2b"
+    },
+    "currentBranchBuildInputHashes": {
+      "webview_bionic_shim.c": "489c354086722b3d3ad4bc753257dfe6a9efa386cc8132ad5a613a45bc4f5d68",
+      "hicollie_signal_mask.h": "ab9d96c0d5e6d9746c341c78342e7983d0626be6db111bf78c3748018fd17f9b",
+      "android_relocs.c": "058ae89453d4dbbb8845e5ca2d8a184a188c47db281e96fe382838003a4172ae"
+    },
+    "repositorySourcesAtPublication": {
+      "webview_bionic_shim.c": "64403d9f56cfb96e64ea2e0eea4a58b95abe12d616ee843990a47e9d4d35bb81",
+      "hicollie_signal_mask.h": "ab9d96c0d5e6d9746c341c78342e7983d0626be6db111bf78c3748018fd17f9b",
+      "android_relocs.c": "058ae89453d4dbbb8845e5ca2d8a184a188c47db281e96fe382838003a4172ae"
+    },
+    "sourceCommentUpdatedAfterBuild": true
+  },
+  "deployedShimSha256": "93a97b3cc5596180ee0d8f85b6a57a6c9b6bab4662091bc56048e08d1dfbfd3f",
+  "controlIntegrationTests": [
+    {
+      "test": "baseline-android",
+      "metadata": [
+        "pending_sigpipe=true",
+        "child_signal=13 child_exit=-1 expected_result=PASS"
+      ],
+      "expectedResultPassed": true
+    },
+    {
+      "test": "fixed-android",
+      "metadata": [
+        "pending_sigpipe=true",
+        "[WESTLAKE-HICOLLIE-SIGNALS] retained_art_mask=true",
+        "watchdog_callback=true pipe_blocked=1 quit_blocked=1 usr1_blocked=1 usr2_blocked=0 sampler_blocked=1",
+        "child_signal=0 child_exit=0 expected_result=PASS"
+      ],
+      "expectedResultPassed": true
+    },
+    {
+      "test": "fixed-native",
+      "metadata": [
+        "pending_sigpipe=true",
+        "child_signal=13 child_exit=-1 expected_result=PASS"
+      ],
+      "expectedResultPassed": true
+    }
+  ],
+  "controlTestMethod": "A minimal preload compiles the same production mask adapter header and invokes the installed libhicollie SetTimerRust API after queuing SIGPIPE in a controlled child. The complete Android shim needs its normal launch environment; a standalone full-preload attempt produced SIGSEGV without reaching the probe diagnostic markers in both control and fixed variants.",
+  "liveFixedRun": {
+    "clientStarted": true,
+    "watchdogAdaptationMarkerCount": 1,
+    "watchdogSignalMask": "0000000000001204",
+    "debuggerAttached": false,
+    "visibleOnboarding": true,
+    "authAfterGmsAndClientRestart": {
+      "validated": true,
+      "silentOAuthProviderTokenCount": 1,
+      "silentTokenOwner": "wp.wattpad",
+      "clientTokenBearingReplyCount": 1,
+      "accountChooserNeeded": false,
+      "preferencesCleared": false,
+      "visibleResult": "Create an Account",
+      "accountCreated": false,
+      "microgRestarted": false
+    },
+    "successfulStartsObserved": 2,
+    "ordinaryRepeat": {
+      "visibleOnboarding": true,
+      "watchdogAdaptationMarkerCount": 1,
+      "watchdogSignalMask": "0000000000001204",
+      "debuggerAttached": false
+    }
+  },
+  "oauthClientRestartBeforeNativeFix": {
+    "silentTokenOwner": "wp.wattpad",
+    "providerOAuthTokenCount": 1,
+    "clientTokenBearingReplyCount": 1,
+    "accountChooserNeeded": false,
+    "preferencesCleared": false,
+    "visibleResult": "Create an Account",
+    "accountCreated": false
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsPreserved": true,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "a43d27c88532cbf8f1ce72516813e1dd968420e9d088851ef363147e0f583e0b",
+    "clientAdapterJarSha256": "a43d27c88532cbf8f1ce72516813e1dd968420e9d088851ef363147e0f583e0b",
+    "clientApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372"
+  },
+  "expiredTokenRenewalValidated": false,
+  "appAccountSessionValidated": false,
+  "readingValidated": false,
+  "fullApplicationAcceptance": false,
+  "productionPerAppIsolationValidated": false,
+  "nativeSignalFixValidatedOnBoard": true,
+  "sustainedReliabilityValidated": false,
+  "tools": {
+    "observerSelfTestsPassedOnHostAndBoard": true,
+    "observerSourceSha256": "e4541d3a69ddf684acfa65aad71e313178967a22294db0ff7687d0d2de3ae0ab",
+    "probeSourceSha256": "739ec8c0b217b7b66e392a07b3d965456754fcb440013c5b8486b92c0db56c15",
+    "minimalPreloadSourceSha256": "d413df325c5bc1b5d06103ac323c2d7f858cc89d07e6ffe9cc5c5b634507e810"
+  }
+}

@@ -38,6 +38,7 @@
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include <time.h>
+#include "hicollie_signal_mask.h"
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -172,7 +173,8 @@ const char *wl_progname(void)
  *
  * WebView ELF imports are redirected to equal-length wl_* names at deployment
  * time, so these converters are scoped to the Android WebView boundary.
- * Native OH and ART signal handling is untouched.
+ * These ABI converters leave native OH and ART callers untranslated. The
+ * separate hicollie adapter below preserves ART's inherited watchdog mask.
  */
 struct westlake_webview_bionic_sigaction {
     int32_t flags;
@@ -397,6 +399,8 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *old_set)
     if (real_pthread_sigmask == NULL) {
         return ENOSYS;
     }
+    sigset_t adapted;
+    set = westlake_hicollie_signal_mask(how, set, &adapted, __builtin_return_address(0));
     return real_pthread_sigmask(how, set, old_set);
 }
 

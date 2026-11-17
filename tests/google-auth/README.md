@@ -6,9 +6,12 @@ tracks the remaining Google and Facebook flows from the live batch. Candidates
 Spotify and Wattpad now receive successful Google activity returns. Spotify stops
 at separate signup. Candidate 52 also delivers Wattpad's subsequent OAuth access
 token; Wattpad reaches its separate signup form. This required manual recovery
-from an older saved Google account choice. Neither app has a validated account
-session or full application pass, and intermittent SIGPIPE startup exits remain
-unresolved. See the linked validation report for the exact evidence boundaries.
+from an older saved Google account choice. Wattpad subsequently reuses that
+authorization after restarting GMS and the client. Candidate 54 preserves ART's
+inherited signal blocks in the native OpenHarmony watchdog after tracing a
+SIGPIPE startup exit there. Its controlled board test and live startup/auth check
+pass. Neither app has a validated application account session or full application
+pass. See the linked validation report for the exact evidence boundaries.
 Historical results below retain their original build boundaries.
 
 This probe tests the official GMS token implementation and a separate direct
