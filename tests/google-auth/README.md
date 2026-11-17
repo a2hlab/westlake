@@ -1,5 +1,11 @@
 # Official Google authentication probe
 
+The active [full application validation](../../docs/google-two-path-full-validation.md)
+tracks the remaining Google and Facebook flows from the live batch. Candidate 48
+adds legacy sign-in service 91 eligibility; Wattpad's connection succeeds, while
+its complete login remains unresolved. Historical results below retain their
+original build boundaries.
+
 This probe tests the official GMS token implementation and a separate direct
 microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-official-auth-validation.md) and

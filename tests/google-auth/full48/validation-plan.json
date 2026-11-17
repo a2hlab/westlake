@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "objective": "Complete and fix all two-path validation apps",
+  "status": "in_progress",
+  "baseline": "../live44/batch-results.json",
+  "baselineWestlakeRevision": "fd1b14caf7b5e94eb175305f9e67cec5adab91b2",
+  "requiredGoogleFlows": {
+    "com.mobilefootie.wc2010": ["sign_in", "private_preference_cloud_round_trip", "silent_token_renewal", "restart_persistence"],
+    "com.spotify.music": ["sign_in", "account_session", "library_load", "playback", "silent_token_renewal", "restart_persistence"],
+    "wp.wattpad": ["sign_in", "account_session", "library_or_reading", "silent_token_renewal", "restart_persistence"],
+    "com.google.android.youtube": ["sign_in", "account_session", "video_playback", "restart_persistence"],
+    "com.google.android.gm": ["account_selection", "mailbox_sync", "refresh", "restart_persistence"],
+    "com.google.android.apps.docs": ["account_selection", "file_listing", "file_open", "token_renewal", "restart_persistence"],
+    "com.google.android.apps.maps": ["startup", "map_tiles", "search", "real_location", "route_preview", "restart_persistence"],
+    "com.ubercab": ["sign_in", "account_session", "destination_search", "fare_preview_without_booking", "restart_persistence"]
+  },
+  "requiredFacebookFlows": {
+    "com.mobilefootie.wc2010": ["sign_in", "authenticated_return", "account_session", "restart_persistence"],
+    "wp.wattpad": ["sign_in", "authenticated_return", "account_session", "restart_persistence"],
+    "com.spotify.music": ["sign_in", "authenticated_return", "account_session", "restart_persistence"]
+  },
+  "sharedRequirements": [
+    "Keep uncertified status honest; service eligibility adaptation is documented separately",
+    "Verify originating package and signer; no token access based only on claimed extras",
+    "Account selection, scope consent, revocation and caller-death enforcement",
+    "Validate clients under distinct host UIDs before claiming per-app isolation",
+    "Exercise overlapping callers and sustained use without losing account or window routing",
+    "Capture rebuilt adapter and exact APK provenance for each accepted result",
+    "Keep credentials, raw logs, tokens and screenshots out of public evidence",
+    "Publish fixes and precise observed outcomes without converting partial results into passes"
+  ],
+  "existingUserConstraints": {
+    "separateApplicationSignup": "Stop until the user authorizes the concrete signup and supplies required information",
+    "purchaseBookingOrPublicPost": "Not authorized",
+    "mailSending": "Not part of validation",
+    "securityChallenge": "Wait for user completion if interactive verification is required"
+  },
+  "completionRule": "Every required flow needs observed evidence or an explicit user-approved scope change; failed, blocked, indirect and missing evidence remain incomplete"
+}
