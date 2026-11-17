@@ -1437,3 +1437,68 @@ start a stopped app through OpenHarmony's scheduler. OS-managed wake, idle
 policies, long-duration operation, incremental mailbox refresh and the wider
 Google/Facebook acceptance plan remain open. Exact sanitized results are in
 [candidate80.json](../tests/google-auth/full48/candidate80.json).
+
+
+## Candidate 81: Drive native OAuth formatting and live broker denial
+
+The original Drive APK reaches the approved account and obtains real OAuth tokens
+through official GMS and microG. Its five-scope file-access request starts with
+one ASCII space after `oauth2:`. The old policy rejects that as an empty scope
+before a Google request. The policy now accepts one ASCII delimiter at either
+edge of an ordinary OAuth list, preserving the exact service sent to the provider.
+Repeated delimiters, duplicate scopes, other whitespace, unapproved scopes and
+server-code grammar retain their checks. The 4,096-character key limit remains.
+Five authorization/session test programs pass 220 checks; the old parser fails
+the new leading-delimiter case.
+
+The user explicitly approved eight scopes for the unchanged Drive APK and the
+existing test account: espresso, Photos read-only, Cloud Search, Drive read-only,
+workspace_ui, supportcontent, People read-only and notifications. The operator
+consent is bound to the current APK signer, account, revocation epoch and a
+24-hour expiry. All prior grant entries remain byte-for-byte intact. Only the
+client signer metadata pin was added; no direct microG client-token scopes or
+Google Sign-In session were fabricated. Consent remains an operator-provisioned
+test record; a native user consent UI is still absent.
+
+After deployment, both hosts record token-bearing native-consent replies for
+Drive, including its previously rejected scope list. An independent, read-only
+host API check using Drive's own issued token gets HTTP 200 for account metadata
+and file listing. The account matches the approved test account and returns no
+files. An invalid-token control gets HTTP 401 on both endpoints. These calls
+request no file bodies and perform no upload, file edit or deletion. This proves
+backend acceptance of that token, not completion of the application's file UI.
+
+Drive's own Files screen still says "Can't refresh", including after a retained-
+data restart. Private Android logs identify a second local path: Drive also calls
+`AccountManager.getAuthToken` directly. That currently uses the restricted
+bootstrap provider operation, which refuses it without a separate direct-client
+grant. Its document provider and native Cello fetch consequently report auth
+errors/cancelled root loading. The working official GMS request and the failed
+AccountManager request are distinct. The next fix must route that API through
+the verified official native-auth path with the same consent checks, rather than
+adding a direct bootstrap token grant. File opening also lacks an existing test
+item. Application listing, file opening, actual token renewal and full acceptance
+remain incomplete.
+
+Before Drive consent was written, the live probe completed two foreign-broker
+native transaction-28 tests and one chooser transaction-23 test. Every request
+reached the provider and received `SecurityException`; three matching
+`broker_not_granted` events were captured, with the grant file unchanged. The
+probe could read its allowed account view and verify the official GMS package
+first, so an unavailable channel is not counted as a successful denial. Setup
+initially mixed leftover Gmail config splits, then used a private-mode probe APK
+that the different-UID verifier could not reopen. Isolating the APK and making
+only that public code file mode 444 resolved those setup failures without
+changing APK bytes or account-data permissions. This test used candidate-80
+client code and candidate-78 hosts before the parser deployment. It does not
+establish separate production app UID isolation.
+
+The candidate-81 adapter and matching boot image were then installed for official
+GMS, microG, Drive and the retained Gmail runtime. Exact code hashes and host
+rollback files were checked for all 116 replacements. The four test runtimes
+share root-owned mode-444 code through hardlinks; private application data is
+not shared this way. Original APKs/data and the prior check-in identity remain.
+All three active hosts pass executable/UID checks; uncertified status remains 3
+without an override. Gmail control on this adapter, overlapping callers, sustained
+use and the wider Google/Facebook acceptance plan remain open. Sanitized evidence
+is in [candidate81.json](../tests/google-auth/full48/candidate81.json).

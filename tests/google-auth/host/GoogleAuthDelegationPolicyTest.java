@@ -25,6 +25,12 @@ public final class GoogleAuthDelegationPolicyTest {
         POLICY.setProperty("delegation.broker.sha256", "c".repeat(64));
         allow(PREFIX + "oauth2:openid email profile");
         allow(PREFIX + "oauth2:openid email profile ");
+        allow(PREFIX + "oauth2: email");
+        allow(PREFIX + "oauth2: openid email profile ");
+        GoogleAuthDelegationPolicy leading = GoogleAuthDelegationPolicy.parse(PREFIX + "oauth2: email profile");
+        if (!leading.service.equals("oauth2: email profile") || !leading.scopes.equals(java.util.Set.of("email", "profile")))
+            throw new AssertionError("leading delimiter changed service or scope set");
+        passed++;
         GoogleAuthDelegationPolicy trailing = GoogleAuthDelegationPolicy.parse(PREFIX + "oauth2:email ");
         if (!trailing.service.equals("oauth2:email ") || !trailing.scopes.equals(java.util.Set.of("email")))
             throw new AssertionError("service or scope set changed");
@@ -41,7 +47,12 @@ public final class GoogleAuthDelegationPolicyTest {
         for (String key : new String[] {
                 "hub:" + PREFIX + "oauth2:email", PREFIX + "ac2dm", PREFIX + "oauth2:",
                 PREFIX + "oauth2:email email", PREFIX + "oauth2:email  profile", PREFIX + "oauth2:email\nprofile",
-                PREFIX + "oauth2:email  ", PREFIX + "oauth2: email", PREFIX + "oauth2: ",
+                PREFIX + "oauth2:email  ", PREFIX + "oauth2:  email", PREFIX + "oauth2: ",
+                PREFIX + "oauth2:  ", PREFIX + "oauth2: email  ", PREFIX + "oauth2: email  profile",
+                PREFIX + "oauth2: email email", PREFIX + "oauth2: email drive",
+                PREFIX + "oauth2:\temail", PREFIX + "oauth2:\nemail", PREFIX + "oauth2:\remail",
+                PREFIX + "oauth2:\u00a0email", PREFIX + "oauth2: email\t",
+                PREFIX + "oauth2:server:client_id:" + CLIENT + ":api_scope: email",
                 PREFIX + "oauth2:email\t", PREFIX + "oauth2:email\r", PREFIX + "oauth2:email\u00a0",
                 PREFIX + "oauth2:email drive ",
                 PREFIX + "oauth2:server:client_id:" + CLIENT + ":api_scope:email ",

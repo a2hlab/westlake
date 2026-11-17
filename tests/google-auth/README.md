@@ -334,7 +334,7 @@ out=$(mktemp -d)
 javac -d $out/policy framework/core/java/GoogleAuthPolicy.java tests/google-auth/host/GoogleAuthPolicyTest.java
 java -cp $out/policy adapter.core.GoogleAuthPolicyTest                         # GOOGLE_AUTH_POLICY_PASS 16
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java tests/google-auth/host/GoogleAuthDelegationPolicyTest.java
-java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 50
+java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 64
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleIdentityClaims.java tests/google-auth/host/GoogleIdentityClaimsTest.java
 java -cp $out/delegation adapter.core.GoogleIdentityClaimsTest                 # ..._PASS 17
 javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/google-auth/host/GoogleAuthBoundaryTraceTest.java

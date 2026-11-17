@@ -50,9 +50,11 @@ public final class GoogleAuthDelegationPolicy {
             clientId = service.substring(26); scopeList = "";
         } else if (service.startsWith("oauth2:")) {
             clientId = null; scopeList = service.substring(7);
-            // The original Gmail APK appends one ASCII space to its OAuth scope list.
-            // Accept that delimiter for set comparison, preserving the exact service sent
-            // to the provider. Do not trim arbitrary whitespace or relax server-code syntax.
+            // Original Drive requests start with one ASCII space; Gmail appends one.
+            // Accept one delimiter at either edge for set comparison, preserving the
+            // exact service sent to the provider. Repeated/interior empty scopes and
+            // other whitespace remain invalid; server-code syntax is unchanged.
+            if (scopeList.startsWith(" ")) scopeList = scopeList.substring(1);
             if (scopeList.endsWith(" ")) scopeList = scopeList.substring(0, scopeList.length() - 1);
         } else throw new SecurityException("unsupported service");
         if (clientId != null && !clientId.matches("[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com"))
