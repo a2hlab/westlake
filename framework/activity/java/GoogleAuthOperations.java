@@ -78,8 +78,10 @@ public final class GoogleAuthOperations {
                         + adapter.core.GoogleAuthBoundaryTrace.requestExtras(extras == null ? null : extras.keySet()));
             }
             if (data.dataAvail() != 0 || operation.account == null || !"com.google".equals(operation.account.type)
-                    || operation.service == null || operation.service.length() > 512)
+                    || operation.service == null || operation.service.length() > GoogleAuthDelegationPolicy.MAX_KEY_LENGTH)
                 throw new SecurityException("silent request unsupported");
+            // The parser also bounds the complete package:signer:service key. First-party
+            // OAuth scope lists can exceed 512 characters without changing authorization.
             operation.requested = GoogleAuthDelegationPolicy.parse(origin.packageName + ":"
                     + operation.legacySigner + ":" + operation.service);
             GoogleAuthSessions.requireReusable(operation.requested);

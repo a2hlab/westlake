@@ -6,7 +6,15 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest observed result: candidate 62 renews Wattpad's legacy Google sign-in after
+Latest result: candidate 71 accepts Gmail's bounded native OAuth scope list,
+including its trailing ASCII space, while still denying ungranted token access.
+Candidate 70 fixes Gmail's GMS APK loading using verified read-only descriptors;
+candidate 67 makes its manual-sync button invoke the real listener. The mailbox
+remains unsynced. Gmail scope consent, native account-selection mediation, the
+GMS-version gap and remaining service eligibility failures are still open.
+No full application pass is established.
+
+Earlier, candidate 62 renews Wattpad's legacy Google sign-in after
 the SDK's cached selection is deliberately expired. Official GMS returns a
 successful callback, microG supplies fresh OAuth tokens, and Wattpad reaches
 separate signup without clearing its username or opening a chooser. A control
@@ -15,16 +23,10 @@ Wattpad OAuth token. This is a local SDK-expiry test, not actual server-token
 expiry or a full application pass. Drive's OAuth/file-listing gap and the wider
 Google/Facebook acceptance plan remain open.
 
-Candidate 63 fixes Gmail's account-list connection in the test configuration.
-Candidate 64 adds an opt-in app-owned sync dispatcher. Gmail discovers its real
-mail sync adapter and reads sync settings on two preserved-data starts, but no
-sync request or adapter execution is observed. The APK's manual-sync button uses
-an internal asynchronous sync pipeline; its live stopping point is unresolved.
-Mail remains unsynced, with separate GMS eligibility and scoped-token gaps.
-Candidate 65 traces the actual touch helper: the manual-sync tap reaches Gmail's
-focused main window and is handled on the main thread without a dispatch
-exception. Queued click-listener execution and the internal sync pipeline remain
-unvalidated.
+Candidate 63 exposes the account to Gmail through the pinned provider, and
+candidate 64 discovers its real mail sync adapter. Gmail's manual-sync action
+uses an internal asynchronous pipeline; discovering the Android sync adapter
+does not prove that Gmail invokes it or that mailbox synchronization completes.
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -844,3 +846,52 @@ GMS and microG remain alive throughout the client controls. Certification stays
 are unchanged. No new Gmail OAuth scope or account-ID permission is granted.
 
 See [candidate70.json](../tests/google-auth/full48/candidate70.json).
+
+### Candidate 71: parse Gmail's native scope list without authorizing it
+
+After the code-loading repair, Gmail requests a 14-scope OAuth token. Its
+original signed APK contains a scope list longer than the silent-request
+handler's 512-character limit, with one trailing ASCII space. The handler
+rejects the request as unsupported and the cache-key parser separately rejects
+the trailing delimiter. These are local compatibility failures, not Google
+server refusals of an issued token.
+
+The silent handler now uses the parser's existing 4096-character bound; the
+complete package/signer/service key must still fit that bound. Ordinary OAuth
+scope lists may contain one trailing ASCII space. Scope comparison ignores that
+one delimiter but preserves the exact service passed to the provider. Leading
+or repeated spaces, control/non-ASCII whitespace, duplicate scopes, and
+server-code requests with trailing spaces remain rejected. This creates no
+account selection, provider scope grant, or scope alias. Diagnostics recognize
+the additional fixed public Gmail scope names without printing arbitrary scope
+values.
+
+Seven host test programs pass: 175 numbered checks plus the boundary-trace test.
+The previous parser fails the new trailing-delimiter case. Compilation covers
+140 Java sources and 293 classes; runtime packaging and boot-image builds pass.
+Only the official GMS host receives the candidate-71 Java/boot overlay. GMS and
+Gmail restart with retained data; Gmail keeps client 70b and native runtime 70,
+while microG stays on 59 without a restart. No standalone preload is claimed.
+
+The real Gmail startup now passes three OAuth requests into mediation: one
+14-scope request and two People API requests. All three token reads are denied.
+After a recorded Sync now tap, another 14-scope request passes parsing and its
+token read is denied. The request has zero unknown scope categories and one
+empty trailing segment in diagnostic classification. This verifies parsing and
+continued denial; it does not verify token issuance or backend acceptance.
+The action window uses the board's whole-second clock and shared-host logs, so
+it is correlation rather than exclusive attribution to that click.
+
+The account list alone does not create a reusable scoped authorization. The
+current saved-selection mechanism requires a successful supported Google
+Sign-In activity; Gmail's native account selection needs separate mediation.
+The operator's approval for Gmail's broader scopes is also pending. No Gmail
+OAuth scope or account-ID grant is added. Gmail still displays Account not
+synced, has an unmet GMS-version requirement and receives service status 9.
+
+The nine verified GMS APK descriptors and three successful base/configuration
+asset loads are reproduced after restarting GMS and Gmail. Status remains 3
+without an override; check-in identity, provider grants and account-store bytes
+are unchanged. All three hosts are alive at the preservation check.
+
+See [candidate71.json](../tests/google-auth/full48/candidate71.json).

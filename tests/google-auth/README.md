@@ -14,6 +14,11 @@ pass. Neither app has a validated application account session or full applicatio
 pass. See the linked validation report for the exact evidence boundaries.
 Historical results below retain their original build boundaries.
 
+Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
+The board now accepts the request into mediation while continuing to deny
+ungranted token access. No Gmail OAuth grant or mailbox acceptance is claimed;
+see [candidate71.json](full48/candidate71.json) and the full validation report.
+
 Candidate 59 separately grants the verified official GMS broker access to the
 existing account's Google ID. Drive receives account-ID replies after the GMS
 and microG restart, while its OAuth requests remain denied and its file list
@@ -290,9 +295,9 @@ The broker's policies and file handling are plain Java. From the repository root
 ```sh
 out=$(mktemp -d)
 javac -d $out/policy framework/core/java/GoogleAuthPolicy.java tests/google-auth/host/GoogleAuthPolicyTest.java
-java -cp $out/policy adapter.core.GoogleAuthPolicyTest                         # GOOGLE_AUTH_POLICY_PASS 8
+java -cp $out/policy adapter.core.GoogleAuthPolicyTest                         # GOOGLE_AUTH_POLICY_PASS 16
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java tests/google-auth/host/GoogleAuthDelegationPolicyTest.java
-java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 36
+java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 50
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleIdentityClaims.java tests/google-auth/host/GoogleIdentityClaimsTest.java
 java -cp $out/delegation adapter.core.GoogleIdentityClaimsTest                 # ..._PASS 17
 javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/google-auth/host/GoogleAuthBoundaryTraceTest.java
@@ -300,7 +305,7 @@ java -cp $out/trace GoogleAuthBoundaryTraceTest                                #
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
 java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
 javac -cp $out/sessions -d $out/sessions tests/google-auth/host/GoogleAuthOAuthSessionsTest.java
-java -cp $out/sessions adapter.core.GoogleAuthOAuthSessionsTest                # GOOGLE_AUTH_OAUTH_SESSIONS_PASS 44
+java -cp $out/sessions adapter.core.GoogleAuthOAuthSessionsTest                # GOOGLE_AUTH_OAUTH_SESSIONS_PASS 50
 javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.java tests/google-auth/host/GoogleIdentityServicePolicyTest.java
 java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 20
 javac -d $out/signin-trace framework/core/java/GoogleSignInDiagnostics.java tests/google-auth/host/GoogleSignInDiagnosticsTest.java

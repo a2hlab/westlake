@@ -45,6 +45,16 @@ public final class GoogleAuthBoundaryTraceTest {
                 .contains("scope_categories=notifications unknown_scope_count=0"));
         require(GoogleAuthBoundaryTrace.requestService("oauth2:https://www.googleapis.com/auth/drive.apps.readonly")
                 .contains("scope_categories=drive_apps_readonly unknown_scope_count=0"));
+        String gmail = GoogleAuthBoundaryTrace.requestService("oauth2:https://mail.google.com/ "
+                + "https://www.googleapis.com/auth/gmail.full_access https://www.googleapis.com/auth/gmail.ads "
+                + "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/taskassist.readonly "
+                + "https://www.googleapis.com/auth/reminders https://www.googleapis.com/auth/gmail.locker.read "
+                + "https://www.googleapis.com/auth/apps.growth.promotion.read https://www.googleapis.com/auth/calendar.readonly "
+                + "https://www.googleapis.com/auth/chat https://www.googleapis.com/auth/gmail.publisher_first_party "
+                + "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/subscriptions "
+                + "https://www.googleapis.com/auth/espresso ");
+        require(gmail.contains("unknown_scope_count=0 empty_scope_count=1") && gmail.contains("mail_full")
+                && gmail.contains("gmail_full_access") && !gmail.contains("https://"));
         require(GoogleAuthBoundaryTrace.requestService("https://docs.google.com/feeds/private@example.invalid")
                 .equals("request_kind=other"));
         require(GoogleAuthBoundaryTrace.requestService(null).equals("request_kind=null"));

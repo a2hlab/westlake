@@ -31,12 +31,17 @@ public final class GoogleAuthOAuthSessionsTest {
         Path root = Files.createTempDirectory("wl-oauth-session-").resolve("private");
         String epoch = GoogleAuthSessions.generation(root, OWNER);
         require(!allows(root, "oauth2:openid email", epoch));
+        require(!allows(root, "oauth2:openid email ", epoch));
         require(GoogleAuthSessions.sameService(request("oauth2:openid email"), request("oauth2:email openid")));
         require(!GoogleAuthSessions.sameService(request("oauth2:email"), request("oauth2:email profile")));
+        require(GoogleAuthSessions.sameService(request("oauth2:openid email "), request("oauth2:email openid")));
+        require(!GoogleAuthSessions.sameService(request("oauth2:email "), request("oauth2:email profile")));
         require(!GoogleAuthSessions.sameService(request("oauth2:email"), request("oauth2:https://www.googleapis.com/auth/userinfo.email")));
         require(!GoogleAuthSessions.sameService(request("oauth2:email"), request("audience:server:client_id:test.apps.googleusercontent.com")));
         grant(root, List.of("oauth2:openid email?include_email=1", "oauth2:profile https://www.googleapis.com/auth/user.birthday.read"), epoch);
         require(allows(root, "oauth2:profile email openid", epoch));
+        require(allows(root, "oauth2:profile email openid ", epoch));
+        require(!allows(root, "oauth2:email contacts ", epoch));
         require(allows(root, "oauth2:email?include_email=1", epoch));
         require(!allows(root, "oauth2:email?include_profile=1", epoch));
         require(!allows(root, "oauth2:email contacts", epoch));
@@ -72,6 +77,7 @@ public final class GoogleAuthOAuthSessionsTest {
         String next = GoogleAuthSessions.generation(root, OWNER);
         require(!allows(root, "oauth2:email", epoch));
         require(!allows(root, "oauth2:email", next));
+        require(!allows(root, "oauth2:email ", next));
         denied(() -> grant(root, List.of("oauth2:email"), epoch));
         grant(root, List.of("oauth2:email"), next);
         require(allows(root, "oauth2:email", next));

@@ -29,7 +29,9 @@ public final class GoogleAuthBoundaryTrace {
             for (String known : new String[] {"drive", "drive.readonly", "drive.file", "drive.appdata",
                     "drive.metadata.readonly", "espresso", "photos.image.readonly", "cloud_search.query",
                     "workspace_ui", "userinfo.email", "userinfo.profile", "user.birthday.read",
-                    "youtube", "youtube.readonly", "gmail.readonly", "notifications", "subscriptions",
+                    "youtube", "youtube.readonly", "gmail.readonly", "gmail.full_access", "gmail.ads",
+                    "gmail.locker.read", "gmail.publisher_first_party", "taskassist.readonly", "reminders",
+                    "calendar.readonly", "chat", "notifications", "subscriptions",
                     "supportcontent", "apps.growth.promotion.read", "apps.signup", "activity", "cloudprint",
                     "discussions", "discussions.readonly", "docs", "drive.activity", "drive.activity.readonly",
                     "drive.apps", "drive.apps.readonly", "drive.categories.readonly", "drive.meet.readonly",
@@ -38,6 +40,7 @@ public final class GoogleAuthBoundaryTrace {
                 if (("https://www.googleapis.com/auth/" + known).equals(scope)) label = known.replace('.', '_');
             if ("https://docs.google.com/feeds".equals(scope)) label = "docs_feed";
             if ("https://docs.google.com/feeds/".equals(scope)) label = "docs_feed_slash";
+            if ("https://mail.google.com/".equals(scope)) label = "mail_full";
             if (label == null) unknown++; else labels.add(label);
         }
         return "request_kind=oauth2 scope_categories=" + (labels.isEmpty() ? "none" : String.join(",", labels))
