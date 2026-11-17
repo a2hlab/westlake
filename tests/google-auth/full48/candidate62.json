@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "candidate": 62,
+  "phase": "Experimental asynchronous legacy OAuth renewal",
+  "implementationRevisionBeforeChange": "ab1020c79c37174de9645dd16768b78a70df8d57",
+  "package": "wp.wattpad",
+  "flag": "WESTLAKE_GOOGLE_ASYNC_SIGNIN=1",
+  "enabledByDefault": false,
+  "protocol": {
+    "interface": "com.google.android.gms.auth.api.signin.internal.ISignInService",
+    "requestCode": 101,
+    "callbackCode": 101,
+    "deadlineMillis": 100000,
+    "maxPendingOperations": 16,
+    "scope": "OAuth silentSignIn; no ID-token, server-code, hosted-domain or extension variants",
+    "origin": "HELLO verified original APK, signing certificate and live spawner",
+    "authorization": "Requested scopes/account plus existing saved selection and epoch plus provider grant",
+    "correlation": "Pending request matching by verified owner/signer/account/scopes; ambiguous matches denied; no unique ID through every GMS executor",
+    "trust": "Pinned official GMS validates and routes internal work",
+    "googleResultRewritten": false
+  },
+  "build": {
+    "optionsParserHostChecks": 21,
+    "asyncLeaseHostChecks": 19,
+    "javaRuntimeBootPassed": true,
+    "boardPreloadPassed": true,
+    "classInitializationFailures": [],
+    "gmsAdapterCandidate": 62,
+    "providerAdapterCandidate": 59,
+    "clientAdapterCandidate": 61,
+    "nativeWatchdogFixCandidate": 54,
+    "nativeArtifactsRebuiltForThisCandidate": false
+  },
+  "sourceSha256": {
+    "framework/activity/java/GoogleAsyncAuthOperations.java": "865243aa56905f93fbdd4e4c90b26c2e42371a9b5fbcc4b725a87c24113d2258",
+    "framework/activity/java/GoogleAuthOperations.java": "d778c21a0739a704d7aea1f4e740f19aa54e00dd1d8b274e11832db8086054e8",
+    "framework/activity/java/PlayServicesChannel.java": "16632e6a0ce9ee4a08b375ee871a34484cfe98177707a600f5ce0fc90a6b32ff",
+    "framework/core/java/SocketBinder.java": "e750aeee6bf35c30e08d14b2cccb0d96bb636f470d7402a3daa64873230f266e",
+    "framework/core/java/GoogleAsyncAuthLease.java": "cef05379b299d18f9600c97b01e95cc3fba36ea9ce659f85f50756f241bd047e",
+    "framework/core/java/GoogleSignInOptionsReader.java": "b9a2125c147263a746b97ef8ffa71c6872cd96c5257c86aff88d95cabbfad153",
+    "tests/google-auth/host/GoogleAsyncAuthLeaseTest.java": "7fdc9e5851e29025c0a274c66cd1bc9d8b96ae491144222260f91ad8267867bc",
+    "tests/google-auth/host/GoogleSignInOptionsReaderTest.java": "a2dd1375710c2649037935ecb73f37358d6435f1691243a63ea57c984b230d7a"
+  },
+  "sdkExpiryControl": {
+    "modifiedField": "Active SDK GoogleSignInAccount.expirationTime",
+    "forcedExpiresBeforeBoardClockSeconds": 600,
+    "accountIdOtherFieldsUsernameGmsChoicesGrantsPreserved": true,
+    "actualGoogleTokenExpiryTested": false,
+    "methodAndQueueTraceDisabled": true
+  },
+  "firstExpiredRun": {
+    "asyncRequestsAccepted": 2,
+    "overlapReadRefusals": 1,
+    "modernStatus": 16,
+    "legacyStatuses": [
+      4,
+      0
+    ],
+    "accountPresentOnStatus0": true,
+    "asyncTokenReads": 2,
+    "synchronousTokenReads": 1,
+    "providerWattpadOAuthIssuances": 3,
+    "chooserObserved": false,
+    "visibleResult": "Create an Account",
+    "signupSubmitted": false
+  },
+  "revokedEpochControl": {
+    "control": "Same expired SDK snapshot, changed saved-selection epoch before requests, GMS/provider kept running",
+    "asyncRequestsAccepted": 2,
+    "modernStatus": 16,
+    "legacyStatuses": [
+      4,
+      4
+    ],
+    "providerWattpadOAuthIssuances": 0,
+    "visibleResult": "Existing-account login form",
+    "publicRevocationApiTested": false,
+    "inFlightRevocationTested": false
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "onlyProviderGrantAddedIsAccountId": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": false,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "6a27c5c05ab2a019a2648ba5a39e46ffa36e1a4c4b523844d50c5fd017918c5f",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "09c62d57897f33c95e69127deea56c75214a61947deeb566a3e16aea5c5d7a9c",
+    "clientApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372"
+  },
+  "fullApplicationPassed": false,
+  "fullApplicationPassCount": 0,
+  "remaining": [
+    "Actual Google token expiry",
+    "Full Wattpad account/session/reading acceptance",
+    "Public sign-out and in-flight revocation on board",
+    "Caller-death and overlapping-caller board controls",
+    "Per-operation correlation and concurrency reliability",
+    "Distinct host UIDs and production isolation",
+    "Other Google/Facebook plan flows"
+  ],
+  "privacy": "Fixed outcomes and public package/class names and artifact/source hashes only; credentials, account identifiers, tokens, raw captures/logs stay private.",
+  "restoredEpochExpiredRun": {
+    "asyncRequestsAccepted": 2,
+    "overlapReadRefusals": 1,
+    "modernStatus": 16,
+    "legacyStatuses": [
+      4,
+      0
+    ],
+    "accountPresentOnStatus0": true,
+    "asyncTokenReads": 2,
+    "synchronousTokenReads": 1,
+    "providerWattpadOAuthIssuances": 3,
+    "chooserObserved": false,
+    "visibleResult": "Create an Account",
+    "signupSubmitted": false,
+    "gmsAndProviderKeptRunning": true,
+    "sameExpiredSdkSnapshot": true,
+    "foregroundIntervention": "Host EntryAbility explicitly foregrounded after a black capture; onboarding then rendered"
+  },
+  "restoration": {
+    "exactOriginalSdkPreferenceRestored": true,
+    "exactOriginalEpochStateRestored": true,
+    "clientStoppedAfterRestoration": true
+  }
+}

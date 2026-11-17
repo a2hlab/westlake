@@ -305,6 +305,10 @@ javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.
 java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 20
 javac -d $out/signin-trace framework/core/java/GoogleSignInDiagnostics.java tests/google-auth/host/GoogleSignInDiagnosticsTest.java
 java -cp $out/signin-trace adapter.core.GoogleSignInDiagnosticsTest            # GOOGLE_SIGNIN_DIAGNOSTICS_PASS 14
+javac -d $out/signin-options framework/core/java/GoogleSignInOptionsReader.java tests/google-auth/host/GoogleSignInOptionsReaderTest.java
+java -cp $out/signin-options adapter.core.GoogleSignInOptionsReaderTest        # GOOGLE_SIGNIN_OPTIONS_PASS 21
+javac -cp $out/sessions -d $out/sessions framework/core/java/GoogleAsyncAuthLease.java tests/google-auth/host/GoogleAsyncAuthLeaseTest.java
+java -cp $out/sessions adapter.core.GoogleAsyncAuthLeaseTest                   # GOOGLE_ASYNC_AUTH_LEASE_PASS 19
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
 java -cp $out/files adapter.core.PrivateFilesTest                              # PRIVATE_FILES_PASS 6
 ```

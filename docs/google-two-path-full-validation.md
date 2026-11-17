@@ -6,13 +6,14 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest observed result: candidate 59 supplies the Google account ID to the pinned
-official GMS broker through a separate, explicitly granted metadata operation.
-Drive now receives three successful account-ID replies, then encounters denied
-OAuth requests. Its file list remains unvalidated. Earlier, Wattpad reused its
-Google authorization after restarting GMS and the client, and candidate 54
-fixed its traced native watchdog signal-mask exit. Spotify and Wattpad still
-stop at separate signup. No full application pass is claimed.
+Latest observed result: candidate 62 renews Wattpad's legacy Google sign-in after
+the SDK's cached selection is deliberately expired. Official GMS returns a
+successful callback, microG supplies fresh OAuth tokens, and Wattpad reaches
+separate signup without clearing its username or opening a chooser. A control
+with a revoked saved-selection epoch denies both legacy requests and issues no
+Wattpad OAuth token. This is a local SDK-expiry test, not actual server-token
+expiry or a full application pass. Drive's OAuth/file-listing gap and the wider
+Google/Facebook acceptance plan remain open.
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -472,3 +473,65 @@ working unexpired cache, failing expired cache, working restored cache. No GMS o
 provider restart or permission change occurs between these three checks.
 
 See [candidate61.json](../tests/google-auth/full48/candidate61.json).
+
+### Candidate 62: asynchronous legacy sign-in renewal
+
+The missing route is the original `ISignInService` transaction 101, whose work
+continues after its initial Binder reply. The previous synchronous auth scope
+cannot cover that worker lifetime. An opt-in adapter now parses the pinned
+GoogleSignInOptions request and creates a bounded authorization lease from the
+HELLO-verified original APK, signer, callback, requested scopes, optional account
+and saved-selection epoch. Official GMS's persistent process can consult that
+lease through a private, verified same-app channel. The provider still checks its
+separate operator grant and rechecks liveness before and after HTTP. Completion
+of callback 101, channel death, timeout or revocation denies subsequent reads.
+Google's returned status and account payload are not replaced.
+
+The bounded parser passes 21 host checks, including unsupported and malformed
+options. The lease passes 19 checks covering scope/account/signer mismatch,
+missing authorization, death, deadline, revocation and completed requests. The
+adapter/runtime/boot builds and board preload pass, with no class-initialization
+failures. Only official GMS is updated to candidate 62; microG remains on 59,
+the original Wattpad client on 61, and the native watchdog fix on 54. Method and
+queue execution tracing are disabled for the live tests.
+
+The first live retry uses the same timestamp-only SDK-expiry manipulation as
+candidate 61, preserving the numeric account ID, username, GMS choices and scope
+grants. GMS accepts two legacy requests. Their overlapping eligibility causes
+one read to be refused rather than assigning it to an arbitrary operation. One
+legacy callback returns status 4, and the other returns status 0 with an account.
+Two asynchronous OAuth reads and a subsequent synchronous auth read obtain
+tokens; microG records three Wattpad OAuth issuances. Wattpad reaches **Create
+an Account** without a chooser. The modern sign-in attempt still returns 16.
+No separate Wattpad account is created.
+
+For a negative control, the client is stopped, the exact same expired SDK
+snapshot is installed, and only Wattpad's saved-selection epoch is changed to a
+revoked generation. GMS and microG remain running. Both legacy callbacks return
+4, no Wattpad OAuth token is issued, and the existing-account login form remains
+visible. This tests pre-request revoked state; it does not test the public
+sign-out/revocation API or revocation during an in-flight HTTP exchange.
+
+Restoring the exact original epoch state, reinstalling the same expired SDK
+snapshot and restarting only the client reproduces the successful result:
+legacy callbacks 4 then 0, two asynchronous token reads, one synchronous token
+read, three provider OAuth issuances, and the signup page without a chooser.
+This run needs an explicit host foreground action after an initial black
+capture. GMS and microG remain running throughout all three authorization
+controls. The exact original SDK preference and epoch state are restored after
+the test, and the client is stopped. The controlled sequence is therefore
+successful renewal, revoked failure, restored successful renewal.
+
+The new route is disabled by default (`WESTLAKE_GOOGLE_ASYNC_SIGNIN=1` enables
+it alongside the existing guards). It supports the tested OAuth silent-sign-in
+variant, not asynchronous ID-token/server-code or extension variants. Matching
+uses pending verified requests and fails when more than one qualifies; there
+is no unique operation identifier propagated through every GMS executor. The
+implementation therefore relies on the pinned official GMS worker routing.
+This run does not establish general concurrency reliability, live caller-death
+or in-flight revocation behavior, distinct-client UID isolation, actual Google
+token expiry, or Wattpad account-session/reading acceptance. Certification
+status remains 3 without an override, and check-in identity and provider grants
+are unchanged.
+
+See [candidate62.json](../tests/google-auth/full48/candidate62.json).

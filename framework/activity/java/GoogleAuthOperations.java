@@ -61,6 +61,8 @@ public final class GoogleAuthOperations {
     /** Installed only by HELLO after independent APK/spawner verification, never from request extras. */
     static SocketBinder.CallScope enter(PackageInfo origin, int pid, String spawner, SocketBinder channel,
             IBinder target, int code, Parcel data, int flags) throws RemoteException {
+        if (enabled() && code == 101)
+            return GoogleAsyncAuthOperations.enter(origin, pid, spawner, channel, target, code, data, flags);
         if (!enabled() || code != 5 || !AUTH.equals(target.getInterfaceDescriptor())) return null;
         Operation operation = new Operation(origin, pid, spawner, channel, CURRENT.get());
         int position = data.dataPosition();

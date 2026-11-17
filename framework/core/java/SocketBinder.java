@@ -142,7 +142,10 @@ public final class SocketBinder {
     private volatile int mCallerPid;
 
     /** Optional verified per-connection policy. A scope ends even when the target throws. */
-    public interface CallScope extends AutoCloseable { @Override void close(); }
+    public interface CallScope extends AutoCloseable {
+        default void returned(boolean handled, Parcel reply) {}
+        @Override void close();
+    }
     public interface CallScopes {
         CallScope enter(IBinder target, int code, Parcel data, int flags) throws RemoteException;
     }
@@ -152,6 +155,18 @@ public final class SocketBinder {
     public static boolean isCallingChannel(SocketBinder channel) {
         Inbound inbound = sInbound.get();
         return inbound != null && inbound.channel == channel;
+    }
+
+    /** Observe completion on a callback owned by this verified inbound connection. */
+    public static CallScope observeCallback(IBinder callback, int code, Runnable completion) {
+        if (!isCallingPeer(callback) || completion == null || code <= 0)
+            throw new SecurityException("callback must belong to the calling channel");
+        Proxy proxy = (Proxy) callback;
+        synchronized (proxy) {
+            if (proxy.completions.putIfAbsent(code, completion) != null)
+                throw new SecurityException("callback already has an operation");
+        }
+        return () -> { synchronized (proxy) { proxy.completions.remove(code, completion); } };
     }
 
     /** Per caller uid set with setCaller: {pid, elapsedRealtime of its latest incoming call}. */
@@ -435,6 +450,7 @@ public final class SocketBinder {
         final long id;
         private long mReferences;
         private String mDescriptor;
+        final Map<Integer, Runnable> completions = new HashMap<>();
 
         Proxy(SocketBinder channel, long id) {
             this.channel = channel;
@@ -447,6 +463,10 @@ public final class SocketBinder {
 
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            Runnable completed;
+            synchronized (this) { completed = completions.remove(code); }
+            // Revoke before forwarding the result; never inspect or replace the callback payload.
+            if (completed != null) completed.run();
             // Every forwarding hop must preserve the same-app restriction. Checking only the
             // final creator would reveal its stored Intent to a foreign holder via an intermediary.
             if (code == SAME_APP_ACTIVITY_INTENT) {
@@ -775,7 +795,11 @@ public final class SocketBinder {
             if (TRACE) traceInbound(target, call.code, data);
             CallScopes scopes = mCallScopes;
             CallScope scope = scopes == null ? null : scopes.enter(target, call.code, data, call.flags);
-            try { return target.transact(call.code, data, reply, call.flags); }
+            try {
+                boolean handled = target.transact(call.code, data, reply, call.flags);
+                if (scope != null) scope.returned(handled, reply);
+                return handled;
+            }
             finally { if (scope != null) scope.close(); }
         } catch (RemoteException | RuntimeException e) {
             if (oneway) {

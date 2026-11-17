@@ -110,6 +110,7 @@ public final class PlayServicesChannel {
     private static final int READ_DELEGATED_AUTH = 24;
     private static final int START_PENDING_ACTIVITY = 25;
     private static final int START_CREATOR_ACTIVITY = 26;
+    private static final int READ_ASYNC_AUTH = 27;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -765,6 +766,10 @@ public final class PlayServicesChannel {
         if (!adapter.core.GoogleAuthDelegation.enabled() || !"com.google.android.gms".equals(application().getPackageName())) return null;
         // The authenticated app call owns this capability. Do not borrow another process's picker.
         if (GoogleAuthOperations.present()) return GoogleAuthOperations.read(method, account, key);
+        if (GoogleAsyncAuthOperations.enabled()) {
+            android.os.Bundle async = readAsyncAuth(method, account, key);
+            if (async != null && async.getBoolean("handled")) return async.getString("value");
+        }
         String ui = "com.google.android.gms.ui";
         if (AppProcesses.runsHere(ui)) return RemoteActivities.readDelegatedAuth(method, account, key);
         // Cache reads must not start a background UI; the verified activity route starts it.
@@ -776,6 +781,20 @@ public final class PlayServicesChannel {
             data.writeString(method); data.writeTypedObject(account, 0); data.writeString(key);
             if (!target.transact(READ_DELEGATED_AUTH, data, reply, 0)) return null;
             reply.readException(); return reply.readString();
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    private static android.os.Bundle readAsyncAuth(String method, android.accounts.Account account, String key)
+            throws RemoteException {
+        if (AppProcesses.runsHere("com.google.android.gms")) return GoogleAsyncAuthOperations.read(method, account, key);
+        Channel channel = processChannel(AppProcesses.socketOf("com.google.android.gms"));
+        IBinder target = channel == null ? null : root(channel);
+        if (target == null) throw new RemoteException("original auth operation host unavailable");
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeString(method); data.writeTypedObject(account, 0); data.writeString(key);
+            if (!target.transact(READ_ASYNC_AUTH, data, reply, 0)) throw new RemoteException("async auth route unavailable");
+            reply.readException(); return reply.readBundle(PlayServicesChannel.class.getClassLoader());
         } finally { data.recycle(); reply.recycle(); }
     }
 
@@ -1808,6 +1827,16 @@ public final class PlayServicesChannel {
                     String method = data.readString();
                     android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
                     reply.writeString(RemoteActivities.readDelegatedAuth(method, account, data.readString()));
+                    return true;
+                }
+                case READ_ASYNC_AUTH: {
+                    if (!mIdentityEnforced || !mOwnApplication || !GoogleAsyncAuthOperations.enabled())
+                        throw new SecurityException("async auth reads require the verified official app");
+                    String method = data.readString();
+                    android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
+                    String key = data.readString();
+                    if (data.dataAvail() != 0) throw new SecurityException("unexpected auth read fields");
+                    reply.writeBundle(GoogleAsyncAuthOperations.read(method, account, key));
                     return true;
                 }
                 case DELEGATED_AUTH: {
