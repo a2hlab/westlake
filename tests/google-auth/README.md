@@ -3,7 +3,8 @@
 The active [full application validation](../../docs/google-two-path-full-validation.md)
 tracks the remaining Google and Facebook flows from the live batch. Candidates
 48 and 51 add legacy sign-in service 91 and its internal service 44 dependency.
-Wattpad now reaches the real account chooser; its token flow remains incomplete.
+Spotify and Wattpad now receive successful Google activity returns. Spotify stops
+at separate signup; Wattpad's subsequent silent OAuth request is refused locally.
 Historical results below retain their original build boundaries.
 
 This probe tests the official GMS token implementation and a separate direct
@@ -281,6 +282,8 @@ javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/googl
 java -cp $out/trace GoogleAuthBoundaryTraceTest                                # ..._TEST_PASS
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
 java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
+javac -cp $out/sessions -d $out/sessions tests/google-auth/host/GoogleAuthOAuthSessionsTest.java
+java -cp $out/sessions adapter.core.GoogleAuthOAuthSessionsTest                # GOOGLE_AUTH_OAUTH_SESSIONS_PASS 44
 javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.java tests/google-auth/host/GoogleIdentityServicePolicyTest.java
 java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 20
 javac -d $out/signin-trace framework/core/java/GoogleSignInDiagnostics.java tests/google-auth/host/GoogleSignInDiagnosticsTest.java

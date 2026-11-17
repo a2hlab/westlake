@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "candidate": 51,
+  "sourceRevision": "d2b875e26c8781d155e37a7e9d408c705ae80213",
+  "adapterJarSha256": "3032185371445c3bea8d40a08f9a46ef1b2f5221f26c0fab3939ba25ea12370e",
+  "deviceState": {
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "policyStatus": "3",
+    "certificationOverridePresent": false
+  },
+  "spotify": {
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "freshAppData": true,
+    "accountChooserReached": true,
+    "existingAccountSelected": true,
+    "providerTokenKindsObserved": [
+      "oauth2",
+      "server_code"
+    ],
+    "providerTokenEventsInAttempt": {
+      "oauth2": 4,
+      "server_code": 3
+    },
+    "googleActivityResult": -1,
+    "visibleResult": "Create account: date-of-birth form",
+    "separateSignupCompleted": false,
+    "signupAuthorization": "Requested; earlier instruction requires stopping before separate signup",
+    "accountSessionEstablished": false,
+    "libraryPlaybackRenewalAndRestart": "Not validated"
+  },
+  "wattpad": {
+    "apkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+    "appRestart": "In-place restart with existing data and exact candidate51 adapter",
+    "birthDatePermission": "User explicitly authorized for this test",
+    "appGrant": {
+      "package": "wp.wattpad",
+      "signerSha256": "012de45837d20561255a02bbc22334c1f681d01b366fe31bef418baf535903ef",
+      "scopes": [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/user.birthday.read"
+      ],
+      "explicitServerClientIdGranted": false,
+      "birthdayScopeGranted": true,
+      "existingEntriesPreserved": true,
+      "grantBeforeSha256": "79d11bc6fd32bd6c75afb34a55f1b5a4b26de78e760f7903c023573a7279683a",
+      "grantAfterSha256": "a72dc3f69e1023d3e640e6d91c1bc3a7c5894c993a353f12e23796e0ccbaa74a",
+      "basis": "User explicitly authorized birth-date access for the Wattpad test; original signer pin and all other app grants retained.",
+      "grantScopeDelimiterVerified": true
+    },
+    "providerTokenKindsObserved": [
+      "oauth2"
+    ],
+    "providerTokenEventsInAttempt": 3,
+    "googleActivityResult": -1,
+    "visibleResult": "Returns to existing-account login page",
+    "postReturnFailure": {
+      "interface": "com.google.android.auth.IAuthManagerService",
+      "transaction": 5,
+      "requestedServiceFromOriginalApk": "oauth2:openid email profile",
+      "officialGmsEvents": [
+        "silent_request_denied=true",
+        "silent_read_denied=true owner=wp.wattpad"
+      ],
+      "clientError": "BadAuthentication",
+      "cause": "Current silent authorization supports ID tokens only; no persisted OAuth selection is created by the legacy Google sign-in activity."
+    },
+    "accountSessionEstablished": false
+  },
+  "fullApplicationPasses": 0,
+  "rawLogsAndScreenshotsPublic": false
+}

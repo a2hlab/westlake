@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "candidate": 52,
+  "sourceBaseRevision": "d2b875e26c8781d155e37a7e9d408c705ae80213",
+  "changedSourceHashes": {
+    "framework/core/java/GoogleAuthSessions.java": "dc8c1930340e84948a561821a8e9612a817fcd8300eb7116c8a96a0ea930be20",
+    "framework/activity/java/GoogleAuthOperations.java": "444119249c3581f0bdb60e5bb10ea5e59df80dba62d0862efbe8f532ef793019",
+    "framework/activity/java/RemoteActivities.java": "98eba732d4f3c97f10f1b539a89135b6d82ca405285d02968dae8e3f06ccc6eb"
+  },
+  "officialGmsAdapterJarSha256": "a43d27c88532cbf8f1ce72516813e1dd968420e9d088851ef363147e0f583e0b",
+  "clientAdapterCandidate": 51,
+  "clientAdapterJarSha256": "3032185371445c3bea8d40a08f9a46ef1b2f5221f26c0fab3939ba25ea12370e",
+  "existingIdTokenChecksPassed": 23,
+  "newOAuthChecksPassed": 44,
+  "adapterBuildPassed": true,
+  "bootImageBuildPassed": true,
+  "boardPreloadPassed": true,
+  "nativeArtifactsRebuilt": false,
+  "preservation": {
+    "identityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "policyStatus": "3",
+    "certificationOverridePresent": false,
+    "officialGmsAlive": true,
+    "microgAlive": true
+  },
+  "policy": "Persist only OAuth scopes issued in the completed verified legacy Google sign-in flow. Bind owner, both signer digests, selected account hash and revocation epoch. Follow-up requests may use a subset of saved scopes, and the provider cache request must match the live operation scope set exactly. Recheck operator grants and live witness. No server-code reuse, scope alias expansion, or opaque-option reuse.",
+  "wattpadBoardRetest": {
+    "existingSdkSelection": "Silent token request reached the new boundary, but no persisted OAuth selection existed from candidate51. No successful token issued.",
+    "googleSignInPreferenceReset": {
+      "package": "wp.wattpad",
+      "file": "shared_prefs/com.google.android.gms.signin.xml",
+      "backupHashVerified": true,
+      "entryCount": 3,
+      "onlyGoogleSignInPreferences": true,
+      "reason": "Pre-candidate52 SDK-cached sign-in skipped the interactive flow required to create the new OAuth selection record."
+    },
+    "afterReset": {
+      "modernCallback": {
+        "status": 16,
+        "resultPresent": false
+      },
+      "legacyCallbacks": [
+        {
+          "status": 4,
+          "accountPresent": false
+        },
+        {
+          "status": 4,
+          "accountPresent": false
+        }
+      ],
+      "remoteActivityLaunchObserved": false,
+      "authenticatedReturnObserved": false,
+      "visibleResult": "Existing-account login page",
+      "uiMainThreadSample": "MessageQueue.nativePollOnce; single sample does not prove UI health",
+      "oauthFollowupFixValidatedOnBoard": false
+    },
+    "automaticExistingDataMigration": "Not implemented"
+  },
+  "fullApplicationAcceptance": false
+}

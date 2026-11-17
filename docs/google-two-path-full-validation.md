@@ -87,3 +87,61 @@ Token delivery, authenticated return, app backend use and renewal remain
 incomplete. The uncertified-device screen after a local provider denial is not
 evidence that Google rejected a successfully delegated token. See
 [candidate51.json](../tests/google-auth/full48/candidate51.json).
+
+### Candidate 51 follow-up: two successful Google activity returns
+
+Spotify reaches Google's account chooser, receives delegated OAuth access tokens
+and server authorization codes, and receives `RESULT_OK`. Its next visible page
+is the separate Spotify account-creation form asking for a birth date. Testing
+stops there under the user's earlier signup restriction. A Spotify account
+session, library, playback, renewal and restart are not yet validated.
+
+The user subsequently authorizes Wattpad's birth-date scope. Only that scope is
+added to its existing signer-pinned grant; the other entries are preserved.
+After an in-place app restart, the Google flow issues OAuth tokens and returns
+`RESULT_OK`. Wattpad then invokes `IAuthManagerService` transaction 5. Its original
+APK requests `oauth2:openid email profile`; the current silent boundary accepts
+only ID tokens. The official GMS process records `silent_request_denied` and
+`silent_read_denied` for Wattpad, and the client receives `BadAuthentication`.
+Wattpad remains on its login page. This is a local post-return authorization gap,
+not evidence of a Google certification rejection at that step.
+
+Both service hosts remain alive; recorded uncertified status is still 3 and
+there is no certification-status override. The successful Google returns show
+that this status can coexist with working delegated authentication. They do not
+establish full app acceptance or production per-app isolation. Exact observations
+are in [candidate51-followup.json](../tests/google-auth/full48/candidate51-followup.json).
+
+## Candidate 52: authorize follow-up OAuth access-token requests
+
+The silent authorization path now accepts ordinary OAuth access tokens after a
+successful, verified legacy Google sign-in activity. It stores the scopes issued
+during that completed flow, bound to the original package, both signer digests,
+selected account hash and revocation epoch. The next request may use a subset
+of those scopes. Its live Binder operation and the provider cache request must
+still agree on the exact requested scope set; changing scope order is allowed,
+but scope aliases are not invented. The provider's separate operator grant and
+live witness are checked again. Server authorization codes and opaque options
+cannot become reusable grants. No account names or tokens enter the selection
+record, and each new selection replaces the previous scope set.
+
+All 23 existing ID-token checks and 44 new OAuth boundary checks pass. The adapter,
+runtime packaging, boot image and board preload pass. Official GMS runs the new
+adapter with its account data retained; the client remains on candidate 51.
+Check-in identity and provider grants are unchanged, policy status remains 3,
+and no certification override is present.
+
+The first retry reused Wattpad's SDK-cached Google selection from before this
+change. It skipped the chooser and reached a silent-read denial because no new
+OAuth selection record existed. The exact app Google-sign-in preference file
+was backed up before clearing it for a fresh interactive test; other app data
+was retained. Automatic migration or an interactive recovery from this existing
+cache state is not yet implemented.
+
+After clearing that SDK cache, the modern callback returns 16 and the legacy
+callbacks return 4 with no account. This retry has not produced another remote
+Google activity launch or authenticated return; Wattpad remains at login. A
+single thread sample shows the UI thread in `MessageQueue.nativePollOnce`,
+which does not establish overall UI health. The new OAuth follow-up fix is
+therefore **not yet validated on the board**, despite passing its host boundary
+tests and preload. See [candidate52.json](../tests/google-auth/full48/candidate52.json).

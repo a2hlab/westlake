@@ -37,7 +37,7 @@ public final class GoogleAuthSessionsTest {
         require(!allows(root, OWNER, SIGNER, LEGACY, "other@example.invalid", silent, epoch));
         require(!allows(root, OWNER, SIGNER, LEGACY, ACCOUNT, request(SERVICE.replace("test.apps", "other.apps")), epoch));
         require(!GoogleAuthSessions.allows(root, OWNER, SIGNER, LEGACY, "com.other", ACCOUNT, silent, epoch));
-        denied(() -> allows(root, OWNER, SIGNER, LEGACY, ACCOUNT, request("oauth2:email"), epoch));
+        require(!allows(root, OWNER, SIGNER, LEGACY, ACCOUNT, request("oauth2:email"), epoch));
         denied(() -> allows(root, OWNER, SIGNER, LEGACY, ACCOUNT,
                 request("oauth2:server:client_id:test.apps.googleusercontent.com:api_scope:email"), epoch));
         denied(() -> allows(root, OWNER, SIGNER, LEGACY, ACCOUNT, request(SERVICE + "?token_request_options=nonce"), epoch));

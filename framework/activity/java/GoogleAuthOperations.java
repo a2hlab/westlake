@@ -48,6 +48,16 @@ public final class GoogleAuthOperations {
         GoogleAuthDelegation.event("session_granted=true owner=" + origin.packageName);
     }
 
+    static void rememberOAuth(PackageInfo origin, Account account, java.util.List<String> providerKeys,
+            String epoch) throws Exception {
+        if (!enabled()) return;
+        GoogleAuthSessions.grantOAuth(directory(), origin.packageName,
+                GoogleAuthProxy.digest(origin.signingInfo.getApkContentsSigners()[0].toByteArray(), "SHA-256"),
+                GoogleAuthProxy.digest(origin.signatures[0].toByteArray(), "SHA-1"),
+                account.type, account.name, providerKeys, epoch);
+        GoogleAuthDelegation.event("session_granted=true owner=" + origin.packageName + " kind=oauth2");
+    }
+
     /** Installed only by HELLO after independent APK/spawner verification, never from request extras. */
     static SocketBinder.CallScope enter(PackageInfo origin, int pid, String spawner, SocketBinder channel,
             IBinder target, int code, Parcel data, int flags) throws RemoteException {
@@ -61,9 +71,12 @@ public final class GoogleAuthOperations {
             operation.service = data.readString();
             Bundle extras = data.readTypedObject(Bundle.CREATOR);
             if (data.dataAvail() != 0 || operation.account == null || !"com.google".equals(operation.account.type)
-                    || operation.service == null || operation.service.length() > 512
-                    || !operation.service.matches("audience:server:client_id:[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com"))
+                    || operation.service == null || operation.service.length() > 512)
                 throw new SecurityException("silent request unsupported");
+            operation.requested = GoogleAuthDelegationPolicy.parse(origin.packageName + ":"
+                    + operation.legacySigner + ":" + operation.service);
+            GoogleAuthSessions.requireReusable(operation.requested);
+            if (!operation.requested.options.isEmpty()) throw new SecurityException("silent options unsupported");
             if (extras != null) for (String key : extras.keySet()) {
                 if ("androidPackageName".equals(key) || "clientPackageName".equals(key)) {
                     if (!origin.packageName.equals(extras.getString(key))) throw new SecurityException("silent origin mismatch");
@@ -101,6 +114,7 @@ public final class GoogleAuthOperations {
         boolean accepted;
         Account account;
         String service, epoch, issuedKey;
+        GoogleAuthDelegationPolicy requested;
         Bundle issued;
 
         Operation(PackageInfo origin, int pid, String spawner, SocketBinder channel, Operation outer) {
@@ -117,7 +131,7 @@ public final class GoogleAuthOperations {
         boolean allowed(GoogleAuthDelegationPolicy request) {
             try {
                 return accepted && active && channel.isAlive() && SystemClock.elapsedRealtime() < deadline
-                        && service.equals(request.service) && GoogleAuthSessions.allows(directory(), origin.packageName,
+                        && GoogleAuthSessions.sameService(requested, request) && GoogleAuthSessions.allows(directory(), origin.packageName,
                         signer, legacySigner, account.type, account.name, request, epoch);
             } catch (Exception denied) { return false; }
         }
