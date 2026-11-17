@@ -3,7 +3,8 @@
  * Android NDK networking boundary compatibility for OpenHarmony.
  *
  * APK DSOs in the Westlake Android namespace call the normal POSIX socket
- * surface.  Calls selected by WESTLAKE_ANDROID_NATIVE_NET_TARGETS receive the
+ * surface. APK-backed callers, app-written libraries and calls selected by
+ * WESTLAKE_ANDROID_NATIVE_NET_TARGETS receive the
  * small ABI translations required between Bionic and OH musl; every other
  * caller is forwarded unchanged.  The DSO can therefore be preloaded at the
  * process boundary even though OH's inherited libc wins inside a child loader
@@ -23,6 +24,7 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <sys/syscall.h>
+#include "../../../webview-shim/bionic_apk_path.h"
 
 extern long syscall(long number, ...);
 
@@ -98,6 +100,8 @@ static int westlake_network_callsite_selected(void *return_address) {
     }
     return westlake_basename_in_list(
             info.dli_fname, getenv("WESTLAKE_ANDROID_NATIVE_NET_TARGETS")) ||
+           /* Dynamite libraries may retain a /proc/self/fd/N loader label. */
+           in_apk(info.dli_fname) ||
            westlake_is_app_written_library(info.dli_fname);
 }
 

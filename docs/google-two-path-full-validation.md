@@ -6,15 +6,16 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 78 adds separately approved native-account OAuth
-consent for Gmail. The provider refuses the original app without consent,
-issues OAuth tokens after explicit approval, and refuses it again when only
-that consent is withdrawn. Official GMS delivers token-bearing replies to
-Gmail. This does not establish mailbox synchronization: after deploying the
-existing Cronet APK-descriptor ABI fix to Gmail, its settings sync fails with
-`ERR_NAME_NOT_RESOLVED`. Candidate 77 removed the Contacts-client
-compatibility dialog by adding People/Feedback to the existing opt-in service
-eligibility policy. Certification remains 3, without an override.
+Latest result: candidate 79 fixes Cronet's network ABI routing for APK code
+loaded through a file descriptor. Gmail's DNS lookups now succeed. After
+turning on Sync Gmail in the original app's settings, a controlled restart shows
+real recent inbox conversations, and an existing message opens with its HTML
+body rendered. An independent read-only Gmail API request also accepts the
+native OAuth token with HTTP 200; an invalid-token control returns 401. Manual
+pull to refresh is exercised, but new-message arrival, periodic background sync
+and sustained operation remain unvalidated. Periodic sync scheduling still has
+an observed unimplemented-operation error. Candidate 78's explicit account-
+consent controls pass; certification remains 3 without an override.
 
 Candidate 76 completes fresh FotMob Facebook login and restart.
 The app saves a different token for the same account. An independent read-only
@@ -1282,3 +1283,76 @@ claimed. Native consent matches the explicitly approved record. Exact sanitized
 results are in [candidate78.json](../tests/google-auth/full48/candidate78.json).
 Chooser-flow regression on the upgraded hosts and the new foreign-broker test
 remain separate outstanding checks.
+
+## Candidate 79: network ABI for APK descriptor callers and Gmail API acceptance
+
+A read-only inspection of live Cronet's relocation slots confirms that
+`getaddrinfo` and `freeaddrinfo` already resolve to the native network adapter.
+The adapter's caller selector recognizes named or app-written libraries but
+misses the loader's APK descriptor label. It forwards those calls with musl's
+`addrinfo` member order and constants. Cronet expects Bionic, whose address and
+canonical-name pointers occupy the opposite slots. The caller-label problem is
+similar to candidate 72's `sysconf` classifier failure, but affects a different
+library boundary.
+
+The network selector now reuses `bionic_apk_path.h`, including bounded
+`/proc/self/fd/N` resolution and descriptor-reuse handling. Normal native callers
+keep the host ABI; the existing explicit-library selector remains supported.
+This selects ABI translation, not package authenticity or token authorization.
+The original APKs and the Google consent policy are unchanged.
+
+The new test loads an actual caller DSO through a self descriptor and invokes
+the real adapter's resolver and release functions. It checks Bionic address
+layout for APK code, host layout for native code, descriptor reuse and the
+existing library allowlist. All 24 checks pass on the host and the OH board;
+the parent source fails check 12 at the APK address-layout assertion. The probe
+uses a numeric loopback address, so it needs no external DNS. Its `.apk` file
+contains an ELF test fixture and does not validate ZIP loading or signatures.
+Build/run instructions are in
+[README-network-apk.md](../tests/parity/native/README-network-apk.md).
+
+The OH adapter compiles with warnings as errors and strict undefined-symbol
+linking. Its in-place Gmail overlay has a verified host rollback copy; the
+mapped inode and artifact hash match. Java, the Android runtime and the other
+native libraries are retained. In the original Gmail client, the previously
+failing Google hostnames resolve successfully and the adapter records Bionic
+address translation. No `ERR_NAME_NOT_RESOLVED` or fatal-signal marker occurs in
+the fixed capture. Native OAuth issuance and official-GMS token-bearing replies
+still occur. The compatibility warning stays absent in the observed UI.
+
+An independent host-side request to Gmail's read-only profile API uses the
+cached native Gmail OAuth credential. Google returns HTTP 200 and the authorized
+account, while an invalid token returns HTTP 401/`UNAUTHENTICATED`. A second
+metadata-only query returns a recent inbox message identifier with the approved
+token and 401 with the control. Normal TLS verification is enabled, redirects
+are refused, and no message bodies are requested. These checks establish Google
+API acceptance of that token; they do not prove the app's own mailbox sync.
+Account identifiers, message identifiers, counts, tokens and response bodies
+remain private.
+
+The original app's account settings show Sync Gmail unchecked. Enabling that
+checkbox persists the automatic-sync preference and queues one matching job in
+LocalSyncService, which starts the original `gmail-ls` adapter in initialization
+mode. A controlled restart retains the account and enabled preference. The new
+process again records address translation, token-bearing replies and no
+DNS-error or fatal-signal marker in its captured log.
+
+The restarted app then displays real recent inbox conversations. Opening an
+existing welcome message renders its HTML body inside the original Gmail app.
+This is direct mailbox and message-view evidence beyond the independent API
+check. Screenshots and message contents remain private. A manual pull-to-refresh
+gesture is exercised; no new mail is sent to create a server delta, so this does
+not validate new-message arrival or prove a completed incremental refresh.
+
+The earlier process also calls `addPeriodicSync`, which throws
+`UnsupportedOperationException: periodic sync scheduling is not implemented`.
+That remains a background-scheduling gap even though the app's initial mailbox
+flow now works. Sync-adapter initialization completion is not independently
+established by the captured callback trace. Sustained sync, incremental refresh,
+periodic scheduling and full application acceptance require further checks.
+No mail is sent or deleted during validation.
+
+Certification remains 3 without an override; the check-in identity, one provider
+account and explicitly approved native-consent record are preserved. Exact
+sanitized results are in
+[candidate79.json](../tests/google-auth/full48/candidate79.json).

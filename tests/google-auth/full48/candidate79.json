@@ -1,0 +1,187 @@
+{
+  "candidate": 79,
+  "phase": "Repair descriptor-backed native network ABI; Gmail inbox synchronization and message rendering observed",
+  "baseCommit": "f70f516f150380c7e06569c619ca716616c1aaf0",
+  "diagnosis": {
+    "liveCronetGotReadOnlyInspected": true,
+    "cronetVersion": "129.0.6614.4",
+    "getaddrinfoAndFreeaddrinfoBoundTo": "libandroid_native_network_compat.so",
+    "sysconfBoundTo": "libwebview_bionic_shim.so",
+    "priorNetworkCallerClassifierMissesApkDescriptors": true,
+    "baselineNameNotResolvedOccurrences": 174,
+    "occurrenceCountIsLogTextNotDistinctRequests": true
+  },
+  "implementation": {
+    "change": "Use existing bounded APK self-descriptor classifier in network ABI routing",
+    "reusesHeader": "framework/webview-shim/bionic_apk_path.h",
+    "handlesDescriptorReuseWithoutFdCache": true,
+    "normalNativeCallersKeepMuslAbi": true,
+    "existingLibraryAllowlistRetained": true,
+    "authorizationPolicyChanged": false,
+    "originalApplicationApksModified": false
+  },
+  "tests": {
+    "hostActualDlopenCallerChecks": 24,
+    "ohBoardActualDlopenCallerChecks": 24,
+    "oldSourceFailsCheck": 12,
+    "cases": [
+      "Native executable and DSO use host addrinfo order",
+      "APK ELF loaded through /proc/self/fd uses Bionic addrinfo order",
+      "Both result layouts freed through the real adapter",
+      "Descriptor reused for native DSO does not retain APK classification",
+      "Explicit native-library allowlist still selects Bionic translation"
+    ],
+    "probeUsesNumericLoopbackOnly": true,
+    "probeApkIsElfFixtureNotZipSignatureTest": true
+  },
+  "build": {
+    "ohSdkCompilePassed": true,
+    "warningsAsErrors": true,
+    "strictUndefinedSymbolLinking": true,
+    "networkAdapterSha256": "6e265ecbde12dd30acc853e1ed84c232ae6ecbb081b1d49b6b7991a66849afa1",
+    "networkAdapterBytes": 25712,
+    "sourceSha256": {
+      "framework/appspawn-x/bionic_compat/src/android_native_network_compat.c": "27cf1685af2089e725caf4ada3d55daaf22467bcc06c34e6f6a89fec0dc642ea",
+      "framework/webview-shim/bionic_apk_path.h": "d7996ecb947dba3d0eeb6739f20440b06261b2c70da83e68274d723893cc801a",
+      "tests/parity/native/network_apk_caller.c": "c11dfd42d7706988f91e3e0b967fba9f64a15c1dd3e122be2daa4f019df85eb5",
+      "tests/parity/native/network_apk_caller_test.c": "2b1892051feab6a6f3e492b7a0ec323e35dc8159021ce3368fce0349c34460ed"
+    },
+    "javaAdapterRebuilt": false,
+    "otherNativeLibrariesRebuilt": false
+  },
+  "board": {
+    "gmailAdapter": "70b",
+    "officialGmsAdapter": 78,
+    "providerAdapter": 78,
+    "gmailNetworkOverlayHashVerified": true,
+    "mappedNetworkInodeVerified": true,
+    "exactRollbackRetainedOnHost": true,
+    "successfulResolverCalls": [
+      {
+        "hostname": "inbox.google.com",
+        "addressFamily": 0,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "inbox.google.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "peoplestack-pa.googleapis.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "taskassist-pa.googleapis.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "appsgrowthpromo-pa.googleapis.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "appsgenaiserver-pa.googleapis.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "mail.google.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      },
+      {
+        "hostname": "inbox.google.com",
+        "addressFamily": 2,
+        "bionicFlags": "0x400",
+        "rc": 0
+      }
+    ],
+    "fixedAddrinfoTranslationCount": 8,
+    "fixedNameNotResolvedCount": 0,
+    "fixedFatalSignalCount": 0,
+    "nativeGmailOAuthAndOfficialSilentTokenDeliveryStillObserved": true,
+    "tokenBearingClientReplies": 5,
+    "originalGmailSyncNowTested": true,
+    "originalGmailSyncCheckboxEnabled": true,
+    "automaticPreferenceWrittenByOriginalApp": true,
+    "matchingSyncJobQueued": true,
+    "observedAdditionalFailure": "LocalSyncService.addPeriodicSync throws UnsupportedOperationException",
+    "periodicExceptionOccurrences": 2,
+    "mailboxSyncValidated": true,
+    "restart": {
+      "clientAlive": true,
+      "sameAccountDataRetained": true,
+      "automaticPreferenceRemainsTrue": true,
+      "nativeAddrinfoTranslations": 7,
+      "nameNotResolvedCount": 0,
+      "fatalSignalCount": 0,
+      "tokenBearingClientReplies": 3,
+      "fullMailboxAcceptance": false,
+      "inboxRowsVisible": true
+    },
+    "initialSyncAdapterStarted": true,
+    "initialSyncAdapterMode": "initialization",
+    "mailboxObserved": {
+      "accountPreviouslyDisplayedEmptyOrNotSynced": true,
+      "syncEnabledThroughOriginalAppSettings": true,
+      "realRecentInboxConversationsVisibleAfterRestart": true,
+      "existingWelcomeMessageOpened": true,
+      "messageBodyRenderedInOriginalGmail": true,
+      "screenshotsRetainedPrivately": true,
+      "messageContentsPublished": false,
+      "mailSentOrDeleted": false,
+      "pullToRefreshGestureExecuted": true,
+      "newMessageArrivalOrServerDeltaDuringRefreshEstablished": false
+    }
+  },
+  "independentGoogleServerValidation": {
+    "execution": "Host-side read-only API requests using cached native Gmail token; separate from app sync",
+    "tlsCertificateVerification": true,
+    "redirectsAllowed": false,
+    "profile": {
+      "approvedNativeTokenHttpStatus": 200,
+      "returnedAccountMatchesAuthorizedAccount": true,
+      "mailboxContainsMessages": true,
+      "invalidTokenHttpStatus": 401,
+      "invalidTokenErrorStatus": "UNAUTHENTICATED"
+    },
+    "recentInboxMetadata": {
+      "approvedNativeTokenHttpStatus": 200,
+      "atLeastOneRecentInboxMessageReturned": true,
+      "invalidTokenHttpStatus": 401,
+      "serverEstimateNotUsedAsExactCount": true
+    },
+    "messageBodiesRequested": false,
+    "apiTokenAcceptanceEstablishesAppMailboxSync": false
+  },
+  "preservation": {
+    "uncertifiedStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerConsentMatchesApproval": true,
+    "providerAccountCount": 1,
+    "officialGmsAlive": true,
+    "providerAlive": true,
+    "gmailAliveAtCapture": true,
+    "finalAfterRestartChecked": true,
+    "providerAccountStoreByteIdentical": false
+  },
+  "remaining": {
+    "syncDispatchAndPeriodicScheduling": true,
+    "gmailRestartAcceptance": false,
+    "otherPlannedAppsAndConcurrency": true,
+    "productionIsolation": true,
+    "fullApplicationPassed": false,
+    "sustainedMailboxSyncAndRefreshDelta": true
+  }
+}

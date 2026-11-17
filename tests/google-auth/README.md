@@ -459,3 +459,12 @@ Gmail absent-consent / approved / withdrawn controls and remaining Cronet DNS
 failure are recorded in the [full validation report](../../docs/google-two-path-full-validation.md#candidate-78-explicit-native-account-consent-and-gmail-token-delivery).
 Token delivery is an intermediate result; mailbox sync and production consent UI
 remain incomplete.
+
+Candidate 79 repairs the native networking selector for APK-descriptor callers.
+Its real resolver/release test passes 24 checks on host and OH; the old source
+fails the APK layout case. Gmail's DNS lookups succeed and independent read-only
+Gmail API controls accept its native OAuth token (200) and reject an invalid
+one (401). After enabling Sync Gmail through the app's settings, its inbox
+loads after restart and an existing message body renders. Sustained sync,
+incremental refresh and periodic scheduling remain incomplete. See
+[candidate79.json](full48/candidate79.json).
