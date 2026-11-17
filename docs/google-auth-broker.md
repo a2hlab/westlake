@@ -22,9 +22,12 @@ caller, and not for Play services.
 
 The broker does not certify the device. microG's check-in is not Google's uncertified-device registration,
 and official Play services enforces its own identity's `uncertified_status` whoever holds the account.
-The optional identity-service compatibility layer separately changes local service eligibility for
-the tested GMS build. It preserves that status and the check-in identity; it does not register the
-board, change Google's server decisions, or remove other service restrictions.
+One optional switch does work around Play services' uncertified-device check:
+`WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT` widens Play services' own exception list, so that a few sign-in
+services are served on a device Google treats as uncertified. See
+[Play services' uncertified-device exceptions](#play-services-uncertified-device-exceptions). It leaves
+`uncertified_status` and the check-in identity as they are; it does not register the board, change
+Google's server decisions, or lift any other service restriction.
 
 ## Pieces
 
@@ -96,6 +99,46 @@ not an update-resilient compatibility guarantee. Token authorization and provide
 - A single-activity PendingIntent can now execute through its verified creator and return its result
   to the foreign caller. The fixture proves this contract; actual FotMob/authentication results are
   recorded separately in the continuation report. General activity stacks and URI grants remain unsupported.
+
+## Play services' uncertified-device exceptions
+
+Play services refuses most third-party API requests on a device whose `uncertified_status` is 3. It still
+serves the services in its Phenotype value `uncertified_exceptions_whitelist`, which in build 244034029
+defaults to `151,130,40,25,257,185,51,218`. With `WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT=1`, Westlake adds
+services to that value in Play services' own `gms_chimera_phenotype_flags` preferences before Play
+services starts. The added services then pass Play services' uncertified-device check on a device that
+Google still treats as uncertified.
+
+This is a local workaround of Google's device policy, not certification:
+- `uncertified_status`, the check-in identity and Play Integrity verdicts are unchanged.
+- Google's servers still decide whether to issue tokens.
+- Every other service stays refused: ads, measurement, location and module downloads among them.
+
+**Approved set.** The project owner approved this workaround on 2026-11-17 for these services only:
+
+| Service | What it is |
+|---|---|
+| 212 | Google Identity sign-in (the account chooser) |
+| 213 | Its internal identity service, used after account selection |
+| 91 | Legacy Google Sign-In |
+| 44 | `SignIn.API`, which legacy sign-in opens |
+| 5 | People (`People.API_1P`), needed by Gmail's contacts client |
+| 29 | Feedback, needed by Gmail's contacts client |
+
+`main` adds 212 and 213; the other four are part of the pending two-path validation change. Adding any other
+service needs the owner's sign-off.
+
+**Rules that stay:**
+- No override of `uncertified_status` or `enable_uncertified_device_check`.
+- No certification or attestation spoofing.
+- Registering the board with Google remains the owner's decision.
+
+**Results must say so.** A result obtained with the switch on (a round, a validation report, a gap-map
+entry) must state that the exception list was widened and name the added services. It is not evidence of
+what an unmodified uncertified device gets, in the same way that results from a separate check-in identity
+must state that identity's `uncertified_status`. Play services' log records each widening as
+`[WL-GOOGLE-POLICY] identity_service_compat=true services=...`, and each restoration as `...=false
+restored=true`.
 
 ## Evidence
 
