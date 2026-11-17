@@ -1,60 +1,26 @@
 # Full two-path application validation
 
-Status: in progress. The goal is to fix and validate every application flow in
-the [validation plan](../tests/google-auth/full48/validation-plan.json), including
-backend use, renewal and restart. The
-[previous batch](google-two-path-live44.md) remains the baseline. A connection,
-account picker, or partial login is not a full application pass.
+The [validation plan](../tests/google-auth/full48/validation-plan.json) covers
+eight Google app flows with 39 checks and three Facebook app flows with 12
+checks. The table records what the original APKs demonstrated on the board.
+Most rows combine observations from more than one build. The shared isolation,
+concurrency and sustained-use requirements remain open. The latest [process
+and window checks](#live-app-and-service-isolation-on-the-board) cover six
+live roles and their native HAPs.
 
-Latest result: candidate 80 adds real app-owned periodic sync registration,
-dispatch, cancellation and restart persistence. Its local-account fixture
-completes both normal and periodic adapter calls; 22 device checks pass across
-two launches. A source adaptation fixes AOSP's system-UID-only caller guard for
-opt-in calls from the same UID and PID, preserving the app's real identity.
-Gmail retains its inbox and registers its daily sync request without the former
-unsupported-operation error. OpenHarmony waking a stopped app, multiple real
-periodic cycles and new-message incremental refresh remain unvalidated.
-Candidate 79's original Gmail inbox/message rendering and Google API token
-acceptance results remain the mailbox baseline. Certification remains 3 without
-an override; the full app and isolation plan is still in progress.
-
-Candidate 76 completes fresh FotMob Facebook login and restart.
-The app saves a different token for the same account. An independent read-only
-Facebook Graph identity request accepts that token before and after restart;
-an invalid-token control returns HTTP 401 with error 190. Candidate 75 adds
-fresh FotMob Google app sign-in through the
-official account chooser and persistence after another client restart. The
-token saved by the app is independently verified with Google's signing keys.
-Candidate 74 validates FotMob's Google favorite-team cloud round
-trip and silent delivery of a fresh Google-signed ID token after its saved login
-token expired. An app-side reply fingerprint matches the independently verified,
-unexpired token from microG. The original APK uploads a favorite change and
-restores both teams after its local favorite files and cache are cleared.
-Candidate 73 separately validates that cloud feature in a retained Facebook
-session. Candidate 72's native APK-descriptor classification fix keeps Cronet
-129 past its earlier crash. These are specific feature results; the wider
-application and isolation plan remains incomplete.
-
-Candidate 71 accepts Gmail's bounded native OAuth scope list; candidate 70
-fixes its GMS APK loading. Candidate 78 upgrades both service hosts to that
-parser and introduces explicit operator consent for native account access.
-An end-user consent interface, mailbox sync, the GMS-version gap and remaining
-service eligibility failures are still open.
-No full application pass is established.
-
-Earlier, candidate 62 renews Wattpad's legacy Google sign-in after
-the SDK's cached selection is deliberately expired. Official GMS returns a
-successful callback, microG supplies fresh OAuth tokens, and Wattpad reaches
-separate signup without clearing its username or opening a chooser. A control
-with a revoked saved-selection epoch denies both legacy requests and issues no
-Wattpad OAuth token. This is a local SDK-expiry test, not actual server-token
-expiry or a full application pass. Drive's OAuth/file-listing gap and the wider
-Google/Facebook acceptance plan remain open.
-
-Candidate 63 exposes the account to Gmail through the pinned provider, and
-candidate 64 discovers its real mail sync adapter. Gmail's manual-sync action
-uses an internal asynchronous pipeline; discovering the Android sync adapter
-does not prove that Gmail invokes it or that mailbox synchronization completes.
+| Original app | Observed on the board | Still to verify |
+| --- | --- | --- |
+| FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
+| Spotify · Google | Google's account chooser returned successfully to Spotify. Spotify then requested a birth date to create its own account. [Board results](../tests/google-auth/full48/candidate51-followup.json) | Spotify account session, library, playback, silent renewal and persistence. The test stopped at signup. |
+| Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
+| YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
+| Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
+| Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
+| Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
+| Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
+| FotMob · Facebook | Fresh Facebook login returned to FotMob, its account menu displayed Sign out, and the session survived a process restart. [Board results](../tests/google-auth/full48/candidate76.json) | All four named Facebook checks have evidence on the tested build. |
+| Wattpad · Facebook | Facebook consent completed and the SDK delivered a successful activity result to the original Wattpad app. Wattpad displayed Create an Account. [SDK return](google-two-path-live44.md) | Wattpad account session and restart persistence. |
+| Spotify · Facebook | The recorded Facebook test stalled at a black startup screen before the Facebook login UI appeared. A later Google test reached Spotify’s account screen. [Facebook run](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Google run](../tests/google-auth/full48/candidate51-followup.json) | Facebook login on the newer runtime, authenticated return, Spotify session and persistence. |
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -1844,3 +1810,42 @@ H.264 control. The rebuilt shim corrects Android’s format queries. HEVC
 playback and online playback in the original YouTube APK remain open.
 [Android test source](../tests/parity/VideoDecoderProfileProbe.java) ·
 [Board results and fixture hashes](../tests/google-auth/full48/candidate90.json)
+
+## Live app and service isolation on the board
+
+Seven read-only samples over 206 seconds followed the original Drive, Maps and
+Uber APKs, official Play services, the private microG provider and the Play
+Store instance configured for these clients. All six Android processes kept
+their original process identity, had distinct Linux UIDs and occupied distinct
+mount namespaces. Each shared its UID with its own native HAP. SELinux was
+enforcing and all twelve processes used the `normal_hap` domain.
+
+| Kernel or window observation | Android processes | Corresponding native HAP processes |
+| --- | --- | --- |
+| System call filter | Every sampled thread reported seccomp mode 0. | Every sampled thread reported mode 2. The main thread had two filters. |
+| Privileges | Effective Linux capabilities were zero. All main threads had `NoNewPrivs=1`. | Effective capabilities were zero. All main threads had `NoNewPrivs=0`. |
+| CPU scheduling | All six main threads were in the `top-app` CPU and cpuset groups while the screen was locked. The launcher selects this group before applying the APK's user identity. | All six main threads were in the root CPU and cpuset groups. |
+| Window ownership | Drive kept four registered windows, Maps two and Uber three. Their window IDs stayed attached to the same processes. | The OpenHarmony lock screen held focus at every sample. |
+
+Drive, Maps and Uber were configured for the same official GMS and Store
+instances. Each endpoint had one kernel listener, and the expected service
+process held its listening file descriptor. Drive and official GMS also had
+the private provider endpoint configured. The three clients' sampled account
+request counters did not change during this interval. The observation verifies
+which services were reachable and which processes owned the windows. Concurrent
+sign-in replies and interactive focus handoffs still need a live test.
+
+Two older test processes, a second official GMS and a second Play Store,
+were still running under the private provider's HAP and UID. Their staged base
+APKs matched their recorded hashes. The active clients selected a different
+Store instance running under its own UID. This board therefore had shared-UID
+test processes alongside the six distinct active roles. Cross-app data access
+was not exercised.
+
+In a separate headless ART process on the board, enabling Westlake's existing
+Android 15 seccomp option installed the filter across threads. The kernel
+reported mode 2 with one filter. The same three H.264 clips returned all
+36 frames with matching checksums with the option on and off. The six live
+Android processes continued to run with mode 0. CPU usage, battery drain and
+original app behavior with the filter enabled remain unmeasured.
+[Board observations, hashes and controls](../tests/google-auth/full48/candidate91.json)

@@ -1,0 +1,492 @@
+{
+  "schema": 1,
+  "candidate": 91,
+  "scope": "Read-only observation of the original Drive, Maps and Uber processes, the three active service roles, and their native HAP counterparts. A separate offline ART workload exercises the existing opt-in filter.",
+  "observation": {
+    "samples": 7,
+    "firstToLastSeconds": 206.0,
+    "nativeHapsObserved": 6,
+    "androidMainProcessesObserved": 6,
+    "uniqueAndroidUids": [
+      20010056,
+      20010057,
+      20010060,
+      20010061,
+      20010062,
+      20010063
+    ],
+    "uniqueAndroidMountNamespacesEachSample": [
+      6,
+      6,
+      6,
+      6,
+      6,
+      6,
+      6
+    ],
+    "eachAndroidMountNamespaceStable": true,
+    "selinuxEnforcingAllSamples": true,
+    "focusOwnerBySample": [
+      "screen-lock",
+      "screen-lock",
+      "screen-lock",
+      "screen-lock",
+      "screen-lock",
+      "screen-lock",
+      "screen-lock"
+    ],
+    "androidWindowSetsStable": {
+      "drive": true,
+      "maps": true,
+      "uber": true
+    },
+    "appAccountMarkerDeltas": {
+      "drive": {
+        "accountRequests": 0,
+        "successReplies": 0,
+        "failedReplies": 0
+      },
+      "maps": {
+        "accountRequests": 0,
+        "successReplies": 0,
+        "failedReplies": 0
+      },
+      "uber": {
+        "accountRequests": 0,
+        "successReplies": 0,
+        "failedReplies": 0
+      }
+    },
+    "registeredWindowCountsAreVisibleOrHidden": true,
+    "roles": {
+      "drive": {
+        "hostBundle": "org.westlake.authclienthost",
+        "baseApkSha256FromLaunch": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+        "registeredAndroidWindowCountRange": [
+          4,
+          4
+        ],
+        "android": {
+          "uid": 20010060,
+          "gid": 20010060,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 1,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 0,
+          "mainFilters": 0,
+          "cpuCgroup": "/top-app",
+          "cpuset": "/top-app",
+          "observedThreadModes": [
+            0
+          ],
+          "threadsReadRange": [
+            194,
+            197
+          ],
+          "processStartTimeStable": true
+        },
+        "nativeHap": {
+          "uid": 20010060,
+          "gid": 20010060,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 0,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 2,
+          "mainFilters": 2,
+          "cpuCgroup": "/",
+          "cpuset": "/",
+          "observedThreadModes": [
+            2
+          ],
+          "threadsReadRange": [
+            30,
+            30
+          ],
+          "processStartTimeStable": true
+        }
+      },
+      "maps": {
+        "hostBundle": "org.westlake.apk.com.google.android.apps.maps",
+        "baseApkSha256FromLaunch": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+        "registeredAndroidWindowCountRange": [
+          2,
+          2
+        ],
+        "android": {
+          "uid": 20010062,
+          "gid": 20010062,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 1,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 0,
+          "mainFilters": 0,
+          "cpuCgroup": "/top-app",
+          "cpuset": "/top-app",
+          "observedThreadModes": [
+            0
+          ],
+          "threadsReadRange": [
+            90,
+            97
+          ],
+          "processStartTimeStable": true
+        },
+        "nativeHap": {
+          "uid": 20010062,
+          "gid": 20010062,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 0,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 2,
+          "mainFilters": 2,
+          "cpuCgroup": "/",
+          "cpuset": "/",
+          "observedThreadModes": [
+            2
+          ],
+          "threadsReadRange": [
+            27,
+            27
+          ],
+          "processStartTimeStable": true
+        }
+      },
+      "uber": {
+        "hostBundle": "org.westlake.apk.com.ubercab",
+        "baseApkSha256FromLaunch": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+        "registeredAndroidWindowCountRange": [
+          3,
+          3
+        ],
+        "android": {
+          "uid": 20010063,
+          "gid": 20010063,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 1,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 0,
+          "mainFilters": 0,
+          "cpuCgroup": "/top-app",
+          "cpuset": "/top-app",
+          "observedThreadModes": [
+            0
+          ],
+          "threadsReadRange": [
+            181,
+            181
+          ],
+          "processStartTimeStable": true
+        },
+        "nativeHap": {
+          "uid": 20010063,
+          "gid": 20010063,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 0,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 2,
+          "mainFilters": 2,
+          "cpuCgroup": "/",
+          "cpuset": "/",
+          "observedThreadModes": [
+            2
+          ],
+          "threadsReadRange": [
+            27,
+            27
+          ],
+          "processStartTimeStable": true
+        }
+      },
+      "officialGms": {
+        "hostBundle": "org.westlake.authservicehost",
+        "baseApkSha256FromLaunch": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+        "registeredAndroidWindowCountRange": [
+          0,
+          0
+        ],
+        "android": {
+          "uid": 20010061,
+          "gid": 20010061,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 1,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 0,
+          "mainFilters": 0,
+          "cpuCgroup": "/top-app",
+          "cpuset": "/top-app",
+          "observedThreadModes": [
+            0
+          ],
+          "threadsReadRange": [
+            76,
+            76
+          ],
+          "processStartTimeStable": true
+        },
+        "nativeHap": {
+          "uid": 20010061,
+          "gid": 20010061,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 0,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 2,
+          "mainFilters": 2,
+          "cpuCgroup": "/",
+          "cpuset": "/",
+          "observedThreadModes": [
+            2
+          ],
+          "threadsReadRange": [
+            31,
+            31
+          ],
+          "processStartTimeStable": true
+        }
+      },
+      "privateProvider": {
+        "hostBundle": "org.westlake.sourcehost",
+        "baseApkSha256FromLaunch": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+        "registeredAndroidWindowCountRange": [
+          0,
+          0
+        ],
+        "android": {
+          "uid": 20010056,
+          "gid": 20010056,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 1,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 0,
+          "mainFilters": 0,
+          "cpuCgroup": "/top-app",
+          "cpuset": "/top-app",
+          "observedThreadModes": [
+            0
+          ],
+          "threadsReadRange": [
+            26,
+            27
+          ],
+          "processStartTimeStable": true
+        },
+        "nativeHap": {
+          "uid": 20010056,
+          "gid": 20010056,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 0,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 2,
+          "mainFilters": 2,
+          "cpuCgroup": "/",
+          "cpuset": "/",
+          "observedThreadModes": [
+            2
+          ],
+          "threadsReadRange": [
+            27,
+            27
+          ],
+          "processStartTimeStable": true
+        }
+      },
+      "store": {
+        "hostBundle": "org.westlake.playhost",
+        "baseApkSha256FromLaunch": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+        "registeredAndroidWindowCountRange": [
+          0,
+          0
+        ],
+        "android": {
+          "uid": 20010057,
+          "gid": 20010057,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 1,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 0,
+          "mainFilters": 0,
+          "cpuCgroup": "/top-app",
+          "cpuset": "/top-app",
+          "observedThreadModes": [
+            0
+          ],
+          "threadsReadRange": [
+            125,
+            125
+          ],
+          "processStartTimeStable": true
+        },
+        "nativeHap": {
+          "uid": 20010057,
+          "gid": 20010057,
+          "allGroupIdsEqual": true,
+          "capEff": "0000000000000000",
+          "noNewPrivs": 0,
+          "selinux": "u:r:normal_hap:s0",
+          "mainSeccomp": 2,
+          "mainFilters": 2,
+          "cpuCgroup": "/",
+          "cpuset": "/",
+          "observedThreadModes": [
+            2
+          ],
+          "threadsReadRange": [
+            27,
+            27
+          ],
+          "processStartTimeStable": true
+        }
+      }
+    }
+  },
+  "serviceChecks": {
+    "serviceRoutes": {
+      "drive": {
+        "officialGms": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "store": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "privateProvider": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        }
+      },
+      "maps": {
+        "officialGms": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "store": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "privateProvider": {
+          "directEndpointConfigured": false
+        }
+      },
+      "uber": {
+        "officialGms": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "store": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "privateProvider": {
+          "directEndpointConfigured": false
+        }
+      },
+      "officialGms": {
+        "officialGms": {
+          "directEndpointConfigured": false
+        },
+        "store": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        },
+        "privateProvider": {
+          "directEndpointConfigured": true,
+          "configuredToRecordedHost": true,
+          "visibleListeners": 1,
+          "recordedProcessHoldsListener": true
+        }
+      }
+    },
+    "hosts": {
+      "privateProvider": {
+        "uid": 20010056,
+        "hostBundle": "org.westlake.sourcehost",
+        "processName": "com.google.android.gms:ui",
+        "baseApkSha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+        "stagedBaseApkHashMatches": true
+      },
+      "olderOfficialGms": {
+        "uid": 20010056,
+        "hostBundle": "org.westlake.sourcehost",
+        "processName": "com.google.android.gms",
+        "baseApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+        "stagedBaseApkHashMatches": true
+      },
+      "olderStore": {
+        "uid": 20010056,
+        "hostBundle": "org.westlake.sourcehost",
+        "processName": "com.android.vending",
+        "baseApkSha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+        "stagedBaseApkHashMatches": true
+      },
+      "officialGms": {
+        "uid": 20010061,
+        "hostBundle": "org.westlake.authservicehost",
+        "processName": "com.google.android.gms",
+        "baseApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+        "stagedBaseApkHashMatches": true
+      },
+      "store": {
+        "uid": 20010057,
+        "hostBundle": "org.westlake.playhost",
+        "processName": "com.android.vending",
+        "baseApkSha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+        "stagedBaseApkHashMatches": true
+      }
+    },
+    "priorStoreEndpointSelected": false
+  },
+  "offlineFilterControl": {
+    "previousWorkload": "candidate90.json",
+    "sameRuntimeAndFixturesBothRuns": true,
+    "shimSha256": "cf9a0ded88e5c515f34d2330f8dbd907bd17d991388e3c35b2257412ffe6e112",
+    "frameworkJarSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "dexJarSha256": "f02fd9ae28cd86b1aabdf3cd0e6565e728a99811aadb6458902cab16b0b01367",
+    "noNewPrivilegesSetBeforeBothRuns": true,
+    "enabledRun": {
+      "kernelMode": 2,
+      "filtersOnMainThread": 1,
+      "installerReportedThreadSync": true
+    },
+    "h264ResultBothRuns": [
+      "DECODE baseline OH.video.avc.decoder samples=12 frames=12 bytes=1382400 crc=3117990295 eos=true",
+      "DECODE main OH.video.avc.decoder samples=12 frames=12 bytes=1382400 crc=4236291165 eos=true",
+      "DECODE high OH.video.avc.decoder samples=12 frames=12 bytes=1382400 crc=1037594565 eos=true"
+    ],
+    "productionDeployment": false
+  },
+  "limitations": [
+    "The account counters measure only the named diagnostic markers. None increased in this observation, which cannot verify overlapping sign-in, renewal or per-request routing.",
+    "A live listener and a matching file descriptor establish endpoint configuration and ownership, not a completed API call.",
+    "The device lock screen retained focus. Registered window IDs and owners do not establish input or interactive return routing.",
+    "Separate UIDs and mount namespaces do not establish a complete cross-app data access policy. The older co-resident GMS and Store processes share the private provider host UID.",
+    "The Android filter was enabled only in a separate headless process. Its media checks are not end-to-end tests of any original APK under that filter."
+  ],
+  "goalComplete": false
+}
