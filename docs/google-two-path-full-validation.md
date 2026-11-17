@@ -1721,3 +1721,32 @@ These tests verify the denied-permission case. A positive location fix,
 approximate-only delivery and independent user grants for apps sharing a host
 still need board validation. The [board evidence](../tests/google-auth/full48/candidate87.json)
 includes both app runs, the deployed hashes and the result of the Settings action.
+
+## OpenHarmony Settings from the original Maps APK
+
+Maps 26.43.00.1002020710 now opens its own OpenHarmony app details when the
+tester selects **Go to settings**. The board displayed **Westlake Maps test
+host** on three app-initiated attempts. One came from onboarding and two came
+from **Your location** after separate restarts with both Play connections
+configured. All three had a matching acknowledgement from the native host.
+The app-details page showed Notifications and Network. To reach the location
+control on this board, the tester opened **Settings → Privacy and security →
+Permission manager → Location → Westlake Maps test host**. The selected option
+was **Deny**. The other choices were **Ask each time** and **Allow only while
+in use**. No permission was changed during these runs.
+
+The first connected launch with clean Maps data stayed black during observation.
+Its UI thread waited on a startup future. Two workers waited for an account ID
+and a remote service connection. With only the Maps service connections disabled,
+the tester dismissed the install prompt and selected **Skip** in Maps. Labeled
+map tiles appeared after both connections were restored and again after a second
+Maps restart. The tests cover this onboarding sequence and the settings button.
+Signed-in acceptance, a first launch with clean data and a live location fix
+remain open.
+
+Maps, Drive, official Play services and microG ran concurrently under four
+different Linux UIDs. The Maps data and host-control directories were owned by
+the dedicated UID with mode 0700. The test used a signed development HAP paired
+with the original, unmodified APK. Cross-UID file access and production isolation
+still need separate tests. The structured results include the deployed hashes
+and the outcome of each attempt. [Board evidence](../tests/google-auth/full48/candidate88.json)

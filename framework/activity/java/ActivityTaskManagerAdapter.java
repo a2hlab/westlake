@@ -212,6 +212,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      * native start, which puts the text on the clipboard instead.
      */
     private int startOutside(Intent intent, int flags, IBinder resultTo, ActivityResults.Request request) {
+        if (RemoteHostWindows.isOwnAppSettings(intent)) {
+            return RemoteHostWindows.openOwnAppSettings() ? ActivityManager.START_SUCCESS : ActivityManager.START_ABORTED;
+        }
         if (Intent.ACTION_CHOOSER.equals(intent.getAction())) return startChooser(intent, flags, resultTo, request);
         if (!adapter.packagemanager.PackageManagerAdapter.ohHandles(intent) && !sharesText(intent)) {
             if (alwaysOnAndroid(intent)) {

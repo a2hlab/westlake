@@ -27,3 +27,19 @@ The HAP uses its real `UIAbilityContext.startAbility` token. Its mailbox is with
 trust boundary and its wait/polling mechanism is for development. This is not production per-APK
 isolation, a general activity stack or an atomic window-ownership protocol. See the
 [continuation report](../../docs/google-two-path-continuation.md) for observed results and limits.
+
+## App settings for a dedicated APK host
+
+For a source-launch test that needs its own OpenHarmony permission state, build a
+separate HAP with `--only-host --host-bundle org.westlake.apk.<Android package>`.
+Use `--host-label` to give it a recognizable name in system Settings. Sign the
+test HAP and supply its bundle name and signed build to the manifest launcher's
+`--host` and `--host-build` options. The launcher checks the package against the
+locked APK, verifies the installed HAP bytes, and creates a private control
+directory for that host.
+
+When the guest opens Android's application details for itself, the foreground
+HAP opens OpenHarmony Settings for its own bundle. The Settings target and the
+bundle shown on screen come from the host. The mailbox carries no caller-supplied
+permission name or grant decision. The board's Settings application determines
+which controls appear.

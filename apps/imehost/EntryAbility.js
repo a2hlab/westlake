@@ -21,7 +21,8 @@ class EntryAbility extends UIAbility {
     // state. The mailbox shares the host UID's trust boundary; it is not per-APK
     // isolation. It carries window routing only, never authentication material.
     configureWindowBridge(want) {
-        if (want && want.parameters && want.parameters['westlake.remoteHostWindows'] === true) {
+        const parameter = HOST_BUNDLE.startsWith('org.westlake.apk.') ? 'westlake.ownAppSettings' : 'westlake.remoteHostWindows';
+        if (want && want.parameters && want.parameters[parameter] === true) {
             this.windowBridgeEnabled = true;
         }
         if (this.windowBridgeEnabled && !this.windowBridgeTimer) {
@@ -45,7 +46,9 @@ class EntryAbility extends UIAbility {
         // already running unrelated APKs. General routing needs installer policy.
         const peer = HOST_BUNDLE === 'org.westlake.authclienthost' ? 'org.westlake.authservicehost' :
             HOST_BUNDLE === 'org.westlake.authservicehost' ? 'org.westlake.authclienthost' : undefined;
-        if (!peer) return;
+        const ownSettings = HOST_BUNDLE.startsWith('org.westlake.apk.') &&
+            this.context.abilityInfo.bundleName === HOST_BUNDLE;
+        if (!peer && !ownSettings) return;
         try {
             const names = fs.listFileSync(directory);
             for (const name of names.slice(0, 32)) {
@@ -66,7 +69,7 @@ class EntryAbility extends UIAbility {
                 this.windowHandledIds.add(id);
                 if (this.windowHandledIds.size > 64) this.windowHandledIds.delete(this.windowHandledIds.values().next().value);
                 const age = Date.now() - body.created;
-                if (body.id !== id || body.target !== peer || typeof body.created !== 'number' ||
+                if (!body || body.id !== id || body.target !== (ownSettings ? 'app-settings' : peer) || typeof body.created !== 'number' ||
                     !Number.isFinite(age) || age < -1000 || age > 1500) {
                     this.windowReply(directory, id, false, 'invalid'); continue;
                 }
@@ -74,8 +77,11 @@ class EntryAbility extends UIAbility {
                     this.windowReply(directory, id, false, 'background'); continue;
                 }
                 this.windowBridgeBusy = true;
-                this.context.startAbility({bundleName: peer, abilityName: 'EntryAbility',
-                    parameters: {'westlake.remoteHostWindows': true}}).then(() => {
+                const want = ownSettings ? {
+                    bundleName: 'com.ohos.settings', abilityName: 'com.ohos.settings.MainAbility',
+                    uri: 'application_info_entry', parameters: {pushParams: HOST_BUNDLE}
+                } : {bundleName: peer, abilityName: 'EntryAbility', parameters: {'westlake.remoteHostWindows': true}};
+                this.context.startAbility(want).then(() => {
                     this.windowReply(directory, id, true, 'started');
                 }).catch(error => {
                     this.windowReply(directory, id, false, 'oh-denied');

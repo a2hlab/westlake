@@ -37,6 +37,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--host-bundle', default='org.westlake.imehost',
                         help='Use a separate host identity for isolated source device validation')
+    parser.add_argument('--host-label', help='Name displayed by OpenHarmony for this test host')
     parser.add_argument('--only-host', action='store_true')
     args = parser.parse_args()
     sdk = args.sdk.resolve()
@@ -69,12 +70,18 @@ def main():
         output = out / name
         output.mkdir()
         package = args.host_bundle if name == 'imehost' else 'org.westlake.' + name
-        if name == 'imehost' and package != 'org.westlake.imehost':
+        if name == 'imehost' and (package != 'org.westlake.imehost' or args.host_label):
             copied = output / 'source'
             shutil.copytree(source, copied)
             module = json.loads((copied / 'module.json').read_text())
             module['app']['bundleName'] = package
             (copied / 'module.json').write_text(json.dumps(module, indent=2) + '\n')
+            if args.host_label:
+                strings = copied / 'resources/base/element/string.json'
+                resources = json.loads(strings.read_text())
+                app_name = next(entry for entry in resources['string'] if entry['name'] == 'app_name')
+                app_name['value'] = args.host_label
+                strings.write_text(json.dumps(resources, ensure_ascii=False, indent=2) + '\n')
             # The pages register their route under the bundle name too; a route under another bundle's name
             # leaves the host's window without its page.
             for page in sorted(copied.glob('*.js')):
