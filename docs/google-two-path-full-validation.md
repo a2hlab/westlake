@@ -770,3 +770,27 @@ disables one internal logger backend, and the bounded capture can drop records;
 absence of a log is not proof that an operation did not occur.
 
 See [candidate68.json](../tests/google-auth/full48/candidate68.json).
+
+### Candidate 69: confirm the asset failure in Gmail's actual security context
+
+A bounded native diagnostic now observes the existing APK load and, for up to
+32 explicitly selected APK paths, attempts a read-only open in the same process.
+It emits only numeric open/ZIP/load metadata, never paths or raw bytes. Both
+private logging and the diagnostic switch must be enabled; loader results are
+unchanged. The native rebuild retains candidate 68's private capture and all
+previous input, BLAST and signal fixes. Only Gmail is restarted.
+
+The first four startup samples all report UID 20010060, errno 13 (EACCES), no
+ZIP provider and no loaded APK assets. This identifies file access before ZIP
+parsing as the immediate failure. By comparison, a separate native probe can
+open the hash-verified original GMS APK after dropping to that UID, both outside
+and inside the client's mount namespace. That probe does not run in the same
+app security context. The controls establish a context-dependent access
+restriction, not a specific SELinux rule or a corrupt APK.
+
+The next repair should use root-spawner-verified read-only descriptors for the
+remote public APKs. It must preserve the separate GMS private data boundary.
+This diagnostic does not yet implement that repair, meet Gmail's newer GMS
+version requirement, or establish mailbox/backend acceptance.
+
+See [candidate69.json](../tests/google-auth/full48/candidate69.json).

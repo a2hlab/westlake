@@ -17,8 +17,14 @@
 #define ATRACE_TAG ATRACE_TAG_RESOURCES
 
 #include <mutex>
+#include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "signal.h"
 
@@ -240,11 +246,13 @@ static jlong NativeLoad(JNIEnv* env, jclass /*clazz*/, const format_type_t forma
 
   auto loader_assets = LoaderAssetsProvider::Create(env, assets_provider);
   AssetManager2::ApkAssetsPtr apk_assets;
+  bool zip_created = false;
   switch (format) {
     case FORMAT_APK: {
+        auto zip = ZipAssetsProvider::Create(effective_path.c_str(), property_flags);
+        zip_created = zip != nullptr;
         auto assets = MultiAssetsProvider::Create(std::move(loader_assets),
-                                                  ZipAssetsProvider::Create(effective_path.c_str(),
-                                                                            property_flags));
+                                                  std::move(zip));
         apk_assets = ApkAssets::Load(std::move(assets), property_flags);
         break;
     }
@@ -266,6 +274,38 @@ static jlong NativeLoad(JNIEnv* env, jclass /*clazz*/, const format_type_t forma
       const std::string error_msg = base::StringPrintf("Unsupported format type %d", format);
       jniThrowException(env, "java/lang/IllegalArgumentException", error_msg.c_str());
       return 0;
+  }
+
+  // Bounded, value-free diagnostics in the actual app UID, mount namespace and
+  // SELinux domain. A UID-only external probe does not reproduce that context.
+  // Probe only APK paths below a launcher-selected prefix; never log the path
+  // or file contents, change the loader's result, or provide an alternate file.
+  const char* diagnostic = std::getenv("WESTLAKE_ASSET_DIAGNOSTICS");
+  const char* private_logs = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
+  const char* prefix = std::getenv("WESTLAKE_ASSET_DIAGNOSTIC_PREFIX");
+  static std::atomic<unsigned> samples{0};
+  if (diagnostic && std::string(diagnostic) == "1"
+      && private_logs && std::string(private_logs) == "1" && prefix && prefix[0] == '/'
+      && effective_path.compare(0, std::string(prefix).size() + 1, std::string(prefix) + "/") == 0
+      && effective_path.size() >= 4 && effective_path.compare(effective_path.size() - 4, 4, ".apk") == 0
+      && samples.fetch_add(1) < 32) {
+    int saved_errno = errno;
+    int fd = open(effective_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int open_errno = fd < 0 ? errno : 0;
+    struct stat metadata{};
+    bool regular = fd >= 0 && fstat(fd, &metadata) == 0 && S_ISREG(metadata.st_mode);
+    unsigned char magic[4]{};
+    ssize_t got = regular ? pread(fd, magic, sizeof(magic), 0) : -1;
+    int read_errno = regular && got < 0 ? errno : 0;
+    bool zip_magic = got == 4 && magic[0] == 'P' && magic[1] == 'K'
+            && magic[2] == 3 && magic[3] == 4;
+    if (fd >= 0) close(fd);
+    fprintf(stderr, "[WL-ASSET] format=%d flags=%d loaded=%d zip_provider=%d "
+            "uid=%u open_errno=%d regular=%d bytes=%lld read_errno=%d zip_magic=%d\n",
+            format, property_flags, apk_assets != nullptr, zip_created,
+            static_cast<unsigned>(getuid()), open_errno, regular,
+            static_cast<long long>(regular ? metadata.st_size : -1), read_errno, zip_magic);
+    errno = saved_errno;
   }
 
   if (apk_assets == nullptr) {
