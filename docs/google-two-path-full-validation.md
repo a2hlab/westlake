@@ -364,3 +364,46 @@ service/runtime changes and trace the missing chooser/recovery transition.
 The provider still has one account; all three hosts remain alive; status remains
 3 without an override. The temporary screen-timeout override is restored.
 See [candidate59-followup.json](../tests/google-auth/full48/candidate59-followup.json).
+
+### Candidate 60: metadata reversal and callback-queue diagnosis
+
+Turning off the broker's account-ID metadata option does not recover Wattpad.
+With the candidate-59 GMS/provider and candidate-52 client, both the cleared-choice
+run and a run restoring the SDK/GMS sign-in preferences from verified backups
+return modern status 16 and legacy status 4 twice. Neither produces a remote
+activity launch or a provider OAuth token for Wattpad. These are sequential
+reversal/recovery checks; the complete app-data snapshots were archived rather
+than restored, so they are not identical-state replays of the earlier on run.
+They establish that disabling metadata alone is insufficient to recover this
+state, not that metadata cannot affect any sign-in path.
+
+The original APK's `GoogleManager` has a status-4 branch that constructs the
+legacy sign-in intent and starts an activity for a result. Its launch wrapper
+passes a non-null intent through. The observed callback alone does not establish
+that this particular application branch executed.
+
+An opt-in, read-only callback diagnostic samples the main message queue two
+seconds after supported sign-in callbacks. It logs handler/callback class names,
+message codes and timing, never message objects, bundles or argument values.
+Both `WESTLAKE_GOOGLE_SIGNIN_QUEUE_TRACE=1` and private logging are required;
+the existing sign-in diagnostics must also be enabled. It does not remove
+barriers, dispatch messages or change authentication responses.
+
+With metadata re-enabled, the diagnostic retry again receives statuses 16, 4
+and 4. All three samples have no head synchronization barrier. A short overdue
+frame-message backlog in one sample drains by the next sample. No chooser
+launch or Wattpad provider OAuth exchange follows. A persistent main-queue
+barrier is therefore not supported by this capture; callback delivery and the
+application's subsequent control flow still need tracing.
+
+The Java/runtime/boot builds, 14 callback-parser checks and board preload pass.
+The first preload attempt exhausted storage during staging and never ran the
+preload process. Incomplete/redundant build copies were removed, and private
+app-data snapshots were verified and archived on the host. A first runtime
+attempt was separately interrupted by GMS's uncaught-exception handler killing
+its main process; the underlying exception remains unidentified. GMS and the
+client were restarted, and all three hosts remained alive through the captured
+retry. Certification status remains 3 without an override. No account signup,
+renewal pass or full application pass is claimed.
+
+See [candidate60.json](../tests/google-auth/full48/candidate60.json).

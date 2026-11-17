@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "candidate": 60,
+  "implementationRevisionBeforeDiagnostic": "756a9b32634b70548b8b06adadbda07656764166",
+  "phase": "Wattpad missing chooser diagnosis",
+  "package": "wp.wattpad",
+  "originalApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+  "metadataOffRuns": [
+    {
+      "condition": "SDK sign-in and GMS Wattpad choices previously cleared",
+      "gmsAndProviderAdapterCandidate": 59,
+      "clientAdapterCandidate": 52,
+      "nativeWatchdogFixCandidate": 54,
+      "metadataEnabled": false,
+      "modernBeginStatus": 16,
+      "legacyStatuses": [
+        4,
+        4
+      ],
+      "providerOAuthTokenIssued": false,
+      "remoteActivityLaunchObserved": false,
+      "newAppSignupCreated": false
+    },
+    {
+      "condition": "SDK sign-in and GMS choice preferences restored from verified pre-clear backups",
+      "gmsAndProviderAdapterCandidate": 59,
+      "clientAdapterCandidate": 52,
+      "nativeWatchdogFixCandidate": 54,
+      "metadataEnabled": false,
+      "modernBeginStatus": 16,
+      "legacyStatuses": [
+        4,
+        4
+      ],
+      "providerOAuthTokenIssued": false,
+      "remoteActivityLaunchObserved": false,
+      "newAppSignupCreated": false
+    }
+  ],
+  "fullApplicationPassed": false,
+  "comparisonLimits": "The off runs followed the recorded candidate59 on runs; the original full app data was archived, not restored. This is a reversal and saved-choice recovery test, not a randomized replay of all process and server state.",
+  "conclusion": "Disabling account-ID metadata alone did not recover sign-in. The missing chooser transition still requires localization.",
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "onlyProviderGrantAddedIsAccountId": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": false,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "1015be074088c033b728d69c90054163cefedaf19f14930ff51d7b7bd03144c7",
+    "clientApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372"
+  },
+  "diagnosticBuild": {
+    "adapterSha256": "1015be074088c033b728d69c90054163cefedaf19f14930ff51d7b7bd03144c7",
+    "sourceSha256": "6e000c898f59664cf685f33551790a6987d91f46c86924419eb4d339bcbac552",
+    "javaBuildPassed": true,
+    "runtimeAndBootBuildPassed": true,
+    "callbackParserChecksPassed": 14,
+    "firstBoardPreload": "Failed during staging because storage was exhausted; preload process was not started",
+    "preloadRetryPending": false,
+    "boardPreloadPassed": true,
+    "classInitializationFailures": [],
+    "clientOverlayFiles": 13,
+    "firstRuntimeAttempt": "Official GMS root process terminated itself via its uncaught-exception handler before the diagnostic login; it was restarted along with the client"
+  },
+  "metadataEnabledForDiagnostic": true,
+  "queueDiagnostic": {
+    "optInEnabled": true,
+    "maximumScheduledSamples": 8,
+    "delayMillis": 2000,
+    "maximumMessagesPerSample": 16,
+    "headBarrierSamples": [
+      "false",
+      "false",
+      "false"
+    ],
+    "modernBeginStatus": 16,
+    "legacyStatuses": [
+      4,
+      4
+    ],
+    "persistentQueueBlockEstablished": false,
+    "remoteActivityLaunchObserved": false,
+    "providerOAuthTokenIssuedForWattpad": false,
+    "visibleResult": "Existing-account login form",
+    "authenticatedActivityResult": false,
+    "messageContentsLogged": false,
+    "messageQueueMutated": false
+  },
+  "nextDiagnosis": "Trace which callback implementation receives the legacy responses and whether the application status-4 fallback executes; do not assume the received callback equals a completed application callback",
+  "privacy": "Only fixed diagnostic outcomes, artifact hashes and public package identifiers; no account name, account ID, token, raw capture or private configuration."
+}

@@ -372,6 +372,7 @@ public final class SocketBinder {
         if (GoogleSignInDiagnostics.supported(descriptor, code)
                 && "1".equals(System.getenv("WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS"))
                 && "1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) {
+            GoogleSignInQueueTrace.schedule();
             int position = data.dataPosition();
             try {
                 // Binder versions differ in their policy/work-source header words. Validate
