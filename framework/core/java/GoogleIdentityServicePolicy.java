@@ -3,9 +3,9 @@ package adapter.core;
 /** Opt-in local service eligibility adaptation for the separately pinned GMS build, not certification. */
 public final class GoogleIdentityServicePolicy {
     public static final String KEY = "uncertified_exceptions_whitelist";
-    // Modern chooser, its identity dependency, and legacy Google Sign-In.
+    // Modern chooser, its identity dependency, legacy Google Sign-In and its SignIn.API dependency.
     // Eligibility does not grant accounts, tokens, scopes, or an integrity verdict.
-    static final java.util.List<String> REQUIRED = java.util.List.of("212", "213", "91");
+    static final java.util.List<String> REQUIRED = java.util.List.of("212", "213", "91", "44");
     // Default service exceptions in the tested 244034029 build; the value lives in Phenotype preferences.
     private static final String DEFAULT = "151,130,40,25,257,185,51,218";
     private GoogleIdentityServicePolicy() {}

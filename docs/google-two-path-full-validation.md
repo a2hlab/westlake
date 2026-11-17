@@ -61,3 +61,29 @@ status is still 3 and no certification override is present. See
 [candidate50.json](../tests/google-auth/full48/candidate50.json) for exact hashes
 and observations. Account sign-in and an uncertified status can coexist; neither
 fact by itself establishes broad Westlake application compatibility.
+
+## Candidate 51: legacy sign-in reaches account selection
+
+The pinned Google APK shows that legacy service 91 creates a `SignIn.API`
+client for service 44. Adding that dependency to the eligibility policy changes
+Wattpad's legacy callback from status 8 to status 4 (`SIGN_IN_REQUIRED`) and
+opens Google's real account chooser. The check-in identity and provider grants
+were unchanged during this comparison; policy status remains 3 with no
+certification override. Twenty policy checks, the rebuilt adapter and boot
+image, and board preload pass. Native artifacts are reused.
+
+Selecting the existing test account then reaches the provider's separate app
+authorization boundary. Wattpad initially has no grant, so the provider refuses
+the origin and GMS falls back to its uncertified-device page. A subsequent
+operator grant pins the verified original Wattpad signer and permits only basic
+identity scopes. That retry reaches a scope refusal. The original APK requests
+`user.birthday.read` during legacy sign-in, while its later `GoogleAuthUtil`
+request is `oauth2:openid email profile`. Birth-date permission is pending user
+clarification; it has not been added to the grant. No explicit server client ID
+is granted, and ID-token requests remain ungranted for this app.
+
+This fixes the observed internal-error stage and confirms the account chooser.
+Token delivery, authenticated return, app backend use and renewal remain
+incomplete. The uncertified-device screen after a local provider denial is not
+evidence that Google rejected a successfully delegated token. See
+[candidate51.json](../tests/google-auth/full48/candidate51.json).

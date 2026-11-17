@@ -1,10 +1,10 @@
 # Official Google authentication probe
 
 The active [full application validation](../../docs/google-two-path-full-validation.md)
-tracks the remaining Google and Facebook flows from the live batch. Candidate 48
-adds legacy sign-in service 91 eligibility; Wattpad's connection succeeds, while
-its complete login remains unresolved. Historical results below retain their
-original build boundaries.
+tracks the remaining Google and Facebook flows from the live batch. Candidates
+48 and 51 add legacy sign-in service 91 and its internal service 44 dependency.
+Wattpad now reaches the real account chooser; its token flow remains incomplete.
+Historical results below retain their original build boundaries.
 
 This probe tests the official GMS token implementation and a separate direct
 microG positive control. It does not fake a result or claim full OAuth login.
@@ -282,7 +282,7 @@ java -cp $out/trace GoogleAuthBoundaryTraceTest                                #
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
 java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
 javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.java tests/google-auth/host/GoogleIdentityServicePolicyTest.java
-java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 18
+java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 20
 javac -d $out/signin-trace framework/core/java/GoogleSignInDiagnostics.java tests/google-auth/host/GoogleSignInDiagnosticsTest.java
 java -cp $out/signin-trace adapter.core.GoogleSignInDiagnosticsTest            # GOOGLE_SIGNIN_DIAGNOSTICS_PASS 14
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
