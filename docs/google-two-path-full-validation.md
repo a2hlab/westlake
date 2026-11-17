@@ -1757,3 +1757,22 @@ the dedicated UID with mode 0700. The test used a signed development HAP paired
 with the original, unmodified APK. Cross-UID file access and production isolation
 still need separate tests. The structured results include the deployed hashes
 and the outcome of each attempt. [Board evidence](../tests/google-auth/full48/candidate88.json)
+
+### Temporary approximate location grant and revocation
+
+Selecting **Allow only while in use** granted approximate location to the Maps
+host. Its precise-location switch stayed off. The shared host running Drive had
+neither permission before, during or after the test.
+
+| Check | Observed on the board |
+| --- | --- |
+| Maps after a restart with the grant | The APK saw coarse access granted and fine access denied. |
+| Your location | OpenHarmony accepted two low-power requests. Neither delivered a first fix during the 48-second observation window. GNSS stayed off. |
+| Restore Deny and restart Maps | Both Android checks returned denied. The adapter withheld two requests and started none. The native permission manager also showed Deny. |
+
+The installed network-location library references parameters for its provider
+bundle and ability. Both parameter reads returned error 106 with no provider
+name. That leaves the network-location provider as a lead. The cause of the
+missing fix remains unconfirmed. The board has demonstrated an independent
+approximate grant and its revocation. Delivery of a physical location remains
+open. [Board evidence](../tests/google-auth/full48/candidate88.json)

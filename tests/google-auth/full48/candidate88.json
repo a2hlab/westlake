@@ -120,5 +120,58 @@
     "Automatic return to Maps from native Settings was not verified.",
     "Full app validation remains open."
   ],
-  "callbackEvidence": "Distinct numeric status values in sampled inbound IGmsCallbacks log entries for each Maps process. Status 0 denotes a successful service connection and 9 denotes SERVICE_INVALID. These are local connection replies. The trace does not establish which policy caused a refusal or whether Google accepted sign-in."
+  "callbackEvidence": "Distinct numeric status values in sampled inbound IGmsCallbacks log entries for each Maps process. Status 0 denotes a successful service connection and 9 denotes SERVICE_INVALID. These are local connection replies. The trace does not establish which policy caused a refusal or whether Google accepted sign-in.",
+  "subsequentWhileInUseTest": {
+    "selection": "Allow only while in use on the dedicated host. The precise-location switch stayed off.",
+    "hostGrants": {
+      "before": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      },
+      "whileInUse": {
+        "APPROXIMATELY_LOCATION": 0,
+        "LOCATION": -1
+      },
+      "restored": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "sharedClientHostGrantsAtAllThreeChecks": {
+      "APPROXIMATELY_LOCATION": -1,
+      "LOCATION": -1
+    },
+    "mapsRestartDuringGrant": {
+      "androidCoarse": "granted",
+      "androidFine": "denied",
+      "nativeLowPowerRequestsAccepted": 2,
+      "nativePowerScene": "0x602",
+      "secondsObservedAfterStartAtLeast": 48,
+      "firstLocationFixesObserved": 0,
+      "gnssEnabled": false
+    },
+    "restoration": {
+      "nativeSelection": "Deny",
+      "androidCoarseAfterRestart": "denied",
+      "androidFineAfterRestart": "denied",
+      "withheldRequestsAfterRestart": 2,
+      "nativeRequestsStartedAfterRestart": 0
+    },
+    "networkLocationDiagnostic": {
+      "boardLibrary": "liblbsservice_network.z.so",
+      "providerParameterQueries": [
+        "const.location.nlp_service_name",
+        "const.location.nlp_ability_name"
+      ],
+      "keysPresentInBoardLibrary": true,
+      "readResult": "Both queries returned error 106 and no provider name.",
+      "causeOfMissingFixEstablished": false
+    },
+    "acceptance": {
+      "perHostApproximateGrantAndRevocationVerified": true,
+      "approximateLocationDeliveryVerified": false,
+      "preciseLocationTested": false,
+      "productionIsolationVerified": false
+    }
+  }
 }
