@@ -104,6 +104,7 @@ public final class LocalIntentSenders {
      * the call goes back to the maker through each process the binder passed.
      */
     static final int SEND_TRANSACTION = 0x574c53;
+    static final int PREPARE_ACTIVITY_TRANSACTION = adapter.core.SocketBinder.SAME_APP_ACTIVITY_INTENT;
 
     /** A sender's binder: it leads back to its record for as long as a PendingIntent holds it. */
     private static final class SenderBinder extends Binder {
@@ -115,6 +116,16 @@ public final class LocalIntentSenders {
 
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            if (code == PREPARE_ACTIVITY_TRANSACTION) {
+                data.enforceInterface(SENDER_DESCRIPTOR);
+                if (!RemoteActivities.enabled() || !adapter.core.SocketBinder.isCallingSameApp())
+                    throw new SecurityException("activity sender preparation requires a verified process of the same app");
+                Intent fillIn = data.readTypedObject(Intent.CREATOR);
+                int mask = data.readInt(), values = data.readInt();
+                Intent prepared = prepareActivity(record, fillIn, mask, values);
+                reply.writeNoException(); reply.writeTypedObject(prepared, 0);
+                return true;
+            }
             if (code == SEND_TRANSACTION) {
                 data.enforceInterface(SENDER_DESCRIPTOR);
                 int sendCode = data.readInt();
@@ -332,6 +343,49 @@ public final class LocalIntentSenders {
     private static Record find(IIntentSender sender) {
         IBinder binder = sender == null ? null : sender.asBinder();
         return binder instanceof SenderBinder ? ((SenderBinder) binder).record : null;
+    }
+
+    /**
+     * An interactive, single-activity sender within one verified application. Keep the resultTo
+     * in the process displaying the caller instead of losing it in application.startActivity().
+     * Foreign callers cannot inspect the stored intent; cross-package PendingIntents and stacks
+     * require a separate broker implementation and are deliberately not handled here.
+     */
+    static Intent prepareActivity(IIntentSender sender, Intent fillIn, int mask, int values) {
+        Record local;
+        synchronized (LocalIntentSenders.class) { local = find(sender); }
+        if (local != null) return prepareActivity(local, fillIn, mask, values);
+        if (sender == null) return null;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(SENDER_DESCRIPTOR); data.writeTypedObject(fillIn, 0);
+            data.writeInt(mask); data.writeInt(values);
+            if (!sender.asBinder().transact(PREPARE_ACTIVITY_TRANSACTION, data, reply, 0)) return null;
+            reply.readException();
+            Intent intent = reply.readTypedObject(Intent.CREATOR);
+            if (intent != null) intent.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
+            return intent;
+        } catch (RemoteException | RuntimeException error) {
+            RemoteActivities.event("pending_activity_rejected type=" + error.getClass().getSimpleName());
+            return null;
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    private static synchronized Intent prepareActivity(Record record, Intent fillIn, int mask, int values) {
+        if (record.cancelled || record.key.type != ActivityManager.INTENT_SENDER_ACTIVITY
+                || record.intents == null || record.intents.length != 1 || record.last() == null
+                || !ActivityThread.currentPackageName().equals(record.key.packageName)) return null;
+        Intent intent = new Intent(record.last());
+        if (!record.immutable) {
+            if (fillIn != null) intent.fillIn(fillIn, record.key.flags);
+            // PendingIntentRecord excludes URI grant flags from caller-supplied changes.
+            int grants = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION;
+            mask &= ~grants;
+            intent.setFlags((intent.getFlags() & ~mask) | (values & mask));
+        }
+        if ((record.key.flags & FLAG_ONE_SHOT) != 0) remove(record);
+        return intent;
     }
 
     private static void remove(Record record) {

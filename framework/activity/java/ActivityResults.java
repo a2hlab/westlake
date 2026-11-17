@@ -43,16 +43,24 @@ final class ActivityResults {
         final IBinder resultTo;
         final String resultWho;
         final int requestCode;
+        final RemoteActivities.Incoming remote;
 
         Request(IBinder resultTo, String resultWho, int requestCode) {
             this.resultTo = resultTo;
             this.resultWho = resultWho;
             this.requestCode = requestCode;
+            this.remote = null;
+        }
+
+        Request(RemoteActivities.Incoming remote) {
+            this.resultTo = null; this.resultWho = null; this.requestCode = remote.wantsResult ? 0 : -1;
+            this.remote = remote;
         }
     }
 
     // Keyed by the started activity's token, held weakly: a token outlives no activity of its own.
     private static final Map<IBinder, Request> sPending = new WeakHashMap<>();
+    private static final Map<IBinder, Request> sOrigins = new WeakHashMap<>();
 
     private ActivityResults() {}
 
@@ -63,7 +71,10 @@ final class ActivityResults {
 
     /** Called as the started activity is launched, with its token. */
     static synchronized void bind(IBinder started, Request request) {
-        if (started != null && request != null) sPending.put(started, request);
+        if (started != null && request != null) {
+            sPending.put(started, request); sOrigins.put(started, request);
+            if (request.remote != null) request.remote.activityToken = started;
+        }
     }
 
     /**
@@ -76,8 +87,48 @@ final class ActivityResults {
             request = sPending.remove(finishing);
         }
         if (request == null) return;
+        if (request.remote != null) {
+            request.remote.complete(resultCode, data, true, false);
+            return;
+        }
         new Handler(Looper.getMainLooper()).post(
                 () -> sendNow(request.resultTo, request.resultWho, request.requestCode, resultCode, data));
+    }
+
+    static synchronized Request origin(IBinder token) { return sOrigins.get(token); }
+
+    /** A redirect transfers its reply destination before finishing; it must not send cancellation. */
+    static synchronized Request forward(IBinder token) { return sPending.remove(token); }
+
+    static synchronized void restoreForward(IBinder token, Request request) {
+        if (token != null && request != null) sPending.put(token, request);
+    }
+
+    static void destroyed(IBinder token) {
+        deliver(token, Activity.RESULT_CANCELED, null);
+        synchronized (ActivityResults.class) { sOrigins.remove(token); }
+        RemoteActivities.callerDestroyed(token);
+    }
+
+    static android.content.ComponentName callingActivity(IBinder token) {
+        Request request = origin(token);
+        if (request == null || request.requestCode < 0) return null;
+        if (request.remote != null) return request.remote.caller;
+        ActivityThread thread = ActivityThread.currentActivityThread();
+        Activity caller = thread == null ? null : thread.getActivity(request.resultTo);
+        return caller == null ? null : caller.getComponentName();
+    }
+
+    static String launchedFromPackage(IBinder token) {
+        Request request = origin(token);
+        if (request != null && request.remote != null) return request.remote.caller.getPackageName();
+        android.content.ComponentName caller = callingActivity(token);
+        return caller == null ? null : caller.getPackageName();
+    }
+
+    static int launchedFromUid(IBinder token) {
+        Request request = origin(token);
+        return request != null && request.remote != null ? request.remote.callerUid : android.os.Process.myUid();
     }
 
     /**

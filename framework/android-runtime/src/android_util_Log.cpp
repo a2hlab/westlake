@@ -17,6 +17,7 @@
 
 #include <android/log.h>
 #include <cstring>
+#include <cstdlib>
 #include <jni.h>
 
 // From our cross-compiled liblog.so:
@@ -76,6 +77,10 @@ namespace {
 
 jboolean JNICALL
 Log_isLoggable(JNIEnv* env, jclass /*clazz*/, jstring tagObj, jint level) {
+    // Credential experiments use their explicit, value-free stderr events.
+    // Third-party Log messages may contain auth tokens, check-in secrets or URLs.
+    const char* privateLogs = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
+    if (privateLogs && std::strcmp(privateLogs, "1") == 0) return JNI_FALSE;
     if (tagObj == nullptr) {
         return JNI_FALSE;
     }
@@ -99,6 +104,10 @@ Log_println_native(JNIEnv* env, jclass /*clazz*/,
     // SECURITY(6)/KERNEL(7) per AOSP android_LogId.
     if (bufID < 0 || bufID > 7) {
         return -1;
+    }
+    const char* privateLogs = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
+    if (privateLogs && std::strcmp(privateLogs, "1") == 0) {
+        return env->GetStringUTFLength(msgObj);
     }
 
     const char* tag = nullptr;

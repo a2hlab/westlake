@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.google.android.gms" android:versionCode="1" android:versionName="fixture">
+ <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="34"/>
+ <application android:label="Remote activity fixture host" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Host" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Echo" android:exported="true" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$ForwardEntry" android:exported="true" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Cancel" android:exported="true" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Wait" android:exported="true" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Private" android:exported="false" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Disabled" android:exported="true" android:enabled="false" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Protected" android:exported="true" android:permission="android.permission.MANAGE_USERS" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$Receipt" android:exported="false" android:process=":ui"/>
+  <activity android:name="org.westlake.remoteactivity.fixture.Fixture$ForwardReceipt" android:exported="false" android:process=":ui"/>
+  <service android:name="org.westlake.remoteactivity.fixture.Fixture$Factory" android:exported="false"/>
+  <service android:name="org.westlake.remoteactivity.fixture.Fixture$Worker" android:exported="false" android:process=":worker"/>
+ </application>
+</manifest>
