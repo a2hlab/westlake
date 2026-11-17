@@ -1,0 +1,151 @@
+{
+  "candidate": 80,
+  "phase": "App-owned periodic sync registration, dispatch and restart persistence",
+  "baseCommit": "8c999437f1a9e87450fb73a0401f3e92912b44be",
+  "companionManifestCommit": "270452cf18c38016f5be2b49795795f8948f3132",
+  "implementation": {
+    "periodicApis": [
+      "addPeriodicSync",
+      "getPeriodicSyncs",
+      "removePeriodicSync",
+      "SyncRequest periodic registration",
+      "cancelRequest periodic removal"
+    ],
+    "ownedAdapterAndVisibleAccountRequired": true,
+    "illegalPeriodicExtrasRefused": true,
+    "registrationAndNextWindowPersisted": true,
+    "duplicateRegistrationRetainsWindow": true,
+    "returnedValuesCopied": true,
+    "removalCancelsMatchingPeriodicJobs": true,
+    "missedWindowsDoNotCreateCatchupBurst": true,
+    "maximumRecords": 64,
+    "maximumSerializedStoreBytes": 1048576,
+    "minimumPeriodSeconds": 900,
+    "minimumFlexSeconds": 300,
+    "appTimerRecheckSeconds": 30,
+    "frameworkCallerAdaptation": {
+      "aospClass": "android.content.AbstractThreadedSyncAdapter",
+      "requiresOptIn": "WESTLAKE_LOCAL_SYNC=1",
+      "systemCallerRetained": true,
+      "localPathRequiresBothMatchingUidAndPid": true,
+      "appUidOrBinderIdentitySpoofed": false,
+      "sourcePortMap": "manifest/framework-source-ports.json",
+      "currentMapReproducesExactCompiledSource": true
+    },
+    "stoppedApplicationWakeImplemented": false
+  },
+  "hostTests": {
+    "timingChecks": 26,
+    "dispatchStateChecks": 14,
+    "transformedAospCallerGuardChecks": 28,
+    "oldAospGuardFailsOptInSameProcessCase": true,
+    "allPassed": true
+  },
+  "deviceFixture": {
+    "package": "org.westlake.syncprobe",
+    "apkSha256": "4ca421e7e40b173adeeac89c9380fecee2a85b1a4859825e450e9994bf4b6f17",
+    "localFixtureAccountOnly": true,
+    "googleAccountAndNetworkUsed": false,
+    "testUsesExistingLocalAccountsBackendInOwnProcess": true,
+    "oldFrameworkAttempt": {
+      "oneOffStartedButNoCompletion": true,
+      "timedOutWaitingForAdapter": true,
+      "successfulChecksBeforeFailure": 5
+    },
+    "fixedFramework": {
+      "oneOffAdapterCompleted": true,
+      "periodicAdapterCompleted": true,
+      "completionCallbacksObserved": true,
+      "firstPhaseChecks": 15,
+      "restartPhaseChecks": 7,
+      "totalChecks": 22,
+      "reportsFreshForEachVerifiedLaunch": true,
+      "registrationRestoredAfterRestart": true,
+      "restoredRegistrationRemoved": true,
+      "firstPeriodicWindowSeconds": 900,
+      "firstFlexSeconds": 900,
+      "productionClockOrMinimumIntervalAccelerated": false,
+      "multipleRealTimePeriodsObserved": false
+    },
+    "sharesHostUidWithGmail": true,
+    "fixtureAndGmailRanSequentially": true,
+    "productionIsolationProven": false
+  },
+  "build": {
+    "adapterJavaSources": 142,
+    "adapterJavaClasses": 296,
+    "frameworkSourceClassesRecompiled": 3,
+    "otherFrameworkClassAndResourceEntriesRetainedExactly": true,
+    "frameworkJarjarAndDexRebuilt": true,
+    "bootImageJars": 9,
+    "bootImageArtifacts": 27,
+    "adapterJarSha256": "ab4f1cb2d4291208a35e2def55d9a85edf3ec3f5c90c2948ba6f12a20bc97e0e",
+    "frameworkJarSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "nativeLibrariesRebuilt": false,
+    "standalonePreloadRun": false,
+    "sourceSha256": {
+      "framework/activity/java/LocalSyncService.java": "b2cf1396435849fe0588cb146945eba6171353db0a69f06919ff6ee2e985595b",
+      "framework/core/java/PeriodicSyncSchedule.java": "0e135f300581f4af5d5f5c6f9686c978ed8ac761d7831bf1a16dd2bf1e67cc90",
+      "tests/google-auth/host/PeriodicSyncScheduleTest.java": "25431fb01e918e22244418408778408bb65f62d0986bd4c67662de3d0b8b1509",
+      "tools/build_periodic_sync_probe.py": "44ffebe5757650ff3d2997bec105c6206dde5a5977cd8c8e4535b453dafa2a62",
+      "tests/periodic-sync/AndroidManifest.xml": "53994e938e476b52cf8772c39d8f07c0820de5d3033f5e6e4d72f23152af5083",
+      "tests/periodic-sync/ProbeService.java": "64a4933fcdb871dccdf4e49958a343cb671715c37b75beecb783faba2e0df297",
+      "tests/periodic-sync/ProbeActivity.java": "c5b467a83fba727cd274d4aebbf3bb6f86b03a0273d131e72efe6eb1b41ae237",
+      "tests/periodic-sync/ProbeProvider.java": "a53229eab11ccff46bb1b6fd37b35dc10b300979f866b3a27d7d7d2ba3c7c2cb",
+      "tests/periodic-sync/README.md": "23babb9d15594846fa2352936899eb32bf327f794802b62d462371cf0833ff93",
+      "tests/periodic-sync/res/xml/sync.xml": "d1a342ec8efe80e07043e36aa4892e371214080ec73697fc8ec391b2fd35b010"
+    }
+  },
+  "gmail": {
+    "originalApkModified": false,
+    "dailyPeriodicRequestAccepted": true,
+    "periodSeconds": 86400,
+    "flexSeconds": 3456,
+    "periodicUnsupportedExceptionAbsent": true,
+    "savedRegistrationBytes": 328,
+    "inboxVisibleOnNewFramework": true,
+    "registrationRestartRetestPending": false,
+    "realDailyPeriodElapsedAndExecuted": false,
+    "restart": {
+      "sameSavedRecordAndWindow": true,
+      "restoredRegistrationCount": 1,
+      "automaticSettingRetained": true,
+      "duplicateRegistrationResetTiming": false,
+      "unsupportedPeriodicExceptionCount": 0,
+      "fatalSignals": 0,
+      "dnsNameFailures": 0,
+      "tokenBearingClientReplies": 3,
+      "clientAlive": true,
+      "executableVerified": true
+    },
+    "inboxVisibleAfterFurtherRestart": true
+  },
+  "deployment": {
+    "exactHostRollbackArtifactsRetained": true,
+    "fixtureDataArchivedSeparately": true,
+    "originalAppDataRemoved": false,
+    "incompleteUploadRemovedAfterHashAndSizeVerification": true,
+    "verifiedStoppedProbeCodeRetiredWithExactHostCopies": true,
+    "retiredCodeBytes": 94015500
+  },
+  "remaining": [
+    "OpenHarmony waking a stopped application for scheduled sync",
+    "Multiple real periodic windows, device idle and long-duration background reliability",
+    "Gmail new-message incremental refresh and independent initialization callback evidence",
+    "Other named Google/Facebook app flows, overlapping callers and production UID isolation"
+  ],
+  "fullApplicationPassed": false,
+  "goalComplete": false,
+  "preservation": {
+    "uncertifiedStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "approvedNativeConsentRetained": true,
+    "providerAccountCount": 1,
+    "gmsAlive": true,
+    "providerAlive": true,
+    "gmailAlive": true,
+    "originalGmailApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "googleAccountStoreByteIdentityClaimed": false
+  }
+}

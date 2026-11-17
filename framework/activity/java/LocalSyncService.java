@@ -1,6 +1,7 @@
 package adapter.activity;
 
 import adapter.core.SyncDispatchState;
+import adapter.core.PeriodicSyncSchedule;
 import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.app.ActivityThread;
@@ -9,6 +10,7 @@ import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.PeriodicSync;
 import android.content.ISyncAdapter;
 import android.content.ISyncContext;
 import android.content.ISyncStatusObserver;
@@ -32,6 +34,7 @@ import android.os.Parcel;
 import android.os.SystemClock;
 import android.os.UserHandle;
 import android.util.Xml;
+import android.util.Base64;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -44,7 +47,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-/** Opt-in app-owned, one-off Android sync execution. No credential or successful-sync substitution. */
+/** Opt-in app-owned sync execution. Periodic records survive restart; timers run while the app lives. */
 public final class LocalSyncService {
     public static final Object UNHANDLED = new Object();
     private static final String ACTION = "android.content.SyncAdapter";
@@ -60,11 +63,15 @@ public final class LocalSyncService {
     private final Map<String, SyncStatusInfo> statuses = new HashMap<>();
     private final Map<IBinder, Observer> observers = new HashMap<>();
     private long sequence;
+    private final List<Periodic> periodic = new ArrayList<>();
+    private static final int MAX_PERIODIC = 64, MAX_PERIODIC_BYTES = 1_048_576;
 
     private LocalSyncService(Application app) {
         this.app = app;
         settings = app.getSharedPreferences("westlake-local-sync", Context.MODE_PRIVATE);
         discover();
+        restorePeriodic();
+        timers.scheduleWithFixedDelay(() -> worker.execute(this::periodicTick), 0, 30, TimeUnit.SECONDS);
     }
 
     public static boolean enabled() { return "1".equals(System.getenv("WESTLAKE_LOCAL_SYNC")); }
@@ -140,7 +147,12 @@ public final class LocalSyncService {
                 request((Account) a[0], (String) a[1], (Bundle) a[2], (String) a[3]); return null;
             case "sync": case "syncAsUser": {
                 SyncRequest r = (SyncRequest) a[0];
-                if (r.isPeriodic()) throw new UnsupportedOperationException("periodic sync scheduling is not implemented");
+                if (r.isPeriodic()) {
+                    String caller = (String) a[a.length - 1];
+                    if (caller != null && !app.getPackageName().equals(caller)) throw new SecurityException("foreign sync caller");
+                    addPeriodic(r.getAccount(), r.getProvider(), r.getBundle(), r.getSyncRunTime(), r.getSyncFlexTime());
+                    return null;
+                }
                 if (r.getSyncRunTime() != 0 || r.getSyncFlexTime() != 0)
                     throw new UnsupportedOperationException("delayed sync scheduling is not implemented");
                 request(r.getAccount(), r.getProvider(), r.getBundle(), (String) a[a.length - 1]); return null;
@@ -150,6 +162,7 @@ public final class LocalSyncService {
                 cancel((Account) a[0], (String) a[1]); return null;
             case "cancelRequest": {
                 SyncRequest r = (SyncRequest) a[0];
+                if (r.isPeriodic()) removePeriodic(r.getAccount(), r.getProvider(), r.getBundle());
                 for (Job j : new ArrayList<>(jobs)) if (j.matches(r.getAccount(), r.getProvider())
                         && sameExtras(j.extras, r.getBundle())) j.cancel("cancelled");
                 return null;
@@ -177,10 +190,150 @@ public final class LocalSyncService {
             }
             case "removeStatusChangeListener":
                 if (a[0] != null) observers.remove(((ISyncStatusObserver) a[0]).asBinder()); return null;
-            case "getPeriodicSyncs": return Collections.emptyList();
-            case "addPeriodicSync": throw new UnsupportedOperationException("periodic sync scheduling is not implemented");
-            case "removePeriodicSync": return null;
+            case "getPeriodicSyncs": {
+                requireAdapter((Account) a[0], (String) a[1]);
+                List<PeriodicSync> result = new ArrayList<>();
+                for (Periodic p : periodic) if (p.sync.account.equals(a[0]) && p.sync.authority.equals(a[1]))
+                    result.add(new PeriodicSync(p.sync));
+                return result;
+            }
+            case "addPeriodicSync": {
+                long period = (Long) a[3];
+                long flex = Math.min(Math.max(0, period), 86_400) * 4 / 100;
+                addPeriodic((Account) a[0], (String) a[1], (Bundle) a[2], period, flex);
+                return null;
+            }
+            case "removePeriodicSync":
+                removePeriodic((Account) a[0], (String) a[1], (Bundle) a[2]); return null;
             default: return UNHANDLED;
+        }
+    }
+
+    private static final class Periodic {
+        final String id;
+        final PeriodicSync sync;
+        final PeriodicSyncSchedule schedule;
+        Periodic(String id, PeriodicSync sync, PeriodicSyncSchedule schedule) {
+            if (id == null || !id.matches("[0-9a-f-]{36}")) throw new IllegalArgumentException("invalid periodic id");
+            this.id = id; this.sync = sync; this.schedule = schedule;
+        }
+        boolean matches(Account account, String authority, Bundle extras) {
+            return sync.account.equals(account) && sync.authority.equals(authority) && sameExtras(sync.extras, extras);
+        }
+    }
+
+    private Bundle periodicExtras(Account account, String authority, Bundle extras) {
+        requireAdapter(account, authority);
+        if (account.name.isEmpty() || account.name.length() > 320 || account.type.length() > 256)
+            throw new IllegalArgumentException("invalid periodic account");
+        Bundle copy = extras == null ? new Bundle() : new Bundle(extras);
+        ContentResolver.validateSyncExtrasBundle(copy);
+        if (ContentResolver.invalidPeriodicExtras(copy)) throw new IllegalArgumentException("illegal periodic extras");
+        Parcel parcel = Parcel.obtain();
+        try {
+            parcel.writeBundle(copy);
+            if (parcel.dataSize() > 65_536) throw new IllegalArgumentException("sync extras too large");
+            parcel.setDataPosition(0);
+            return parcel.readBundle(Account.class.getClassLoader());
+        } finally { parcel.recycle(); }
+    }
+
+    private void addPeriodic(Account account, String authority, Bundle extras, long period, long flex) {
+        Bundle copy = periodicExtras(account, authority, extras);
+        if (!Arrays.asList(AccountManager.get(app).getAccounts()).contains(account))
+            throw new SecurityException("sync account not visible");
+        PeriodicSyncSchedule timing = PeriodicSyncSchedule.create(period, flex, System.currentTimeMillis());
+        List<Periodic> changed = new ArrayList<>(periodic);
+        Periodic previous = null;
+        for (Periodic p : periodic) if (p.matches(account, authority, copy)) { previous = p; break; }
+        if (previous != null && previous.schedule.periodSeconds == timing.periodSeconds
+                && previous.schedule.flexSeconds == timing.flexSeconds) return; // Preserve an existing window.
+        if (previous == null && changed.size() >= MAX_PERIODIC) throw new IllegalStateException("periodic sync limit reached");
+        if (previous != null) changed.remove(previous);
+        String id = previous == null ? java.util.UUID.randomUUID().toString() : previous.id;
+        changed.add(new Periodic(id, new PeriodicSync(account, authority, copy,
+                timing.periodSeconds, timing.flexSeconds), timing));
+        storePeriodic(changed);
+        trace("periodic_registered=true period_seconds=" + timing.periodSeconds + " flex_seconds=" + timing.flexSeconds);
+        notifyStatus(ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
+        worker.execute(this::periodicTick);
+    }
+
+    private void removePeriodic(Account account, String authority, Bundle extras) {
+        Bundle copy = periodicExtras(account, authority, extras);
+        List<Periodic> changed = new ArrayList<>(periodic), removed = new ArrayList<>();
+        for (Periodic p : periodic) if (p.matches(account, authority, copy)) { changed.remove(p); removed.add(p); }
+        if (removed.isEmpty()) return;
+        storePeriodic(changed);
+        for (Job j : new ArrayList<>(jobs)) if (removed.stream().anyMatch(p -> p.id.equals(j.periodicId))) j.cancel("periodic_removed");
+        trace("periodic_removed=true count=" + removed.size());
+        notifyStatus(ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
+    }
+
+    private void storePeriodic(List<Periodic> values) {
+        Parcel parcel = Parcel.obtain();
+        try {
+            parcel.writeInt(1); parcel.writeInt(values.size());
+            for (Periodic p : values) {
+                parcel.writeString(p.id); parcel.writeTypedObject(p.sync, 0); parcel.writeLong(p.schedule.nextAtMillis);
+            }
+            if (parcel.dataSize() > MAX_PERIODIC_BYTES) throw new IllegalStateException("periodic store too large");
+            save(settings.edit().putString("periodic.v1", Base64.encodeToString(parcel.marshall(), Base64.NO_WRAP)));
+            periodic.clear(); periodic.addAll(values);
+        } finally { parcel.recycle(); }
+    }
+
+    private void restorePeriodic() {
+        String encoded = settings.getString("periodic.v1", null);
+        if (encoded == null) return;
+        Parcel parcel = Parcel.obtain();
+        try {
+            if (encoded.length() > MAX_PERIODIC_BYTES * 4 / 3 + 4) throw new IllegalStateException("periodic store too large");
+            byte[] bytes = Base64.decode(encoded, Base64.NO_WRAP);
+            if (bytes.length > MAX_PERIODIC_BYTES) throw new IllegalStateException("periodic store too large");
+            parcel.unmarshall(bytes, 0, bytes.length); parcel.setDataPosition(0);
+            if (parcel.readInt() != 1) throw new IllegalStateException("unknown periodic store");
+            int count = parcel.readInt(); if (count < 0 || count > MAX_PERIODIC) throw new IllegalStateException("invalid periodic count");
+            List<Periodic> restored = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                String id = parcel.readString(); PeriodicSync value = parcel.readTypedObject(PeriodicSync.CREATOR);
+                if (value == null) throw new IllegalStateException("missing periodic record");
+                long next = parcel.readLong();
+                Bundle copy = periodicExtras(value.account, value.authority, value.extras);
+                if (restored.stream().anyMatch(p -> p.id.equals(id) || p.matches(value.account, value.authority, copy)))
+                    throw new IllegalStateException("duplicate periodic record");
+                PeriodicSyncSchedule timing = PeriodicSyncSchedule.restore(value.period, value.flexTime, next);
+                restored.add(new Periodic(id, new PeriodicSync(value.account, value.authority, copy,
+                        timing.periodSeconds, timing.flexSeconds), timing));
+            }
+            if (parcel.dataAvail() != 0) throw new IllegalStateException("trailing periodic fields");
+            periodic.addAll(restored); trace("periodic_restored=true count=" + restored.size());
+        } catch (RuntimeException invalid) {
+            periodic.clear(); trace("periodic_restore_refused=true type=" + invalid.getClass().getSimpleName());
+        } finally { parcel.recycle(); }
+    }
+
+    private void periodicTick() {
+        synchronized (LOCK) {
+            try {
+                if (periodic.isEmpty() || !settings.getBoolean("master", true)) return;
+                Account[] visible = AccountManager.get(app).getAccounts();
+                for (Periodic p : new ArrayList<>(periodic)) {
+                    long now = System.currentTimeMillis();
+                    if (!p.schedule.due(now) || !Arrays.asList(visible).contains(p.sync.account)
+                            || !settings.getBoolean(key(p.sync.account, p.sync.authority) + ".auto", false)
+                            || syncable(p.sync.account, p.sync.authority) == 0) continue;
+                    requireAdapter(p.sync.account, p.sync.authority);
+                    if (jobs.stream().anyMatch(j -> j.matches(p.sync.account, p.sync.authority)
+                            && sameExtras(j.extras, p.sync.extras))) continue;
+                    request(p.sync.account, p.sync.authority, p.sync.extras, app.getPackageName(), p.id);
+                    List<Periodic> changed = new ArrayList<>(periodic); changed.remove(p);
+                    changed.add(new Periodic(p.id, p.sync, p.schedule.advance(now))); storePeriodic(changed);
+                    trace("periodic_due=true authority=" + p.sync.authority);
+                }
+            } catch (RuntimeException failure) {
+                trace("periodic_dispatch_failed=true type=" + failure.getClass().getSimpleName());
+            }
         }
     }
 
@@ -194,6 +347,10 @@ public final class LocalSyncService {
     }
 
     private void request(Account account, String authority, Bundle extras, String caller) {
+        request(account, authority, extras, caller, null);
+    }
+
+    private void request(Account account, String authority, Bundle extras, String caller, String periodicId) {
         if (caller != null && !app.getPackageName().equals(caller)) throw new SecurityException("foreign sync caller");
         Bundle copy = extras == null ? new Bundle() : new Bundle(extras);
         ContentResolver.validateSyncExtrasBundle(copy);
@@ -210,6 +367,7 @@ public final class LocalSyncService {
                 requireAdapter(chosen, adapter.type.authority); // Refuse ambiguous declarations.
                 if (jobs.size() >= 32) throw new IllegalStateException("sync queue full");
                 Job job = new Job(++sequence, chosen, adapter, new Bundle(copy));
+                job.periodicId = periodicId;
                 jobs.add(job); status(job).pending = true; count++;
             }
         }
@@ -333,7 +491,7 @@ public final class LocalSyncService {
         final String key;
         boolean binding, running, done, bound, initializing;
         long started;
-        String cancellation;
+        String cancellation, periodicId;
         ISyncAdapter remote;
         java.util.concurrent.ScheduledFuture<?> timeout;
         final SyncDispatchState dispatch = new SyncDispatchState();

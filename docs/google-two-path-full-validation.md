@@ -6,16 +6,17 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 79 fixes Cronet's network ABI routing for APK code
-loaded through a file descriptor. Gmail's DNS lookups now succeed. After
-turning on Sync Gmail in the original app's settings, a controlled restart shows
-real recent inbox conversations, and an existing message opens with its HTML
-body rendered. An independent read-only Gmail API request also accepts the
-native OAuth token with HTTP 200; an invalid-token control returns 401. Manual
-pull to refresh is exercised, but new-message arrival, periodic background sync
-and sustained operation remain unvalidated. Periodic sync scheduling still has
-an observed unimplemented-operation error. Candidate 78's explicit account-
-consent controls pass; certification remains 3 without an override.
+Latest result: candidate 80 adds real app-owned periodic sync registration,
+dispatch, cancellation and restart persistence. Its local-account fixture
+completes both normal and periodic adapter calls; 22 device checks pass across
+two launches. A source adaptation fixes AOSP's system-UID-only caller guard for
+opt-in calls from the same UID and PID, preserving the app's real identity.
+Gmail retains its inbox and registers its daily sync request without the former
+unsupported-operation error. OpenHarmony waking a stopped app, multiple real
+periodic cycles and new-message incremental refresh remain unvalidated.
+Candidate 79's original Gmail inbox/message rendering and Google API token
+acceptance results remain the mailbox baseline. Certification remains 3 without
+an override; the full app and isolation plan is still in progress.
 
 Candidate 76 completes fresh FotMob Facebook login and restart.
 The app saves a different token for the same account. An independent read-only
@@ -1356,3 +1357,83 @@ Certification remains 3 without an override; the check-in identity, one provider
 account and explicitly approved native-consent record are preserved. Exact
 sanitized results are in
 [candidate79.json](../tests/google-auth/full48/candidate79.json).
+
+## Candidate 80: real periodic sync and the standard adapter caller guard
+
+LocalSyncService previously threw on `addPeriodicSync`. It now supports both
+legacy registration and periodic SyncRequest, returns copied registrations,
+removes matching registrations and jobs, and stores the next window in the
+app's existing sync preferences. Duplicate registration preserves its window.
+At most 64 records and one MiB of serialized data are accepted. Only an adapter
+owned by the current app and a visible account may be registered; invalid
+periodic flags and excessive extras are refused. The minimum interval is 900
+seconds and the minimum flex is 300 seconds. Due work uses the existing real
+adapter dispatch/callback path and avoids a burst of missed jobs after restart.
+
+The first real-adapter fixture attempt exposes another failure: the standard
+AOSP AbstractThreadedSyncAdapter accepts only the Android system UID. The
+Westlake caller retains its application UID, so `startSync` silently returns.
+A start trace alone therefore did not prove that the adapter's work or callback
+ran, including in earlier Gmail captures. The fixture reaches five assertions
+and times out waiting for completion on that framework.
+
+The companion manifest source port changes only this caller guard. With
+`WESTLAKE_LOCAL_SYNC=1`, it also accepts a direct call whose UID **and** PID match
+the current process. The normal Android system caller remains accepted.
+Different UIDs, different processes and disabled opt-in remain refused. No
+system UID or Binder identity is fabricated. The guard test executes the actual
+transformed AOSP method body against 28 identity/opt-in cases; the parent source
+fails the required same-process case. SocketBinder already installs its verified
+remote calling identity during channel dispatch; production isolation and a
+new real cross-process adversarial test are not claimed by this host matrix.
+
+The source build recompiles the three classes owned by
+AbstractThreadedSyncAdapter and retains all other source-framework entries
+exactly. Framework jarjar/D8 packaging and the nine-JAR, 27-artifact boot image
+are rebuilt. The Westlake adapter compiles 142 sources into 296 classes. Timing
+checks pass 26 cases; dispatch-state checks pass 14. The final source-port map
+reproduces the exact transformed source used for compilation. Its descriptive
+scope metadata was updated afterward without changing the transformation.
+The source adaptation is in
+[manifest PR 70](https://github.com/a2hlab/manifest/pull/70).
+
+The fixture uses its own local account and provider, with no Google account or
+network. It runs a normal sync and a periodic request through a real
+AbstractThreadedSyncAdapter; both report successful completion. Registration,
+refused accounts/authorities, copied return data, duplicate handling and
+cancellation pass 15 assertions. A fresh process restores the retained record,
+checks the saved automatic setting and removes it, passing seven more. Report
+start times are newer than their verified launch cutoffs. The periodic request
+uses the normal 900-second period and a full 900-second flex window, permitting
+its first run immediately. The clock and minimum interval are not shortened.
+This observes one periodic window, not several elapsed cycles.
+
+The fixture runs sequentially with Gmail in the test host's UID; it does not
+prove separate production app isolation. Its setup initially used the default
+empty account service, then enabled the existing local-account backend for the
+fixture process. Google endpoints are absent there. Original Gmail APK bytes
+and data are retained, and its original launcher is restored after testing.
+The fixture source and build instructions are in
+[tests/periodic-sync](../tests/periodic-sync/README.md).
+
+Gmail retains its inbox on the new framework. Its real periodic call registers
+a daily 86,400-second interval with a 3,456-second flex window and writes the
+registration to its app-owned preferences. A further Gmail restart restores
+one registration. Its serialized record is unchanged, including the next window;
+there is no new registration/reset event. Automatic sync remains enabled,
+token-bearing replies still arrive, and no periodic unsupported exception,
+DNS failure or fatal signal appears in the captured log. The full daily window
+has not elapsed in this test.
+
+A staging upload filled the nearly-full board. Its incomplete file was removed
+after checking its exact hash and size. Two code files from a verified stopped
+old probe were retired, freeing 94,015,500 bytes; exact host copies and a removal
+journal remain available. No real application's data was deleted. Deployment
+then completed with all overlay hashes checked and rollback files retained.
+
+Periodic timers currently run while the application process lives. Records
+resume when the app restarts and initializes LocalSyncService; this does not
+start a stopped app through OpenHarmony's scheduler. OS-managed wake, idle
+policies, long-duration operation, incremental mailbox refresh and the wider
+Google/Facebook acceptance plan remain open. Exact sanitized results are in
+[candidate80.json](../tests/google-auth/full48/candidate80.json).

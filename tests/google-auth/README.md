@@ -468,3 +468,10 @@ one (401). After enabling Sync Gmail through the app's settings, its inbox
 loads after restart and an existing message body renders. Sustained sync,
 incremental refresh and periodic scheduling remain incomplete. See
 [candidate79.json](full48/candidate79.json).
+
+Candidate 80 adds persisted app-owned periodic sync and an opt-in same-process
+source adaptation for the standard Android adapter. The local fixture completes
+normal and periodic sync callbacks and passes 22 device checks across restart;
+26 timing, 14 dispatch-state and 28 source-guard checks pass on the host. Gmail's
+daily registration succeeds on the new framework. Stopped-app wake and multiple
+elapsed cycles remain open. See [candidate80.json](full48/candidate80.json).

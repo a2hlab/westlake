@@ -1,0 +1,3 @@
+<sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
+ android:contentAuthority="org.westlake.syncprobe.data" android:accountType="org.westlake.syncprobe"
+ android:userVisible="true" android:supportsUploading="true" android:isAlwaysSyncable="true" />
