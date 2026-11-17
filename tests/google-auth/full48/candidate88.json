@@ -164,8 +164,9 @@
         "const.location.nlp_ability_name"
       ],
       "keysPresentInBoardLibrary": true,
-      "readResult": "Both queries returned error 106 and no provider name.",
-      "causeOfMissingFixEstablished": false
+      "readResult": "Both provider parameters returned 106 (parameter not found).",
+      "causeOfMissingFixEstablished": false,
+      "boardSystemLog": "NetworkAbility::RequestRecord logged “get service name failed!” between the approximate-grant launch and the post-revocation launch. The system event does not identify the Maps caller."
     },
     "acceptance": {
       "perHostApproximateGrantAndRevocationVerified": true,

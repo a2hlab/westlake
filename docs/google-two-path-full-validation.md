@@ -1771,8 +1771,10 @@ neither permission before, during or after the test.
 | Restore Deny and restart Maps | Both Android checks returned denied. The adapter withheld two requests and started none. The native permission manager also showed Deny. |
 
 The installed network-location library references parameters for its provider
-bundle and ability. Both parameter reads returned error 106 with no provider
-name. That leaves the network-location provider as a lead. The cause of the
-missing fix remains unconfirmed. The board has demonstrated an independent
+bundle and ability. Both returned error 106 (parameter not found). During the
+retest, the board’s network-location service also logged **get service name
+failed!** while processing requests. That identifies a provider configuration
+problem on this build. The system event does not name Maps as its caller, so
+we cannot attribute its missing fix to that event alone. The board has demonstrated an independent
 approximate grant and its revocation. Delivery of a physical location remains
 open. [Board evidence](../tests/google-auth/full48/candidate88.json)
