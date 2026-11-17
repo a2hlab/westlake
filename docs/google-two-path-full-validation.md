@@ -6,6 +6,12 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
+Latest observed result: candidate 52 supplies Wattpad's follow-up OAuth access
+token after Google's successful interactive return. Wattpad reaches its separate
+account-creation form. No Wattpad account has been created; reading, an app
+session and full application acceptance remain unvalidated. See the candidate
+52 follow-up below for the manual recovery and startup limitations.
+
 ## Candidate 48: legacy Google sign-in eligibility
 
 The restricted official GMS build rejected Spotify and Wattpad's legacy sign-in
@@ -145,3 +151,51 @@ single thread sample shows the UI thread in `MessageQueue.nativePollOnce`,
 which does not establish overall UI health. The new OAuth follow-up fix is
 therefore **not yet validated on the board**, despite passing its host boundary
 tests and preload. See [candidate52.json](../tests/google-auth/full48/candidate52.json).
+
+### Candidate 52 follow-up: live OAuth token delivered to Wattpad
+
+Both the official GMS host and Wattpad now run the verified candidate 52 adapter.
+With preserved pre-login Wattpad data and a new interactive account selection,
+Google returns `RESULT_OK`. GMS records three successful interactive OAuth reads
+and saves the signer-bound OAuth selection. Wattpad then invokes its separate
+legacy auth request: GMS records `silent_token=true owner=wp.wattpad`, the provider
+issues another OAuth token, and the client receives a token-bearing auth reply.
+Wattpad advances to **Create an Account**, requesting a username and birthday.
+No signup fields are filled and no account is created. This is a live pass for
+the previously failing follow-up token path, not a Wattpad account or reading pass.
+
+The saved selection is schema 2, mode `0600`, and contains the verified Wattpad
+signer, account hash, revocation epoch and issued scopes `openid`, `email`,
+`profile`, and `user.birthday.read`. It contains no account name or token. The
+provider's operator grant remains separate. The user had explicitly authorized
+birth-date access before this test. The device's recorded policy remains `3`,
+there is no certification override, and the check-in identity and provider-grant
+hashes are unchanged.
+
+This successful test required manual recovery from earlier test state. Google
+skipped its account chooser while retaining Wattpad's previous choice, but
+Westlake had no reusable OAuth selection from candidate 51. The delegation layer
+recorded `no_selection`; no Wattpad provider token was issued in that attempt,
+and Google's UI fell back to its uncertified-device page. A private backup was
+made before removing only Wattpad's three entries from
+`shared_prefs/common.selected_account_prefs.xml`; nine other entries were
+preserved. Restarting only the GMS UI process did not restore the chooser.
+After restarting the GMS processes and the client, a subsequent live attempt
+displayed the chooser and completed the token path above. Automatic migration
+and recovery from this older cached-choice state are still unimplemented.
+
+Startup reliability is a separate open problem. A fresh-data launch initially
+remained black; a run with preserved pre-login data reached onboarding after a
+long startup. Another client restart exited before login, with its verified
+spawner recording signal 13 (`SIGPIPE`). A later unchanged retry reached login.
+In that surviving retry, 282 sampled threads blocked SIGPIPE while one
+`OS_DfxWatchdog` thread did not; the sampled process disposition was default.
+This narrows investigation but does not identify the failing write or prove a
+signal fix. A further restart intended to check saved OAuth authorization also
+exited with signal 13 before login. OAuth reuse after restart therefore remains
+unvalidated; the saved record alone is insufficient evidence. No new native
+artifact was deployed in these comparisons.
+
+Exact sanitized observations are in
+[candidate52-followup.json](../tests/google-auth/full48/candidate52-followup.json).
+Raw logs, account screenshots and the preference backups remain private.

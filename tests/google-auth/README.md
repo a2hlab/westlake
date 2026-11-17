@@ -4,7 +4,11 @@ The active [full application validation](../../docs/google-two-path-full-validat
 tracks the remaining Google and Facebook flows from the live batch. Candidates
 48 and 51 add legacy sign-in service 91 and its internal service 44 dependency.
 Spotify and Wattpad now receive successful Google activity returns. Spotify stops
-at separate signup; Wattpad's subsequent silent OAuth request is refused locally.
+at separate signup. Candidate 52 also delivers Wattpad's subsequent OAuth access
+token; Wattpad reaches its separate signup form. This required manual recovery
+from an older saved Google account choice. Neither app has a validated account
+session or full application pass, and intermittent SIGPIPE startup exits remain
+unresolved. See the linked validation report for the exact evidence boundaries.
 Historical results below retain their original build boundaries.
 
 This probe tests the official GMS token implementation and a separate direct
