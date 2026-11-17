@@ -1588,6 +1588,14 @@ account selected had shown the connection-error dialog for that same query.
 The test establishes guest place search on this board. Signed-in search and the
 origin of the authentication refusal remain open.
 
+After a client restart, Maps retained its guest selection with both service
+connections active. In **Directions**, selecting Central station on Des Voeux
+Road Central as the origin and entering Hong Kong City Hall as the destination
+produced a blue route to the City Hall area by Edinburgh Place. The map showed
+a two-minute driving route and an eight-minute walking alternative. Both
+endpoints were entered manually. Physical location and turn-by-turn navigation
+remain untested.
+
 Drive’s Files tab still showed **Can’t refresh**. The original app accepted
 `Westlake-Drive-validation.txt` in search, but never displayed or opened the
 file. The earlier Drive API check read the approved 107 bytes. The local

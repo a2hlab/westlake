@@ -60,7 +60,7 @@
       "changeRecommendedOnThisEvidence": false
     },
     "realLocationVerified": false,
-    "routePreviewVerified": false,
+    "routePreviewVerified": true,
     "privateLogControl": {
       "clientDiagnosticNativeSha256": "8e5d7304fc4aa46db3c1c4deba45dfcd69b9839eeac5762e27095492a0280a5d",
       "originalJavaAdapterRetained": true,
@@ -147,6 +147,20 @@
       "placeSearchVerified": true,
       "authenticatedSearchVerified": false,
       "certificationOrRegistrationFailureEstablished": false
+    },
+    "guestRestartAndDirections": {
+      "clientRestarted": true,
+      "guestSelectionRetained": true,
+      "officialGmsAndProviderStillRunning": true,
+      "directionsFormRendered": true,
+      "manualOrigin": "Central station, Des Voeux Road Central, Central, Hong Kong",
+      "manualDestinationQuery": "Hong Kong City Hall",
+      "renderedMap": "Blue driving route from Central station to the City Hall area by Edinburgh Place; gray walking alternative.",
+      "drivePreviewMinutesShown": 2,
+      "walkingAlternativeMinutesShown": 8,
+      "navigationStarted": false,
+      "physicalLocationUsed": false,
+      "privateCoordinatesPublished": false
     }
   },
   "drive": {
