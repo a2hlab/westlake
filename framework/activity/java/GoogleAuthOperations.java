@@ -4,6 +4,7 @@ import adapter.core.GoogleAuthDelegation;
 import adapter.core.GoogleAuthDelegationPolicy;
 import adapter.core.GoogleAuthProxy;
 import adapter.core.GoogleAuthSessions;
+import adapter.core.GoogleNativeAuthConsent;
 import adapter.core.SocketBinder;
 import android.accounts.Account;
 import android.app.ActivityThread;
@@ -94,6 +95,14 @@ public final class GoogleAuthOperations {
                 } else throw new SecurityException("silent options unsupported");
             }
             operation.epoch = generation(origin.packageName);
+            // A native account request has separate, explicitly provisioned operator consent.
+            // This selects a provider protocol, not permission: the provider checks the account,
+            // signer, scope set, epoch and expiry before and after network I/O. No session is saved.
+            operation.nativeConsent = "1".equals(System.getenv("WESTLAKE_GOOGLE_NATIVE_ACCOUNT_CONSENT"))
+                    && GoogleNativeAuthConsent.reusable(operation.requested)
+                    && !GoogleAuthSessions.allows(directory(), origin.packageName,
+                            operation.signer, operation.legacySigner, operation.account.type,
+                            operation.account.name, operation.requested, operation.epoch);
             operation.accepted = true;
             if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE")))
                 GoogleAuthDelegation.event("silent_request_accepted=true owner=" + origin.packageName);
@@ -122,7 +131,7 @@ public final class GoogleAuthOperations {
         final long deadline = SystemClock.elapsedRealtime() + 100_000L;
         final String signer, legacySigner;
         volatile boolean active = true;
-        boolean accepted;
+        boolean accepted, nativeConsent;
         Account account;
         String service, epoch, issuedKey;
         GoogleAuthDelegationPolicy requested;
@@ -142,8 +151,10 @@ public final class GoogleAuthOperations {
         boolean allowed(GoogleAuthDelegationPolicy request) {
             try {
                 return accepted && active && channel.isAlive() && SystemClock.elapsedRealtime() < deadline
-                        && GoogleAuthSessions.sameService(requested, request) && GoogleAuthSessions.allows(directory(), origin.packageName,
-                        signer, legacySigner, account.type, account.name, request, epoch);
+                        && GoogleAuthSessions.sameService(requested, request)
+                        && (nativeConsent ? epoch.equals(generation(origin.packageName))
+                            : GoogleAuthSessions.allows(directory(), origin.packageName,
+                                signer, legacySigner, account.type, account.name, request, epoch));
             } catch (Exception denied) { return false; }
         }
 
@@ -167,10 +178,12 @@ public final class GoogleAuthOperations {
                         reply.writeNoException(); reply.writeBoolean(allowed(parsed)); return true;
                     }
                 };
-                Bundle result = PlayServicesChannel.delegatedAuth(origin, pid, spawner, requested, key, witness, null);
+                Bundle result = PlayServicesChannel.delegatedAuth(origin, pid, spawner, requested, key, witness, null,
+                        nativeConsent ? epoch : null);
                 if (!allowed(parsed) || result == null || result.getString("token") == null) return null;
                 issuedKey = key; issued = result;
-                GoogleAuthDelegation.event("silent_token=true owner=" + origin.packageName + " token_present=true");
+                GoogleAuthDelegation.event("silent_token=true owner=" + origin.packageName
+                        + " token_present=true native_consent=" + nativeConsent);
                 return result.getString("token");
             } catch (Exception error) {
                 GoogleAuthDelegation.event("silent_read_denied=true " + GoogleAuthDelegation.failure(error));

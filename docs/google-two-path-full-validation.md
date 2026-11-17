@@ -6,12 +6,15 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 77 fixes Gmail's Contacts-client compatibility warning.
-The original client combines People and Feedback APIs; adding services 5 and 29
-to the existing opt-in local eligibility policy removes the status-9 dialog in
-two fresh Gmail processes. Gmail now calls IPeopleService, but its mailbox remains
-unsynced. The user-approved provider scopes are applied; native scoped account
-authorization still denies its token read. Certification remains 3.
+Latest result: candidate 78 adds separately approved native-account OAuth
+consent for Gmail. The provider refuses the original app without consent,
+issues OAuth tokens after explicit approval, and refuses it again when only
+that consent is withdrawn. Official GMS delivers token-bearing replies to
+Gmail. This does not establish mailbox synchronization: after deploying the
+existing Cronet APK-descriptor ABI fix to Gmail, its settings sync fails with
+`ERR_NAME_NOT_RESOLVED`. Candidate 77 removed the Contacts-client
+compatibility dialog by adding People/Feedback to the existing opt-in service
+eligibility policy. Certification remains 3, without an override.
 
 Candidate 76 completes fresh FotMob Facebook login and restart.
 The app saves a different token for the same account. An independent read-only
@@ -30,11 +33,11 @@ session. Candidate 72's native APK-descriptor classification fix keeps Cronet
 129 past its earlier crash. These are specific feature results; the wider
 application and isolation plan remains incomplete.
 
-Candidate 71 accepts Gmail's bounded native OAuth scope list while still denying
-ungranted token access; candidate 70 fixes its GMS APK loading. The mailbox
-remains unsynced. The operator-approved Gmail provider scopes are now applied;
-native account-selection mediation remains work in progress. The GMS-version gap and remaining service eligibility
-failures are still open.
+Candidate 71 accepts Gmail's bounded native OAuth scope list; candidate 70
+fixes its GMS APK loading. Candidate 78 upgrades both service hosts to that
+parser and introduces explicit operator consent for native account access.
+An end-user consent interface, mailbox sync, the GMS-version gap and remaining
+service eligibility failures are still open.
 No full application pass is established.
 
 Earlier, candidate 62 renews Wattpad's legacy Google sign-in after
@@ -1201,3 +1204,81 @@ not a full Gmail or production-isolation pass. Private logs, policy snapshots,
 account data and screenshots are excluded.
 
 See [candidate77.json](../tests/google-auth/full48/candidate77.json).
+
+## Candidate 78: explicit native-account consent and Gmail token delivery
+
+Gmail calls the native Android account-token service without going through the
+Google Sign-In chooser used by third-party apps. A package/signer/scope grant
+alone did not authorize that account access, so the previous implementation
+correctly denied its token read. This candidate adds a separate, opt-in native
+consent record, provisioned for this board test only after the user's explicit
+Gmail approval. It does not synthesize a Google Sign-In result or saved chooser
+session.
+
+Official GMS uses transaction 28 when a reusable OAuth request has no existing
+saved selection and `WESTLAKE_GOOGLE_NATIVE_ACCOUNT_CONSENT=1`. The provider
+still requires the pinned official GMS broker, independently verified live
+origin and APK signers, and the exact operation's live witness. It additionally
+checks the account hash, approved scopes, revocation epoch and consent expiry
+before and after network I/O. Returned scopes cannot exceed the approved set.
+Google server consent remains required; a consent challenge is not converted
+into a token. Existing chooser-based transaction 23 remains separate.
+
+The provider-owned `grants.properties` record uses
+`delegate.<package>.native.{source,account_sha256,epoch,issued_at_ms,expires_at_ms,scopes}`.
+`source` must be `operator-native-account-v1`; the account hash is SHA-256 of
+account type, a NUL separator and account name. Consent lasts at most 24 hours
+and does not replace the existing package/signer/scope grant. Removing these
+native fields withdraws consent. A changed GMS revocation epoch invalidates the
+old record. This is an experimental operator workflow; a production consent
+screen and production isolation are not implemented or validated by this test.
+
+The 66 new host checks cover wrong accounts and signers, missing or malformed
+records, scope expansion, expiry, epoch revocation and returned scopes. The
+combined authorization suite passes 241 numbered checks plus the boundary
+trace test. The adapter builds 141 Java sources into 294 classes; runtime
+packaging and all nine boot-image JARs pass. Both service hosts receive the
+new adapter with verified rollback artifacts. Native runtime binaries are
+reused.
+
+The board tests use the unchanged original Gmail APK and existing authorized
+account. Without a native-consent record, the provider reports
+`native_consent_absent` and no Gmail OAuth token is issued. Installing the
+approved record produces provider OAuth issuance and official GMS
+`silent_token=true ... native_consent=true`; Gmail receives token-bearing
+replies. Removing only the native consent fields, while preserving ordinary
+signer/scope grants, denies a fresh Gmail process again. Restoring the same record, without extending its
+expiry, reproduces provider and official-GMS token delivery in another process.
+These controls test local authorization; token issuance alone is not
+authenticated mailbox acceptance.
+
+The first approved launch exposes a separate Cronet 129 fatal trap. Gmail's
+runtime still used the older candidate-54b shim; the trap and call frames match
+the APK-descriptor ABI-classification failure already fixed in candidate 72.
+Deploying that existing current-source shim to Gmail allows Cronet to initialize
+and the app to stay alive. The Contacts warning is absent, but the app still
+shows **Account not synced**. Its SettingsService requests fail with
+`net::ERR_NAME_NOT_RESOLVED`, and its settings client cannot start without the
+required server settings. Other GMS status-9 replies and the installed-version
+gap remain. The next investigation is the Cronet DNS boundary, followed by a
+real mailbox sync check.
+
+Private account records, consent hashes tied to the test account, credentials,
+tokens, raw logs and screenshots are excluded from the public evidence.
+
+The new foreign-broker transaction-28 probe builds with the original test
+signer, but its live denial is **not validated**. Graphical attempts abort in
+physical-display initialization before interaction. Later experimental
+headless launches are refused by `HapDomainSetcontext` before Java starts,
+despite matching the current HAP token and UID. No SELinux check is bypassed;
+those attempts count as setup failures, not security passes. The headless
+experiment is not retained in the published test source. The probe shares the
+provider's UID and cannot establish production UID isolation in any case.
+
+Final checks retain uncertified status 3 without an override, the check-in
+identity and one provider account. Both service hosts and Gmail are alive.
+The provider account store changes during token activity; byte identity is not
+claimed. Native consent matches the explicitly approved record. Exact sanitized
+results are in [candidate78.json](../tests/google-auth/full48/candidate78.json).
+Chooser-flow regression on the upgraded hosts and the new foreign-broker test
+remain separate outstanding checks.

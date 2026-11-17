@@ -111,6 +111,8 @@ public final class PlayServicesChannel {
     private static final int START_PENDING_ACTIVITY = 25;
     private static final int START_CREATOR_ACTIVITY = 26;
     private static final int READ_ASYNC_AUTH = 27;
+    /** Native account consent uses a distinct transaction; older providers must fail closed. */
+    private static final int DELEGATED_NATIVE_AUTH = 28;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -834,13 +836,21 @@ public final class PlayServicesChannel {
 
     static android.os.Bundle delegatedAuth(PackageInfo origin, int pid, String spawner,
             android.accounts.Account account, String key, IBinder witness, String invalidate) throws RemoteException {
+        return delegatedAuth(origin, pid, spawner, account, key, witness, invalidate, null);
+    }
+
+    static android.os.Bundle delegatedAuth(PackageInfo origin, int pid, String spawner,
+            android.accounts.Account account, String key, IBinder witness, String invalidate,
+            String nativeEpoch) throws RemoteException {
         IBinder provider = root(AUTH);
         if (provider == null) throw new RemoteException("auth provider unavailable");
         Parcel data = Parcel.obtain(), reply = Parcel.obtain();
         try {
             data.writeTypedObject(origin, 0); data.writeInt(pid); data.writeString(spawner);
             data.writeTypedObject(account, 0); data.writeString(key); data.writeStrongBinder(witness); data.writeString(invalidate);
-            if (!provider.transact(DELEGATED_AUTH, data, reply, 0)) throw new RemoteException("delegation unavailable");
+            if (nativeEpoch != null) data.writeString(nativeEpoch);
+            if (!provider.transact(nativeEpoch == null ? DELEGATED_AUTH : DELEGATED_NATIVE_AUTH, data, reply, 0))
+                throw new RemoteException("delegation unavailable");
             reply.readException(); return reply.readBundle(PlayServicesChannel.class.getClassLoader());
         } finally { data.recycle(); reply.recycle(); }
     }
@@ -1805,7 +1815,8 @@ public final class PlayServicesChannel {
                 return true;
             }
             if (!mIdentified) throw new SecurityException("channel has not said who it is");
-            if (adapter.core.GoogleAuthProxy.provider() && !mOwnApplication && code != AUTH_PROVIDER && code != DELEGATED_AUTH) {
+            if (adapter.core.GoogleAuthProxy.provider() && !mOwnApplication && code != AUTH_PROVIDER
+                    && code != DELEGATED_AUTH && code != DELEGATED_NATIVE_AUTH) {
                 throw new SecurityException("authentication namespace exposes only its token provider");
             }
             IPackageManager packages = ActivityThread.getPackageManager();
@@ -1873,7 +1884,8 @@ public final class PlayServicesChannel {
                     reply.writeBundle(GoogleAsyncAuthOperations.read(method, account, key));
                     return true;
                 }
-                case DELEGATED_AUTH: {
+                case DELEGATED_AUTH:
+                case DELEGATED_NATIVE_AUTH: {
                     if (!mIdentityEnforced || mVerifiedInfo == null || mVerifiedInfo.signingInfo == null)
                         throw new SecurityException("unverified broker");
                     android.content.pm.Signature[] broker = mVerifiedInfo.signingInfo.getApkContentsSigners();
@@ -1884,6 +1896,10 @@ public final class PlayServicesChannel {
                         int originPid = data.readInt(); String spawner = data.readString();
                         android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
                         String key = data.readString(); IBinder witness = data.readStrongBinder(); String invalidate = data.readString();
+                        String nativeEpoch = code == DELEGATED_NATIVE_AUTH ? data.readString() : null;
+                        if (data.dataAvail() != 0 || (flags & IBinder.FLAG_ONEWAY) != 0
+                                || (code == DELEGATED_NATIVE_AUTH && (nativeEpoch == null || invalidate != null)))
+                            throw new SecurityException("invalid delegation fields");
                         if (origin == null || origin.signingInfo == null || origin.signatures == null
                                 || origin.signatures.length != 1 || origin.signingInfo.getApkContentsSigners().length != 1)
                             throw new SecurityException("unverified origin");
@@ -1896,7 +1912,7 @@ public final class PlayServicesChannel {
                             throw new SecurityException("origin signer mismatch");
                         reply.writeBundle(adapter.core.GoogleAuthDelegation.provide(mVerifiedInfo.packageName, broker[0].toByteArray(),
                                 origin.packageName, origin.signingInfo.getApkContentsSigners()[0].toByteArray(),
-                                origin.signatures[0].toByteArray(), account, key, witness, invalidate));
+                                origin.signatures[0].toByteArray(), account, key, witness, invalidate, nativeEpoch));
                         return true;
                     } catch (Exception error) {
                         adapter.core.GoogleAuthDelegation.event("provider_denied=true " + adapter.core.GoogleAuthDelegation.failure(error));

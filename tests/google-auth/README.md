@@ -86,15 +86,17 @@ uses the same build 11 and adds an authorized FotMob sign-in attempt. Its
 `service-retest11/` evidence keeps Google connection results separate from
 visible app behavior and full feature acceptance.
 
-The current source includes eight buttons. The `spoof-package` button calls the official
+The current source includes nine buttons. The `spoof-package` button calls the official
 token Binder with `com.spotify.music` in both package options while retaining
 the probe's actual APK, signer and verified channel identity. This is a negative
 identity test, not a Spotify login or a delegated token grant. The manifest
-input key for this source is `google-official-auth-probe-v5`; earlier build
+input key for the earlier eight-button artifact is `google-official-auth-probe-v5`;
+that pinned artifact is not changed by the candidate-78 test build. Earlier build
 records below retain their original v1/v2 identities.
 
-The `delegation-ui` and `delegation-provider` buttons attempt the new wire
-operations while retaining the probe's real APK identity. Both must return
+The `delegation-ui`, `delegation-provider` and `delegation-native-provider`
+buttons attempt wire operations 24, 23 and 28 while retaining the probe's real
+APK identity. Each must return
 `SecurityException`; a missing channel or unsupported transaction is not a pass.
 These are denial tests, not delegated positive controls. Actual Spotify supplied
 the positive interactive flow. Build 11 returned `RESULT_OK` and reached its
@@ -449,3 +451,11 @@ cc -std=c11 -Wall -Wextra -Werror -I framework/webview-shim \
 This test uses real `/proc/self/fd` links, including closure and descriptor reuse.
 It checks ABI routing only; package-code trust remains the separate verified
 descriptor protocol.
+
+Candidate 78 adds explicit operator consent for native account OAuth, separate
+from saved Google Sign-In selections. Its policy test is
+`tests/google-auth/host/GoogleNativeAuthConsentTest.java` (66 checks). The real
+Gmail absent-consent / approved / withdrawn controls and remaining Cronet DNS
+failure are recorded in the [full validation report](../../docs/google-two-path-full-validation.md#candidate-78-explicit-native-account-consent-and-gmail-token-delivery).
+Token delivery is an intermediate result; mailbox sync and production consent UI
+remain incomplete.

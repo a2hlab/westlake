@@ -14,7 +14,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** Experimental, live-picker-bound mediation of pinned official GMS token-cache reads. */
+/** Experimental mediation of pinned GMS token-cache reads with explicit UI or native consent. */
 public final class GoogleAuthDelegation {
     public static final String WITNESS = "org.westlake.GoogleAuthSelection.v1";
     private static final Object LOCK = new Object();
@@ -100,12 +100,15 @@ public final class GoogleAuthDelegation {
 
     /** All identities here were verified independently from the origin's root-owned live spawner. */
     public static Bundle provide(String broker, byte[] brokerSigner, String origin, byte[] currentSigner,
-            byte[] legacySigner, Account requested, String key, IBinder witness, String invalidate) throws Exception {
+            byte[] legacySigner, Account requested, String key, IBinder witness, String invalidate,
+            String nativeEpoch) throws Exception {
         requireBroker(broker, brokerSigner);
         GoogleAuthDelegationPolicy parsed = GoogleAuthDelegationPolicy.parse(key);
         String sha256 = GoogleAuthProxy.digest(currentSigner, "SHA-256");
         String sha1 = GoogleAuthProxy.digest(legacySigner, "SHA-1");
         parsed.require(GoogleAuthProxy.readGrants(), origin, sha256, sha1);
+        if (nativeEpoch != null) GoogleNativeAuthConsent.require(GoogleAuthProxy.readGrants(), origin, sha256, sha1,
+                requested.type, requested.name, parsed, nativeEpoch, System.currentTimeMillis());
         selected(witness);
         Context app = ActivityThread.currentApplication();
         Account[] accounts = AccountManager.get(app).getAccountsByType("com.google");
@@ -131,7 +134,7 @@ public final class GoogleAuthDelegation {
                 event("invalidate=true owner=" + origin + " cache_removed=" + match);
                 return result;
             }
-            // The operator's private grant plus the live account selection is local scope permission.
+            // The scope grant and either the live selection or separate native consent are local permission.
             // Google server consent is still required; a consent response is never converted to success.
             type.getMethod("setPermitted", boolean.class).invoke(manager, true);
             type.getField("includeGrantedScopes").set(manager, "0");
@@ -152,6 +155,11 @@ public final class GoogleAuthDelegation {
             requireBroker(broker, brokerSigner);
             parsed.require(GoogleAuthProxy.readGrants(), origin, sha256, sha1);
             parsed.requireGrantedScopes(GoogleAuthProxy.readGrants(), scopes);
+            if (nativeEpoch != null) GoogleNativeAuthConsent.requireReturnedScopes(
+                    GoogleNativeAuthConsent.require(GoogleAuthProxy.readGrants(), origin, sha256, sha1,
+                            requested.type, requested.name, parsed, nativeEpoch, System.currentTimeMillis()), scopes);
+            Account[] current = AccountManager.get(app).getAccountsByType("com.google");
+            if (current.length != 1 || !current[0].equals(requested)) throw new SecurityException("account not granted");
             selected(witness);
             if (!consent && token != null && !token.isEmpty() && (expiry <= 0 || expiry > System.currentTimeMillis() / 1000L)) {
                 result.putString("token", token);
@@ -161,7 +169,7 @@ public final class GoogleAuthDelegation {
             result.putBoolean("consentRequired", consent);
             event("token=true owner=" + origin + " kind=" + (parsed.serverCode ? "server_code" : parsed.clientId != null ? "id_token" : "oauth2")
                     + " token_present=" + result.containsKey("token") + " expiry_present=" + result.containsKey("expiry")
-                    + " consent_required=" + consent);
+                    + " consent_required=" + consent + " native_consent=" + (nativeEpoch != null));
         }
         return result;
     }
@@ -180,7 +188,10 @@ public final class GoogleAuthDelegation {
                 "scope syntax", "unsupported service", "selection no longer active", "wrong witness peer",
                 "cache signer differs from origin", "origin signer mismatch", "origin launch mismatch", "origin is not live",
                 "silent options unsupported", "silent origin mismatch", "silent request unsupported",
-                "silent timing invalid", "silent oneway unsupported", "silent service unsupported"}) {
+                "silent timing invalid", "silent oneway unsupported", "silent service unsupported",
+                "native account invalid", "native consent time invalid", "native service unsupported",
+                "native consent absent", "native account not granted", "native consent revoked",
+                "native consent expired", "native scope not granted", "invalid delegation fields"}) {
             if (known.equals(message)) detail += " reason=" + known.replace(' ', '_');
         }
         if (message != null) for (String code : new String[] {"BadAuthentication", "NeedsBrowser", "NeedsPermission",
