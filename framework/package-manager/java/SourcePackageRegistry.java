@@ -122,6 +122,11 @@ public final class SourcePackageRegistry {
         return parsed != null && parsed.packageName.equals(packageName);
     }
 
+    /** Read the registered APK's manifest without re-entering the package manager. */
+    static synchronized Boolean requestsPermission(String permission) {
+        return parsed == null ? null : parsed.requestedPermissions.contains(permission);
+    }
+
     /** The registered package's name, or null before the launch registers it. */
     public static synchronized String packageName() {
         return parsed != null ? parsed.packageName : null;

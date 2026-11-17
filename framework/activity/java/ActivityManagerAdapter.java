@@ -1460,6 +1460,9 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     @Override
     public int checkPermission(String permission, int pid,
             int uid) throws RemoteException {
+        if (adapter.packagemanager.PermissionManagerAdapter.isForegroundLocation(permission)) {
+            return adapter.packagemanager.PermissionManagerAdapter.checkProcessPermission(permission, pid, uid);
+        }
         logStub("checkPermission", "OH uses AccessTokenKit");
         return 0; // PERMISSION_GRANTED
     }

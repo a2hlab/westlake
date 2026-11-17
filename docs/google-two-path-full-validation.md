@@ -1695,3 +1695,29 @@ player error remain unknown. Google account acceptance, YouTube playback and
 opening the file in Drive remain unverified. The [board results and matching
 hashes](../tests/google-auth/full48/candidate86.json) include the individual
 media checks.
+
+## Maps location permissions on the OpenHarmony board
+
+OpenHarmony's location switch was on, but the client HAP had neither approximate
+nor precise location permission. In the original Maps APK, Android's
+`checkSelfPermission` reported both granted. The location adapter withheld fixes
+and the map stayed at continental scale when the tester tapped **Your location**.
+
+Westlake now checks the current HAP grant and the APK's declared foreground
+permission. Android fine location maps to `ohos.permission.LOCATION` and coarse
+location to `ohos.permission.APPROXIMATELY_LOCATION`. The Java and C++ mappers
+also preserve that distinction when converting back to Android permission names.
+An initial build crashed before Maps drew its screen. The tested build can read
+the original APK's parsed manifest directly during a permission check.
+
+With the same APK and host grants, Maps rendered its tiles, reported both
+permissions denied, and displayed **App permission denied** when the tester
+tapped **Your location**. The result repeated after a process restart. The
+**Settings** button sent Android's app-details intent. The resolver found no
+handler, and no permission panel opened. OpenHarmony lists the shared client
+HAP; Maps has no separate installed HAP in this configuration.
+
+These tests verify the denied-permission case. A positive location fix,
+approximate-only delivery and independent user grants for apps sharing a host
+still need board validation. The [board evidence](../tests/google-auth/full48/candidate87.json)
+includes both app runs, the deployed hashes and the result of the Settings action.

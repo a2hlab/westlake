@@ -52,12 +52,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   minimum interval and maximum update count applied. Unregistering stops the OH request. getCurrentLocation
  *   answers its first fix, or null at its duration (30 seconds by default), and can be cancelled.
  * - getLastLocation answers the last fix this process received, or null.
- * - Location is OH's: the host application must hold OH's location permission
- *   (ohos.permission.APPROXIMATELY_LOCATION), which is what Westlake answers an app's runtime permission request
- *   with. Without it, or with the switch off, a request is accepted and gets no fixes, getCurrentLocation answers
- *   null and getLastLocation null: the answers Android gives while location is unavailable. A SecurityException,
- *   Android's answer to an app without the permission, would reach apps that checkSelfPermission told it had
- *   been granted (runtime permissions are not yet answered consistently: phase B of ADR-0004).
+ * - For a foreground location request, the APK must declare a location permission and its HAP must hold
+ *   the corresponding OH grant. Android fine location maps to ohos.permission.LOCATION and coarse location
+ *   maps to ohos.permission.APPROXIMATELY_LOCATION. The checks read the current grant.
+ *   With neither permission, or with location switched off, listeners receive no fixes, getCurrentLocation
+ *   returns null and there is no last known location. The host's permission applies to the HAP;
+ *   independent user grants for APKs sharing that HAP need separate enforcement.
  * - Without OH's location library the compatibility floor stays: providers absent, location off, no fixes.
  * - Not bridged: geocoding (isGeocodeAvailable false), GNSS status, NMEA, measurements and batching (accepted, no
  *   callbacks, as on a device without that data). Coordinates are never logged.

@@ -31,7 +31,7 @@ const std::unordered_map<std::string, std::string>& GetAndroidToOHMap() {
         {"android.permission.MANAGE_EXTERNAL_STORAGE",  "ohos.permission.FILE_ACCESS_MANAGER"},
 
         // Location
-        {"android.permission.ACCESS_FINE_LOCATION",     "ohos.permission.APPROXIMATELY_LOCATION"},
+        {"android.permission.ACCESS_FINE_LOCATION",     "ohos.permission.LOCATION"},
         {"android.permission.ACCESS_COARSE_LOCATION",   "ohos.permission.APPROXIMATELY_LOCATION"},
         {"android.permission.ACCESS_BACKGROUND_LOCATION", "ohos.permission.LOCATION_IN_BACKGROUND"},
 
@@ -94,7 +94,8 @@ const std::unordered_map<std::string, std::string>& GetOHToAndroidMap() {
         {"ohos.permission.READ_MEDIA",              "android.permission.READ_EXTERNAL_STORAGE"},
         {"ohos.permission.WRITE_MEDIA",             "android.permission.WRITE_EXTERNAL_STORAGE"},
         {"ohos.permission.FILE_ACCESS_MANAGER",     "android.permission.MANAGE_EXTERNAL_STORAGE"},
-        {"ohos.permission.APPROXIMATELY_LOCATION",  "android.permission.ACCESS_FINE_LOCATION"},
+        {"ohos.permission.LOCATION",                "android.permission.ACCESS_FINE_LOCATION"},
+        {"ohos.permission.APPROXIMATELY_LOCATION",  "android.permission.ACCESS_COARSE_LOCATION"},
         {"ohos.permission.LOCATION_IN_BACKGROUND",  "android.permission.ACCESS_BACKGROUND_LOCATION"},
         {"ohos.permission.READ_CONTACTS",           "android.permission.READ_CONTACTS"},
         {"ohos.permission.WRITE_CONTACTS",          "android.permission.WRITE_CONTACTS"},
