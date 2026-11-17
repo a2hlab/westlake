@@ -176,6 +176,14 @@ run. Enable `WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS=1` together with private logs
 in a rebuilt adapter to reproduce the value-free activity diagnostics; this
 flag does not implement activity/result transport or change authentication.
 
+The current adapter also traces numeric legacy `ISignInCallbacks` (transaction
+101) and modern `IBeginSignInCallback` (transaction 1) statuses under that flag,
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1` and `WESTLAKE_PLAY_TRACE=1`. It records only
+status and account/result presence, skips account payloads, and restores the
+incoming Parcel position. Malformed replies produce an unreadable marker.
+These statuses describe the sign-in operation; a successful service-broker
+connection alone does not establish sign-in success.
+
 ## Silent-token diagnosis, build 27
 
 [`refresh-diagnosis27/fotmob-policy1.json`](refresh-diagnosis27/fotmob-policy1.json)
@@ -274,7 +282,9 @@ java -cp $out/trace GoogleAuthBoundaryTraceTest                                #
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
 java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
 javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.java tests/google-auth/host/GoogleIdentityServicePolicyTest.java
-java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 15
+java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 18
+javac -d $out/signin-trace framework/core/java/GoogleSignInDiagnostics.java tests/google-auth/host/GoogleSignInDiagnosticsTest.java
+java -cp $out/signin-trace adapter.core.GoogleSignInDiagnosticsTest            # GOOGLE_SIGNIN_DIAGNOSTICS_PASS 14
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
 java -cp $out/files adapter.core.PrivateFilesTest                              # PRIVATE_FILES_PASS 6
 ```

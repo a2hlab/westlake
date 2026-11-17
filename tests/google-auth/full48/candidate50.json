@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "candidate": 50,
+  "sourceBaseRevision": "ca096363419f9d468662105debd7f9804784bc35",
+  "changedSourceHashes": {
+    "framework/core/java/GoogleSignInDiagnostics.java": "d84cd59dcec04f98e35adb97f261a5605a3cacbe747f7c34efb1f63e2db5ac5b",
+    "framework/core/java/SocketBinder.java": "7d3c32c5c94930b0cfbbcf93bd1f43e1b73fa988a814d1355f1b059eace98826"
+  },
+  "clientAdapterJarSha256": "40da454e38a8d4d99fe6f0785d8339957ec191e73518f76d111b11f04ff9fcf0",
+  "officialGmsAdapterJarSha256": "0e15a6477c41b6a638f44d93e82c885713f850d135473fd31738bd8549cf3bb3",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "diagnosticHostChecksPassed": 14,
+  "adapterBuildPassed": true,
+  "bootImageBuildPassed": true,
+  "boardPreloadPassed": true,
+  "nativeArtifactsRebuilt": false,
+  "frameworkOutputsReusedWithMatchedInputsAndCompilerArguments": true,
+  "candidate49DiagnosticLimitation": "Fixed-position Binder header assumption prevented status decoding; candidate50 validates the exact interface token within the bounded header. No authentication outcome was inferred from the missing candidate49 numeric trace.",
+  "preservation": {
+    "clientAdapterSha256": "40da454e38a8d4d99fe6f0785d8339957ec191e73518f76d111b11f04ff9fcf0",
+    "gmsAdapterSha256": "0e15a6477c41b6a638f44d93e82c885713f850d135473fd31738bd8549cf3bb3",
+    "identityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "clientAndHostsAlive": true
+  },
+  "wattpad": {
+    "apkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+    "existingAppDataCarried": true,
+    "brokerStatusesByApproximateService": {
+      "270": [
+        9
+      ],
+      "300": [
+        9
+      ],
+      "93": [
+        9
+      ],
+      "116": [
+        9
+      ],
+      "8": [
+        9
+      ],
+      "212": [
+        0
+      ],
+      "91": [
+        0
+      ]
+    },
+    "signInCallbacks": [
+      {
+        "kind": "begin",
+        "status": 16,
+        "resultPresent": false
+      },
+      {
+        "kind": "legacy",
+        "status": 8,
+        "accountPresent": false
+      },
+      {
+        "kind": "legacy",
+        "status": 8,
+        "accountPresent": false
+      }
+    ],
+    "accountChooserReached": false,
+    "authenticatedReturn": false,
+    "observedScreen": "Existing-account login screen after Google attempt",
+    "staticAppBehavior": "Wattpad GoogleManager starts the interactive legacy sign-in flow for silent result 4; result 8 follows the failure branch.",
+    "rootCause": "Internal legacy sign-in failure not yet localized; numeric status alone does not establish a Google server rejection.",
+    "fullApplicationAcceptance": false
+  },
+  "rawLogsAndScreenshotsPublic": false
+}

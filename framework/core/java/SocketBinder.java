@@ -369,6 +369,32 @@ public final class SocketBinder {
                 data.setDataPosition(position);
             }
         }
+        if (GoogleSignInDiagnostics.supported(descriptor, code)
+                && "1".equals(System.getenv("WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS"))
+                && "1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) {
+            int position = data.dataPosition();
+            try {
+                // Binder versions differ in their policy/work-source header words. Validate
+                // the exact public interface token within the bounded header, without
+                // enforceInterface's thread-policy side effects or reading credential fields.
+                boolean token = false;
+                for (int at = 0; at <= 16 && at <= data.dataSize() - 4; at += 4) {
+                    data.setDataPosition(at);
+                    if (data.readInt() != descriptor.length()) continue;
+                    data.setDataPosition(at);
+                    if (descriptor.equals(data.readString())) { token = true; break; }
+                }
+                if (token) {
+                    result = GoogleSignInDiagnostics.describe(descriptor, code, new GoogleSignInDiagnostics.Reader() {
+                        public int position() { return data.dataPosition(); }
+                        public int size() { return data.dataSize(); }
+                        public int readInt() { return data.readInt(); }
+                        public void seek(int at) { data.setDataPosition(at); }
+                    });
+                } else result = "status=unreadable";
+            } catch (RuntimeException ignored) { result = "status=unreadable"; }
+            finally { data.setDataPosition(position); }
+        }
         trace("in", descriptor, code, -1, result);
     }
 
