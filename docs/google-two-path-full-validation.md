@@ -21,6 +21,10 @@ mail sync adapter and reads sync settings on two preserved-data starts, but no
 sync request or adapter execution is observed. The APK's manual-sync button uses
 an internal asynchronous sync pipeline; its live stopping point is unresolved.
 Mail remains unsynced, with separate GMS eligibility and scoped-token gaps.
+Candidate 65 traces the actual touch helper: the manual-sync tap reaches Gmail's
+focused main window and is handled on the main thread without a dispatch
+exception. Queued click-listener execution and the internal sync pipeline remain
+unvalidated.
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -647,3 +651,32 @@ still experimental, and the full application pass count remains zero.
 
 See [candidate64.json](../tests/google-auth/full48/candidate64.json) and the
 [dispatcher test notes](../tests/google-auth/README.md#app-owned-sync-dispatcher-candidate-64).
+
+### Candidate 65: distinguish input delivery from click and sync execution
+
+The native `i` command prints a receiver-tap label, but the deployed native
+implementation prefers `OHTouchInjector` when that helper is available.
+Instrumenting only `InputEventBridge` therefore produced no events even when
+the compatibility dialog visibly closed. The diagnostic build now covers both
+Java paths, with a default-off flag and a requirement for private logging.
+
+The trace records dispatch phases and exception class/stack identifiers, plus
+bounded structural window metadata. It does not read view text, titles, account
+values, entered text or exception messages. Routing and event handling are
+unchanged. Compilation, packaging, boot build and preload pass. The preload
+reuses independently hash-verified public framework artifacts through a private
+temporary cache; both that index and the disposable probe copies are removed.
+
+On the board, the compatibility-dialog tap selects the dialog and both DOWN and
+UP run on the main thread and return handled. After dismissal, **Sync now**
+selects the single remaining focused, visible and attached main window. Its
+DOWN and UP also run on the main thread and return handled, with no dispatch
+exception. This rules out an initial main-thread handoff failure or wrong-window
+selection for this captured tap. It does not prove that Android's queued
+`View.PerformClick` runs or that Gmail's listener completes its internal futures.
+No content-service sync request, adapter execution or mailbox content is observed.
+
+GMS and microG remain alive; their identity, grants and provider account-store
+bytes are preserved. Status remains 3 without an override. Full application
+acceptance remains open. Exact results are in
+[candidate65.json](../tests/google-auth/full48/candidate65.json).

@@ -44,6 +44,37 @@ public class InputEventBridge {
     // dispatchOnMainThread below for full rationale.
     private static volatile Handler sMainHandler;
 
+    // Bounded, value-free diagnostics for private authentication test sessions.
+    // No key codes, typed text, view text, account values or exception messages.
+    private static final java.util.concurrent.atomic.AtomicInteger sTraceIds =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    static int beginTrace() {
+        if (!"1".equals(System.getenv("WESTLAKE_INPUT_DIAGNOSTICS"))
+                || !"1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) return 0;
+        int id = sTraceIds.incrementAndGet();
+        if (id > 128) return 0;
+        trace(id, "received", null);
+        return id;
+    }
+
+    static void trace(int id, String phase, Throwable error) {
+        if (id == 0) return;
+        System.err.println("[WL-INPUT] time=" + System.currentTimeMillis()
+                + " id=" + id + " phase=" + phase
+                + " main=" + (Looper.myLooper() == Looper.getMainLooper()));
+        if (error == null) return;
+        if (error instanceof java.lang.reflect.InvocationTargetException
+                && error.getCause() != null) error = error.getCause();
+        System.err.println("[WL-INPUT] id=" + id + " error=" + error.getClass().getName());
+        StackTraceElement[] frames = error.getStackTrace();
+        for (int i = 0; i < Math.min(frames.length, 6); i++) {
+            StackTraceElement frame = frames[i];
+            System.err.println("[WL-INPUT] id=" + id + " frame="
+                    + frame.getClassName() + "." + frame.getMethodName() + ":" + frame.getLineNumber());
+        }
+    }
+
     private static Handler getMainHandler() {
         if (sMainHandler == null) {
             synchronized (InputEventBridge.class) {
@@ -115,11 +146,14 @@ public class InputEventBridge {
     public static void dispatchOnMainThread(final InputEventReceiver receiver,
                                             final int seq,
                                             final InputEvent event) {
+        final int traceId = beginTrace();
         if (receiver == null || event == null) {
+            trace(traceId, "missing_input", null);
             return;
         }
         final java.lang.reflect.Method m = resolveDispatchMethod();
         if (m == null) {
+            trace(traceId, "method_unavailable", null);
             Log.w(TAG, "dispatchOnMainThread: dispatchInputEvent method not resolved, dropping event");
             return;
         }
@@ -128,22 +162,29 @@ public class InputEventBridge {
         // always calls from worker, but stays correct if invoked from main).
         if (Looper.myLooper() == h.getLooper()) {
             try {
+                trace(traceId, "dispatch_inline", null);
                 m.invoke(receiver, Integer.valueOf(seq), event);
+                trace(traceId, "dispatch_returned", null);
             } catch (Throwable t) {
+                trace(traceId, "dispatch_failed", t);
                 Log.w(TAG, "dispatchOnMainThread inline: " + t);
             }
             return;
         }
-        h.post(new Runnable() {
+        boolean posted = h.post(new Runnable() {
             @Override
             public void run() {
                 try {
+                    trace(traceId, "dispatch_posted", null);
                     m.invoke(receiver, Integer.valueOf(seq), event);
+                    trace(traceId, "dispatch_returned", null);
                 } catch (Throwable t) {
+                    trace(traceId, "dispatch_failed", t);
                     Log.w(TAG, "dispatchOnMainThread post: " + t);
                 }
             }
         });
+        trace(traceId, posted ? "queue_accepted" : "queue_refused", null);
     }
 
     public static InputEventBridge getInstance() {

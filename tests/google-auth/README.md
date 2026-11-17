@@ -337,3 +337,17 @@ durable jobs, retry/backoff, system-wide cross-process state, and destruction of
 services retained by the existing binding cache remain unimplemented. Cancellation
 has a deadline but cannot forcibly stop app code that ignores it. Keep the feature
 opt-in until those lifecycle and scheduling gaps are addressed.
+
+## Private input diagnostics, candidate 65
+
+In the client, set `WESTLAKE_INPUT_DIAGNOSTICS=1` together with
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1` to trace at most 128 input dispatches and 16
+window roots per dispatch. `[WL-INPUT]` covers both the receiver bridge and
+`OHTouchInjector`, which the deployed native `i` command prefers despite its
+receiver-tap label. The trace records main-thread delivery, handled/unhandled
+results, exception types/stack frames and structural window state. It omits
+entered text, key codes, coordinates, titles, view text and exception messages.
+
+A handled touch is not a completed click listener or an accepted backend action.
+Keep the trace disabled for ordinary use; the candidate-65 record separates
+input delivery from the still-unvalidated Gmail click and sync work.

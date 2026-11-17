@@ -76,11 +76,14 @@ public final class OHTouchInjector {
             // preserve the same barrier-independent input property.  A normal Handler was
             // measured at invokeCount=2/runCount=0 for 35 seconds while rendering continued.
             if (mainLooper != null && Handler.createAsync(mainLooper).post(task)) {
+                InputEventBridge.trace(task.traceId, "helper_queue_accepted", null);
                 return;
             }
         } catch (Throwable throwable) {
+            InputEventBridge.trace(task.traceId, "helper_post_failed", throwable);
             lastEx = "main-post:" + String.valueOf(throwable);
         }
+        InputEventBridge.trace(task.traceId, "helper_view_post_fallback", null);
         if (!view.post(task)) {
             task.run();
         }
@@ -236,10 +239,12 @@ public final class OHTouchInjector {
     static final class Task implements Runnable {
         private final View view;
         private final MotionEvent event;
+        private final int traceId;
 
         Task(View view, MotionEvent event) {
             this.view = view;
             this.event = event;
+            this.traceId = InputEventBridge.beginTrace();
         }
 
         @Override
@@ -267,7 +272,9 @@ public final class OHTouchInjector {
             }
             runCount++;
             try {
+                InputEventBridge.trace(traceId, "helper_dispatch", null);
                 View target = targetFor(view, event)[0];
+                traceRoots(traceId, target);
                 event.offsetLocation(-gestureLeft, -gestureTop);
                 android.view.InputQueue queue = takenInputQueue(target);
                 if (queue != null) {
@@ -276,6 +283,7 @@ public final class OHTouchInjector {
                 } else {
                     lastHandled = target.dispatchTouchEvent(event) ? 1 : 0;
                 }
+                InputEventBridge.trace(traceId, lastHandled == 1 ? "helper_handled" : "helper_unhandled", null);
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                     gestureView = null;
                 }
@@ -289,10 +297,33 @@ public final class OHTouchInjector {
                     forceClickAt(target, event.getX(), event.getY());
                 }
             } catch (Throwable throwable) {
+                InputEventBridge.trace(traceId, "helper_dispatch_failed", throwable);
                 lastHandled = -1;
                 lastEx = String.valueOf(throwable);
             }
         }
+    }
+
+    private static void traceRoots(int traceId, View chosen) {
+        if (traceId == 0) return;
+        try {
+            java.util.List<View> roots = android.view.WindowManagerGlobal.getInstance().getWindowViews();
+            for (int i = 0; i < Math.min(roots.size(), 16); i++) {
+                View root = roots.get(i);
+                if (root == null) continue;
+                android.view.WindowManager.LayoutParams lp = root.getLayoutParams()
+                        instanceof android.view.WindowManager.LayoutParams
+                        ? (android.view.WindowManager.LayoutParams) root.getLayoutParams() : null;
+                // Structural window state only; never read its title, view text or account data.
+                System.err.println("[WL-INPUT] id=" + traceId + " root=" + i
+                        + " session=" + InputEventBridge.getInstance().getSessionId(root.getWindowToken())
+                        + " chosen=" + (root == chosen) + " attached=" + root.isAttachedToWindow()
+                        + " shown=" + root.isShown() + " visibility=" + root.getVisibility()
+                        + " focused=" + root.hasWindowFocus() + " width=" + root.getWidth()
+                        + " height=" + root.getHeight() + " type=" + (lp == null ? -1 : lp.type)
+                        + " flags=" + (lp == null ? 0 : lp.flags));
+            }
+        } catch (Throwable failure) { InputEventBridge.trace(traceId, "root_trace_failed", failure); }
     }
 
     // The native tap channel knows one view root and raw screen coordinates. Android's
