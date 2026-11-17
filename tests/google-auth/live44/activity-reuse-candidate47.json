@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "candidate": 47,
+  "sourceBase": "41cfd1ca645e42547bd8118b4ab6fb00f5f1b624",
+  "sourceHashes": {
+    "framework/activity/java/LocalActivityLaunch.java": "e006f0ad041c6eea5eee15433d03d36a79fefa5a6ebc64a7af1d527ffebc3942",
+    "framework/activity/java/ActivityTaskManagerAdapter.java": "88c36d3f2dd9648b3d4d2eda853db8e362d8e509d6c4651eb643f28722ca5e9e",
+    "tests/activity-reuse/Fixture.java": "b6eeee3b20b1dfbc35e56012bfee251cf4f427d01202cc5537199212deee351c",
+    "tests/activity-reuse/AndroidManifest.xml": "5b1d5121451d013e30f2dc079a4983b072c68e996b9e3d71add83233dcbbe43f",
+    "tools/build_local_activity_fixture.py": "ce935f312673d9f9677b56e508ea3bdbdfd8604326b814c0c5870be1f1290ba5"
+  },
+  "sourceCommentAfterBuild": "Only the flags parameter Javadoc was corrected after compilation; adapter behavior is unchanged.",
+  "fixture": {
+    "schema": "westlake-local-activity-fixture-v1",
+    "fixture_only": true,
+    "device_tested": false,
+    "apk_sha256": {
+      "fixture": "95b7ff393ab9b1add64d76aa7ff37f79212d282f2b0e98e115c4dc9996fdd37a"
+    },
+    "sources": {
+      "tests/activity-reuse/AndroidManifest.xml": "5b1d5121451d013e30f2dc079a4983b072c68e996b9e3d71add83233dcbbe43f",
+      "tests/activity-reuse/Fixture.java": "b6eeee3b20b1dfbc35e56012bfee251cf4f427d01202cc5537199212deee351c"
+    }
+  },
+  "frameworkPackagingPassed": true,
+  "bootImageGenerationPassed": true,
+  "boardPreloadPassed": true,
+  "nativeArtifactsRebuilt": false,
+  "frameworkJarRebuilt": false,
+  "frameworkReuse": "Unchanged raw framework inputs, compiler arguments and output hashes verified against candidate46; changed adapter compiled and repackaged.",
+  "baseline": {
+    "report": "live44-reuse-fixture46",
+    "alive": true,
+    "events": [
+      "[WL-REUSE-TEST] FAIL redirect_created_new_instance",
+      "[WESTLAKE-RESULT] delivered requestCode=2 resultCode=0 data=false to org.westlake.activityreuse.fixture.Fixture$Redirect",
+      "[WL-REUSE-TEST] FAIL timeout completed=0"
+    ],
+    "fatal_markers": {
+      "FATAL EXCEPTION": 0,
+      "Fatal signal": 0,
+      "deferred startActivity failed": 0,
+      "Error delivering new intent": 0
+    }
+  },
+  "candidateResult": {
+    "report": "live44-reuse-fixture47",
+    "alive": true,
+    "events": [
+      "[WESTLAKE-RESULT] the caller of requestCode=2 is finishing or gone; result dropped",
+      "[WL-LOCAL-REUSE] class=org.westlake.activityreuse.fixture.Fixture$RedirectTarget cleared=1",
+      "[WL-REUSE-TEST] PASS request=41",
+      "[WESTLAKE-RESULT] delivered requestCode=41 resultCode=-1 data=true to org.westlake.activityreuse.fixture.Fixture$Root",
+      "[WL-LOCAL-REUSE] class=org.westlake.activityreuse.fixture.Fixture$Top cleared=0",
+      "[WL-REUSE-TEST] PASS request=42",
+      "[WESTLAKE-RESULT] delivered requestCode=42 resultCode=-1 data=true to org.westlake.activityreuse.fixture.Fixture$Root",
+      "[WESTLAKE-RESULT] delivered requestCode=7 resultCode=-1 data=false to org.westlake.activityreuse.fixture.Fixture$Normal",
+      "[WL-REUSE-TEST] PASS request=43",
+      "[WL-REUSE-TEST] PASS all=3",
+      "[WESTLAKE-RESULT] delivered requestCode=43 resultCode=-1 data=true to org.westlake.activityreuse.fixture.Fixture$Root"
+    ],
+    "fatal_markers": {
+      "FATAL EXCEPTION": 0,
+      "Fatal signal": 0,
+      "deferred startActivity failed": 0,
+      "Error delivering new intent": 0
+    }
+  },
+  "screenVisiblyShowsAllThreePassed": true,
+  "scope": "Direct-launch in-process activity reuse with no individual OH ability token. No cross-task or manifest singleTask claim.",
+  "liveFacebookReturn": "passed_to_separate_application_signup_boundary",
+  "fullApplicationAcceptance": false,
+  "rawLogsAndCapturesPublic": false,
+  "runtimeJars": {
+    "framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    },
+    "adapter-runtime-bcp.jar": {
+      "bytes": 389252,
+      "sha256": "840302552e0918da7a0f99a9870e21627139112b223e317871fca2e02ff74f9a"
+    },
+    "adapter-runtime-bcp.classes.jar": {
+      "bytes": 722826,
+      "sha256": "c76ab4cc0f9dd39a04b991852af40618aa034d6f7a057164a9fdb4171900293a"
+    }
+  },
+  "startupFailureDuringLiveRetry": {
+    "childExitedBeforeLogin": true,
+    "signal": 13,
+    "reuseHandlerInvokedBeforeExit": false,
+    "controlledRespawnReachedLogin": true,
+    "extraSignalWorkaroundUsed": false,
+    "startupCrashFixed": false
+  },
+  "liveEvents": [
+    "[WESTLAKE-RESULT] the caller of requestCode=2 is finishing or gone; result dropped",
+    "[WL-LOCAL-REUSE] class=com.facebook.CustomTabMainActivity cleared=1",
+    "[WESTLAKE-RESULT] delivered requestCode=554465501 resultCode=-1 data=true to com.facebook.FacebookActivity",
+    "[WESTLAKE-RESULT] delivered requestCode=1934996820 resultCode=-1 data=true to wp.wattpad.onboarding.MainActivity"
+  ],
+  "facebookCredentialsAccepted": true,
+  "facebookConsentCompleted": true,
+  "wattpadReceivedResultOk": true,
+  "visibleScreen": "Create an Account: username and birthday required; no fields filled and no signup submitted.",
+  "separateAppAccountSignupCompleted": false,
+  "googleTwoPathAuthenticationValidatedByThisFacebookTest": false
+}

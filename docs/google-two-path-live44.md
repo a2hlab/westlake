@@ -31,7 +31,7 @@ claimed by this batch yet.
 | FotMob | Followed a team in the previously signed-in session; launched fresh application data; selected the existing Google account through official GMS UI. | Interactive `RESULT_OK` and follow-up token-details replies were observed. The fresh session entered default onboarding instead of visibly restoring the followed team. Cloud preference round trip is unproven. |
 | Spotify | Launched the newer corpus APK, opened Log in, then Google. | The window handoff was accepted, but legacy sign-in service `91` returned status `9`. The result was cancelled and the app displayed “Something went wrong.” No successful account login or playback. |
 | Wattpad | Opened the existing-account login page and selected Google. | Service `91` returned status `9`; the app displayed that Play services are unsupported. Service `212` also returned a successful broker handshake, which did not make the login succeed. |
-| Wattpad / Facebook | Opened Log in with Facebook. | The Facebook SDK activity and embedded Facebook web login rendered. Candidate 46 fixes input into the Facebook HTML field. The authorized login was submitted and Facebook returned a suggested account instead of an exact match. User confirmation of that identity is pending; no authenticated return to Wattpad. |
+| Wattpad / Facebook | Opened Log in with Facebook. | The Facebook SDK activity and embedded Facebook web login rendered. Candidate 46 fixes input into the Facebook HTML field. The corrected authorized login was accepted by Facebook and reached Wattpad consent. After consent, candidate 46 created a duplicate SDK activity and returned cancellation, leaving a blank window. Candidate 47 fixes direct-launch activity reuse and passes three board lifecycle checks. The real retry delivers `RESULT_OK` through FacebookActivity to Wattpad, which displays Create an Account. Stopped there without completing signup. |
 | YouTube, Gmail, Maps, Uber | Original corpus inputs prepared. | Live acceptance flows pending. |
 | Google Drive | Downloaded and pinned an original signed APK and 19 splits. | Signature verification includes the rotated Android 33+ key and the older key published in Google's Drive Digital Asset Links file. Live acceptance pending. |
 
@@ -101,10 +101,40 @@ again. Native artifacts remain reused. See [candidate 46 evidence](../tests/goog
 This verifies the private test input mailbox. It does not establish physical
 keyboard or production OH IME acceptance.
 
-The authorized Facebook login was submitted. Facebook could not find an exact
-account match and proposed another account. The test stops at that identity
-choice pending user confirmation. No suggested account identity, credentials,
-account data or raw screenshots are included in these public artifacts.
+The user supplied a corrected login identifier. Facebook accepted that login and
+showed its ordinary Wattpad consent page. After consent, the window stayed blank.
+No account identifiers, credentials, cookies, redirect URLs or screenshots are
+included in the public evidence.
+
+## Facebook return investigation
+
+The installed Facebook SDK launches its existing `CustomTabMainActivity` with
+`CLEAR_TOP | SINGLE_TOP` (`0x24000000`). Android should clear the redirect activity
+above it and deliver the redirect through `onNewIntent()`. Westlake's direct
+launch instead created another `CustomTabMainActivity`. Its `onCreate()` handles
+this unexpected redirect by cancelling, while the original controller still
+owns the callback to `FacebookActivity`.
+
+Candidate 47 reads launch flags from the Intent instead of confusing them with
+Binder start flags. For a local task with no individual OH ability tokens, it
+finds the existing target, destroys activities above it when requested, and
+sends a `NewIntentItem` while preserving the original result destination. The
+code has no Facebook-specific branch. Cross-task launches, manifest launch modes
+and activities with real OH tokens remain outside this local implementation.
+
+A source-only fixture reproduces the failure on candidate 46. Candidate 47
+passes all three board checks: clear-top redirect with the original result
+recipient, single-top reuse, and ordinary launch creating a new instance. The
+pass screen was also observed. See
+[activity reuse evidence](../tests/google-auth/live44/activity-reuse-candidate47.json).
+The real retry also passes the return path: `CustomTabMainActivity` is reused,
+`FacebookActivity` receives `RESULT_OK` with data, and Wattpad
+`wp.wattpad.onboarding.MainActivity` receives `RESULT_OK` with data. Wattpad then
+displays Create an Account, requesting a username and birthday. No signup
+fields were filled and no account was created. This passes Facebook
+authentication and SDK-to-application return, but does not establish an existing
+Wattpad session, a completed backend account, restart persistence or full
+application acceptance.
 
 ## Startup failures during the input checks
 
@@ -123,6 +153,8 @@ not establish a fix for the intermittent exit. The reset location and failing
 write remain unresolved. The exact signal experiment is recorded separately
 from input acceptance; it is not a production launcher rebuild.
 
-Returning from the candidate-44 Facebook page also left a blank window while the
-application process remained alive. Authentication, application return, restart
-stability and long-run acceptance remain separate open checks.
+Candidate 47 also hit SIGPIPE before reaching login; its reuse handler had not
+run. A controlled respawn, without the extra shell signal workaround, reached
+login and the successful Facebook return described above. The intermittent
+startup exit is still unresolved. Restart persistence and long-run acceptance
+remain open checks.

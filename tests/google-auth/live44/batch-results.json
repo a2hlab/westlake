@@ -67,14 +67,23 @@
   "facebookTests": {
     "wp.wattpad": {
       "webLoginRendered": true,
-      "authenticatedReturn": "pending_account_identity_confirmation",
+      "authenticatedReturn": "passed_to_separate_application_signup_boundary",
       "webViewInputAssertionObserved": true,
       "credentialsSubmitted": true,
       "webViewInputFixedAndValidated": true,
       "facebookResponseReceived": true,
-      "exactAccountMatch": false,
-      "suggestedAccountRequiresUserConfirmation": true,
-      "separateAppAccountSignupCompleted": false
+      "exactAccountMatch": true,
+      "suggestedAccountRequiresUserConfirmation": false,
+      "separateAppAccountSignupCompleted": false,
+      "correctedIdentifierAccepted": true,
+      "facebookConsentReached": true,
+      "facebookConsentAccepted": true,
+      "localReuseFixturePassed": true,
+      "localReuseFixLiveValidated": true,
+      "facebookSdkResultOk": true,
+      "wattpadResultOk": true,
+      "fullApplicationAcceptance": false,
+      "explanation": "Corrected Facebook login accepted. Candidate47 reuses CustomTabMainActivity and delivers RESULT_OK through FacebookActivity to Wattpad. Wattpad displays Create an Account; stopped without completing signup."
     },
     "com.spotify.music": {
       "status": "not_tested"

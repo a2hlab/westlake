@@ -1218,7 +1218,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      * while OH native apps remain unaffected.
      *
      * @param intent the Android Intent
-     * @param flags  Intent flags (FLAG_ACTIVITY_NEW_TASK, CLEAR_TOP, etc.)
+     * @param flags  Binder start flags; activity launch flags are read from the Intent
      * @return result code
      */
     private int bridgeStartActivityWithStack(Intent intent, int flags, IBinder resultTo,
@@ -1227,6 +1227,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             Log.w(TAG, "bridgeStartActivityWithStack called with null Intent");
             return 0;
         }
+
+        // Binder start flags are not Intent launch flags. Resolve direct-task reuse before
+        // enqueuing a fresh launch, preserving the existing activity and its result destination.
+        if ((flags & ActivityManager.START_FLAG_ONLY_IF_NEEDED) == 0
+                && LocalActivityLaunch.reuse(intent, request)) return ActivityManager.START_SUCCESS;
+        flags = intent.getFlags();
 
         IntentWantConverter.WantParams want = IntentWantConverter.intentToWant(intent);
         String bundleName = want.bundleName;
