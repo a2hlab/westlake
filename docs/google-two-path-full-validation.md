@@ -1671,3 +1671,27 @@ final build preserved them, and the board displayed **Five activity checks
 passed**. The direct host still lacks separate task IDs. OH-managed activities,
 document tasks and tasks with different affinities are outside this board test.
 See the [structured board results](../tests/google-auth/full48/candidate85.json).
+
+## Drive file opening and YouTube playback on the matched framework
+
+The approved `Westlake-Drive-validation.txt` already existed. Its saved Drive
+API response matched the three approved lines, including the final newline
+(107 bytes). Opening the existing file’s HTTPS link again entered the original
+Drive APK’s file-opening activity. At 87 seconds its log contained 23 account-token
+requests, 23 failed callbacks and zero successes. At 88 seconds the process was
+alive and the screen showed only system bars over black. The file remains in
+place. The additional read-only labels permission is still outside the 27 approved
+scopes. The client log cannot attribute each callback failure to that permission.
+
+| Playback test | Board result |
+| --- | --- |
+| **Me at the zoo**, original YouTube APK | The two earlier attempts reported a player error. Across both attempts, the main process queried the platform for H.264, HEVC and five audio formats. Its trace recorded zero platform decoder configure or start events. |
+| **Big Buck Bunny**, original YouTube APK | The exported URL activity and both subsequent watch-activity launches received the chosen URL. YouTube displayed a sign-in error. Searching for the title then displayed “The connection to the server timed out.” No watch page or moving video appeared. |
+| Bundled H.264/AAC clips, offline test APK | All nine checks passed on each of two launches. On the second launch, the adapter, framework, boot image and four media libraries matched the hashes measured in YouTube’s process. The probe rendered three video frames to a Surface, received an image callback, and decoded 100,352 bytes of 48 kHz mono PCM. The separate AudioTrack check wrote silence. Speaker output remains untested. |
+
+The board can decode and render these bundled clips. The original YouTube
+APK also ships its own codecs. Its selected stream, codec and reason for the
+player error remain unknown. Google account acceptance, YouTube playback and
+opening the file in Drive remain unverified. The [board results and matching
+hashes](../tests/google-auth/full48/candidate86.json) include the individual
+media checks.
