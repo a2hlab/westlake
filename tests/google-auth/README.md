@@ -25,6 +25,14 @@ invalid token, so its status alone does not prove credential validation.
 Google delegation and token renewal are not retested by this Facebook flow.
 See [candidate73.json](full48/candidate73.json).
 
+Candidate 74 validates FotMob's Google cloud favorite round trip and silent
+replacement-token delivery after its saved login token expired. A client-side
+reply fingerprint matches a fresh, unexpired ID token verified with Google's
+signing keys. The app restores both cloud favorites after local cache removal.
+The provider account store changes during renewal; certification stays 3,
+check-in identity and grants stay unchanged. This is feature validation, not a
+full application or production-isolation pass. See [candidate74.json](full48/candidate74.json).
+
 Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
 The board now accepts the request into mediation while continuing to deny
 ungranted token access. No Gmail OAuth grant or mailbox acceptance is claimed;

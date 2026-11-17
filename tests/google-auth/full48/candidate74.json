@@ -1,0 +1,110 @@
+{
+  "candidate": 74,
+  "phase": "FotMob Google silent ID-token renewal and cloud favorite round trip",
+  "baseCommit": "0ac6b281d435c29a0098832eb30d72f988df52cb",
+  "newImplementationChange": false,
+  "rebuiltArtifacts": false,
+  "app": {
+    "package": "com.mobilefootie.wc2010",
+    "originalApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "originalApkModified": false,
+    "loginProvider": "google",
+    "retainedGoogleSessionBaseline": "google-fotmob-restricted44b",
+    "freshInteractiveLoginPerformed": false,
+    "savedLoginTokenExpiredAtBoardTime": true,
+    "storedAccountIdMatchesSavedTokenSubject": true,
+    "savedLoginTokenChangedByRenewal": false
+  },
+  "artifacts": {
+    "clientJavaAdapter": 71,
+    "clientAdapterSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "nativeAndroidRuntime": 70,
+    "officialGmsJavaAdapter": 71,
+    "microgJavaAdapter": 59,
+    "nativeShimSha256": "3d6375f177816c403038b026e4656bd75605b9ac5e8ed51c9bac333f9fd4b0a7",
+    "cronet129Initialized": true
+  },
+  "silentRenewal": {
+    "originalAppRequestedIdTokens": true,
+    "officialGmsDelegatedToSeparateMicrogHost": true,
+    "freshTokenFoundInProviderCache": true,
+    "googleRs256SignatureVerified": true,
+    "verificationKeysFetchedOverHttpsFromGoogle": true,
+    "issuerAccepted": true,
+    "subjectMatchesOriginalAccount": true,
+    "audienceMatchesOriginalFotmobToken": true,
+    "issuedDuringThisTest": true,
+    "unexpiredAtBoardTime": true,
+    "differentFromExpiredSavedLoginToken": true,
+    "privateClientReplyFingerprintCount": 5,
+    "replyFingerprintsMatchingVerifiedFreshToken": 1,
+    "everyReplyTokenIndependentlyVerified": false,
+    "exactFreshTokenDeliveredToOriginalAppThroughGms": true,
+    "newCredentialsOrAccountChoiceRequired": false,
+    "scopeGrantsChanged": false,
+    "providerForceRefreshAlreadyEnabled": true,
+    "renewalTriggeredSpecificallyByExpiryProven": false,
+    "existingOptInFingerprintDiagnosticUsed": true,
+    "diagnosticDisabledAndOriginalLauncherRestored": true,
+    "diagnosticOffRestartTokenReplyCount": 5,
+    "diagnosticOffRestartFingerprintMarkers": 0,
+    "newTokenFullLifetimeObserved": false,
+    "rawTokensClaimsAndFingerprintsPublished": false
+  },
+  "outgoingSync": {
+    "beforeRemoteTeamCount": 1,
+    "originalAppFollowButtonUsed": true,
+    "afterRemoteTeamCount": 2,
+    "addedTeamMatchesSelectedTeam": true,
+    "hostSentDatasetWrites": false,
+    "serverReadsWereIndependentHostDiagnostics": true
+  },
+  "readControl": {
+    "storedExpiredTokenHttpStatus": 200,
+    "invalidTokenHttpStatus": 200,
+    "bodiesIdentical": true,
+    "credentialEnforcementProvenByGetResponse": false,
+    "scope": "Only the authorized test account dataset was queried"
+  },
+  "restoration": {
+    "clientStoppedBeforeReset": true,
+    "originalFavoriteFilesAndCacheBackedUp": true,
+    "removedLocalFiles": [
+      "FAVORITE_TEAMS_JSON",
+      "FAVORITE_TEAMS_ORDER_JSON",
+      "SYNC_FILE_ETAG_PER_TYPE_SYNC_TYPE_TEAM",
+      "sync_favouriteTeamsDataset.json"
+    ],
+    "applicationCacheRecreatedEmpty": true,
+    "loginPreferenceByteIdenticalAcrossReset": true,
+    "freshClientProcess": true,
+    "incomingDatasetBytes": 134,
+    "incomingDatasetByteIdenticalToIndependentServerRead": true,
+    "restoredFavoriteCount": 2,
+    "originalAppDisplaysBothRestoredFavorites": true,
+    "onlyChangedLoginPreferenceKeyAfterRestart": "app_launch_count",
+    "googleIdentityFieldsUnchangedAfterRestart": true,
+    "cloudRoundTripPassed": true
+  },
+  "preservation": {
+    "uncertifiedPolicyStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "providerAccountStoreByteIdentical": false,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "separateOfficialGmsAndMicrogHosts": true
+  },
+  "limitations": {
+    "freshInteractiveGoogleLoginOnExactCurrentBuild": false,
+    "allExpiryAndRevocationCasesValidated": false,
+    "generalWindowRoutingPassed": false,
+    "productionIsolationValidated": false,
+    "fullApplicationPassed": false,
+    "allPlannedApplicationsPassed": false,
+    "temporaryFavoriteCleanupComplete": false
+  }
+}

@@ -6,12 +6,15 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 73 validates a live favorite-team cloud round trip in
-FotMob's retained Facebook session. An in-app change appears on the server;
-after backing up and clearing the local favorite files and cache, the restarted
-app downloads the same dataset and displays both favorites. This is a concrete
-feature result, not proof of Google delegation or token renewal. Candidate 72's
-native APK-descriptor classification fix keeps Cronet 129 past its earlier crash.
+Latest result: candidate 74 validates FotMob's Google favorite-team cloud round
+trip and silent delivery of a fresh Google-signed ID token after its saved login
+token expired. An app-side reply fingerprint matches the independently verified,
+unexpired token from microG. The original APK uploads a favorite change and
+restores both teams after its local favorite files and cache are cleared.
+Candidate 73 separately validates that cloud feature in a retained Facebook
+session. Candidate 72's native APK-descriptor classification fix keeps Cronet
+129 past its earlier crash. These are specific feature results; the wider
+application and isolation plan remains incomplete.
 
 Candidate 71 accepts Gmail's bounded native OAuth scope list while still denying
 ungranted token access; candidate 70 fixes its GMS APK loading. The mailbox
@@ -995,3 +998,62 @@ The temporary favorite markers are retained for continued testing, with cleanup
 pending. No full application pass is added.
 
 See [candidate73.json](../tests/google-auth/full48/candidate73.json).
+
+### Candidate 74: Google token renewal and cloud favorite restoration
+
+FotMob's Google session from candidate 44 is resumed on Java adapter 71,
+native runtime 70 and the current repository shim from candidate 72. The APK is
+unchanged. Its saved Google ID token has expired at board time; the stored
+account ID matches that token's subject. Startup requests pass from the original
+app through official GMS to the separate microG host without a new account
+chooser, credential entry or scope grant. Cronet 129 initializes successfully.
+
+The provider cache contains a different ID token issued during this test.
+Verification against Google's public signing keys succeeds, with an accepted
+Google issuer, the same subject and FotMob audience, and an unexpired `exp` at
+board time. A subsequent client restart enables the existing private TokenData
+fingerprint diagnostic. Five token replies are observed; the final provider
+cache's independently verified fresh token matches one of those exact client
+reply fingerprints. This establishes delivery to the original app through GMS,
+beyond a provider-only success message. It does not independently verify all
+five reply tokens. The diagnostic is then disabled and the exact original
+launcher restored. Another restart returns five token replies without any
+fingerprint markers. Tokens, fingerprints, account IDs and raw claims stay private.
+
+The on-disk login token remains unchanged. Inspection of the original APK shows
+that its sync path requests a token into a temporary result and can return that
+token without updating the saved login-token preference. Therefore the old
+preference alone is not evidence that renewal failed. This test demonstrates
+recovery with a naturally expired saved token and fresh silent issuance; it
+does not wait through the new token's full lifetime or establish every expiry,
+revocation or error-recovery case. The existing experimental provider forces
+refresh for delegated requests, so this does not isolate an expiry-triggered
+refresh decision from ordinary startup behavior.
+
+In the Google session, the original Follow button adds Manchester United to
+the test account's existing Barcelona favorite. Independent read-only requests
+observe the server team count change from one to two. The host does not write
+the dataset. After stopping the app, the favorite JSON, order, team ETag,
+incoming sync JSON and app cache are backed up and removed. The login preference
+is byte-identical across this reset. A fresh process downloads a new 134-byte
+dataset, identical to the independent server response, recreates both favorites,
+and displays them in Following. After restart, the login preference differs
+only in `app_launch_count`; its Google identity fields remain unchanged.
+
+As in the Facebook control, the Google dataset GET returns the same HTTP 200
+body with an intentionally invalid token. Only the authorized test account's
+dataset is queried. The cloud write and restoration establish feature behavior;
+the GET response does not establish backend credential enforcement. The token
+signature and exact delivery checks are separate evidence of Google issuance
+and the two-path handoff.
+
+Official GMS and microG retain separate hosts. Certification remains 3 without
+an override; check-in identity and provider grants are unchanged. The provider
+account-store bytes change during the Google test, and a fresh token is present;
+the account count remains one. Whole-store byte preservation is not claimed.
+No production source change or new build is required. The added test favorite
+is retained for continued validation, with cleanup pending. Fresh interactive
+login on this exact build, general window routing, other planned applications
+and production isolation remain open. No full application pass is added.
+
+See [candidate74.json](../tests/google-auth/full48/candidate74.json).
