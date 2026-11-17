@@ -6,7 +6,11 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 75 adds fresh FotMob Google app sign-in through the
+Latest result: candidate 76 completes fresh FotMob Facebook login and restart.
+The app saves a different token for the same account. An independent read-only
+Facebook Graph identity request accepts that token before and after restart;
+an invalid-token control returns HTTP 401 with error 190. Candidate 75 adds
+fresh FotMob Google app sign-in through the
 official account chooser and persistence after another client restart. The
 token saved by the app is independently verified with Google's signing keys.
 Candidate 74 validates FotMob's Google favorite-team cloud round
@@ -21,8 +25,10 @@ application and isolation plan remains incomplete.
 
 Candidate 71 accepts Gmail's bounded native OAuth scope list while still denying
 ungranted token access; candidate 70 fixes its GMS APK loading. The mailbox
-remains unsynced. Gmail scope consent, native account-selection mediation, the
-GMS-version gap and remaining service eligibility failures are still open.
+remains unsynced. The operator has now approved Gmail's requested scopes;
+applying that authorization and native account-selection mediation remain
+work in progress. The GMS-version gap and remaining service eligibility
+failures are still open.
 No full application pass is established.
 
 Earlier, candidate 62 renews Wattpad's legacy Google sign-in after
@@ -1095,3 +1101,44 @@ application pass is added. Test favorites remain pending cleanup. No production
 code change or rebuild is required for this follow-up.
 
 See [candidate75.json](../tests/google-auth/full48/candidate75.json).
+
+### Candidate 76: fresh Facebook login and live token acceptance
+
+On the repaired FotMob runtime, the original Sign out action removes the
+Facebook SDK token and clears the app's login type. The original Facebook
+button opens the real web login. Authorized existing-account credentials and
+the existing FotMob consent complete successfully; the optional save-login-info
+prompt is declined. No separate app signup or account deletion is performed.
+The local CustomTabMainActivity is reused. Successful activity results reach
+FacebookActivity and, from this entry point, FotMob's MainActivity.
+
+The SDK saves a different token for the same account and application. FotMob's
+stored Facebook account matches the SDK account. The same three permissions
+(email, openid and public_profile) remain, with none declined or expired, and
+both token and data-access expirations are in the future at board time.
+
+A read-only host-side GET to Facebook Graph `/me?fields=id`, using the app-saved
+token, returns HTTP 200 and the matching account. An intentionally invalid-token
+control returns HTTP 401 with Facebook error 190. TLS verification remains on
+and redirects are refused. This independently establishes live acceptance of
+this token by that endpoint; it does not claim an in-app network capture or
+acceptance by every FotMob endpoint. Candidate 73's dataset GET, which also
+accepted an invalid token, remains a separate cloud-feature result.
+
+After an identity-checked stop and restart, FotMob retains the same token,
+account, permissions and favorite-team sync file and displays the signed-in
+More screen. The Graph positive and negative controls reproduce. The original
+APK and candidate-71 Java, candidate-70 native runtime and full candidate-72
+repository shim are reused; no new implementation or rebuilt artifact is
+introduced. The Google FotMob profile is preserved separately.
+
+The preservation check keeps certification at 3 without an override, the same
+check-in identity and provider grants, one provider account and both service
+hosts alive. Some GMS service status-9 replies and the version gap remain.
+This Facebook flow does not exercise Google token delegation. Facebook token
+renewal/revocation, a new cloud round trip, general window routing, production
+isolation and full application acceptance are not established. Temporary test
+favorites remain pending cleanup. Raw credentials, account identifiers, tokens,
+logs, API bodies and screenshots stay private.
+
+See [candidate76.json](../tests/google-auth/full48/candidate76.json).

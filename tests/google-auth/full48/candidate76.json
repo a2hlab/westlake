@@ -1,0 +1,108 @@
+{
+  "candidate": 76,
+  "phase": "Fresh FotMob Facebook sign-in, live Graph token check and restart",
+  "baseCommit": "6e0e0421ade0305d88d70ea02c0687704695b662",
+  "newImplementationChange": false,
+  "rebuiltArtifacts": false,
+  "artifactPins": "candidate74.json",
+  "app": {
+    "package": "com.mobilefootie.wc2010",
+    "originalApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "originalApkModified": false,
+    "clientJavaAdapter": 71,
+    "nativeAndroidRuntime": 70,
+    "nativeShim": "Full repository build validated in candidate72"
+  },
+  "interactiveSignIn": {
+    "originalSignOutActionUsed": true,
+    "signedOutUiAndEmptyLoginTypeObserved": true,
+    "sdkTokenAbsentAfterSignOut": true,
+    "accountDeletionSelected": false,
+    "originalFacebookButtonUsed": true,
+    "existingAuthorizedAccountCredentialsSubmitted": true,
+    "saveLoginInfoDeclined": true,
+    "existingFotmobConsentAccepted": true,
+    "separateSignupFormShown": false,
+    "signedInUiObserved": true,
+    "resultCallbacks": [
+      {
+        "class": "com.facebook.FacebookActivity",
+        "requestCode": 702599660,
+        "resultCode": -1,
+        "dataPresent": true
+      },
+      {
+        "class": "com.fotmob.android.ui.MainActivity",
+        "requestCode": 64206,
+        "resultCode": -1,
+        "dataPresent": true
+      }
+    ],
+    "localActivityReuse": [
+      {
+        "class": "com.facebook.CustomTabMainActivity",
+        "cleared": 1
+      }
+    ]
+  },
+  "newSdkToken": {
+    "differentFromPretestToken": true,
+    "sameAccount": true,
+    "sameSdkApplication": true,
+    "appAccountMatchesSdk": true,
+    "permissionsUnchanged": true,
+    "permissions": [
+      "email",
+      "openid",
+      "public_profile"
+    ],
+    "declinedPermissions": [],
+    "expiredPermissions": [],
+    "tokenAndDataAccessExpiryInFutureAtBoardTime": true
+  },
+  "liveBackendCheck": {
+    "execution": "Independent host-side read-only request using the original app-saved token; not an in-app network capture",
+    "endpoint": "https://graph.facebook.com/me?fields=id",
+    "version": "Unversioned application-default endpoint",
+    "tlsCertificateVerification": true,
+    "redirectsAllowed": false,
+    "beforeAndAfterClientRestart": true,
+    "freshTokenHttpStatus": 200,
+    "returnedAccountMatchesSdkAndApp": true,
+    "invalidTokenHttpStatus": 401,
+    "invalidTokenFacebookErrorCode": 190,
+    "rawResponsesTokensAndIdentifiersPublished": false
+  },
+  "restart": {
+    "identityCheckedBeforeStop": true,
+    "freshClientProcess": true,
+    "sameAppAccount": true,
+    "sameSdkToken": true,
+    "samePermissions": true,
+    "sameCloudFavoritesFile": true,
+    "signedInUiRetained": true,
+    "newCredentialEntryRequired": false
+  },
+  "preservation": {
+    "uncertifiedPolicyStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "providerAccountCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "separateGoogleFotmobProfilePreserved": true
+  },
+  "limitations": {
+    "facebookFlowDoesNotExerciseGoogleTokenDelegation": true,
+    "newCloudWriteAndRestoreCycleRetested": false,
+    "priorFacebookCloudEvidence": "candidate73",
+    "facebookTokenRenewalOrRevocationTested": false,
+    "someGmsServiceStatus9RepliesRemain": true,
+    "gmsVersionGapRemains": true,
+    "productionIsolationValidated": false,
+    "fullApplicationPassed": false,
+    "allPlannedApplicationsPassed": false,
+    "temporaryFavoriteCleanupComplete": false
+  }
+}

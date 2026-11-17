@@ -36,6 +36,12 @@ Candidate 75 adds fresh FotMob Google app sign-in through the official chooser,
 verification of the token saved by the app, and another successful client
 restart. Existing Google account authorization is reused; no new microG account
 registration or separate app signup is performed. See [candidate75.json](full48/candidate75.json).
+Candidate 76 completes fresh Facebook login and restart on the same repaired
+runtime. A read-only Facebook Graph identity check accepts the original app's
+new token and returns the matching account; an invalid-token control is rejected
+before and after restart. This independently validates that endpoint's token
+acceptance, while Facebook renewal and full application acceptance remain open.
+See [candidate76.json](full48/candidate76.json).
 
 Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
 The board now accepts the request into mediation while continuing to deny
