@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "candidate": 64,
+  "phase": "Opt-in app-owned sync implementation; Gmail discovery and query validation",
+  "implementationBaseRevision": "85e87d49ba0cbddb8c65cc8fb85e0c90d2c0ee01",
+  "sourceSha256": {
+    "framework/activity/java/LocalSyncService.java": "e4b8f26f10ca64e50e32082c41f87166b07cd6f54800546092a5f5fc95ea00d1",
+    "framework/core/java/SyncDispatchState.java": "2f62b552488ac7adbfc21625ebc4dc2438e1d4104dbfa5395078d6fb75ed951f",
+    "framework/appspawn-x/java/com/android/internal/os/AppSpawnXInit.java": "e31949d790c93113d5c799e6f639551ff86006672015c861f764a95a3014b7f1",
+    "tests/google-auth/host/SyncDispatchStateTest.java": "8596946766101baa7f8f717f58f033240706025ab10ca78f6d339f71dea44b49"
+  },
+  "package": "com.google.android.gm",
+  "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "switch": {
+    "name": "WESTLAKE_LOCAL_SYNC",
+    "value": "1",
+    "default": "off",
+    "enabledInThisRun": "Gmail client only"
+  },
+  "implementation": {
+    "discovery": "Own enabled manifest services and compiled SyncAdapter metadata",
+    "execution": "Normal app service binding and ISyncAdapter.startSync with real callbacks",
+    "settings": "App-private persisted master, authority and account settings",
+    "authorization": "Requires visible account and preserves existing separate token grants",
+    "lifecycle": [
+      "Separate initialization and execution callback tickets",
+      "Serial execution per service component",
+      "Bounded 32-job queue",
+      "120-second deadline and 10-second cancellation grace",
+      "Account recheck before each dispatch",
+      "Service identity and Binder death checks"
+    ],
+    "limitations": [
+      "Process-local state only",
+      "No durable job queue or background restart",
+      "Periodic and delayed requests unsupported",
+      "No automatic retry or backoff",
+      "Existing service-binding cache does not destroy retained services",
+      "Cannot forcibly stop adapter code that ignores cancellation"
+    ]
+  },
+  "hostValidation": {
+    "callbackTicketChecks": 14,
+    "javaBuildPassed": true,
+    "javaSources": 138,
+    "javaClasses": 290,
+    "runtimePackagingPassed": true,
+    "bootBuildPassed": true,
+    "boardPreloadPassed": true,
+    "classInitializationFailures": [],
+    "nativeArtifactsRebuilt": false,
+    "unchangedFrameworkReusedWithHashChecks": true
+  },
+  "artifacts": {
+    "gmailAdapterSha256": "c43afcec4b8b4354d2970e8f4acfeb480ef1299537243e55ca53f5254f3f2928",
+    "javaBuildReportSha256": "dde5a3cd791f9da49fcbed55e2fad01ddc7ac994905db38595b8548a9594d9df",
+    "frameworkReportSha256": "53f1213718c7a6c552b275bcd886414213880e41a5beac6014885a8af77a59af",
+    "bootReportSha256": "d769b9916c245782f46fc77a6068896f9077e7e5598dd9543f8cb14c3f328aa1",
+    "preloadReportSha256": "96f632234534f6712f22d39f0f7ed2a0d1a3f638bdb87348ad85db1379c47d96"
+  },
+  "boardValidation": {
+    "clientStarts": 2,
+    "preservedDataRestartSurvived": true,
+    "discoveredEnabledAdapters": 3,
+    "googleAuthority": "gmail-ls",
+    "googleService": "com.google.android.gm.provider.MailSyncAdapterService",
+    "observedContentMethods": [
+      "getMasterSyncAutomatically",
+      "getSyncAutomatically",
+      "addStatusChangeListener"
+    ],
+    "uncaughtMarkersInClientCaptures": [
+      0,
+      0
+    ],
+    "manualSyncButtonAttempted": true,
+    "inputInterventions": [
+      "Ordinary isolated input receiver taps",
+      "Main-queue hit-tested click comparison",
+      "Explicit root-0 input comparison; automatic selection restored",
+      "Explicit host foreground transfer"
+    ],
+    "nativeInputSubmissionAcknowledged": true,
+    "buttonListenerInvocationEstablished": false,
+    "syncRequestObserved": false,
+    "adapterBindingObserved": false,
+    "adapterExecutionObserved": false,
+    "mailboxObserved": false,
+    "compatibilityWarningPersists": true,
+    "screen": "Account not synced",
+    "mailSent": false
+  },
+  "staticDiagnosis": {
+    "allDexResourceReferenceScanCompleted": true,
+    "methodsMatchingSelectedUiResourceConstants": 53,
+    "manualSyncButton": "pai.onClick, resource manual_sync (0x7f0b13ac)",
+    "manualSyncCallPath": [
+      "pbr.o checks account type",
+      "oly.j starts account-component and sync futures",
+      "myl case 16 calls aaio.h internal SyncEngine",
+      "nwd case 4 calls tih.r",
+      "nre case 7 notifies conversation content observers"
+    ],
+    "buttonDoesNotDirectlyCallContentResolverRequestSync": true,
+    "staticPathIsNotProofOfRuntimeExecution": true,
+    "exactRuntimeStopUnresolved": true,
+    "nativeViewTreeTraceSuppressedByExistingPrivacyGuard": true
+  },
+  "authWindow": {
+    "scope": "Combined GMS/provider window across the two candidate-64 Gmail starts",
+    "accountIdMetadataRequests": 4,
+    "peopleapiReadonlyRequests": 4,
+    "localSilentOAuthReadRefusals": 4,
+    "providerFeatureQueryRefusals": 4,
+    "gmailOAuthIssuancesObserved": false,
+    "mailScopeRequestIsolated": false,
+    "serverRejectionOfIssuedGmailTokenEstablished": false
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": true,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "6a27c5c05ab2a019a2648ba5a39e46ffa36e1a4c4b523844d50c5fd017918c5f",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "c43afcec4b8b4354d2970e8f4acfeb480ef1299537243e55ca53f5254f3f2928",
+    "clientApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a"
+  },
+  "fullApplicationPassed": false,
+  "fullApplicationPassCount": 0,
+  "remaining": [
+    "Trace Gmail manual-sync listener and internal account/sync futures without account or token logging",
+    "Resolve separate GMS eligibility and first-party scoped authorization gaps",
+    "Validate actual adapter binding, execution, callbacks, cancellation and timeout on the board",
+    "Mailbox sync, refresh and restart acceptance",
+    "Remaining Google/Facebook and isolation validation plan"
+  ],
+  "privacy": "No account identifiers, credentials, tokens, mailbox content, screenshots, raw logs or proprietary disassembly included."
+}

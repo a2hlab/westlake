@@ -2072,6 +2072,9 @@ public class AppSpawnXInit {
                         }
                     }
 
+                    Object sync = adapter.activity.LocalSyncService.answer(name, args);
+                    if (sync != adapter.activity.LocalSyncService.UNHANDLED) return sync;
+
                     Class<?> ret = method.getReturnType();
                     if (ret == void.class) return null;
                     if (ret == boolean.class || ret == Boolean.class) {

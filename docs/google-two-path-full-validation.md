@@ -16,9 +16,11 @@ expiry or a full application pass. Drive's OAuth/file-listing gap and the wider
 Google/Facebook acceptance plan remain open.
 
 Candidate 63 fixes Gmail's account-list connection in the test configuration.
-Gmail now sees the account and reaches its main screen, but mail does not sync.
-The deployed content service has no sync execution, and separate GMS eligibility
-and scoped-token gaps remain.
+Candidate 64 adds an opt-in app-owned sync dispatcher. Gmail discovers its real
+mail sync adapter and reads sync settings on two preserved-data starts, but no
+sync request or adapter execution is observed. The APK's manual-sync button uses
+an internal asynchronous sync pipeline; its live stopping point is unresolved.
+Mail remains unsynced, with separate GMS eligibility and scoped-token gaps.
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -590,3 +592,58 @@ Status remains uncertified (3), without an override, and check-in identity is
 unchanged. The sole provider-grant change is Gmail's signer pin.
 
 See [candidate63.json](../tests/google-auth/full48/candidate63.json).
+
+### Candidate 64: implement app-owned sync and separate discovery from execution
+
+The default-off `WESTLAKE_LOCAL_SYNC=1` client switch routes supported content
+service sync calls to a process-local dispatcher. It discovers the client's own
+enabled manifest services, resolves compiled sync metadata, checks that the
+account is visible, binds through the existing service manager and invokes the
+real `ISyncAdapter`. Initialization and actual sync have distinct callback
+tickets; duplicate or stale replies cannot complete a later attempt. The
+dispatcher persists sync settings, bounds the queue and handles completion,
+Binder death and cancellation with a deadline. It grants no OAuth permissions
+and does not substitute a successful adapter response.
+
+The callback-ticket host test passes 14 checks, including concurrent duplicate
+callbacks. Java compilation covers 138 sources and 290 classes. Runtime packaging,
+boot build and board preload pass, with no class-initialization failures. Native
+artifacts and hash-verified unchanged framework outputs are reused.
+
+Only Gmail receives the new Java/boot overlay. On its first launch and a second
+preserved-data launch, it discovers three enabled sync adapters, including
+`gmail-ls` / `MailSyncAdapterService`, and calls the master/per-account setting
+queries and status-listener registration. Gmail renders **Account not synced**;
+the status-9 compatibility dialog still appears. The captures contain no uncaught
+exception markers. This validates discovery and queries, not execution.
+
+Ordinary input, a main-queue hit-tested click comparison and an explicit root-0
+input comparison produce no content-service sync request. Automatic root
+selection is restored. Input submission reaches the native bridge, but the
+button listener's execution is not established. Existing private-input logging
+deliberately suppresses view-tree dumps. No adapter binding, `startSync`, callback,
+mailbox content or mail sending is observed.
+
+A completed resource-reference scan and targeted inspection of the original APK
+also correct the assumption that **Sync now** directly calls Android's sync API.
+Its listener enters account-component futures and an internal `SyncEngine` path,
+then further account work and conversation-provider notifications. This static
+path does not establish where the live run stops. Tracing those stages and input
+delivery remains necessary alongside validating the new dispatcher separately.
+
+Across the two starts, the captured GMS/provider window contains four account-ID
+metadata requests, four `peopleapi.readonly` requests with local silent OAuth
+read refusals, and four provider feature-query refusals. No Gmail OAuth issuance
+or specific mail-token request is established. These observations do not show
+Google rejecting an issued Gmail token.
+
+GMS stays on candidate 62 and microG on 59. Both remain alive. Status remains 3
+without an override; the check-in identity, grants and provider account-store
+bytes are unchanged across this candidate. The original Gmail APK is unchanged.
+Periodic/delayed scheduling, durable jobs, retry/backoff, cross-process sync
+state and destruction of services retained by the binding cache remain missing.
+Cancellation cannot forcibly stop adapter code that ignores it. The feature is
+still experimental, and the full application pass count remains zero.
+
+See [candidate64.json](../tests/google-auth/full48/candidate64.json) and the
+[dispatcher test notes](../tests/google-auth/README.md#app-owned-sync-dispatcher-candidate-64).

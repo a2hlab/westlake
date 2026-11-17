@@ -309,6 +309,31 @@ javac -d $out/signin-options framework/core/java/GoogleSignInOptionsReader.java 
 java -cp $out/signin-options adapter.core.GoogleSignInOptionsReaderTest        # GOOGLE_SIGNIN_OPTIONS_PASS 21
 javac -cp $out/sessions -d $out/sessions framework/core/java/GoogleAsyncAuthLease.java tests/google-auth/host/GoogleAsyncAuthLeaseTest.java
 java -cp $out/sessions adapter.core.GoogleAsyncAuthLeaseTest                   # GOOGLE_ASYNC_AUTH_LEASE_PASS 19
+javac -d $out/sync framework/core/java/SyncDispatchState.java tests/google-auth/host/SyncDispatchStateTest.java
+java -cp $out/sync adapter.core.SyncDispatchStateTest                         # SYNC_DISPATCH_STATE_PASS 14
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
 java -cp $out/files adapter.core.PrivateFilesTest                              # PRIVATE_FILES_PASS 6
 ```
+
+## App-owned sync dispatcher, candidate 64
+
+`WESTLAKE_LOCAL_SYNC=1` enables one-off sync execution in the client process.
+It is off by default. The dispatcher discovers the client's declared
+`android.content.SyncAdapter` services, reads their metadata, binds the selected
+service through the existing service manager and invokes `ISyncAdapter.startSync`.
+The account must remain visible to that client. Existing token authorization
+still applies independently; enabling sync adds no account or OAuth grants.
+
+Initialization and actual sync use separate callback tickets. The host test above
+covers duplicate, stale, foreign and concurrent callback tickets, cancellation,
+and closure. It does not exercise Android binding, device cancellation or Google
+backend acceptance. A successful adapter callback alone is insufficient to pass
+the Gmail mailbox test.
+
+This is a process-local dispatcher for immediate requests. It persists the
+client's sync settings, limits the queue, serializes work for each service and
+tracks real callbacks, failures and cancellation. Periodic and delayed scheduling,
+durable jobs, retry/backoff, system-wide cross-process state, and destruction of
+services retained by the existing binding cache remain unimplemented. Cancellation
+has a deadline but cannot forcibly stop app code that ignores it. Keep the feature
+opt-in until those lifecycle and scheduling gaps are addressed.
