@@ -6,7 +6,7 @@ checks. The table records what the original APKs demonstrated on the board.
 Most rows combine observations from more than one build. The shared isolation,
 concurrency and sustained-use requirements remain open. The latest [process
 and window checks](#live-app-and-service-isolation-on-the-board) cover six
-live roles and their native HAPs.
+live roles and their native HAPs. All eight APKs now have [dedicated test hosts](#dedicated-hosts-for-the-eight-apks).
 
 | Original app | Observed on the board | Still to verify |
 | --- | --- | --- |
@@ -1849,3 +1849,30 @@ reported mode 2 with one filter. The same three H.264 clips returned all
 Android processes continued to run with mode 0. CPU usage, battery drain and
 original app behavior with the filter enabled remain unmeasured.
 [Board observations, hashes and controls](../tests/google-auth/full48/candidate91.json)
+
+
+## Dedicated hosts for the eight APKs
+
+OpenHarmony now has a separate native test HAP for each Android package in
+the plan. Maps and Uber had already run under their dedicated hosts. Six
+additional hosts were built from source, development-signed and installed.
+The installed HAP hashes matched the local artifacts, and OpenHarmony assigned
+all eight different UIDs.
+
+| App | Dedicated host UID | Original APK has run under this UID |
+| --- | ---: | --- |
+| Maps | 20010062 | Yes |
+| Uber | 20010063 | Yes |
+| YouTube | 20010064 | Pending |
+| Drive | 20010065 | Pending |
+| Gmail | 20010066 | Pending |
+| Spotify | 20010067 | Pending |
+| Wattpad | 20010068 | Pending |
+| FotMob | 20010069 | Pending |
+
+All eight hosts have network access. Microphone, approximate location and
+precise location were denied for all eight when checked. The six new UIDs
+had no running process after installation. The Drive instance that passed the
+file test remained alive under the earlier reusable client UID 20010060.
+Its app data and account results have not been transferred to the new host.
+[Installed HAP hashes, APK pins and permission checks](../tests/google-auth/full48/candidate92.json)
