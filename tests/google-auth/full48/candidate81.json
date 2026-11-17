@@ -170,8 +170,20 @@
   },
   "remaining": [
     "Drive application file listing, file open with an available test item, and token renewal",
-    "Gmail control on the new adapter",
     "Remaining Google and Facebook app flows, overlapping callers and production UID isolation"
   ],
-  "goalComplete": false
+  "goalComplete": false,
+  "gmailControl": {
+    "originalGmailApkUnchanged": true,
+    "inboxVisible": true,
+    "tokenBearingReplies": 3,
+    "periodicRestoredCounts": [
+      1
+    ],
+    "periodicUnsupportedExceptionCount": 0,
+    "fatalSignals": 0,
+    "dnsNameFailures": 0,
+    "adapterCandidate": 81,
+    "newMessageDeltaValidated": false
+  }
 }

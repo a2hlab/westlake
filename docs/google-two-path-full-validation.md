@@ -1499,6 +1499,8 @@ rollback files were checked for all 116 replacements. The four test runtimes
 share root-owned mode-444 code through hardlinks; private application data is
 not shared this way. Original APKs/data and the prior check-in identity remain.
 All three active hosts pass executable/UID checks; uncertified status remains 3
-without an override. Gmail control on this adapter, overlapping callers, sustained
-use and the wider Google/Facebook acceptance plan remain open. Sanitized evidence
+without an override. Gmail control on this adapter retains the inbox and receives
+three token-bearing replies, with no fatal signal or prior DNS-name failure. This
+does not validate a new-message delta. Overlapping callers, sustained use and the
+wider Google/Facebook acceptance plan remain open. Sanitized evidence
 is in [candidate81.json](../tests/google-auth/full48/candidate81.json).
