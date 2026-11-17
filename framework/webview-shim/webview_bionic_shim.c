@@ -39,6 +39,7 @@
 #include <sys/syscall.h>
 #include <time.h>
 #include "hicollie_signal_mask.h"
+#include "bionic_apk_path.h"
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -71,16 +72,6 @@ static int in_app_library_dir(const char *path)
  * reached musl untranslated; musl answered -1, and Chromium's NumberOfProcessors() hit NOTREACHED,
  * fatal in Cronet 129, so the module took AllTrails and Magic Tiles down with it.
  */
-static int in_apk(const char *path)
-{
-    const char *apk = strstr(path, ".apk");
-    while (apk != NULL) {
-        if (apk[4] == '\0' || apk[4] == '!' || apk[4] == '/') return 1;
-        apk = strstr(apk + 4, ".apk");
-    }
-    return 0;
-}
-
 /* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
 /*
  * An Android-built (bionic ABI) caller: the WebView, a library the app packages

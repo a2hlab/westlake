@@ -6,10 +6,14 @@ backend use, renewal and restart. The
 [previous batch](google-two-path-live44.md) remains the baseline. A connection,
 account picker, or partial login is not a full application pass.
 
-Latest result: candidate 71 accepts Gmail's bounded native OAuth scope list,
-including its trailing ASCII space, while still denying ungranted token access.
-Candidate 70 fixes Gmail's GMS APK loading using verified read-only descriptors;
-candidate 67 makes its manual-sync button invoke the real listener. The mailbox
+Latest result: candidate 72 fixes an ABI classification failure when Google's
+Cronet library loads through a verified APK descriptor. FotMob now initializes
+Cronet 129 and survives the previously crashing startup. Its retained Facebook
+signed-in menu is also visible after a controlled client restart. This does not
+yet establish cloud preference synchronization or token renewal.
+
+Candidate 71 accepts Gmail's bounded native OAuth scope list while still denying
+ungranted token access; candidate 70 fixes its GMS APK loading. The mailbox
 remains unsynced. Gmail scope consent, native account-selection mediation, the
 GMS-version gap and remaining service eligibility failures are still open.
 No full application pass is established.
@@ -895,3 +899,55 @@ without an override; check-in identity, provider grants and account-store bytes
 are unchanged. All three hosts are alive at the preservation check.
 
 See [candidate71.json](../tests/google-auth/full48/candidate71.json).
+
+### Candidate 72: recognize Android libraries loaded through APK descriptors
+
+Restarting FotMob with its retained Facebook session exposed a native failure
+after verified GMS code loading. Two bounded native traces locate a fatal
+`brk` in Google's Cronet 129 after `sysconf(96)` returns -1. The import resolves
+to the compatibility shim, but its caller classifier sees `/proc/self/fd/N`,
+not the underlying APK filename. The old `.apk` test therefore misses this
+Android caller and forwards bionic's configured-CPU selector unchanged to
+musl. A private diagnostic confirms the descriptor label and missed translation.
+The first untraced run reported signal 11; only the subsequent traced signal-5
+failures are localized to this Cronet branch.
+
+The classifier now resolves bounded `/proc/self/fd/N` labels, including APK
+member suffixes, and applies the existing APK filename rule to their targets.
+It preserves `errno`, rejects malformed/closed descriptors and does not cache
+descriptor numbers, which can be reused. Ordinary native-library descriptors
+remain native. This classifies the calling ABI; it does not verify a package,
+signer, scope or token. Candidate 70's root-spawner and APK hash checks remain
+the separate code-trust boundary.
+
+The host test passes 27 checks using real APK/native-file descriptors, malformed
+labels, closure/reuse and preserved `errno`. The previous classifier fails the
+first live APK-descriptor case. Both a narrow port to the previously tested
+native baseline and the current repository's full shim build compile. The
+narrow port initializes Cronet 129 in two independent FotMob launches. Their
+captured log spans exceed 328 and 96 seconds respectively, with no recurrence
+of the traced startup trap. Match lists and navigation render, and both launches
+show the retained account menu with Sign out. No credentials or new consent
+are supplied in this restart check.
+
+The current repository shim is then deployed and its mapped inode and binary
+hash verified in a fresh FotMob process. It also initializes Cronet 129 and
+renders the match list, news feed and retained signed-in menu. Its captured log
+span exceeds 212 seconds. A temporary black display recovers by foregrounding
+the host, without restarting the client; general window routing is still open.
+This follow-up uses the actual repository build rather than only the narrow
+baseline port. GMS and microG remain alive;
+certification stays 3 without an override, and check-in identity, provider grants
+and provider account-store bytes remain unchanged.
+
+The menu establishes retained local signed-in state, not a fresh authenticated
+backend response. Public match data can also be available without login.
+Facebook restart behavior is not evidence of Google token delegation or
+renewal. The original FotMob APK and app data are retained; GMS/microG keep
+separate hosts. Service status-9 responses and the actual GMS version gap remain.
+Cloud preference round trip, server-token expiry, sustained/concurrent use and
+full application acceptance remain incomplete.
+
+See [candidate72.json](../tests/google-auth/full48/candidate72.json) for exact
+artifact boundaries and the current-source build follow-up. Raw traces, account
+identifiers, tokens and screenshots remain private.

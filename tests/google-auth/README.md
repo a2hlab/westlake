@@ -14,6 +14,11 @@ pass. Neither app has a validated application account session or full applicatio
 pass. See the linked validation report for the exact evidence boundaries.
 Historical results below retain their original build boundaries.
 
+Candidate 72 fixes native ABI classification for GMS libraries loaded through
+verified APK descriptors. FotMob initializes Cronet 129 and retains its local
+Facebook signed-in menu after a client restart. Cloud synchronization and token
+renewal remain unproven. See [candidate72.json](full48/candidate72.json).
+
 Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
 The board now accepts the request into mediation while continuing to deny
 ungranted token access. No Gmail OAuth grant or mailbox acceptance is claimed;
@@ -402,3 +407,15 @@ restart, and a changed code set on reconnect also requires a client restart.
 
 The board's positive/wrong-hash/restored-pin controls and remaining Gmail/GMS
 version gaps are recorded in [candidate70.json](full48/candidate70.json).
+
+Descriptor-backed native-library ABI classification is covered by:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -I framework/webview-shim \
+  tests/parity/native/bionic_apk_path_test.c -o /tmp/bionic-apk-path-test
+/tmp/bionic-apk-path-test
+```
+
+This test uses real `/proc/self/fd` links, including closure and descriptor reuse.
+It checks ABI routing only; package-code trust remains the separate verified
+descriptor protocol.
