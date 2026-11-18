@@ -2106,6 +2106,17 @@ an upright handset. The board screenshot shows the welcome slogan upright in a
 so the displayed width, height and rotation of the animation are still unknown.
 [App and screen measurements](../tests/google-auth/full48/candidate101.json)
 
+In the original APK, `SwipeUpVideoComponent.vY` mounts this clip's widget in
+a card on the swipe-up tutorial. It reads Android's display height and width.
+When height/width is below 16/9, it gives the card a side length of 300 dp,
+capped by the available width, and sets both dimensions to that length. A
+later layout callback can reduce both dimensions together to fit the available
+height. With the observed 1200 × 1920 display and 360 dpi Android
+configuration, this predicts an initial 675 × 675 card. The physical screen
+captures showed the upright launch slogan, sign-up options and birthday
+prompt. Measuring the actual video surface requires a capture during the
+swipe-up tutorial.
+
 The welcome widget inflates `res/b/i0b.xml`. Its video containers request
 the full width and height of their parent. The APK has an optional
 `TextureView` callback that compares the surface **height divided by width**
