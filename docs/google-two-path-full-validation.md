@@ -1685,6 +1685,14 @@ In the last run, Android evaluated those filters inside Gmail. The real response
 During the job, the observer recorded zero copies from the non-null path of Gmail’s recovery-exception accessor. The signed APK copies the stored intent with `Intent(Intent)` when that accessor returns a non-null value. The board observed a separate synthetic copy during the same job. During the job, the Gmail process recorded zero successful remote activity starts and zero pending-intent sends. Automatic sync was on and the original inbox was restored after each run. New mail delivery remains open.
 [Recovery intent, package resolution and getter observations](../tests/google-auth/full48/candidate132.json)
 
+#### Gmail account button and system status bar
+
+On the 1200 × 1920 board, the OpenHarmony status bar covered the top 87 pixels. The original Gmail search field was centered at y=72. A system tap inside the covered portion of the account icon delivered zero touch releases to Gmail. Tapping its exposed edge at y=94 delivered one and opened the Google account panel.
+
+The public NDK window lookup returned error 1300003 for this direct SceneBoard window. In the same Gmail process, the window’s own session returned a 1200 × 87 top avoid area on three samples. Westlake now reads the top system avoid area on relayout and publishes it as an Android status-bar inset for that window. The window also refreshes its inset when OpenHarmony reports a system avoid-area change. [OpenHarmony 6.1 session implementation](https://github.com/openharmony/window_window_manager/blob/OpenHarmony-6.1-Release/window_scene/session/host/src/zidl/session_proxy.cpp)
+
+With the fix, the search field center moved to y=159 and the account icon shifted down by 87 pixels. Tapping the icon’s center opened the Google panel. After a cold restart a center tap opened Gmail’s search controls. A further restart returned to Primary with automatic sync enabled. The account panel did not show a selectable test account during the samples. Gmail received a system pull-to-refresh gesture. Across three samples through 44.5 seconds, the visible message list stayed identical. New mail delivery remains unverified. [Toolbar geometry, touch delivery and restart observations](../tests/google-auth/full48/candidate133.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection

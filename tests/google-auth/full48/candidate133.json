@@ -1,0 +1,582 @@
+{
+  "schema": 1,
+  "candidate": 133,
+  "date": "2026-11-18",
+  "previous": "candidate132.json",
+  "scope": "Normal touch access to the original Gmail account button and search field on its retained host in portrait.",
+  "build": {
+    "originalGmailApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "releaseNativeControlSha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070",
+    "fixedNativeSha256": "9ed70328ec89e34ed785174e568b33fde3e51b51f8962f5ce453d9ac5ce62026",
+    "fixedAdapterJarSha256": "4baadb0b384e33b84754cd85f212f54cad45aa9c6a1d3a1f10db009e7eb71f4d",
+    "javaInputsChangedFromReleaseControl": {
+      "framework/window/java/OhInsetsBridge.java": "bb868a946a70125fbfd57d0b6cbbd9b2edb5bff04a5a1580815267417fac5c81",
+      "framework/window/java/SessionStageBridge.java": "77a5579847d79ac11befb4eb016c2ad71734989706e6a341ba993f50f4c7695f",
+      "framework/window/java/WindowCallbackBridge.java": "4b5ea789048f9ae164ee247cfca9b58477fb24afc530561d8b16ee4143358221",
+      "framework/window/java/WindowSessionAdapter.java": "b2eb56af11533d7eef3a327a733c6e690a5dfcc417161f7e8aaa7e6a38a0e6db"
+    },
+    "nativeSourceSha256": {
+      "oh_window_manager_client.cpp": "1877cb0744f08131ba4c1feb5011dc5d162ca4acf91d4ef5cc8d093709770d44",
+      "oh_window_manager_client.h": "3266289450d5a073df2a7e217f59ff4062804625685bdbd8bb1d7c6fb95347f5"
+    },
+    "verifiedBoardPreloadFiles": 469,
+    "changedInstalledFiles": 14
+  },
+  "before": {
+    "statusBar": [
+      0,
+      0,
+      1200,
+      87
+    ],
+    "avatarCenterY": 79,
+    "avatarLastColoredY": 97,
+    "rows": [
+      {
+        "gesture": "covered",
+        "y": 79,
+        "labels": [
+          "Compose",
+          "Primary",
+          "Search in mail"
+        ],
+        "checkedVisibleMailboxRegionUnchanged": true,
+        "deliveredReleases": 0,
+        "fatals": 0,
+        "seconds": 7.8
+      },
+      {
+        "gesture": "covered",
+        "y": 79,
+        "labels": [
+          "Compose",
+          "Primary",
+          "Search in mail"
+        ],
+        "checkedVisibleMailboxRegionUnchanged": true,
+        "deliveredReleases": 0,
+        "fatals": 0,
+        "seconds": 14.0
+      },
+      {
+        "gesture": "exposed",
+        "y": 94,
+        "labels": [
+          "Compose",
+          "Primary",
+          "Search in mail"
+        ],
+        "checkedVisibleMailboxRegionUnchanged": true,
+        "deliveredReleases": 1,
+        "fatals": 0,
+        "seconds": 8.6
+      },
+      {
+        "gesture": "exposed",
+        "y": 94,
+        "labels": [
+          "Privacy Policy",
+          "Terms of Service"
+        ],
+        "checkedVisibleMailboxRegionUnchanged": false,
+        "deliveredReleases": 1,
+        "fatals": 0,
+        "seconds": 12.6
+      }
+    ]
+  },
+  "windowGeometryControls": {
+    "ndkQueryFromOwningGmailWindow": {
+      "statusBar": [
+        0,
+        0,
+        1200,
+        87
+      ],
+      "nativeBridgeMatches": true,
+      "results": [
+        {
+          "sample": 0,
+          "type": "system",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 0,
+          "type": "navigationIndicator",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 1,
+          "type": "system",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 1,
+          "type": "navigationIndicator",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 2,
+          "type": "system",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 2,
+          "type": "navigationIndicator",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "independentNdkAndOwnedSessionComparison": {
+      "statusBar": [
+        0,
+        0,
+        1200,
+        87
+      ],
+      "nativeBridgeMatches": true,
+      "results": [
+        {
+          "sample": 0,
+          "type": "system",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 0,
+          "type": "navigationIndicator",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 1,
+          "type": "system",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 1,
+          "type": "navigationIndicator",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 2,
+          "type": "system",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "sample": 2,
+          "type": "navigationIndicator",
+          "resultCode": 1300003,
+          "top": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "sessionQueries": [
+        {
+          "sample": 0,
+          "status": 0,
+          "types": 31,
+          "top": [
+            0,
+            0,
+            1200,
+            87
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "nav": [
+            390,
+            1857,
+            420,
+            63
+          ]
+        },
+        {
+          "sample": 1,
+          "status": 0,
+          "types": 31,
+          "top": [
+            0,
+            0,
+            1200,
+            87
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "nav": [
+            390,
+            1857,
+            420,
+            63
+          ]
+        },
+        {
+          "sample": 2,
+          "status": 0,
+          "types": 31,
+          "top": [
+            0,
+            0,
+            1200,
+            87
+          ],
+          "bottom": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "nav": [
+            390,
+            1857,
+            420,
+            63
+          ]
+        }
+      ]
+    }
+  },
+  "after": {
+    "toolbarGeometry": {
+      "searchCenterY": 159,
+      "primaryHeaderY": 305,
+      "avatarShift": 87,
+      "avatarTemplateMeanAbsoluteError": 7.643,
+      "searchShift": 87,
+      "statusBar": [
+        0,
+        0,
+        1200,
+        87
+      ]
+    },
+    "avatarCenterTap": {
+      "centerY": 166,
+      "rows": [
+        {
+          "seconds": 6.7,
+          "owned": true,
+          "labels": [
+            "Primary",
+            "Search in mail"
+          ],
+          "touchReleaseDelta": 1
+        },
+        {
+          "seconds": 15.0,
+          "owned": true,
+          "labels": [
+            "Primary",
+            "Search in mail"
+          ],
+          "touchReleaseDelta": 1
+        },
+        {
+          "seconds": 22.4,
+          "owned": true,
+          "labels": [
+            "Privacy Policy",
+            "Terms of Service"
+          ],
+          "touchReleaseDelta": 1
+        },
+        {
+          "seconds": 34.6,
+          "owned": true,
+          "labels": [
+            "Privacy Policy",
+            "Terms of Service"
+          ],
+          "touchReleaseDelta": 1
+        }
+      ]
+    },
+    "searchAfterGmailRestart": {
+      "geometry": {
+        "searchCenterY": 159,
+        "primaryHeaderY": 305,
+        "avatarShift": 87,
+        "avatarTemplateMeanAbsoluteError": 7.643,
+        "searchShift": 87,
+        "statusBar": [
+          0,
+          0,
+          1200,
+          87
+        ]
+      },
+      "tappedSearchCenterY": 159,
+      "searchChipsVisible": true,
+      "touchReleaseDelta": 1,
+      "originalKeyboardLayoutRestored": true,
+      "keyboardLanguageHadToBeRestored": true,
+      "keyboardPanelMeanDifference": 0.0
+    },
+    "finalInboxAfterAnotherRestart": {
+      "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "nativeSha256": "9ed70328ec89e34ed785174e568b33fde3e51b51f8962f5ce453d9ac5ce62026",
+      "adapterJarSha256": "4baadb0b384e33b84754cd85f212f54cad45aa9c6a1d3a1f10db009e7eb71f4d",
+      "inboxRegionPixelIdenticalAfterTranslation": false,
+      "autoSync": true,
+      "listeners": {
+        "microG": 1,
+        "officialGms": 1,
+        "store": 1
+      },
+      "uidMatchesRetainedHost": true,
+      "visiblePrimary": true,
+      "geometry": {
+        "searchCenterY": 159,
+        "primaryHeaderY": 305,
+        "avatarShift": 87,
+        "avatarTemplateMeanAbsoluteError": 7.643,
+        "searchShift": 87,
+        "statusBar": [
+          0,
+          0,
+          1200,
+          87
+        ]
+      },
+      "fatalExceptions": 0
+    }
+  },
+  "searchControlBeforeFix": {
+    "onScreenKeyboardEnteredSyntheticWord": true,
+    "searchResultListVerified": false
+  },
+  "testMessageIdentified": false,
+  "accountSelectionCompleted": false,
+  "cleanup": {
+    "filesVerifiedBeforeRemoval": 469,
+    "activeRuntimeVerifiedAfterRemoval": true,
+    "priorReleaseRetainedForRollback": true
+  },
+  "interpretation": "The original Gmail toolbar moved down by the measured 87 pixels. A system tap at the center of its account icon opened the Google account panel. After a cold restart, tapping the center of the search field opened Gmail’s search controls. The account-selection and new-message checks remain partial. Gmail received a system pull-to-refresh gesture. Across three samples through 44.5 seconds, the visible message list stayed identical.",
+  "limits": [
+    "Only the retained Gmail profile in portrait was exercised. Rotation and changes to status-bar visibility were not exercised. The panel did not display the test account in the sampled views.",
+    "The search control used a synthetic word. It cannot establish delivery of the sender’s email."
+  ],
+  "pullToRefreshAfterFix": {
+    "gesture": "system downward swipe in message list",
+    "samples": [
+      {
+        "seconds": 8.7,
+        "visiblePrimary": true,
+        "sameVisibleInboxRows": true,
+        "eventDeltas": {
+          "touchRelease": 1,
+          "mailboxStart": 0,
+          "mailboxFinish": 0,
+          "fatal": 0
+        }
+      },
+      {
+        "seconds": 18.8,
+        "visiblePrimary": true,
+        "sameVisibleInboxRows": true,
+        "eventDeltas": {
+          "touchRelease": 1,
+          "mailboxStart": 0,
+          "mailboxFinish": 0,
+          "fatal": 0
+        }
+      },
+      {
+        "seconds": 44.5,
+        "visiblePrimary": true,
+        "sameVisibleInboxRows": true,
+        "eventDeltas": {
+          "touchRelease": 1,
+          "mailboxStart": 0,
+          "mailboxFinish": 0,
+          "fatal": 0
+        }
+      }
+    ],
+    "automaticSync": true
+  },
+  "croppedInboxComparisonAcrossLayouts": {
+    "method": "Normalized luminance correlation for five separate 105-pixel-high bands in the message list. The reference image precedes the inset repair. Offsets were compared from -20 to 265 pixels.",
+    "bands": [
+      {
+        "referenceBandY": 475,
+        "height": 105,
+        "bestVerticalOffset": 87,
+        "luminanceCorrelation": 0.9954
+      },
+      {
+        "referenceBandY": 685,
+        "height": 105,
+        "bestVerticalOffset": 87,
+        "luminanceCorrelation": 0.9955
+      },
+      {
+        "referenceBandY": 905,
+        "height": 105,
+        "bestVerticalOffset": 87,
+        "luminanceCorrelation": 0.9957
+      },
+      {
+        "referenceBandY": 1125,
+        "height": 105,
+        "bestVerticalOffset": 87,
+        "luminanceCorrelation": 0.9956
+      },
+      {
+        "referenceBandY": 1345,
+        "height": 105,
+        "bestVerticalOffset": 87,
+        "luminanceCorrelation": 0.9964
+      }
+    ]
+  }
+}

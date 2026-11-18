@@ -1232,6 +1232,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // Update surface size if dimensions changed
         nativeUpdateSurfaceSize(sessionId, width, height);
         final Rect placed = placeWindow(window, windowAttrs, width, height);
+        OhInsetsBridge.updateStatusBar(window, sessionId, placed.left, placed.top);
         setDimOwnerVisible(window.asBinder(), viewVisibility == android.view.View.VISIBLE);
 
         // Populate output frames
