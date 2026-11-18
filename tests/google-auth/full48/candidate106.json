@@ -1,0 +1,224 @@
+{
+  "candidate": 106,
+  "date": "2026-11-17",
+  "originalApp": {
+    "package": "com.google.android.youtube",
+    "versionName": "21.43.523",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "account": "Guest",
+    "clip": "Me at the zoo",
+    "videoPixels": [
+      320,
+      240
+    ]
+  },
+  "frameworkGeometryCommit": "a2hlab/manifest@d555997",
+  "frameworkStage": {
+    "filesVerified": 469,
+    "frameworkJarSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+    "adapterJarSha256": "546664499c0b8cf42dc2607c6f3cfd932f358b5aab05f6fcd9c4cd2138e916f8",
+    "codecLibrarySha256": "590ebd5e478152860bc1e9ff45f7678b5485c391b688fb04a3327bc38a7656ce"
+  },
+  "centeredGuestPlayback": {
+    "observedPictureXRangeExclusivePixels": [
+      150,
+      1050
+    ],
+    "playerPixels": [
+      1200,
+      675
+    ],
+    "centeredSamples": 9,
+    "movingCenteredSamplesAbove20PercentChange": 7,
+    "playerTimeline": "0.972:B,15.565:PL,32.268:EN",
+    "observedAudioWriteBytes": [
+      2592,
+      3840,
+      3840,
+      3840
+    ],
+    "maxSampledPresentedAudioFrames": 681588,
+    "speakerStreamObservedRunning": true,
+    "returnedToInitialTikTokWindow": true
+  },
+  "centeredGuestPlaybackWithColorChange": {
+    "observedPictureXRangeExclusivePixels": [
+      150,
+      1050
+    ],
+    "playerPixels": [
+      1200,
+      675
+    ],
+    "centeredSamples": 9,
+    "movingCenteredSamplesAbove20PercentChange": 7,
+    "playerTimeline": "1.206:B,16.283:PL,33.384:EN",
+    "observedAudioWriteBytes": [
+      2592,
+      3840,
+      3840,
+      3840
+    ],
+    "maxSampledPresentedAudioFrames": 792948,
+    "speakerStreamObservedRunning": true,
+    "returnedToInitialTikTokWindow": true
+  },
+  "colorControl": {
+    "decoder": "OH.Media.Codec.Decoder.Video.AVC",
+    "source": "320 x 240 H.264, left half red and right half blue",
+    "sourceFrameReferenceRGB": [
+      [
+        253,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        254
+      ]
+    ],
+    "publicDecoderSurfaceSamplesRGB": {
+      "-1": [
+        [
+          15,
+          63,
+          255
+        ],
+        [
+          208,
+          0,
+          0
+        ]
+      ],
+      "2": [
+        [
+          15,
+          63,
+          255
+        ],
+        [
+          208,
+          0,
+          0
+        ]
+      ],
+      "3": [
+        [
+          255,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          255
+        ]
+      ],
+      "5": [
+        [
+          254,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          255
+        ]
+      ]
+    },
+    "advertisedPixelFormats": [
+      1,
+      2,
+      3,
+      5
+    ],
+    "format1Result": "Decoder returned error 8 with zero frames.",
+    "readbackMethod": "RenderService snapshot of the test-owned surface. Sampled at one-quarter and three-quarters width, halfway down.",
+    "androidImageReader": {
+      "avcMainOld": {
+        "samples": 8,
+        "firstSurface": 3,
+        "replacementSurface": 5,
+        "yuvSha256": "518d8f9dad7193c99f0138ab9e5489b002efeffc115cdfc3e7073e09e4804333"
+      },
+      "avcMainNew": {
+        "samples": 8,
+        "firstSurface": 3,
+        "replacementSurface": 5,
+        "yuvSha256": "518d8f9dad7193c99f0138ab9e5489b002efeffc115cdfc3e7073e09e4804333"
+      },
+      "hevcMainNew": {
+        "samples": 122,
+        "firstSurface": 3,
+        "replacementSurface": 119,
+        "yuvSha256": "eb9617be93658cf548ce6d24ce7c5f1ec80ddc24a6b13644b1bcb524a2ff0f0c"
+      }
+    },
+    "avcMainYuvReferenceSha256": "518d8f9dad7193c99f0138ab9e5489b002efeffc115cdfc3e7073e09e4804333"
+  },
+  "warmGuestRestart": {
+    "outcome": "Home placeholders; no watch playback in the observation.",
+    "chromiumError": -200,
+    "meaning": "Certificate common name invalid",
+    "minimumOccurrences": 44,
+    "freshGuestControl": "With the same APK, codec, framework and board, a separate fresh guest profile reached the end of the public clip. Both original test profiles were retained.",
+    "shellControl": "Unauthenticated requests with hostname and chain verification using the board system trust directory returned HTTP 204 from www.youtube.com, 405 from youtubei.googleapis.com, and 404 from i.ytimg.com.",
+    "causeOfMismatch": "Unresolved."
+  },
+  "open": [
+    "Google sign-in, account session and signed-in restart persistence",
+    "Warm-profile guest restart reliability",
+    "Physical speaker audibility",
+    "Original-video per-pixel fidelity against a frame-matched public source"
+  ],
+  "videoLifecycleRetest": {
+    "codecLibrarySha256": "8523f5815bb8e315b95b25b4a8419dcc06361b1778929c47ace8263a95dea511",
+    "runtimeFilesVerifiedOnBoard": 469,
+    "change": "Map Android video stop and reset to the OH decoder state that accepts Configure. Preserve the bundled HEVC lifecycle.",
+    "control": "Previous library failed the same surface reconfigure probe on AVC Main.",
+    "cases": {
+      "bars-main": {
+        "samples": 8,
+        "postFlushAndRestartYuvSha256": "518d8f9dad7193c99f0138ab9e5489b002efeffc115cdfc3e7073e09e4804333",
+        "surfaceChangeSamePixels": true,
+        "surfaceReconfigureAfterStopAndExplicitReset": true
+      },
+      "bars": {
+        "samples": 8,
+        "postFlushAndRestartYuvSha256": "518d8f9dad7193c99f0138ab9e5489b002efeffc115cdfc3e7073e09e4804333",
+        "surfaceChangeSamePixels": true,
+        "surfaceReconfigureAfterStopAndExplicitReset": true
+      },
+      "square": {
+        "samples": 122,
+        "postFlushAndRestartYuvSha256": "eb9617be93658cf548ce6d24ce7c5f1ec80ddc24a6b13644b1bcb524a2ff0f0c",
+        "surfaceChangeSamePixels": true,
+        "surfaceReconfigureAfterStopAndExplicitReset": true
+      }
+    }
+  },
+  "sameBuildGuestComparison": {
+    "codecLibrarySha256": "8523f5815bb8e315b95b25b4a8419dcc06361b1778929c47ace8263a95dea511",
+    "preservedGuest": {
+      "foregroundScreenshots": 54,
+      "secondsToFinalSample": 108.72,
+      "sampledCenteredPictures": 0,
+      "playerEndObserved": false,
+      "sampledPcmWrites": 0,
+      "maxSampledPresentedAudioFrames": 0,
+      "returnedToOriginalTikTokWindow": true
+    },
+    "freshGuest": {
+      "foregroundScreenshots": 17,
+      "secondsToFinalSample": 34.45,
+      "sampledCenteredPictures": 9,
+      "playerEndObserved": true,
+      "sampledPcmWrites": 8,
+      "maxSampledPresentedAudioFrames": 686112,
+      "returnedToOriginalTikTokWindow": true
+    },
+    "preservedGuestObservation": "Home loading placeholders. At this retest no matching net_error marker was captured; attribution of the failure to TLS remains unproven."
+  }
+}

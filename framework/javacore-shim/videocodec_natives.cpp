@@ -89,7 +89,7 @@ void vlog(const char* fmt, ...)
 /* ---- OH's codec API, opened at the first codec of each kind -------------------------------- */
 
 enum { OH_FLAG_EOS = 1 << 0, OH_FLAG_SYNC = 1 << 1, OH_FLAG_CODEC_DATA = 1 << 3 };
-enum { OH_PIXEL_NV12 = 2 };
+enum { OH_PIXEL_NV12 = 2, OH_PIXEL_NV21 = 3 };
 enum { OH_SAMPLE_S16LE = 1 };   /* OH_BitsPerSample */
 
 /* The video decoder (its CodecApi part) and what both kinds share: buffers, formats, capabilities. */
@@ -97,6 +97,7 @@ struct Oh : VideoCodecApi {
     int loaded = 0;          /* the video decoder */
     int coreLoaded = 0;      /* the shared part */
     OH_AVCodec* (*create)(const char*);
+    int (*reset)(OH_AVCodec*);
     int32_t (*setWindowScaling)(OHNativeWindow*, int32_t);
     uint8_t* (*bufferAddr)(OH_AVBuffer*);
     int32_t (*bufferCapacity)(OH_AVBuffer*);
@@ -111,6 +112,7 @@ struct Oh : VideoCodecApi {
     OH_AVCapability* (*capabilityByCategory)(const char*, bool, int);
     const char* (*capabilityName)(OH_AVCapability*);
     int (*capabilityProfiles)(OH_AVCapability*, const int32_t**, uint32_t*);
+    int (*capabilityPixelFormats)(OH_AVCapability*, const int32_t**, uint32_t*);
     int (*levelsForProfile)(OH_AVCapability*, int32_t, const int32_t**, uint32_t*);
     int (*widthRange)(OH_AVCapability*, OH_AVRange*);
     int (*heightRange)(OH_AVCapability*, OH_AVRange*);
@@ -168,6 +170,7 @@ bool loadCoreLocked()
     SYM(capabilityByCategory, base, "OH_AVCodec_GetCapabilityByCategory");
     SYM(capabilityName, base, "OH_AVCapability_GetName");
     SYM(capabilityProfiles, base, "OH_AVCapability_GetSupportedProfiles");
+    SYM(capabilityPixelFormats, base, "OH_AVCapability_GetVideoSupportedPixelFormats");
     SYM(levelsForProfile, base, "OH_AVCapability_GetSupportedLevelsForProfile");
     SYM(widthRange, base, "OH_AVCapability_GetVideoWidthRange");
     SYM(heightRange, base, "OH_AVCapability_GetVideoHeightRange");
@@ -213,6 +216,7 @@ bool loadOh()
     SYM(prepare, vdec, "OH_VideoDecoder_Prepare");
     SYM(start, vdec, "OH_VideoDecoder_Start");
     SYM(stop, vdec, "OH_VideoDecoder_Stop");
+    SYM(reset, vdec, "OH_VideoDecoder_Reset");
     SYM(flush, vdec, "OH_VideoDecoder_Flush");
     SYM(outputDescription, vdec, "OH_VideoDecoder_GetOutputDescription");
     SYM(pushInput, vdec, "OH_VideoDecoder_PushInputBuffer");
@@ -221,7 +225,7 @@ bool loadOh()
     SYM(freeOutput, vdec, "OH_VideoDecoder_FreeOutputBuffer");
 #undef SYM
     if (!oh.create || !oh.destroy || !oh.registerCallback || !oh.configure || !oh.prepare || !oh.start
-            || !oh.stop || !oh.flush || !oh.pushInput || !oh.freeOutput || !oh.keyWidth
+            || !oh.stop || !oh.reset || !oh.flush || !oh.pushInput || !oh.freeOutput || !oh.keyWidth
             || !oh.keyHeight || !oh.keyPixelFormat) {
         vlog("[WL-VIDEOCODEC] OH video decoder is missing a required entry point");
         return false;
@@ -289,6 +293,7 @@ struct Offered {
     /* OH's software decoder for the type, when it has one: the board's hardware decoder refuses
      * frames below its minimum (176x144), which small clips and thumbnails are. */
     std::string software;
+    bool softwareSurfaceNv21 = false;
     int swMinWidth, swMaxWidth, swMinHeight, swMaxHeight;
     std::vector<int32_t> profiles, swProfiles;   /* OH profiles each decoder reports */
     /* An audio decoder: OH's own name for the type (OH_AVCODEC_MIMETYPE_AUDIO_*), which it is
@@ -373,6 +378,16 @@ void findVideo()
         const char* swName = sw != nullptr && oh.capabilityName != nullptr ? oh.capabilityName(sw) : nullptr;
         if (swName != nullptr && (hardware == nullptr || strcmp(swName, hardware) != 0)) {
             offered.software = swName;
+            // This OH AVC provider's default swaps U and V in composited output.
+            // NV21 presents both chroma channels correctly on the board.
+            if (offered.software == "OH.Media.Codec.Decoder.Video.AVC" && oh.capabilityPixelFormats) {
+                const int32_t* formats = nullptr;
+                uint32_t count = 0;
+                if (oh.capabilityPixelFormats(sw, &formats, &count) == 0 && formats) {
+                    offered.softwareSurfaceNv21 =
+                            std::find(formats, formats + count, OH_PIXEL_NV21) != formats + count;
+                }
+            }
             OH_AVRange w{0, 0}, h{0, 0};
             if (oh.widthRange != nullptr && oh.widthRange(sw, &w) == 0) {
                 offered.swMinWidth = w.minVal; offered.swMaxWidth = w.maxVal;
@@ -944,10 +959,14 @@ void wSetup(JNIEnv* env, jobject thiz, jstring jname, jboolean nameIsType, jbool
 
 /* The hardware decoder refused the format (a size below its minimum): replace it with OH's
  * software decoder for the type, before anything else has been attached to the codec. */
-int configureSoftware(Codec* v, OH_AVFormat* format)
+int configureSoftware(Codec* v, OH_AVFormat* format, bool surfaceOutput)
 {
     const Offered* offered = offeredByMime(v->mime.c_str());
-    if (offered == nullptr || offered->software.empty() || v->software) return -1;
+    if (offered == nullptr || offered->software.empty() || v->video != &oh) return -1;
+    if (surfaceOutput && offered->softwareSurfaceNv21) {
+        oh.formatSetInt(format, *oh.keyPixelFormat, OH_PIXEL_NV21);
+    }
+    if (v->software) return oh.configure(v->codec, format);
     OH_AVCodec* codec = oh.createByName(offered->software.c_str());
     if (codec == nullptr) return -1;
     OH_AVCodecCallback callbacks{onError, onStreamChanged, onNeedInput, onNewOutput};
@@ -1533,8 +1552,10 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
         v->video = &oh;
         v->software = false;
     }
-    int rc = unlisted || missingMain || !hardwareDecodes(v->mime, profile) ? -1 : v->api->configure(v->codec, format);
-    if (rc != 0) rc = configureSoftware(v, format);
+    bool platformSoftware = v->software && v->video == &oh;
+    int rc = platformSoftware || unlisted || missingMain || !hardwareDecodes(v->mime, profile)
+            ? -1 : v->api->configure(v->codec, format);
+    if (rc != 0) rc = configureSoftware(v, format, surface != nullptr);
     if (rc != 0 && fallback) rc = configureBundledHevc(v, format, fallback);
     oh.formatDestroy(format);
     /* OH takes the output window after Configure and before Prepare. */
@@ -1576,13 +1597,36 @@ void clearQueues(Codec* v)
     v->outputData.clear();
 }
 
+// Android stop() and reset() both allow a fresh configure(). OH Stop keeps its
+// configuration for Start, while OH Reset returns the platform codec to Configure.
+void resetVideo(JNIEnv* env, Codec* v)
+{
+    {
+        std::lock_guard<std::mutex> lock(v->mu);
+        v->discardBuffers = true;
+    }
+    int rc = v->video == &oh ? oh.reset(v->codec) : v->api->stop(v->codec);
+    if (rc != 0) {
+        throwState(env, "video decoder reset failed");
+        return;
+    }
+    v->running = false;
+    clearOutputWindow(v);
+    clearQueues(v);
+    std::lock_guard<std::mutex> lock(v->mu);
+    v->errorCode = 0;
+    v->codecDataSent = false;
+    v->formatPending = true;
+    v->asyncFormatSent = false;
+}
+
 void wStop(JNIEnv* env, jobject thiz)
 {
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) { if (b_stop != nullptr) b_stop(env, thiz); return; }
+    if (!v->audio) { resetVideo(env, v); return; }
     v->api->stop(v->codec);
     v->running = false;
-    if (!v->audio) clearOutputWindow(v);
     clearQueues(v);
 }
 
@@ -1626,10 +1670,7 @@ void wReset(JNIEnv* env, jobject thiz)
         resetAudio(v);
         return;
     }
-    v->api->stop(v->codec);
-    v->running = false;
-    clearOutputWindow(v);
-    clearQueues(v);
+    resetVideo(env, v);
 }
 
 void wRelease(JNIEnv* env, jobject thiz)

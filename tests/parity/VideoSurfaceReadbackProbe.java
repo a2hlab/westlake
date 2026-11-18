@@ -102,6 +102,13 @@ public final class VideoSurfaceReadbackProbe {
                     }
                     if (!outputEnded) throw new IllegalStateException("decoder timed out");
                     codec.stop();
+                    // A player can reuse the same MediaCodec for its next item.
+                    codec.configure(format, first.getSurface(), null, 0);
+                    codec.start();
+                    codec.reset();
+                    codec.configure(format, second.getSurface(), null, 0);
+                    codec.start();
+                    codec.stop();
                 } finally { codec.release(); }
             }
             StringBuilder hex = new StringBuilder();
