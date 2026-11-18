@@ -141,7 +141,8 @@
           "candidate121.json",
           "candidate122.json",
           "candidate123.json",
-          "candidate124.json"
+          "candidate124.json",
+          "candidate126.json"
         ],
         "checks": {
           "account_selection": {
@@ -154,7 +155,7 @@
           },
           "refresh": {
             "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery. The original Gmail sync callback acquired its mailbox provider and returned with the database-error flag already set. In two further failed syncs the Gmail process logged no notification enqueue, remote activity launch, or pending intent send during the job or through the subsequent delayed observation marker. The app trace missed callback return. Fresh delivery and in-app recovery remain open."
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery. The original Gmail sync callback acquired its mailbox provider and returned with the database-error flag already set. In two further failed syncs the Gmail process logged no notification enqueue, remote activity launch, or pending intent send during the job or through the subsequent delayed observation marker. The app trace missed callback return. Fresh delivery and in-app recovery remain open. In a new retained-inbox check, the visible rows matched the prior baseline after a system swipe and a second drag consumed by Gmail. Neither observation window produced a new local sync request, start, or completion."
           },
           "restart_persistence": {
             "status": "observed",
@@ -169,12 +170,13 @@
           "candidate82.json",
           "candidate89.json",
           "candidate116.json",
-          "candidate125.json"
+          "candidate125.json",
+          "candidate126.json"
         ],
         "checks": {
           "account_selection": {
             "status": "partial",
-            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice. Fresh dedicated Drive found no account and received authenticator unavailable when it asked to add one, including after connecting to both official services. With the dedicated Drive account connection restored, the provider returned one Android account and the official Play account content provider resolved. Drive still requested add-account and detached its window. The retained profile also failed on the current official-service configuration."
+            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice. Fresh dedicated Drive found no account and received authenticator unavailable when it asked to add one, including after connecting to both official services. With the dedicated Drive account connection restored, the provider returned one Android account and the official Play account content provider resolved. Drive still requested add-account and detached its window. The retained profile also failed on the current official-service configuration. Two dedicated cold starts captured 32 get_accounts replies from official Play services. All contained an empty typed account array. Drive requested add-account on each launch."
           },
           "file_listing": {
             "status": "observed",

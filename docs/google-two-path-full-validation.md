@@ -1606,6 +1606,14 @@ The base APK has four direct calls to the recovery Intent accessor. Two can buil
 
 [Trace coverage, controls and board restoration](../tests/google-auth/full48/candidate124.json)
 
+A later check on the restored original Gmail app found the same visible
+Primary rows as the earlier baseline. The rows stayed identical through
+49.6 seconds after a system swipe. A second downward drag was consumed by
+the client. The visible rows again stayed identical through 29.3 seconds.
+Neither window recorded a new local sync request, start or completion.
+Receipt of the sender's test message remains unverified.
+[Foreground Gmail checks](../tests/google-auth/full48/candidate126.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
@@ -2159,6 +2167,26 @@ metadata both require SDK 35. Westlake’s Android system-property implementatio
 declares SDK 34.
 
 [Original APK and board evidence](../tests/google-auth/full48/candidate125.json) · [GrapheneOS signed repository metadata](https://apps.grapheneos.org/metadata.1.0.sjson)
+
+### Account list returned to the original Drive APK
+
+On two cold launches, the original Drive APK called `get_accounts` 16 times
+per launch. All 32 calls returned a bundle containing an empty Android
+`Account[]`. Each launch resolved the official Play services provider,
+requested an additional account and detached the Drive window. The earlier
+Android account lookup through microG returned one account to the same APK.
+
+This official Play services profile had no private account connection. Its
+four persistent processes saw the same Westlake account directory, with no
+local account file present. The test did not determine how official Play
+services selects the accounts visible to Drive. Google server acceptance and
+device certification were outside the measurement.
+
+The client observer read the array length from a copy of the result and let
+Drive receive the original reply. After both launches, all ten temporarily
+replaced framework files matched their original hashes. The production
+launcher and the three service listeners were verified on the board.
+[Original Drive results](../tests/google-auth/full48/candidate126.json)
 
 ## Drive lists and opens the test file
 
