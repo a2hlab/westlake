@@ -421,7 +421,7 @@ final class LocalAccounts {
                         request.with(IAccountAuthenticator.Stub.asInterface(binder)).on(response);
                     } catch (RemoteException | RuntimeException e) {
                         Log.w(TAG, "authenticator request failed: " + e.getClass().getName());
-                        fail(caller);
+                        authenticatorUnavailable(caller);
                     }
                 });
             }
@@ -430,10 +430,10 @@ final class LocalAccounts {
             public void onServiceDisconnected(ComponentName name) {
             }
         }, Context.BIND_AUTO_CREATE);
-        if (!bound) fail(caller);
+        if (!bound) authenticatorUnavailable(caller);
     }
 
-    private static void fail(IAccountManagerResponse caller) {
+    static void authenticatorUnavailable(IAccountManagerResponse caller) {
         try {
             if (caller != null) caller.onError(AccountManager.ERROR_CODE_REMOTE_EXCEPTION, "authenticator unavailable");
         } catch (RemoteException | RuntimeException e) {

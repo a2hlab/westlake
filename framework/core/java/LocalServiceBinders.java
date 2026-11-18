@@ -248,7 +248,14 @@ public final class LocalServiceBinders {
             IBinder remote = playServicesHostService("account");
             if (remote != null) return remote;
         }
-        return proxy("account", "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+        return proxy("account", "android.accounts.IAccountManager", (method, args) -> {
+            // addAccount completes through its response, even when there is no authenticator to bind.
+            if ("addAccount".equals(method) || "addAccountAsUser".equals(method)) {
+                LocalAccounts.authenticatorUnavailable((android.accounts.IAccountManagerResponse) args[0]);
+                return null;
+            }
+            return DEFAULT;
+        });
     }
 
     /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */
