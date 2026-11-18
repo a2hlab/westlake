@@ -86,5 +86,20 @@
     }
   },
   "appUiBefore": "After the home placeholders the original app displayed Connect to the internet. You are offline. Retry was visible.",
-  "coverage": "Guest playback after process restart with real network data and unchanged trust settings. Google sign-in, signed-in persistence, physical speaker audibility and general video geometry on arbitrary streams remain open."
+  "coverage": "Guest playback after process restart with real network data and unchanged trust settings. Google sign-in, signed-in persistence, physical speaker audibility and general video geometry on arbitrary streams remain open.",
+  "spotifyOfficialServicesControl": {
+    "version": "9.1.94.1929",
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "services": "Official Google Play services and Play Store with their existing profiles. The microG path was not used in this control.",
+    "distinctHostUids": true,
+    "updatedResolverLibraryVerifiedInAllThreeMainProcesses": true,
+    "spotifyConnectedToBothServices": true,
+    "spotifyLoginMenuVisible": true,
+    "focusedGoogleWindowAfterGoogleButton": true,
+    "checkingInfoSamples": 21,
+    "secondsBetweenFirstAndLastCheckingInfo": 127.1,
+    "credentialFieldObserved": false,
+    "spotifyActivityResultObserved": false,
+    "authenticatedSpotifySessionObserved": false
+  }
 }
