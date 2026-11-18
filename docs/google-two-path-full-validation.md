@@ -1614,6 +1614,13 @@ Neither window recorded a new local sync request, start or completion.
 Receipt of the sender's test message remains unverified.
 [Foreground Gmail checks](../tests/google-auth/full48/candidate126.json)
 
+In a later retained-profile run, the visible Primary rows matched two earlier
+board captures. A system swipe left them unchanged through 74.7 seconds. A
+second drag consumed by Gmail left them unchanged through 50.0 seconds. Neither
+action produced a new local sync request, start, or completion marker. The
+check covered the visible Primary list only.
+[Post-send Gmail refresh and input controls](../tests/google-auth/full48/candidate128.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
@@ -2571,6 +2578,25 @@ from board ART without an app caller token. After removing the receiver, none
 of the 73 installed bundles declared an HTTP or HTTPS scheme in the surveyed
 ability skills. An external-browser login remains unverified.
 [Spotify window ownership and link receiver results](../tests/google-auth/full48/candidate120.json)
+
+### Spotify Facebook native discovery and return
+
+On the physical board, Spotify queried Facebook's native login provider twice
+more between the login screen and the web form. Both lookups returned no provider.
+The original Facebook APK was running under its own UID. Its manifest sets the
+exported provider and native login activity to disabled by default. This run did
+not measure a component-state change. The Spotify APK declares the browser
+callback `fbconnect://cct.com.spotify.music`. Its installed OpenHarmony host
+advertised one home ability with no URI skills. That leaves no static route
+through that host declaration for an external browser to return to Spotify.
+
+The Facebook form loaded in a Spotify-owned window. An OS Back command left it
+visible through 37.3 seconds. A Back consumed by the guest closed one of five
+windows. None of the four remaining Spotify windows had focus through 35.0
+seconds. Bringing the host to the foreground still left all four without focus
+through another 37.3 seconds. The trace contained no new redirect or delivered
+activity result. The test ended before credential entry.
+[Board controls and installed declarations](../tests/google-auth/full48/candidate128.json)
 
 ## Where Spotify’s Google sign-in stopped with official Play services
 

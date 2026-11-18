@@ -142,7 +142,8 @@
           "candidate122.json",
           "candidate123.json",
           "candidate124.json",
-          "candidate126.json"
+          "candidate126.json",
+          "candidate128.json"
         ],
         "checks": {
           "account_selection": {
@@ -155,7 +156,7 @@
           },
           "refresh": {
             "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery. The original Gmail sync callback acquired its mailbox provider and returned with the database-error flag already set. In two further failed syncs the Gmail process logged no notification enqueue, remote activity launch, or pending intent send during the job or through the subsequent delayed observation marker. The app trace missed callback return. Fresh delivery and in-app recovery remain open. In a new retained-inbox check, the visible rows matched the prior baseline after a system swipe and a second drag consumed by Gmail. Neither observation window produced a new local sync request, start, or completion."
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery. The original Gmail sync callback acquired its mailbox provider and returned with the database-error flag already set. In two further failed syncs the Gmail process logged no notification enqueue, remote activity launch, or pending intent send during the job or through the subsequent delayed observation marker. The app trace missed callback return. Fresh delivery and in-app recovery remain open. In a new retained-inbox check, the visible rows matched the prior baseline after a system swipe and a second drag consumed by Gmail. Neither observation window produced a new local sync request, start, or completion. On a further board run, both a system swipe and an app-consumed drag left the visible Primary rows unchanged through 74.7 and 50.0 seconds, respectively. Neither produced a local sync marker."
           },
           "restart_persistence": {
             "status": "observed",
@@ -316,16 +317,17 @@
           "candidate97.json",
           "candidate108.json",
           "candidate117.json",
-          "candidate120.json"
+          "candidate120.json",
+          "candidate128.json"
         ],
         "checks": {
           "sign_in": {
             "status": "partial",
-            "evidence": "Spotify showed the Facebook form and the full main-document origin in its own WebView on the dedicated host. Submission and authenticated return remain open. With the standalone Facebook app already running under another UID, Spotify still displayed the empty form in its own window."
+            "evidence": "Spotify showed the Facebook form and the full main-document origin in its own WebView on the dedicated host. Submission and authenticated return remain open. With the standalone Facebook app already running under another UID, Spotify still displayed the empty form in its own window. The native provider lookup missed twice more before the form appeared. The original APK declares a browser callback and the installed OpenHarmony host advertises only its home ability."
           },
           "authenticated_return": {
             "status": "open",
-            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+            "gap": "No authenticated return to Spotify or established Spotify session was observed. A consumed Back closed the form. Four guest windows remained without focus, and foregrounding the host did not restore a guest window during the observation."
           },
           "account_session": {
             "status": "open",
