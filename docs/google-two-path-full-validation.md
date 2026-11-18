@@ -14,7 +14,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. After the Wi-Fi resolver fix, a repeat showed the same screen for 127 s. [Wi-Fi retest](../tests/google-auth/full48/candidate107.json) · [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The original APK played “Me at the zoo” to the end on fresh guest profiles and on two consecutive launches with retained guest data after the DNS repair. Nine samples per fresh run showed the 900 × 675 picture centered in the 1200 × 675 player. [Picture, color and audio](../tests/google-auth/full48/candidate106.json) · [Retained guest playback](../tests/google-auth/full48/candidate107.json) · [Original sign-in dialog](../tests/google-auth/full48/candidate108.json) | Google sign-in, signed-in restart persistence, physical audibility and picture geometry across other stream and player sizes. |
-| Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. [Gmail retest and observer fix](../tests/google-auth/full48/candidate110.json) |
+| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | After repairing client identity registration, official Play services and Play Store accepted Gmail. The official-services configuration without a delegated account provider stayed on **Getting your messages**. Receipt of a newly sent message and completion of incremental refresh remain open. [Latest board retest](../tests/google-auth/full48/candidate111.json) |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
@@ -1355,8 +1355,33 @@ An earlier Gmail trace requested Play services version code 250200000. The
 board has 244034029 and runs API 34. Of three signed APKs inspected on the
 host, one exceeded the requested version but required API 35, and the two
 compatible with API 34 were older than Gmail requested. The board kept its
-installed version. The cause of the current `SERVICE_INVALID` result remains
-open. [Package checks](../tests/google-auth/full48/candidate110.json)
+installed version. [Package checks](../tests/google-auth/full48/candidate110.json)
+
+The retained launcher had changed its listener name but still advertised its
+previous address to the app. The official hosts could not verify who started
+Gmail. In the rebuilt-runtime trace, they rejected all 175 introductions.
+Gmail logged six `SERVICE_INVALID` events. After the launcher used a single
+address for both purposes, Play services and Play Store each verified the
+Gmail process, its four APKs and its signing certificates. The same APK,
+runtime, account settings and Play services version then reached **Getting your
+messages**. Six captures across 47 seconds showed this screen. A swipe and a
+later capture after waking the board showed the same text. Neither a test
+message nor a completed sync was visible.
+[Corrected official-services run](../tests/google-auth/full48/candidate111.json)
+
+This official-services configuration gives an ordinary app an empty account
+list. Gmail also called the asynchronous `getAccountsByFeatures` method.
+The empty account service returned from the method without calling the app
+back. A regression on board ART reproduced the missing callback. The rebuilt
+service completes plural selection with an empty account array and singular
+selection with an empty bundle. These results match Android's behavior when
+the caller has no visible accounts.
+[Account lookup regression](../tests/google-auth/full48/candidate111.json)
+
+After installing the rebuilt runtime in the original Gmail client, the official
+hosts again verified its identity. Gmail continued to show **Getting your
+messages**. Completing the empty lookup did not populate this mailbox.
+[Original Gmail with the callback repair](../tests/google-auth/full48/candidate111.json)
 
 ## Candidate 80: real periodic sync and the standard adapter caller guard
 

@@ -1,9 +1,13 @@
 package adapter.core;
 
+import android.accounts.Account;
+import android.accounts.AccountManager;
+import android.accounts.IAccountManagerResponse;
 import android.content.ClipData;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.IInterface;
 
@@ -249,6 +253,17 @@ public final class LocalServiceBinders {
             if (remote != null) return remote;
         }
         return proxy("account", "android.accounts.IAccountManager", (method, args) -> {
+            if ("getAccountsByFeatures".equals(method) || "getAccountByTypeAndFeatures".equals(method)) {
+                IAccountManagerResponse response = (IAccountManagerResponse) args[0];
+                if (response == null) throw new IllegalArgumentException("response is null");
+                if (args[1] == null) throw new IllegalArgumentException("accountType is null");
+                Bundle result = new Bundle();
+                if ("getAccountsByFeatures".equals(method)) {
+                    result.putParcelableArray(AccountManager.KEY_ACCOUNTS, new Account[0]);
+                }
+                LocalAccounts.reply(response, result);
+                return null;
+            }
             // addAccount completes through its response, even when there is no authenticator to bind.
             if ("addAccount".equals(method) || "addAccountAsUser".equals(method)) {
                 LocalAccounts.authenticatorUnavailable((android.accounts.IAccountManagerResponse) args[0]);

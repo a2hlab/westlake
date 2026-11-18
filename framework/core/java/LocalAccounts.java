@@ -297,7 +297,7 @@ final class LocalAccounts {
         return result;
     }
 
-    private static void reply(IAccountManagerResponse response, Bundle result) {
+    static void reply(IAccountManagerResponse response, Bundle result) {
         try {
             if (response != null) response.onResult(result);
         } catch (RemoteException | RuntimeException e) {

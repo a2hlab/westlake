@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "candidate": 110,
+  "followUp": "candidate111.json identifies a stale client spawner address in the three retained launchers. The official processes were alive, but none of the 175 attempted client introductions in the rebuilt-runtime sample succeeded. See the corrected launch before interpreting SERVICE_INVALID.",
   "date": "2026-11-17",
   "package": "com.google.android.gm",
   "originalBaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
