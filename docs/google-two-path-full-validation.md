@@ -2066,6 +2066,19 @@ failure. In the retest the adapter recorded successful lookups of Google domains
 from Play services. Setup still did not reach an email or password field. Its
 dependency at that point remains unidentified. [Input, window and DNS evidence](../tests/google-auth/full48/candidate99.json)
 
+## YouTube player window and speaker route
+
+After the guest playback runs, with TikTok in the foreground, OpenHarmony's
+window manager reported a 1200 × 1920 YouTube activity and two 1200 × 675
+YouTube video windows. On one of those windows RenderService retained four
+1036 × 720 buffers. These background measurements distinguish the decoded
+buffer dimensions from the display area. They do not identify the video in
+those buffers or the scale used while “Me at the zoo” was playing.
+
+OpenHarmony's audio service attributed a 48 kHz stereo PCM stream on the
+speaker to the YouTube app. The stream was paused or stopped at inspection.
+Audible output during playback remains unverified.
+
 ## TikTok welcome animation on the OpenHarmony board
 
 The original TikTok 47.1.4 APK contains a 6.1-second, 500 × 500 HEVC welcome
@@ -2074,6 +2087,16 @@ an upright handset. The board screenshot shows the welcome slogan upright in a
 1200 × 1920 activity. It did not capture a moving frame of the welcome clip,
 so the displayed width, height and rotation of the animation are still unknown.
 [App and screen measurements](../tests/google-auth/full48/candidate101.json)
+
+The welcome widget inflates `res/b/i0b.xml`. Its video containers request
+the full width and height of their parent. The APK has an optional
+`TextureView` callback that compares the surface **height divided by width**
+with 16/9, then scales one axis about the top center. In these units a
+16/9 target describes a tall surface. The callback calls
+`TextureView.setTransform` with a scale matrix. Its enabling flag defaults
+to false in the widget constructor. The widget also handles a `SurfaceView`.
+The available board screenshots do not identify the active player path or
+show either transform acting on a moving frame.
 
 In a separate board test, OpenHarmony’s hardware decoder accepted the original
 clip and then returned error 6 before its first output frame. Both memory
