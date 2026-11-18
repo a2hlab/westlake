@@ -1,7 +1,9 @@
+import android.location.Criteria;
 import android.location.ILocationCallback;
 import android.location.ILocationListener;
 import android.location.ILocationManager;
 import android.location.Location;
+import android.location.LocationManager;
 import android.location.LocationRequest;
 import android.os.IRemoteCallback;
 import adapter.core.LocationManagerAdapter;
@@ -35,9 +37,27 @@ public final class LocationRequestLifecycleProbe {
         if (!value) throw new AssertionError(message);
     }
 
+    private static void checkGpsPolicy(ILocationManager service, boolean gnssEnabled) throws Exception {
+        String gps = LocationManager.GPS_PROVIDER;
+        String fused = LocationManager.FUSED_PROVIDER;
+        String network = LocationManager.NETWORK_PROVIDER;
+        check(service.hasProvider(gps) && service.getAllProviders().contains(gps)
+                && service.getProviders(null, false).contains(gps), "GPS missing from installed providers");
+        check(service.isProviderEnabledForUser(gps, 0) == gnssEnabled, "GPS enabled state differs from policy");
+        List<String> enabled = service.getProviders(null, true);
+        check(enabled.contains(gps) == gnssEnabled && enabled.contains(network) && enabled.contains(fused),
+                "enabled provider list differs from policy");
+        Criteria fine = new Criteria();
+        fine.setAccuracy(Criteria.ACCURACY_FINE);
+        check((gnssEnabled ? gps : fused).equals(service.getBestProvider(fine, true)), "best enabled provider");
+        check(gps.equals(service.getBestProvider(fine, false)), "best installed provider");
+    }
+
     private static void checkListenerReplacement(Map<Integer, Object> requests, Map<?, ?> keys) throws Exception {
         switchOff();
         ILocationManager service = ILocationManager.Stub.asInterface(LocationManagerAdapter.getBinder());
+        check(service.getProviders(null, true).isEmpty() && service.getBestProvider(null, true) == null,
+                "enabled providers while system location is off");
         ILocationListener listener = new ILocationListener.Stub() {
             @Override public void onLocationChanged(List<Location> locations, IRemoteCallback done) {
                 throw new AssertionError("listener received a location while off");
@@ -60,6 +80,8 @@ public final class LocationRequestLifecycleProbe {
         System.load(fixtureLibrary);
         check(isFixtureBound(), "test location provider not loaded");
         System.load(bridgeLibrary);
+        checkGpsPolicy(ILocationManager.Stub.asInterface(LocationManagerAdapter.getBinder()),
+                !"0".equals(System.getenv("WESTLAKE_LOCATION_GNSS")));
         Class<?> adapter = Class.forName("adapter.core.LocationManagerAdapter");
         Class<?> request = Class.forName("adapter.core.LocationManagerAdapter$Request");
         Constructor<?> constructor = request.getDeclaredConstructor(String.class, LocationRequest.class, Object.class);

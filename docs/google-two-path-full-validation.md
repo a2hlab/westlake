@@ -2121,6 +2121,34 @@ we cannot attribute its missing fix to that event alone. The board has demonstra
 approximate grant and its revocation. Delivery of a physical location remains
 open. [Board evidence](../tests/google-auth/full48/candidate88.json)
 
+### GPS availability when GNSS is disabled
+
+The original Maps APK asked for the Android GPS provider. During the earlier
+approximate-location grant, the retained process logged three explicit GPS
+subscriptions that opened low-power OpenHarmony requests. Two starts fell in
+the previously published observation window. The launcher had GNSS disabled.
+
+Westlake now reports GPS disabled under that launcher setting. GPS remains
+in the installed-provider list. Android's enabled-provider list excludes it
+and a fine-accuracy query for the best enabled provider selects fused. An
+explicit GPS subscription stays off the native positioning service. The
+adapter also withholds cached GPS results while GPS is disabled.
+
+A test through Android's location service on the board reproduced the old
+enabled-state error. The rebuilt adapter passed with GNSS enabled and disabled
+using a process-local fixture. On the separate retained Maps runtime, 143
+original Java inputs were verified and only the location adapter source
+changed. Original Maps opened its main window, queried provider status and
+exercised the disabled GPS path. The test did not obtain a physical fix.
+
+Both network-provider parameters were absent on the board. The installed
+network-location library checks for a nonempty bundle name before looking
+up the provider app. None of the 149 files in the three inspected parameter
+directories assigned either name. A product with a network-positioning
+provider needs its installed bundle and ability configured before this
+route can be retested.
+[Maps build identities, controls and board observations](../tests/google-auth/full48/candidate127.json)
+
 ### Location request completion and cancellation
 
 A board test reproduced a duplicate one-shot answer when the provider delivered

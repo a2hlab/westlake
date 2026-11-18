@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "candidate": 127,
+  "date": "2026-11-18",
+  "previous": "candidate126.json",
+  "scope": "GPS availability under the Westlake GNSS configuration and the physical positioning dependency for original Maps.",
+  "archivedApproximateGrant": {
+    "oldApproximateWholeProcessExplicitGpsLowPowerEvents": 3,
+    "boundedWindowAcceptedInLegacyReport": 2
+  },
+  "headlessBoardChecks": {
+    "fixture": "In-process LocationKit fixture on the physical board. Each mode started in a new ART process. The tests queried ILocationManager and also exercised the existing one-shot and cancellation controls.",
+    "probeSha256": "8d8a3fe9a9be61ace568961a027d6e1848873b0f875b14e72adcc205aaa9be8a",
+    "results": {
+      "previous": {
+        "adapterJarSha256": "56ff5e18b69bf5e38cc6898b0308e19339660873c437d0856e9fc67df1e8cf0f",
+        "nativeLocationBridgeSha256": "ab6ecc29b59d21dc3fde332a7b58f481770224589c936b4055bf3ac37e7eb182",
+        "modes": {
+          "disabled": {
+            "exitCode": 1,
+            "outcome": "GPS reported enabled despite disabled policy"
+          },
+          "enabled": {
+            "exitCode": 0,
+            "outcome": "provider selection, global off and lifecycle checks passed"
+          }
+        }
+      },
+      "fixed": {
+        "adapterJarSha256": "2de94c14b5bf26a9c387962a954e02f26f0ebd5fc9eb5bd2f1a3e6616f1cb201",
+        "nativeLocationBridgeSha256": "ab6ecc29b59d21dc3fde332a7b58f481770224589c936b4055bf3ac37e7eb182",
+        "modes": {
+          "disabled": {
+            "exitCode": 0,
+            "outcome": "provider selection, global off and lifecycle checks passed"
+          },
+          "enabled": {
+            "exitCode": 0,
+            "outcome": "provider selection, global off and lifecycle checks passed"
+          }
+        }
+      }
+    }
+  },
+  "originalMaps": {
+    "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+    "testHostUid": 20010062,
+    "retainedHostHapSha256": "bd521baac20f7b6c3b4b36fdaa74c93e91840b329e9f3762648adb2e53587b63",
+    "baseline": {
+      "originalWindowSeen": true,
+      "checkedProviderEnabled": true,
+      "gpsListenersWhileDenied": 3
+    },
+    "matchedBuild": {
+      "sourceCommit": "028a7885467b001f70fbb42cf717b98afab4ccbb",
+      "originalInputsVerified": 143,
+      "changedInput": "framework/core/java/LocationManagerAdapter.java",
+      "beforeSha256": "2c27cf51bedb0fb868b699380eeee81090021f017ba90f05a310396b88fd0c23",
+      "afterSha256": "ac3051f10c7ed8af88303e718e9541faa40a09330897d0ee19be637250e713cc"
+    },
+    "deployedRuntime": {
+      "originalAppLive": true,
+      "verifiedChangedRuntimeFiles": 9,
+      "adapterSha256": "e4a5ef712a8ab2a21643e70e73ec90e98d94ce58cc667c0f9f3c15561c1f8727",
+      "productionFrameworkSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc"
+    },
+    "ui": {
+      "repairedRuntimeRetained": true,
+      "baseApkHashVerifiedInBothLaunches": true,
+      "coldLaunchesWithFix": 2,
+      "checkedProviderEnabledAndReachedDisabledGpsOnBothLaunches": true,
+      "mainMapAndTilesDisplayed": true,
+      "locationButtonResult": "The app displayed Turn on your location in Google Maps settings, with No thanks and Go to settings.",
+      "approximateAndPreciseHostLocationGrants": "denied",
+      "gpsRequestsSentToLowPowerDuringButtonObservation": 0,
+      "fixEventsDuringButtonObservation": 0,
+      "physicalGnssActivated": false,
+      "realLocationAccepted": false,
+      "freshPositiveGrantTestPerformed": false,
+      "serviceListeners": 3,
+      "originalGmailPrimaryRestored": true
+    }
+  },
+  "productNetworkLocation": {
+    "sourceRevision": "726a641804ecc27c4c92eabbecdd071961710071",
+    "installedNetworkAbilitySha256": "818b47ef5f39d39dca24f1de7dc02b7f5cd1ecc0bfe438721491cbd8aeef6f7b",
+    "firmwareCodeObservation": "The installed network ability uses an empty fallback for the system property. On a disconnected request, failure to obtain a nonempty bundle name is handled before it checks whether that app is installed. Connection also requires the ability name.",
+    "runtimeParameterErrors": {
+      "const.location.nlp_service_name": 106,
+      "const.location.nlp_ability_name": 106
+    },
+    "parameterFilesExamined": 149,
+    "filesAssigningEitherParameter": 0,
+    "installedBundlesExamined": 73,
+    "abilitiesExamined": 78,
+    "extensionsExamined": 253,
+    "metadataResult": "No component name or inspected metadata field matched the network-location provider naming patterns. An implementation with unrelated names remains possible."
+  },
+  "interpretation": "The original Maps APK requested Android GPS while the board runtime had GNSS disabled. The old adapter reported GPS enabled and previously opened low-power OpenHarmony requests for that provider. The repaired adapter reports GPS disabled and keeps it out of enabled-provider selection. The original APK ran on the matched repair and its explicit GPS subscription reached the disabled-provider path. The host still lacks a configured network-location provider. A physical Maps fix remains unverified."
+}

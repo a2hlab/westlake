@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * What it answers:
  * - Location is on when OH's location switch is (OH_Location_IsLocatingEnabled). The providers are Android's four:
- *   gps, network, fused and passive. OH chooses the source itself.
+ *   gps, network, fused and passive. Disabling GNSS in the runtime also disables Android's GPS provider.
  * - Requests (registerLocationListener, registerLocationPendingIntent, getCurrentLocation) become OH requests:
  *   the interval from the LocationRequest, the power scene from its quality. Their fixes reach the listener,
  *   PendingIntent or callback as Android's location manager delivers them, with the request's minimum distance,
@@ -179,7 +179,7 @@ public final class LocationManagerAdapter {
      * network positioning. On a device without a network location service (this board: OH's NetworkAbility finds
      * none) OH files a low-power request as passive and it gets fixes only while someone else locates.
      *
-     * WESTLAKE_LOCATION_GNSS=0 keeps every request off GNSS (low power instead), for a device where starting GNSS
+     * WESTLAKE_LOCATION_GNSS=0 disables explicit GPS and keeps fused requests on low power for a device where GNSS
      * does harm. On the test board OH's GNSS start fails, and about two minutes later its WiFi driver fails every
      * scan and WiFi stays down until a reboot (seen twice; the radio is likely shared). A HAP asking for GNSS does
      * the same there; the switch keeps Westlake's apps from doing it.
@@ -194,6 +194,10 @@ public final class LocationManagerAdapter {
     }
 
     private static final boolean GNSS = !"0".equals(System.getenv("WESTLAKE_LOCATION_GNSS"));
+
+    private static boolean disabledProvider(String provider) {
+        return !GNSS && LocationManager.GPS_PROVIDER.equals(provider);
+    }
 
     private static int intervalSeconds(LocationRequest request) {
         long millis = request != null ? request.getIntervalMillis() : 1000;
@@ -211,6 +215,10 @@ public final class LocationManagerAdapter {
         if (!locationOn()) {
             System.err.println("[" + TAG + "] " + how + " " + r.id + " for " + r.provider
                     + ": registered, no fixes while location is " + describe(state()));
+            return false;
+        }
+        if (disabledProvider(r.provider)) {
+            System.err.println("[" + TAG + "] " + how + " " + r.id + ": GPS disabled by runtime configuration");
             return false;
         }
         if (!hostMayLocate()) {
@@ -396,7 +404,7 @@ public final class LocationManagerAdapter {
                 case "isLocationEnabledForUser":
                     return locationOn();
                 case "isProviderEnabledForUser":
-                    return locationOn() && PROVIDERS.contains((String) args[0]);
+                    return locationOn() && PROVIDERS.contains((String) args[0]) && !disabledProvider((String) args[0]);
                 case "hasProvider":
                     return available() && PROVIDERS.contains((String) args[0]);
                 case "getAllProviders":
@@ -404,19 +412,23 @@ public final class LocationManagerAdapter {
                 case "getProviders": {
                     boolean enabledOnly = (Boolean) args[1];
                     boolean none = !available() || (enabledOnly && !locationOn());
-                    return none ? new ArrayList<String>() : new ArrayList<>(PROVIDERS);
+                    if (none) return new ArrayList<String>();
+                    List<String> providers = new ArrayList<>(PROVIDERS);
+                    if (enabledOnly) providers.removeIf(LocationManagerAdapter::disabledProvider);
+                    return providers;
                 }
                 case "getBestProvider": {
-                    if (!available() || ((Boolean) args[1] && !locationOn())) return null;
+                    boolean enabledOnly = (Boolean) args[1];
+                    if (!available() || (enabledOnly && !locationOn())) return null;
                     Criteria criteria = (Criteria) args[0];
-                    return criteria != null && criteria.getAccuracy() == Criteria.ACCURACY_FINE
+                    return criteria != null && criteria.getAccuracy() == Criteria.ACCURACY_FINE && (!enabledOnly || GNSS)
                             ? LocationManager.GPS_PROVIDER : LocationManager.FUSED_PROVIDER;
                 }
                 case "getProviderProperties":
                     return properties((String) args[0]);
                 case "getLastLocation": {
                     Location last = sLast;
-                    if (last == null || !locationOn() || !hostMayLocate()) return null;
+                    if (last == null || disabledProvider((String) args[0]) || !locationOn() || !hostMayLocate()) return null;
                     Location copy = new Location(last);
                     copy.setProvider((String) args[0]);
                     return copy;
