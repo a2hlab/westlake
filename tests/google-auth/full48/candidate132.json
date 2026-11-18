@@ -1,0 +1,339 @@
+{
+  "schema": 1,
+  "candidate": 132,
+  "date": "2026-11-18",
+  "previous": "candidate131.json",
+  "scope": "Determine how the recovery Intent from an original Gmail mailbox sync is addressed and whether a standard package-manager query from the Gmail UID can resolve it.",
+  "baseApkSha256": {
+    "gmail": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "official": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "store": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272"
+  },
+  "mappedApkManifestsVerified": {
+    "gmail": 4,
+    "official": 3,
+    "store": 7
+  },
+  "manifestActivityEntryCount": 959,
+  "publicManifestFilterValueCount": 467,
+  "normalClientRoutes": {
+    "remoteActivityDispatchEnabled": true,
+    "remoteServiceConnectionConfigured": true,
+    "localSyncEnabled": true
+  },
+  "observations": {
+    "149": {
+      "verifiedPreloadFiles": 469,
+      "adapterJarSha256": "9969e865fc1b2037334d50d3239e291cb27ee76c55a51780c671a6a01949e912",
+      "originalAppInputSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "jobWindow": {
+        "duringJob": {
+          "start": 1,
+          "auth": 1,
+          "finish": 1
+        },
+        "afterJob": {},
+        "wholeProcess": {
+          "nativeNotifyBinding": 1,
+          "auth": 9,
+          "start": 1,
+          "finish": 1
+        },
+        "jobDurationMs": 4292,
+        "authReplyMsAfterStart": [
+          4059
+        ]
+      },
+      "mailboxJobStatus": {
+        "replyCount": 1,
+        "categories": {
+          "statusBadAuthentication": 1,
+          "recoveryKeyPresent": 1,
+          "withRecovery": 1
+        }
+      },
+      "jobReportedSuccess": false,
+      "availableMiBAtStart": 722,
+      "result": {
+        "originalJobAuthResult": "BadAuthentication",
+        "recoveryIntentNonNull": true,
+        "shape": "implicit",
+        "selectorOrComponentRole": null,
+        "duringRecordedMailboxJob": true,
+        "readExtras": false,
+        "launchedRecovery": false
+      },
+      "sampledRecoveryLabels": [],
+      "inboxAfterRestore": {
+        "originalInbox": [
+          {
+            "primary": true,
+            "listMatchesPriorBaseline": true
+          },
+          {
+            "primary": true,
+            "listMatchesPriorBaseline": true
+          }
+        ],
+        "autoSync": true,
+        "listeners": {
+          "microG": 1,
+          "officialGms": 1,
+          "store": 1
+        },
+        "verifiedPackage": true
+      },
+      "recoveryControlsInRestoredInbox": []
+    },
+    "150": {
+      "verifiedPreloadFiles": 469,
+      "adapterJarSha256": "dbbd7de732fe6319974944bc6391288858cfb4485d237392f0b7a882710b6606",
+      "originalAppInputSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "jobWindow": {
+        "duringJob": {
+          "start": 1,
+          "auth": 1,
+          "finish": 1
+        },
+        "afterJob": {},
+        "wholeProcess": {
+          "nativeNotifyBinding": 1,
+          "auth": 9,
+          "start": 1,
+          "finish": 1
+        },
+        "jobDurationMs": 3470,
+        "authReplyMsAfterStart": [
+          3224
+        ]
+      },
+      "mailboxJobStatus": {
+        "replyCount": 1,
+        "categories": {
+          "statusBadAuthentication": 1,
+          "recoveryKeyPresent": 1,
+          "withRecovery": 1
+        }
+      },
+      "jobReportedSuccess": false,
+      "availableMiBAtStart": 715,
+      "result": {
+        "error": "BadAuthentication",
+        "recovery_intent_present": "true",
+        "recovery_route": "implicit",
+        "recovery_role": "officialPackage",
+        "action_kind": "manifest",
+        "category_count": "0",
+        "data_kind": "other",
+        "type_present": "false",
+        "filter_lookup": "limited",
+        "actionInVerifiedManifests": true
+      },
+      "sampledRecoveryLabels": [],
+      "inboxAfterRestore": {
+        "originalInbox": [
+          {
+            "primary": true,
+            "listMatchesPriorBaseline": true
+          },
+          {
+            "primary": true,
+            "listMatchesPriorBaseline": true
+          }
+        ],
+        "autoSync": true,
+        "listeners": {
+          "microG": 1,
+          "officialGms": 1,
+          "store": 1
+        },
+        "verifiedPackage": true
+      },
+      "recoveryControlsInRestoredInbox": []
+    },
+    "151": {
+      "verifiedPreloadFiles": 469,
+      "adapterJarSha256": "9620a06426c0fed7f757dec93c7bb22d7373b6ffa9eabe208937223437c08b01",
+      "originalAppInputSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "jobWindow": {
+        "duringJob": {
+          "start": 1,
+          "auth": 1,
+          "finish": 1
+        },
+        "afterJob": {},
+        "wholeProcess": {
+          "nativeNotifyBinding": 1,
+          "auth": 8,
+          "start": 1,
+          "finish": 1
+        },
+        "jobDurationMs": 3553,
+        "authReplyMsAfterStart": [
+          3362
+        ]
+      },
+      "mailboxJobStatus": {
+        "replyCount": 1,
+        "categories": {
+          "statusBadAuthentication": 1,
+          "recoveryKeyPresent": 1,
+          "withRecovery": 1
+        }
+      },
+      "jobReportedSuccess": false,
+      "availableMiBAtStart": 645,
+      "result": {
+        "error": "BadAuthentication",
+        "recovery_intent_present": "true",
+        "recovery_route": "implicit",
+        "recovery_role": "officialPackage",
+        "action_kind": "manifest",
+        "category_count": "0",
+        "data_kind": "other",
+        "type_present": "false",
+        "original_filter_bits": "2",
+        "public_filter_bits": "2",
+        "filter_lookup": "publicEquivalent",
+        "actionInVerifiedManifests": true,
+        "observations": [
+          {
+            "test": "knownImplicit",
+            "resolution": "present",
+            "default_count": "1",
+            "unfiltered_count": "1",
+            "target_role": "gmail",
+            "enabled": "true",
+            "exported": "true",
+            "app_enabled": "true",
+            "permission_required": "false",
+            "verifiedManifestActivity": {
+              "role": "gmail",
+              "exported": true,
+              "enabledByManifestDefault": true,
+              "componentPermissionDeclared": false,
+              "alias": false
+            }
+          },
+          {
+            "test": "missingImplicit",
+            "resolution": "absent",
+            "default_count": "0",
+            "unfiltered_count": "0"
+          },
+          {
+            "test": "recoveryImplicit",
+            "resolution": "present",
+            "default_count": "1",
+            "unfiltered_count": "1",
+            "target_role": "officialPackage",
+            "enabled": "true",
+            "exported": "true",
+            "app_enabled": "true",
+            "permission_required": "false",
+            "verifiedManifestActivity": {
+              "role": "official",
+              "exported": true,
+              "enabledByManifestDefault": true,
+              "componentPermissionDeclared": false,
+              "alias": false
+            }
+          }
+        ],
+        "directManifestComponentChecks": [
+          {
+            "test": "foreign",
+            "info": "exact",
+            "enabled": "true",
+            "appEnabled": "true",
+            "exported": "true",
+            "permissionRequired": "false",
+            "resolved": "exact"
+          }
+        ]
+      },
+      "sampledRecoveryLabels": [],
+      "inboxAfterRestore": {
+        "originalInbox": [
+          {
+            "primary": true,
+            "listMatchesPriorBaseline": true
+          },
+          {
+            "primary": true,
+            "listMatchesPriorBaseline": true
+          }
+        ],
+        "autoSync": true,
+        "listeners": {
+          "microG": 1,
+          "officialGms": 1,
+          "store": 1
+        },
+        "verifiedPackage": true
+      },
+      "recoveryControlsInRestoredInbox": []
+    }
+  },
+  "privacy": "Published data excludes addresses, user data, Intent extras, URLs, tokens and account identifiers. No recovery activity was launched by these diagnostics.",
+  "publicRoutingFilterControl": {
+    "intentRestrictedToPlayServicesPackage": true,
+    "declaredActivitiesForTheAction": 1,
+    "declaredFiltersForTheAction": 2,
+    "declaredUriConstraints": [
+      "scheme",
+      "authority"
+    ],
+    "usesNoUriPathQueryOrFragmentForMatching": true,
+    "actualAndInertQueryMatchedSameSingleFilter": true,
+    "implicitQueryUsedPublicConstantsOnly": true,
+    "queryResolvedUniqueDeclaredOfficialActivity": true,
+    "directActivityInfoMatchedOfficialManifest": true,
+    "originalUriForwardedOrLoggedByTest": false,
+    "payloadOrNestedActionsExamined": false,
+    "dispatchTestPerformed": false
+  },
+  "originalGmailGetterObservation": {
+    "originalDexInspection": {
+      "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "originalAuthExceptionGetter": "com.google.android.gms.auth.UserRecoverableAuthException.a()",
+      "nonNullStoredIntentBranchCallsAndroidIntentCopyConstructorBeforeReturning": true,
+      "methodContainsExceptionHandlers": false,
+      "readsIntentContents": false
+    },
+    "androidIntentConstructorsObserved": [
+      "Intent(Intent)",
+      "Intent(String, Uri)"
+    ],
+    "controlUsedEmptySyntheticIntent": true,
+    "counts": {
+      "job": {
+        "syntheticCopyControl": 1,
+        "originalExceptionNonNullGetter": 0,
+        "otherExceptionCopy": 0,
+        "officialAuthReplies": 1,
+        "mailboxCompletions": 1
+      },
+      "completionThroughEndOfLog": {
+        "syntheticCopyControl": 0,
+        "originalExceptionNonNullGetter": 0,
+        "otherExceptionCopy": 0,
+        "officialAuthReplies": 0,
+        "mailboxCompletions": 1
+      },
+      "wholeSettingsProcess": {
+        "syntheticCopyControl": 6,
+        "originalExceptionNonNullGetter": 0,
+        "otherExceptionCopy": 0,
+        "officialAuthReplies": 8,
+        "mailboxCompletions": 1
+      }
+    }
+  },
+  "interpretation": "During an original Gmail mailbox sync, the official service returned BadAuthentication with an implicit recovery intent scoped to Google Play services. Android matched the original intent and a query built only from published routing metadata to the same published filter. From Gmail, the package manager found one enabled, exported official activity. During the job, the observer recorded zero copies from the non-null path of Gmail’s recovery-exception accessor. No new mail delivery was verified.",
+  "limits": [
+    "Resolution was checked without sending the actual recovery intent. It does not prove that the page can open, finish account recovery, or fetch mail.",
+    "The constructor observer is specific to the original exception accessor and its non-null return path. Other application paths may handle recovery differently.",
+    "The authentication result does not identify the reason for the refusal."
+  ]
+}

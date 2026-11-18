@@ -1676,6 +1676,15 @@ With space above the threshold, turning **Sync Gmail** back on in the original a
 The jobs lasted 1.34 and 4.67 seconds. Neither job window recorded a remote activity launch or a pending-intent send. The sampled settings and inbox screens showed none of the recovery controls checked. A brief prompt could fall between captures. Automatic sync was on when the original runtime was restored. The reason for the authentication rejection and delivery of the test message remain open.
 [Storage comparison and explicit mailbox sync on the board](../tests/google-auth/full48/candidate131.json)
 
+#### Can Gmail find a receiver for account recovery?
+
+Three settings-triggered mailbox syncs returned `BadAuthentication` and a non-null recovery intent. The intent named the Play services package and left Android to select the activity. Its action appeared in two filters on one exported activity in the signed Play services APK. One filter specified a URI scheme and authority.
+
+In the last run, Android evaluated those filters inside Gmail. The real response and an inert query containing only the public routing fields matched the same single filter. Gmail’s package manager resolved exactly one enabled, exported Play services activity, and a direct component lookup agreed. A known Gmail settings action resolved and an invented action returned zero matches. The test kept the original URI inside Gmail and did not launch the recovery activity.
+
+During the job, the observer recorded zero copies from the non-null path of Gmail’s recovery-exception accessor. The signed APK copies the stored intent with `Intent(Intent)` when that accessor returns a non-null value. The board observed a separate synthetic copy during the same job. During the job, the Gmail process recorded zero successful remote activity starts and zero pending-intent sends. Automatic sync was on and the original inbox was restored after each run. New mail delivery remains open.
+[Recovery intent, package resolution and getter observations](../tests/google-auth/full48/candidate132.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
