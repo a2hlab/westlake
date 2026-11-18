@@ -83,6 +83,8 @@ void oh_wm_set_ime_active(int active) { g_imeActive.store(active != 0); }
 struct NativeWindow;
 typedef struct NativeWindow OHNativeWindow;
 extern "C" OHNativeWindow* CreateNativeWindowFromSurface(void* pSurface);
+// Some builds omit the ability-owned input consumer.
+extern "C" void oh_owned_input_forget_window(int32_t session) __attribute__((weak));
 // 2026-05-12 G2.14aw probe A.1: read producer uniqueId from OHNativeWindow.
 // Defined in libnative_window.so; signature stable per
 // graphic_surface/interfaces/inner_api/surface/external_window.h:674.
@@ -2313,6 +2315,7 @@ int OHWindowManagerClient::notifyDrawingCompleted(int32_t sessionId) {
 }
 
 void OHWindowManagerClient::destroySession(int32_t sessionId) {
+    if (oh_owned_input_forget_window) oh_owned_input_forget_window(sessionId);
     OH_BR_IPC_SCOPE("WMClient.destroySession", "session=%{public}d", sessionId);
 
     OHOS::sptr<OHOS::Rosen::ISession> sessionProxy;

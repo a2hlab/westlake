@@ -46,9 +46,11 @@ public:
             if (action == 0) downNs = time;
             const float x = item.GetWindowX(), y = item.GetWindowY();
             const int rc = touch(bridge(), action, x, y, downNs ? downNs : time, time);
-            if (action != 2) std::fprintf(stderr,
-                "[OH_OWNED_INPUT] window=%d action=%d x=%.0f y=%.0f rc=%d\n",
-                event->GetTargetWindowId(), action, x, y, rc);
+            if (rc < 0) {
+                std::fprintf(stderr, "[OH_OWNED_INPUT] touch dispatch failed rc=%d\n", rc);
+            } else if (action == 1 && std::getenv("WESTLAKE_INPUT_DIAGNOSTICS")) {
+                std::fputs("[OH_OWNED_INPUT] touch release forwarded\n", stderr);
+            }
             if (action == 1 || action == 3) downNs = 0;
         }
         event->MarkProcessed();
@@ -77,6 +79,11 @@ public:
         if (event) event->MarkProcessed();
     }
 };
+}
+
+extern "C" void oh_owned_input_forget_window(int32_t session) {
+    std::lock_guard<std::mutex> guard(mutex);
+    windows.erase(session);
 }
 
 extern "C" int oh_owned_input_subscribe(int32_t session) {

@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "candidate": 118,
+  "date": "2026-11-18",
+  "previous": "candidate117.json",
+  "originalGmailApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "accountMode": "Official Play services and Store, without a delegated account provider. The dedicated host kept the same APK and app data across the native library changes.",
+  "dedicatedWindowInput": {
+    "originalLibrarySha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+    "originalRelinkSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+    "updatedLibrarySha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070",
+    "inputHelperSourceSha256": "7b74c9cb59b7239973d7920d40631784882e2a762008d18ba834735f1477db83",
+    "sourceInventories": {
+      "bridge": {
+        "compiledObjects": 53,
+        "errors": 0,
+        "matchingEventHandlerHeader": true
+      },
+      "bridge15": {
+        "compiledObjects": 52,
+        "errors": 0,
+        "matchingEventHandlerHeader": true
+      }
+    },
+    "libraryChange": "Build the existing hosted-window consumer into the bridge. Remove retired window IDs on session teardown. Report dispatch failures without recording touch coordinates.",
+    "boardAudit": {
+      "knownOriginalApkAndMappedBridgeVerified": true,
+      "registeredWithSystemReturnCodes": [
+        0
+      ],
+      "guestWindowListedInWindowAndInputManagers": true,
+      "guestInputClientRegistered": true,
+      "hostUid": 20010066,
+      "hostPackage": "org.westlake.apk.com.google.android.gm",
+      "appDataMode": "700",
+      "rawTouchForwarderProcessCount": 0,
+      "inputTestMode": "isolated"
+    },
+    "comparison": {
+      "control": [
+        {
+          "control": "Got it",
+          "input": "system",
+          "startScreen": "welcome",
+          "lastScreen": "welcome",
+          "secondsAfterInput": 18.5,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Got it",
+          "input": "app",
+          "startScreen": "welcome",
+          "lastScreen": "add account",
+          "secondsAfterInput": 6.4,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Add an email address",
+          "input": "system",
+          "startScreen": "add account",
+          "lastScreen": "add account",
+          "secondsAfterInput": 19.1,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Add an email address",
+          "input": "app",
+          "startScreen": "add account",
+          "lastScreen": "providers",
+          "secondsAfterInput": 10.1,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Other",
+          "input": "system",
+          "startScreen": "providers",
+          "lastScreen": "providers",
+          "secondsAfterInput": 31.3,
+          "officialMainBeforeAndAfter": true
+        }
+      ],
+      "updated": [
+        {
+          "control": "Got it",
+          "input": "system",
+          "startScreen": "welcome",
+          "lastScreen": "welcome",
+          "secondsAfterInput": 19.5,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Got it",
+          "input": "app",
+          "startScreen": "welcome",
+          "lastScreen": "add account",
+          "secondsAfterInput": 6.6,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Add an email address",
+          "input": "system",
+          "startScreen": "add account",
+          "lastScreen": "providers",
+          "secondsAfterInput": 10.0,
+          "officialMainBeforeAndAfter": true
+        },
+        {
+          "control": "Other",
+          "input": "system",
+          "startScreen": "providers",
+          "lastScreen": "manual address",
+          "secondsAfterInput": 7.0,
+          "officialMainBeforeAndAfter": true
+        }
+      ],
+      "controlFinalPage": "providers",
+      "updatedFinalPage": "manual address",
+      "target": "One OpenHarmony UI Test click on the visible Other provider row. The expected next page was Add your email address. No address was entered.",
+      "inputNames": {
+        "system": "OpenHarmony UI Test click on a control read from the focused original app",
+        "app": "App-local test click used only to prepare the same screen"
+      }
+    },
+    "scope": "Guest-to-host input with one active app. Choosing Other exercises navigation. Google account enrollment, authentication, physical finger input and simultaneous input isolation need separate evidence.",
+    "googleProviderControl": {
+      "first": [
+        "Add your email address",
+        "Email address"
+      ],
+      "manualAccountNeverEntered": true,
+      "googleRowTapped": true,
+      "samples": [
+        {
+          "seconds": 5.9,
+          "foreground": "dedicated Gmail",
+          "controls": [
+            "Google",
+            "Other",
+            "Outlook, Hotmail, and Live",
+            "Set up email",
+            "Yahoo"
+          ]
+        },
+        {
+          "seconds": 15.1,
+          "foreground": "dedicated Gmail",
+          "controls": [
+            "Google",
+            "Other",
+            "Outlook, Hotmail, and Live",
+            "Set up email",
+            "Yahoo"
+          ]
+        },
+        {
+          "seconds": 32.8,
+          "foreground": "dedicated Gmail",
+          "controls": [
+            "Google",
+            "Other",
+            "Outlook, Hotmail, and Live",
+            "Set up email",
+            "Yahoo"
+          ]
+        }
+      ],
+      "signedInAccountObserved": false,
+      "credentialsSubmitted": false
+    }
+  },
+  "retainedMailbox": {
+    "earlierIndependentSearch": {
+      "windowOwnedByOriginalGmail": true,
+      "enteredThrough": "On-screen OpenHarmony keyboard",
+      "filter": "after:2026/11/16",
+      "observationsSeconds": [
+        3,
+        15,
+        35
+      ],
+      "result": "After pressing Search, the original app continued to show the date filter and keyboard. No result list or completion was observed. The query does not establish server receipt."
+    },
+    "originalProfileRefresh": {
+      "officialServiceBefore": true,
+      "focusedBefore": true,
+      "controlsBefore": [
+        "Getting your messages",
+        "Search in mail"
+      ],
+      "appTestGestureConsumed": true,
+      "screens": [
+        {
+          "atSeconds": 6.0,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ],
+          "officialServiceActive": true
+        },
+        {
+          "atSeconds": 17.9,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ],
+          "officialServiceActive": true
+        },
+        {
+          "atSeconds": 38.0,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ],
+          "officialServiceActive": true
+        }
+      ],
+      "localSyncEventsAfterGesture": {
+        "events": 0,
+        "requests": 0,
+        "starts": 0,
+        "finishes": 0
+      },
+      "foregroundAtEnd": true
+    },
+    "targetMessageObserved": false,
+    "remoteReceiptChecked": false
+  }
+}

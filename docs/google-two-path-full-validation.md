@@ -22,7 +22,7 @@ at the app level.
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. After the Wi-Fi resolver fix, a repeat showed the same screen for 127 s. [Wi-Fi retest](../tests/google-auth/full48/candidate107.json) · [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The original APK played “Me at the zoo” to the end on fresh guest profiles and on two consecutive launches with retained guest data after the DNS repair. Nine samples per fresh run showed the 900 × 675 picture centered in the 1200 × 675 player. [Picture, color and audio](../tests/google-auth/full48/candidate106.json) · [Retained guest playback](../tests/google-auth/full48/candidate107.json) · [Original sign-in dialog](../tests/google-auth/full48/candidate108.json) | Google sign-in, signed-in restart persistence, physical audibility and picture geometry across other stream and player sizes. |
-| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) · [Repeat on the board](../tests/google-auth/full48/candidate117.json) |
+| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) · [Repeat on the board](../tests/google-auth/full48/candidate117.json) · [Touch input and live-service refresh](../tests/google-auth/full48/candidate118.json) |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
@@ -1503,6 +1503,44 @@ The run established neither a causal link between those events nor a Google
 backend verdict. The two classes that enforce the identity checks matched the
 previous build byte for byte. The diagnostic recorded only fixed reason codes.
 [Original Store and on-board refusal tests](../tests/google-auth/full48/candidate115.json)
+
+### Gmail touch input on its dedicated host
+
+The hosted window path looked up `oh_owned_input_subscribe` at runtime.
+Both native source inventories omitted its implementation. The Gmail bridge
+loaded on the board lacked that export. A control relink reproduced its SHA-256.
+The updated inventories include the consumer and compile it against the
+OpenHarmony event handler used by the device. The consumer drops its window ID
+when the native session is destroyed. Both inventories compiled. On the board,
+the system accepted the dedicated Gmail input client and listed its guest window
+in both the window manager and the input manager.
+
+Two builds used the same original Gmail APK, dedicated UID, stored app data and
+OpenHarmony UI Test click command. The official Play services main process was
+live before and after each click. The test used app-local input to prepare a
+screen whenever a system click failed. Each row below reports the system click.
+
+| Visible control | Previous bridge | Rebuilt bridge |
+| --- | --- | --- |
+| Got it | Still on the welcome page at 18.5 s | Still on the welcome page at 19.5 s |
+| Add an email address | Still on account setup at 19.1 s | Provider list visible at 10.0 s |
+| Other | Still on the provider list at 31.3 s | Manual email address page visible at 7.0 s |
+
+Selecting **Google** on the provider list left Gmail on **Set up email** through
+32.8 seconds. The Google account chooser never appeared during that interval.
+The manual setup test stopped before entering an address. The comparison covers system
+input to one foreground app. Physical finger input and concurrent app routing
+remain open. [App identities, native build checks and timed observations](../tests/google-auth/full48/candidate118.json)
+
+In the retained Gmail instance, the on-screen keyboard entered a date filter.
+Pressing Search left the filter and keyboard visible through 35 seconds without
+a result list. With official Play services active, the retained app then consumed
+a downward test gesture. Its window still showed **Getting your messages** in
+all three captures, the last at 38 seconds. The local sync trace recorded zero
+new requests, starts or completions. These controls used official services
+without a delegated account provider. Receipt of the sender's message in the
+original app remains unverified.
+[Retained Gmail observations](../tests/google-auth/full48/candidate118.json)
 
 ## Candidate 80: real periodic sync and the standard adapter caller guard
 
