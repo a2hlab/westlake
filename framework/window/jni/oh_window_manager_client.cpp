@@ -1198,8 +1198,12 @@ OHWindowSession OHWindowManagerClient::createSession(
         getenv("WL_NO_CONTENT_NODE") == nullptr) {
         OHOS::Rosen::RSSurfaceNodeConfig contentCfg;
         contentCfg.SurfaceNodeName = windowName + "_content";
+        // On the classic window manager (no SceneBoard session manager) the content node is a render-service node
+        // (isWindow=true). Created with isWindow=false it is a divided-render node: RS holds each of its modifiers
+        // twice (RSSurfaceNode::NeedForcedSendToRemote) and an update reaches one copy only, so a dialog placed at
+        // (27,432) 1026x1415 kept the display-sized bounds it was created with and was stretched to the display.
         wl_contentNode = OHOS::Rosen::RSSurfaceNode::Create(
-            contentCfg, OHOS::Rosen::RSSurfaceNodeType::SELF_DRAWING_NODE, /*isWindow=*/false);
+            contentCfg, OHOS::Rosen::RSSurfaceNodeType::SELF_DRAWING_NODE, /*isWindow=*/sceneProxy_ == nullptr);
         if (wl_contentNode != nullptr) {
             wl_contentNode->SetBounds(0.0f, 0.0f, static_cast<float>(requestedWidth),
                                       static_cast<float>(requestedHeight));
@@ -2466,7 +2470,18 @@ OHWindowSession OHWindowManagerClient::createSession(
         entry.sessionProxy = nullptr;
         entry.stageAdapter = nullptr;
         entry.eventChannel = nullptr;
-        entry.surfaceNode = surfaceNode;
+        // A window draws into its content node, as on the session path: its window node has the
+        // display-sized rect of its OH window, which the classic WMS sets again at every layout, and
+        // placement (applyPosition -> oh_rs_set_layer_bounds) moves the content node inside it. Drawn into
+        // the window node itself, a 1026x1415 dialog (with WL_SUB_WINDOW a host-parented sub-window like
+        // the activity's) was stretched to 1080x2280 (FrameGravity RESIZE: the WMS's bounds won over the
+        // placed ones). The window node is kept for destroySession (§538).
+        if (wl_contentNode != nullptr) {
+            wl_window_nodes()[sessionId] = surfaceNode;
+            entry.surfaceNode = wl_contentNode;
+        } else {
+            entry.surfaceNode = surfaceNode;
+        }
         // 2026-05-19: store WMS-side identity + property + visibility state
         // for hideWindow / showWindow helpers (counterpart to AddWindow above).
         entry.windowId = windowId;
