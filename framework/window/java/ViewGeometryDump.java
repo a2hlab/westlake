@@ -57,7 +57,9 @@ final class ViewGeometryDump {
                         .append(" vis=").append(visibility(root))
                         .append(" focus=").append(root.hasWindowFocus() ? 1 : 0)
                         .append(" sysui=0x").append(Integer.toHexString(root.getWindowSystemUiVisibility()))
-                        .append(" decorFits=").append(decorFits(root))
+                        .append(" decorFits=").append(windowFlag(root, "mDecorFitsSystemWindows"))
+                        .append(" enforcedE2E=").append(windowFlag(root, "mEdgeToEdgeEnforced"))
+                        .append(" e2eChange=").append(edgeToEdgeChange())
                         .append(" contentApplier=").append(contentApplier(root));
                 if (root.getLayoutParams() instanceof WindowManager.LayoutParams) {
                     WindowManager.LayoutParams lp = (WindowManager.LayoutParams) root.getLayoutParams();
@@ -147,17 +149,26 @@ final class ViewGeometryDump {
         }
     }
 
-    /** Whether the window's decor fits system windows (PhoneWindow), "?" when unknown. */
-    private static String decorFits(View root) {
+    /** A boolean field of the root's PhoneWindow (decor fits, edge-to-edge enforced), "?" when unknown. */
+    private static String windowFlag(View root, String name) {
         try {
             Field window = root.getClass().getDeclaredField("mWindow");
             window.setAccessible(true);
             Object phoneWindow = window.get(root);
             if (phoneWindow == null) return "?";
-            Field fits = phoneWindow.getClass().getDeclaredField("mDecorFitsSystemWindows");
-            fits.setAccessible(true);
-            return fits.getBoolean(phoneWindow) ? "1" : "0";
+            Field flag = phoneWindow.getClass().getDeclaredField(name);
+            flag.setAccessible(true);
+            return flag.getBoolean(phoneWindow) ? "1" : "0";
         } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return "?";
+        }
+    }
+
+    /** This process's answer for PhoneWindow.ENFORCE_EDGE_TO_EDGE, "?" when unknown. */
+    private static String edgeToEdgeChange() {
+        try {
+            return android.app.compat.CompatChanges.isChangeEnabled(309578419L) ? "1" : "0";
+        } catch (RuntimeException unavailable) {
             return "?";
         }
     }
