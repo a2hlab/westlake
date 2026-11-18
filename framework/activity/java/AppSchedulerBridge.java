@@ -716,7 +716,7 @@ public class AppSchedulerBridge {
             // told is disabled, so it enabled every Android 12-15 behaviour change for every app.
             // Termux targets 28 and threw from its service's onCreate on the SDK 31 PendingIntent
             // mutability rule; the 64 @Disabled changes were on for everyone as well.
-            long[] disabled = CompatChangeTable.disabledFor(appInfo.targetSdkVersion);
+            long[] disabled = withoutLaterEdgeToEdge(CompatChangeTable.disabledFor(appInfo.targetSdkVersion));
             setField(data, "disabledCompatChanges", disabled);
             System.err.println("[B43-BIND] compat: targetSdk=" + appInfo.targetSdkVersion
                     + " disabled " + disabled.length + " of " + CompatChangeTable.size()
@@ -1150,6 +1150,28 @@ public class AppSchedulerBridge {
         } catch (Throwable t) {
             System.err.println("[B43-BIND] WebView support hold not released: " + t);
         }
+    }
+
+    /** PhoneWindow.ENFORCE_EDGE_TO_EDGE: Android 15 draws a target-35+ app edge to edge. */
+    private static final long ENFORCE_EDGE_TO_EDGE = 309578419L;
+
+    /**
+     * The disabled changes, plus edge-to-edge enforcement while Westlake reports a platform older
+     * than Android 15. Android 14, which apps are told they run on, never enforces it; the Android 15
+     * framework underneath would for any app targeting 35 or later. An app that applies the insets
+     * itself only when SDK_INT is 35 or more then draws its content under the system bars: original
+     * Gmail's settings list started under its action bar, which took the taps meant for its rows.
+     * The result stays sorted, as AppCompatCallbacks binary-searches it.
+     */
+    static long[] withoutLaterEdgeToEdge(long[] disabled) {
+        if (android.os.Build.VERSION.SDK_INT >= 35
+                || java.util.Arrays.binarySearch(disabled, ENFORCE_EDGE_TO_EDGE) >= 0) {
+            return disabled;
+        }
+        long[] out = java.util.Arrays.copyOf(disabled, disabled.length + 1);
+        out[disabled.length] = ENFORCE_EDGE_TO_EDGE;
+        java.util.Arrays.sort(out);
+        return out;
     }
 
     private static android.content.res.CompatibilityInfo buildCompatInfo(
