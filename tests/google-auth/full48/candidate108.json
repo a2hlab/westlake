@@ -68,5 +68,12 @@
     "otherDiagnostic": "Package manager recorded the HTTPS host with a redacted path and no query or fragment. The Spotify process log sample contained no OAuth query parameter names.",
     "credentialsSubmittedDuringObservation": false,
     "authenticatedReturnVerified": false
+  },
+  "windowRouteConfiguration": {
+    "youtubeOutboundToGoogleConfigured": true,
+    "spotifyOutboundToGoogleConfigured": true,
+    "googleReturnToSpotifyConfigured": true,
+    "googleReturnToYouTubeConfigured": false,
+    "observedImpact": "YouTube stayed in its own account dialog. The test never reached the Google return step. The missing return route is an independent fixture gap."
   }
 }

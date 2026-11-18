@@ -2172,6 +2172,12 @@ profile, YouTube still displayed Add account for 43 seconds after the selection.
 The probe proves callback delivery. The app’s own UI has yet to demonstrate a
 Google sign-in or a signed-in restart. [Board evidence](../tests/google-auth/full48/candidate108.json)
 
+Both client launchers mapped Google to its native service host. The service
+launcher mapped a return to Spotify only. A concurrent window test must also
+supply the YouTube return route, `com.google.android.youtube:org.westlake.apk.com.google.android.youtube`,
+in the service host’s existing `WESTLAKE_REMOTE_HOST_ROUTES` list. The Accounts
+dialog never reached that return step in this run.
+
 ## TikTok welcome animation on the OpenHarmony board
 
 The original TikTok 47.1.4 APK contains a 6.1-second, 500 × 500 HEVC welcome
