@@ -55,6 +55,12 @@ public final class OHTouchInjector {
             lastEx = "null arg";
             return;
         }
+        if (ViewGeometryDump.isRequest(event)) {        // a geometry dump (no view text), not a touch
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                ViewGeometryDump.post();
+            }
+            return;
+        }
         if (AccessibilityTreeDump.isRequest(event)) {   // the explorer asking for the node dump, not a touch
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 AccessibilityTreeDump.post();
