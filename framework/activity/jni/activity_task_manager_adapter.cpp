@@ -1313,19 +1313,6 @@ jint nativeStartAbility_impl(JNIEnv* env, jclass,
          want.bundleName.c_str(), want.abilityName.c_str(), want.action.c_str(),
          static_cast<unsigned long long>(callerOhTokenAddr));
 
-    // 2026-06-04 LINK-OPEN GUARD: an implicit ACTION_VIEW (ohos.want.action.viewData
-    // with no explicit bundle) is an Android startActivity(ACTION_VIEW, url) — e.g.
-    // tapping a license hyperlink on noice's "About this sound" page. This device
-    // has no browser/handler, so OH StartAbility returns ERR_IMPLICIT_START_ABILITY_FAIL
-    // (2097199) AND the failed implicit start pushes the caller (noice) to the
-    // BACKGROUND → looks like a crash (launcher comes forward). Since the link can
-    // never open anyway, no-op it and report success so noice keeps foreground.
-    if (want.bundleName.empty() && want.action == "ohos.want.action.viewData") {
-        LOGI("nativeStartAbility: suppressing implicit viewData link-open (no handler; "
-             "keeps noice foreground) uri=%s", want.uri.c_str());
-        return 0;  // pretend success to the AOSP caller; do not yield foreground
-    }
-
     // WESTLAKE (2026-07-22) DIRECT-LAUNCH SECOND ACTIVITY:
     // In DIRECT-LAUNCH mode the bundle is never registered with OH BMS, so routing our OWN
     // Activities through OH StartAbility fails (observed: returns 2097152) and nothing is drawn.

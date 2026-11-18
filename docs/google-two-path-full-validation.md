@@ -1492,6 +1492,16 @@ configuration. The sender's confirmation and these client observations leave
 server receipt and delivery through the full two-path configuration open.
 [Refresh captures and dispatcher event counts](../tests/google-auth/full48/candidate117.json)
 
+A later on-board check compared the retained Gmail launcher with the earlier
+one that named the private microG account provider. The current launcher
+had the official service connection configured and had no delegated account
+connection. The old provider endpoint was absent from Gmail’s socket namespace,
+and its host UID had no running Google process. Gmail accepted another downward
+drag. Its window still displayed **Getting your messages** 38.5 seconds later,
+with zero new local sync requests, starts or completions. Server receipt and
+app delivery with the two paths active remain open.
+[Launcher comparison and refresh samples](../tests/google-auth/full48/candidate120.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
@@ -2358,6 +2368,24 @@ navigation URI. A separate package-manager entry retained the host with a
 redacted path and no query or fragment. This observation ended at the empty
 form. A completed Facebook login and return to Spotify remain open.
 [Board retest](../tests/google-auth/full48/candidate108.json)
+
+The original Facebook 584.0.0.51.56 app opened its first-run Meta terms
+screen in a dedicated host. With that process still running, selecting
+**Facebook** in the original Spotify 9.1.94.1929 app showed the email and
+password form at `https://m.facebook.com`. Spotify owned the window at 35.1
+and 38.6 seconds after selection. This run ended before credential entry.
+The reason the SDK selected the web flow remains open.
+
+Separately, an implicit web link could be resolved by OpenHarmony and then
+discarded by Westlake’s native dispatcher. A permissionless test receiver
+registered one reserved HTTPS address. An OS start opened it. The old native
+bridge returned success, yet the receiver recorded zero deliveries through
+8.6 seconds. With the early return removed, the receiver recorded one delivery
+and owned the foreground at 1.6 seconds. The test called the native dispatcher
+from board ART without an app caller token. After removing the receiver, none
+of the 73 installed bundles declared an HTTP or HTTPS scheme in the surveyed
+ability skills. An external-browser login remains unverified.
+[Spotify window ownership and link receiver results](../tests/google-auth/full48/candidate120.json)
 
 ## Where Spotify’s Google sign-in stopped with official Play services
 
