@@ -11,9 +11,9 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Original app | Observed on the board | Still to verify |
 | --- | --- | --- |
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
-| Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The shared-host run displayed Spotify's date-of-birth signup form. On the dedicated host the return went to the wrong native window. After a cold boot, the updated Spotify and Wattpad hosts both returned to the correct native window in a two-caller test. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host run](../tests/google-auth/full48/candidate93.json) · [Window fix](../tests/google-auth/full48/candidate95.json) · [Two-caller board test](../tests/google-auth/full48/candidate97.json) | Automatic window handoff during the original APK’s Google account selection, a Spotify session, library, playback, silent renewal and persistence. |
+| Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
-| YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. The recorded launch included a provider for all five suspected missing native functions. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) · [Media library audit](../tests/google-auth/full48/candidate96.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
+| YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. With the instrumented native library loaded and official Google services connected, a public watch page again displayed its title and comments. Playback showed an error before and after tapping retry. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) · [Media library audit](../tests/google-auth/full48/candidate96.json) · [Live public-video retest](../tests/google-auth/full48/candidate98.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
@@ -2011,3 +2011,36 @@ activities. Westlake's browser fallback navigated to Facebook’s HTTPS OAuth pa
 The board showed the mobile number or email and password fields, and the focused
 window belonged to Spotify. This was an app-owned WebView. No password was submitted
 during this observation. [Original APK and Facebook form](../tests/google-auth/full48/candidate97.json)
+
+## Where Spotify’s Google sign-in stopped with official Play services
+
+With fresh app data, Spotify 9.1.94.1929 connected to the original Play services and
+Play Store processes. Each ran under its own OpenHarmony UID. All 17 base and split
+APKs matched the locked inputs and passed Android signature verification. This run
+used official Google services alone. It measured the app-to-Google window handoff.
+
+Two launcher settings changed the outcome. Omitting the expected Play services APK
+hash made the peers reject the connection. Supplying its verified hash restored it.
+With Play services limited to its main process, Android canceled Spotify’s request
+to open the sign-in activity. Enabling manifest-declared processes for Play services
+let Google’s UI process start. OpenHarmony moved focus there automatically when
+the tester selected Google in Spotify.
+
+Google’s account picker and add-account activities started. The fresh profile showed
+“Checking info” for at least 7 min 57 s, including after a Back command. No email or
+password prompt appeared, and Spotify received no activity result in that interval.
+A separate HTTPS check from the board verified the server certificates and received
+HTTP 302 from Google Accounts and HTTP 204 from Google’s connectivity endpoint.
+The background Play services process twice reported that the Google Services
+Framework settings provider was missing. The UI process logged no matching lookup
+failure. These observations leave the reason for the wait open. Neither a device
+certification decision nor a Spotify session was observed. [Board evidence](../tests/google-auth/full48/candidate98.json)
+
+The same board opened the public YouTube video “Me at the zoo” in the original
+APK with the instrumented media library loaded. Its watch page displayed the
+title and comments. The player displayed an error and offered “Tap to retry.”
+The same error remained visible 55 seconds after the tap. Video and audio
+capability queries ran. The trace recorded no codec configure or start call,
+and none of the three instrumented native codec factories reported an
+unavailable operation. The test did not identify which component rejected
+playback. [Public-video retest](../tests/google-auth/full48/candidate98.json)
