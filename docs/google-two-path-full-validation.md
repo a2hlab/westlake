@@ -1566,6 +1566,38 @@ local dispatcher recorded zero sync requests in that inbox process. The
 sender-confirmed message remains unverified.
 [Settings, dispatch and inbox observations](../tests/google-auth/full48/candidate122.json)
 
+### Where Gmail reports the sync error
+
+On the retained board profile, turning **Sync Gmail** off and back on called
+the original app’s mailbox adapter. A diagnostic Android framework recorded
+a successful acquisition of the `gmail-ls` content provider. Gmail’s
+`onPerformSync` returned normally with the database-error flag already set.
+Android’s missing-provider and caught-security-exception branches both
+recorded zero hits. The app’s base APK contains four bytecode instructions
+that can set this flag. One of them is in a SQL exception handler.
+
+A second run traced Android method entries during the original Gmail callback.
+Gmail entered its main sync delegate. During that interval, a worker reached the
+Google Auth client’s recovery-exception factory through getTokenWithDetails. The
+APK calls this factory only on a branch with a recovery Intent. The trace did not
+identify which field write produced the final database flag or prove that the
+recovery UI was displayed.
+
+On a third run, the release framework recorded one official authentication reply
+between the start and completion of the mailbox job. Its status was
+`BadAuthentication` and it carried a recovery Intent. The app reported the
+database flag again. The status alone does not identify the reason for rejection,
+and it does not establish whether Google rejected the device or the account. The
+earlier zero count for account-token requests came from a separately gated
+diagnostic and cannot rule out this direct call. On returning to Gmail, a
+foreground screenshot of Primary showed none of the ten recovery labels checked.
+The recovery flow has not been completed.
+
+After the observation, the board ran the prior framework and original Gmail
+with automatic sync enabled. Its retained inbox was visible. Fresh mail
+delivery remains open.
+[Dispatch observations and build identities](../tests/google-auth/full48/candidate123.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
