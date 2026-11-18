@@ -1343,6 +1343,10 @@ showed no list change. In a fresh run, Gmail displayed **Please use a supported
 device** with its retained data. Reconnecting the client to the running official
 Play services and Play Store produced the same dialog. On the rebuilt runtime
 Gmail restored its daily sync registration, then showed the dialog again.
+Three OpenHarmony UI test clicks left the dialog visible. A tap delivered to
+the Gmail window dismissed it. Gmail's process stayed alive, but after bringing
+the native client host forward, the window manager listed no Gmail window and
+the inbox did not appear.
 The official-services control ran without the previous delegated account
 provider. Live receipt of the test message and incremental refresh remain open.
 [Original app retest](../tests/google-auth/full48/candidate110.json)

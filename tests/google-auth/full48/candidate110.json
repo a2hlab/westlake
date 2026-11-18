@@ -69,6 +69,13 @@
     "staleServiceEndpoints": "Original APK displayed Please use a supported device.",
     "activeOfficialPlayServicesAndPlayStore": "Verified live official service processes and configured the retained Gmail launcher to use them. The same warning appeared. This control did not configure the earlier delegated account provider.",
     "rebuiltRuntime": "Installed and verified 21 runtime files in the retained Gmail client. The app process mapped its rebuilt adapter boot image, bound the original application and restored one periodic registration. Gmail again displayed Please use a supported device. Its sampled client trace contained SERVICE_INVALID.",
+    "dismissal": {
+      "systemUiClicks": "Three OpenHarmony UI test clicks on the visible OK button left the dialog visible.",
+      "appWindowTap": "One touch through the existing window test input reached Gmail. The dialog window disappeared. Foregrounding the native client host focused its window, with no remaining Gmail-owned window listed.",
+      "gmailProcessStillAlive": true,
+      "fatalExceptionCountInSample": 0,
+      "inboxVisibleAfterDismissal": false
+    },
     "newTestMailObservedInApp": false,
     "receivedByServerIndependentlyVerified": false,
     "mailSentByAgent": false,
