@@ -186,7 +186,8 @@ public final class OfficialAuthActivity extends Activity {
                         || (details != null && details.getParcelable("TokenData") != null);
                 return result.put("outcome", present ? "token_received" : "token_not_returned")
                         .put("tokenPresent", present).put("errorCode", safeError(response.getString("Error")))
-                        .put("recoveryIntentPresent", response.containsKey("userRecoveryIntent"));
+                        .put("recoveryIntentKeyPresent", response.containsKey("userRecoveryIntent"))
+                        .put("recoveryIntentPresent", response.getParcelable("userRecoveryIntent") instanceof Intent);
             } finally { data.recycle(); reply.recycle(); }
         } catch (Exception error) {
             return failure(error).put("entry", "IAuthManagerService.getTokenWithAccount")

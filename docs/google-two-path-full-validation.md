@@ -1585,7 +1585,7 @@ recovery UI was displayed.
 
 On a third run, the release framework recorded one official authentication reply
 between the start and completion of the mailbox job. Its status was
-`BadAuthentication` and it carried a recovery Intent. The app reported the
+`BadAuthentication` and its reply included the `userRecoveryIntent` key. The app reported the
 database flag again. The status alone does not identify the reason for rejection,
 and it does not establish whether Google rejected the device or the account. The
 earlier zero count for account-token requests came from a separately gated
@@ -1600,9 +1600,9 @@ delivery remains open.
 
 ### What Gmail did with the recovery prompt
 
-Two more original-Gmail mailbox jobs finished unsuccessfully after 44.7 and 40.3 seconds. The Gmail process logged no notification enqueue, remote activity launch, or pending intent send during either job or between completion and a diagnostic stop scheduled eight seconds after the original callback. A separate release-framework run observed the official authentication service return BadAuthentication with a recovery Intent. The new method trace recorded Gmail entering sync, but did not capture its return or the earlier authentication exception. It cannot establish whether Gmail read the recovery Intent. The restored Primary inbox still matched the baseline. Delivery of the sender-confirmed email remains open.
+Two more original-Gmail mailbox jobs finished unsuccessfully after 44.7 and 40.3 seconds. The Gmail process logged no notification enqueue, remote activity launch, or pending intent send during either job or between completion and a diagnostic stop scheduled eight seconds after the original callback. A separate release-framework run observed the official authentication service return BadAuthentication with the recovery key present. The new method trace recorded Gmail entering sync, but did not capture its return or the earlier authentication exception. It cannot establish whether Gmail read the recovery Intent. The restored Primary inbox still matched the baseline. Delivery of the sender-confirmed email remains open.
 
-The base APK has four direct calls to the recovery Intent accessor. Two can build a dialog, one can attach an action to a snackbar, and one wraps the exception. Static code alone does not show that any of those branches ran. A separate run on the release framework also logged a recovery-bearing reply during sync, with no recorded notification enqueue or remote activity launch in that window. The specific reason for the authentication failure remains open.
+The base APK has four direct calls to the recovery Intent accessor. Two can build a dialog, one can attach an action to a snackbar, and one wraps the exception. Static code alone does not show that any of those branches ran. A separate run on the release framework also logged a reply containing the recovery key during sync, with no recorded notification enqueue or remote activity launch in that window. The specific reason for the authentication failure remains open.
 
 [Trace coverage, controls and board restoration](../tests/google-auth/full48/candidate124.json)
 
@@ -1666,6 +1666,15 @@ remains unverified. No new Westlake job was scheduled or started in either
 full-pull window on the enhanced build. The normal framework and retained
 inbox were restored after each run.
 [Original Gmail callback and network-return controls](../tests/google-auth/full48/candidate130.json)
+
+#### Does available storage change Gmail refresh?
+
+The board’s Westlake scheduler can defer a job that requires adequate storage. On this volume its threshold was 500 MiB. Gmail had 307 MiB available when we first pulled to refresh. Evicting two duplicate APK transfer-cache files raised that to 798 MiB without restarting Gmail. One full pull below the threshold and two above it left the same Primary rows visible for over a minute each. None produced a local mailbox sync request or job start.
+
+With space above the threshold, turning **Sync Gmail** back on in the original account settings started a mailbox sync. The official authentication interface returned `BadAuthentication` and the job failed. The old diagnostic established only that the reply included the `userRecoveryIntent` key. We repeated the settings test with one change to the adapter sources, checking whether the value was a non-null Android `Intent`. The second job returned the same error with a non-null `Intent` and again failed.
+
+The jobs lasted 1.34 and 4.67 seconds. Neither job window recorded a remote activity launch or a pending-intent send. The sampled settings and inbox screens showed none of the recovery controls checked. A brief prompt could fall between captures. Automatic sync was on when the original runtime was restored. The reason for the authentication rejection and delivery of the test message remain open.
+[Storage comparison and explicit mailbox sync on the board](../tests/google-auth/full48/candidate131.json)
 
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake

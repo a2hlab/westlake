@@ -505,7 +505,13 @@ public final class SocketBinder {
                     summary = "bundle_present=true error=" + GoogleAuthBoundaryTrace.responseError(result.getString("Error"))
                             + " token_details_present=" + result.containsKey("tokenDetails")
                             + " auth_token_present=" + result.containsKey("authtoken")
-                            + " recovery_intent_present=" + result.containsKey("userRecoveryIntent");
+                            + " recovery_intent_key_present=" + result.containsKey("userRecoveryIntent");
+                    try {
+                        summary += " recovery_intent_present="
+                                + (result.getParcelable("userRecoveryIntent", android.content.Intent.class) != null);
+                    } catch (RuntimeException unreadable) {
+                        summary += " recovery_intent_unreadable=true";
+                    }
                     if ("1".equals(System.getenv("WESTLAKE_GOOGLE_TOKEN_FINGERPRINT"))) {
                         String fingerprint = "token_fingerprint_unavailable=true";
                         Parcel tokenParcel = Parcel.obtain();
