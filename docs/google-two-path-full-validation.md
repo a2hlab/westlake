@@ -2135,6 +2135,31 @@ fix. Both network provider parameters still returned error 106 on the board.
 The local OpenHarmony source returns before requesting a network position when
 the provider bundle name is missing. [Test scope and runtime hashes](../tests/google-auth/full48/candidate109.json)
 
+## Drive account discovery on the current board configuration
+
+The dedicated Drive host and the retained host both resolved two different
+account interfaces during startup. The Android account call reached the
+private provider, which verified Drive’s signing certificate and peer PID
+and returned one account. Drive also acquired the account content provider
+from the persistent process of the official Play services APK. Its SDK uses
+that provider’s `get_accounts` operation. This test did not observe the
+contents of its reply.
+
+The dedicated profile still requested **Add account** and detached its
+window. On the retained profile, Drive logged an empty app account list and an
+unsupported add-account request. The earlier file preview used a different
+official-service configuration. Its result remains scoped to that configuration.
+
+The retained Drive log also reported an outdated Play services version.
+The failing class in the original APK identifies the cloud-messaging service.
+It requires version code `261200000`; the genuine APK on the board is
+`244034029`. Cloud messaging and account selection remain separate test cases.
+The two newer stable packages in the verified November 12 GrapheneOS repository
+metadata both require SDK 35. Westlake’s Android system-property implementation
+declares SDK 34.
+
+[Original APK and board evidence](../tests/google-auth/full48/candidate125.json) · [GrapheneOS signed repository metadata](https://apps.grapheneos.org/metadata.1.0.sjson)
+
 ## Drive lists and opens the test file
 
 The operator approved the additional read-only Drive labels scope. Westlake

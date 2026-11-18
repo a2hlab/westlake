@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "candidate": 125,
+  "date": "2026-11-18",
+  "previous": "candidate124.json",
+  "scope": "Original Google Drive account selection, tested on dedicated and retained profiles with live services.",
+  "originalDrive": {
+    "package": "com.google.android.apps.docs",
+    "version": "2.26.457.0.all.alldpi",
+    "baseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "signerVerifiedForSdk": 34,
+    "currentSignerSha256": "1d4f2ef662f8d086abe035e9f5c3ad34700baa831f3e7e32edab303effb8f156",
+    "dedicatedBaseAndSplitApkFilesVerified": 20,
+    "dedicatedHostHapSha256": "6cc8741bd428a037ece1ca29254917134b03ae2537ddaca7bbbcf7bd87ff2cf2",
+    "dedicatedAndroidFrameworkSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+    "dedicatedAdapterSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+    "retainedAdapterSha256": "5016be949c97bafd80d3bdf84218ee2fa03798bc68f91cb3eb4873f7f827c7b0"
+  },
+  "dedicatedConfiguration": {
+    "dedicatedHostUid": 20010065,
+    "privateAppDataMode": "0700",
+    "uniqueUidsForDedicatedDriveRetainedGmailAccountProviderOfficialGmsAndStore": true,
+    "originalAppDataPreserved": true,
+    "accountDataCopied": false,
+    "consentGrantsChanged": false,
+    "androidAccountProviderConnections": [
+      1,
+      1
+    ],
+    "resultMeaning": "Number of account-list replies containing one account in each of the two launch windows."
+  },
+  "officialAccountProvider": {
+    "authority": "com.google.android.gms.auth.accounts",
+    "sdkMethodInOriginalApk": "get_accounts",
+    "implementation": "com.google.android.gms.auth.account.be.legacy.AccountContentProvider",
+    "process": "com.google.android.gms.persistent",
+    "officialProcessConfiguredWithPrivateAccountProvider": false,
+    "earlierFixtureTestOfficialProcessConfiguredWithPrivateAccountProvider": true,
+    "resultOfContentProviderCallObserved": false
+  },
+  "runs": {
+    "dedicatedFirst": {
+      "hostUid": 20010065,
+      "clientSignerAndPeerPidMatched": true,
+      "methodAndWindowMarkers": {
+        "readAndroidAccountListFirstUse": 1,
+        "requestAddAccountFirstUse": 1,
+        "officialAccountProviderResolved": 1,
+        "registeredSurface": 1,
+        "detachedSurface": 1,
+        "fatalMarker": 0
+      }
+    },
+    "dedicatedRepeat": {
+      "hostUid": 20010065,
+      "clientSignerAndPeerPidMatched": true,
+      "methodAndWindowMarkers": {
+        "readAndroidAccountListFirstUse": 1,
+        "requestAddAccountFirstUse": 1,
+        "officialAccountProviderResolved": 1,
+        "registeredSurface": 1,
+        "detachedSurface": 1,
+        "fatalMarker": 0
+      }
+    },
+    "dedicatedFinal": {
+      "hostUid": 20010065,
+      "clientSignerAndPeerPidMatched": true,
+      "methodAndWindowMarkers": {
+        "readAndroidAccountListFirstUse": 1,
+        "requestAddAccountFirstUse": 1,
+        "officialAccountProviderResolved": 1,
+        "registeredSurface": 1,
+        "detachedSurface": 1,
+        "fatalMarker": 0
+      }
+    },
+    "retainedFirst": {
+      "hostUid": 20010060,
+      "clientSignerAndPeerPidMatched": true,
+      "methodAndWindowMarkers": {
+        "readAndroidAccountListFirstUse": 1,
+        "requestAddAccountFirstUse": 1,
+        "officialAccountProviderResolved": 1,
+        "registeredSurface": 1,
+        "detachedSurface": 1,
+        "fatalMarker": 0
+      }
+    },
+    "retainedRepeat": {
+      "hostUid": 20010060,
+      "clientSignerAndPeerPidMatched": true,
+      "methodAndWindowMarkers": {
+        "readAndroidAccountListFirstUse": 1,
+        "requestAddAccountFirstUse": 1,
+        "officialAccountProviderResolved": 1,
+        "registeredSurface": 1,
+        "detachedSurface": 1,
+        "fatalMarker": 0
+      }
+    }
+  },
+  "cloudMessaging": {
+    "originalClientClass": "qxd",
+    "serviceAction": "com.google.android.gms.cloudmessaging.service.START",
+    "requiredVersionCode": 261200000,
+    "installedOfficialVersionCode": 244034029,
+    "realOfficialApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "versionMismatchLogged": true,
+    "startupCausalityEstablished": false
+  },
+  "availableVersionsInGrapheneRepository": {
+    "repository": "https://apps.grapheneos.org/metadata.1.0.sjson",
+    "verificationClientRevision": "636a200aa6219a5a6237f59879e978cd4420dc77",
+    "signatureVerified": true,
+    "metadataDateUtc": "2026-11-12",
+    "stableVersions": [
+      {
+        "versionCode": 243433041,
+        "minSdk": 31,
+        "maxSdk": 34,
+        "versionName": "24.34.33 (190800-666809342)"
+      },
+      {
+        "versionCode": 243433047,
+        "minSdk": 35,
+        "maxSdk": null,
+        "versionName": "24.34.33 (260800-666809342)"
+      },
+      {
+        "versionCode": 244034029,
+        "minSdk": 31,
+        "maxSdk": 34,
+        "versionName": "24.40.34 (190400-682300402)"
+      },
+      {
+        "versionCode": 263234035,
+        "minSdk": 35,
+        "maxSdk": null,
+        "versionName": "26.32.34 (260400-968093310)"
+      },
+      {
+        "versionCode": 264032035,
+        "minSdk": 35,
+        "maxSdk": null,
+        "versionName": "26.40.32 (260400-995630914)"
+      }
+    ]
+  },
+  "coverageLimit": "The GrapheneOS versions are the stable variants in one repository snapshot. Both builds meeting this cloud-messaging minimum require SDK 35 there. Westlake’s current Android system-property implementation declares SDK 34. Other official variants may exist.",
+  "diagnosticLimits": [
+    "The dedicated runtime did not implement optional private Android log capture. Detailed app-level error categories came from the retained runtime.",
+    "Receiving an Android account at the private provider and obtaining a handle to the official content provider are distinct observations. Neither proves a user selected an account.",
+    "No new Drive token, cloud file listing or file preview was observed in this round.",
+    "Historical fixture evidence and the current failure use different official service configurations."
+  ],
+  "restoration": {
+    "privateCaptureRemoved": true,
+    "gmailOriginalLauncherRestored": true,
+    "gmailProcessVerified": true,
+    "gmailFrameworkVerified": true,
+    "distinctServiceListenersVerified": 3,
+    "dedicatedDriveRunningOnAccountPath": true,
+    "gmailAutoSync": true,
+    "gmailPrimaryVisible": true,
+    "gmailVisibleRowsMatchBaseline": true
+  },
+  "interpretation": "The dedicated Drive process reached the account provider under its own OpenHarmony UID. The provider matched the Drive signing certificate and peer PID and returned one Android account. Within the same launch Drive also obtained the official Play services account content provider. The two operations have different recipients. Startup subsequently requested Android addAccount, the window detached, and no account choice was available. The same symptoms recurred on the formerly working retained app profile using the current official services. Its private diagnostic log recorded an empty app account list and an unsupported add-account operation. Drive also reported that a Google API needed Play services version 261200000 and found 244034029. The original APK identifies the failing client as cloud messaging. This observation does not establish that an upgrade would fix account selection. The contents and account count of the official content-provider reply were not observed. The earlier fixture listing and preview were on a different official-service configuration and have not been reproduced with the current one."
+}
