@@ -2057,7 +2057,7 @@ public class AppSpawnXInit {
                     if (adapter.core.LocalContentObservers.active() && args != null) {
                         if ("registerContentObserver".equals(name)) {
                             adapter.core.LocalContentObservers.register((android.net.Uri) args[0], (Boolean) args[1],
-                                    (android.database.IContentObserver) args[2]);
+                                    (android.database.IContentObserver) args[2], (Integer) args[3]);
                             return null;
                         }
                         if ("unregisterContentObserver".equals(name)) {
