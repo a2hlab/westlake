@@ -1164,10 +1164,14 @@ public class AppSchedulerBridge {
      * The result stays sorted, as AppCompatCallbacks binary-searches it.
      */
     static long[] withoutLaterEdgeToEdge(long[] disabled) {
-        if (android.os.Build.VERSION.SDK_INT >= 35
-                || java.util.Arrays.binarySearch(disabled, ENFORCE_EDGE_TO_EDGE) >= 0) {
-            return disabled;
-        }
+        // The reported platform, read from its property: in this boot image a comparison of
+        // Build.VERSION.SDK_INT disagreed with the value the same method printed (34).
+        int sdk = android.os.SystemProperties.getInt("ro.build.version.sdk", 0);
+        boolean listed = java.util.Arrays.binarySearch(disabled, ENFORCE_EDGE_TO_EDGE) >= 0;
+        boolean disable = sdk > 0 && sdk < 35 && !listed;
+        System.err.println("[B43-BIND] edge-to-edge: reported sdk=" + sdk + " SDK_INT="
+                + android.os.Build.VERSION.SDK_INT + " listed=" + listed + " disable=" + disable);
+        if (!disable) return disabled;
         long[] out = java.util.Arrays.copyOf(disabled, disabled.length + 1);
         out[disabled.length] = ENFORCE_EDGE_TO_EDGE;
         java.util.Arrays.sort(out);
