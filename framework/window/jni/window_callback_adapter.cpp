@@ -211,6 +211,40 @@ OHOS::Rosen::WMError WindowCallbackAdapter::UpdateAvoidArea(
         static_cast<jint>(avoidArea->bottomRect_.posX_ + avoidArea->bottomRect_.width_),
         static_cast<jint>(avoidArea->bottomRect_.posY_ + avoidArea->bottomRect_.height_));
 
+    // OH's system bar areas become the Android window's status and navigation bar insets, through the
+    // OhInsetsBridge.systemBars the SceneBoard path uses (SessionStageBridge.onUpdateAvoidArea); the classic
+    // window manager reports them here. Without it the app lays itself out under the bars.
+    bool needsDetach = false;
+    JNIEnv* env = androidWindow_ ? getJNIEnv(needsDetach) : nullptr;
+    if (env) {
+        jclass insets = env->FindClass("adapter/window/OhInsetsBridge");
+        jclass rectClass = insets ? env->FindClass("android/graphics/Rect") : nullptr;
+        jmethodID bars = rectClass ? env->GetStaticMethodID(insets, "systemBars",
+            "(Ljava/lang/Object;ILandroid/graphics/Rect;Landroid/graphics/Rect;)V") : nullptr;
+        jmethodID rectInit = bars ? env->GetMethodID(rectClass, "<init>", "(IIII)V") : nullptr;
+        if (rectInit) {
+            const OHOS::Rosen::Rect& t = avoidArea->topRect_;
+            const OHOS::Rosen::Rect& b = avoidArea->bottomRect_;
+            jobject top = env->NewObject(rectClass, rectInit, t.posX_, t.posY_,
+                t.posX_ + static_cast<jint>(t.width_), t.posY_ + static_cast<jint>(t.height_));
+            jobject bottom = env->NewObject(rectClass, rectInit, b.posX_, b.posY_,
+                b.posX_ + static_cast<jint>(b.width_), b.posY_ + static_cast<jint>(b.height_));
+            if (top && bottom) {
+                env->CallStaticVoidMethod(insets, bars, androidWindow_, static_cast<jint>(type), top, bottom);
+            }
+            if (top) env->DeleteLocalRef(top);
+            if (bottom) env->DeleteLocalRef(bottom);
+        }
+        if (env->ExceptionCheck()) {
+            ALOGE("UpdateAvoidArea: OhInsetsBridge.systemBars failed");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+        if (rectClass) env->DeleteLocalRef(rectClass);
+        if (insets) env->DeleteLocalRef(insets);
+        detachIfNeeded(needsDetach);
+    }
+
     return OHOS::Rosen::WMError::WM_OK;
 }
 

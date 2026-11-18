@@ -1574,10 +1574,12 @@ OHWindowSession OHWindowManagerClient::createSession(
     }
     // 2026-06-04 NATIVE TRANSLUCENT-DIALOG FIX: parent the sub-window to the main
     // window so OHOS composites it above the parent and keeps the parent visible.
+    // wl_legacyHostSub: the activity's own window as a sub-window of the host (classic window manager).
+    const bool wl_legacyHostSub = !asSubWindow && ohType == OHOS::Rosen::WindowType::WINDOW_TYPE_APP_SUB_WINDOW;
     if (asSubWindow) {
         property->SetParentId(subParentWinId);
         LOGI("createSession: SetParentId(%{public}u) on SUB_WINDOW", subParentWinId);
-    } else if (ohType == OHOS::Rosen::WindowType::WINDOW_TYPE_APP_SUB_WINDOW) {
+    } else if (wl_legacyHostSub) {
         // Classic window manager (no SceneBoard, e.g. the OnePlus 6 port): WL_SUB_WINDOW makes the
         // activity's own window a SUB_WINDOW as well, and the legacy WindowController::CreateWindow
         // rejects a sub-window without a parent (CheckParentWindowValid -> WM_ERROR_INVALID_PARENT, 11).
@@ -1645,8 +1647,16 @@ OHWindowSession OHWindowManagerClient::createSession(
     // SetLayoutFullScreen(true) to escape into fullscreen.  Adapter does the
     // equivalent unconditionally because AOSP DecorView always assumes
     // fullscreen window (no app-level opt-in API for that — it's the baseline).
-    property->SetWindowFlags(static_cast<uint32_t>(
-        OHOS::Rosen::WindowFlag::WINDOW_FLAG_NEED_AVOID));
+    //
+    // Not for the activity's sub-window of the host (classic window manager): it has no starting window
+    // or leash to line up with, and with NEED_AVOID at AddWindow its RS bounds stay at the safe area after
+    // the clear below (the OnePlus 6: layer [0,108,1080,2064] while the WMS reports the window full screen),
+    // so the full-screen frame was shown squeezed and touches landed off. It is laid out full screen from
+    // the start, and the system bars reach it as insets (after AddWindow).
+    if (!wl_legacyHostSub) {
+        property->SetWindowFlags(static_cast<uint32_t>(
+            OHOS::Rosen::WindowFlag::WINDOW_FLAG_NEED_AVOID));
+    }
 
     // 2026-06-04 SYSTEM-BAR FIX: disable the OHOS status bar + navigation bar
     // for this window (immersive). AOSP DecorView assumes a fullscreen window
@@ -1657,7 +1667,11 @@ OHWindowSession OHWindowManagerClient::createSession(
     // bars are turned off → noice uses the full [0,0,720,1280] cleanly, its 5-
     // tab menu is visible at the bottom and reachable. (Addresses "window too
     // big", "◁○□ overlaid on the menu", and "two navs".)
-    {
+    //
+    // Not for the activity's sub-window of the host (classic window manager): there the bars are not hidden
+    // but only drawn empty, and their windows stay above the app and keep taking touches (a tap on the app's
+    // bottom tabs pressed OH's invisible navigation bar). That window keeps OH's bars and gets them as insets.
+    if (!wl_legacyHostSub) {
         OHOS::Rosen::SystemBarProperty barOff(false, 0x00000000, 0x00000000);
         property->SetSystemBarProperty(OHOS::Rosen::WindowType::WINDOW_TYPE_STATUS_BAR, barOff);
         property->SetSystemBarProperty(OHOS::Rosen::WindowType::WINDOW_TYPE_NAVIGATION_BAR, barOff);
@@ -2407,6 +2421,31 @@ OHWindowSession OHWindowManagerClient::createSession(
             LOGW("createSession: clear NEED_AVOID failed rc=%{public}d (window may stay in safe-area)",
                  static_cast<int>(retFs));
         }
+    }
+
+    // The system bars as insets (classic window manager): the WMS reports a window's avoid areas only to a
+    // window that asks for them. Registering makes it send the current ones at once, and later changes, to the
+    // window callback, which gives them to Android as status and navigation bar insets
+    // (OhInsetsBridge.systemBars, as the SceneBoard path does). The app then lays itself out between the bars
+    // of its full-screen window. The callback arrives on a binder thread and waits for setView to return; do
+    // not call it from here (this thread holds the Java monitors that callback needs: a deadlock).
+    if (wl_legacyHostSub) {
+        const auto retListen = wmsInterface->UpdateAvoidAreaListener(windowId, true);
+        const OHOS::Rosen::AvoidArea bars =
+            wmsInterface->GetAvoidAreaByType(windowId, OHOS::Rosen::AvoidAreaType::TYPE_SYSTEM);
+        fprintf(stderr, "[WESTLAKE-WMC] system bars: top [%d,%d %ux%u] bottom [%d,%d %ux%u] (listener rc=%d)\n",
+                bars.topRect_.posX_, bars.topRect_.posY_, bars.topRect_.width_, bars.topRect_.height_,
+                bars.bottomRect_.posX_, bars.bottomRect_.posY_, bars.bottomRect_.width_, bars.bottomRect_.height_,
+                static_cast<int>(retListen));
+        fflush(stderr);
+        // The WMS does not send them to this window itself (AvoidAreaController: "IsOverlayWindow Failed" for
+        // a sub-window), so deliver the ones it reports, from another thread: the callback waits for the Java
+        // monitors this thread holds until setView returns.
+        OHOS::sptr<WindowCallbackAdapter> wl_cb = windowCallback;
+        OHOS::sptr<OHOS::Rosen::AvoidArea> wl_bars = new OHOS::Rosen::AvoidArea(bars);
+        std::thread([wl_cb, wl_bars]() {
+            wl_cb->UpdateAvoidArea(wl_bars, OHOS::Rosen::AvoidAreaType::TYPE_SYSTEM);
+        }).detach();
     }
 
     int64_t surfaceNodeId = static_cast<int64_t>(surfaceNode->GetId());
