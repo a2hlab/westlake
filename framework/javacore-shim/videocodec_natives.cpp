@@ -126,6 +126,7 @@ struct Oh : CodecApi {
     int coreLoaded = 0;      /* the shared part */
     OH_AVCodec* (*create)(const char*);
     int (*setSurface)(OH_AVCodec*, OHNativeWindow*);
+    int32_t (*setWindowScaling)(OHNativeWindow*, int32_t);
     int (*renderOutput)(OH_AVCodec*, uint32_t);
     uint8_t* (*bufferAddr)(OH_AVBuffer*);
     int32_t (*bufferCapacity)(OH_AVBuffer*);
@@ -232,6 +233,10 @@ bool loadOh()
     SYM(destroy, vdec, "OH_VideoDecoder_Destroy");
     SYM(registerCallback, vdec, "OH_VideoDecoder_RegisterCallback");
     SYM(setSurface, vdec, "OH_VideoDecoder_SetSurface");
+    void* nativeWindow = dlopen("libnative_window.so", RTLD_NOW);
+    if (nativeWindow != nullptr) {
+        SYM(setWindowScaling, nativeWindow, "OH_NativeWindow_NativeWindowSetScalingModeV2");
+    }
     SYM(configure, vdec, "OH_VideoDecoder_Configure");
     SYM(prepare, vdec, "OH_VideoDecoder_Prepare");
     SYM(start, vdec, "OH_VideoDecoder_Start");
@@ -522,6 +527,9 @@ struct Codec {
     bool codecDataSent = false;
     int inputsLogged = 0;                        /* the first inputs are logged, as evidence */
     void* window = nullptr;                      /* ANativeWindow from the Surface, released at the end */
+    OHNativeWindow* outputWindow = nullptr;      /* held by window */
+    int32_t scalingMode = 1;                     /* Android's default VIDEO_SCALING_MODE_SCALE_TO_FIT */
+    std::mutex windowMu;
     bool surface = false;
     bool software = false;                       /* OH's software decoder replaced the hardware one */
     bool err = false;
@@ -1082,6 +1090,43 @@ void releaseWindow(void* anw)
     if (release != nullptr) release(anw);
 }
 
+/* Android MediaCodec modes 1 and 2 match OH SCALE_TO_WINDOW_V2 and SCALE_CROP_V2.
+ * The app controls the destination rectangle through its SurfaceView. */
+void applyVideoScaling(Codec* v)
+{
+    if (v->outputWindow == nullptr) return;
+    int rc = oh.setWindowScaling != nullptr ? oh.setWindowScaling(v->outputWindow, v->scalingMode) : -1;
+    vlog("[WL-VIDEOCODEC] window scaling mode=%d -> %d", v->scalingMode, rc);
+}
+
+int attachOutputWindow(JNIEnv* env, Codec* v, jobject surface)
+{
+    void* window = nullptr;
+    auto* target = static_cast<OHNativeWindow*>(ohWindowOf(env, surface, &window));
+    std::lock_guard<std::mutex> lock(v->windowMu);
+    int rc = target != nullptr ? oh.setSurface(v->codec, target) : -1;
+    if (rc != 0) {
+        releaseWindow(window);
+        return rc;
+    }
+    releaseWindow(v->window);
+    v->window = window;
+    v->outputWindow = target;
+    v->surface = true;
+    applyVideoScaling(v);
+    return 0;
+}
+
+void clearOutputWindow(Codec* v)
+{
+    std::lock_guard<std::mutex> lock(v->windowMu);
+    releaseWindow(v->window);
+    v->window = nullptr;
+    v->outputWindow = nullptr;
+    v->surface = false;
+    v->scalingMode = 1;
+}
+
 /* ---- audio: the AAC self-test, configure and reset ---------------------------------------- */
 
 void clearQueues(Codec* v);
@@ -1377,18 +1422,12 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
     oh.formatDestroy(format);
     /* OH takes the output window after Configure and before Prepare. */
     if (rc == 0 && surface != nullptr && oh.setSurface != nullptr) {
-        void* window = nullptr;
-        void* ohWindow = ohWindowOf(env, surface, &window);
-        if (ohWindow != nullptr && oh.setSurface(v->codec, static_cast<OHNativeWindow*>(ohWindow)) == 0) {
-            v->window = window;
-            v->surface = true;
-        } else {
+        rc = attachOutputWindow(env, v, surface);
+        if (rc != 0) {
             /* Without a window OH would decode to buffers in its own default format, which the
              * player configured for a Surface cannot read; refuse, as a codec that cannot attach
              * its output does. */
-            vlog("[WL-VIDEOCODEC] no OH window behind the Surface (anw=%p oh=%p)", window, ohWindow);
-            releaseWindow(window);
-            rc = -1;
+            vlog("[WL-VIDEOCODEC] could not attach the output Surface: %d", rc);
         }
     }
     int prepared = rc == 0 ? oh.prepare(v->codec) : -1;
@@ -1425,6 +1464,7 @@ void wStop(JNIEnv* env, jobject thiz)
     if (v == nullptr) { if (b_stop != nullptr) b_stop(env, thiz); return; }
     v->api->stop(v->codec);
     v->running = false;
+    if (!v->audio) clearOutputWindow(v);
     clearQueues(v);
 }
 
@@ -1455,11 +1495,7 @@ void destroy(JNIEnv* env, jobject thiz, Codec* v)
     { std::lock_guard<std::mutex> l(g_registry); g_codecs.erase(v); }
     v->api->stop(v->codec);
     v->api->destroy(v->codec);
-    if (v->window != nullptr) {
-        typedef void (*Release)(void*);
-        Release release = (Release) dlsym(RTLD_DEFAULT, "ANativeWindow_release");
-        if (release != nullptr) release(v->window);
-    }
+    if (!v->audio) clearOutputWindow(v);
     if (v->javaCodec != nullptr) env->DeleteGlobalRef(v->javaCodec);
     if (v->callback != nullptr) env->DeleteGlobalRef(v->callback);
     env->SetLongField(thiz, g_context, 0);
@@ -1476,6 +1512,7 @@ void wReset(JNIEnv* env, jobject thiz)
     }
     oh.stop(v->codec);
     v->running = false;
+    clearOutputWindow(v);
     clearQueues(v);
 }
 
@@ -1875,25 +1912,31 @@ void wSetSurface(JNIEnv* env, jobject thiz, jobject surface)
         throwState(env, "the codec was not configured for a Surface");
         return;
     }
-    void* window = nullptr;
-    void* ohWindow = ohWindowOf(env, surface, &window);
-    int rc = ohWindow != nullptr ? oh.setSurface(v->codec, static_cast<OHNativeWindow*>(ohWindow)) : -1;
-    vlog("[WL-VIDEOCODEC] setSurface anw=%p oh=%p -> %d", window, ohWindow, rc);
+    int rc = attachOutputWindow(env, v, surface);
+    vlog("[WL-VIDEOCODEC] setSurface -> %d", rc);
     if (rc != 0) {
-        releaseWindow(window);
         jclass illegal = env->FindClass("java/lang/IllegalArgumentException");
         if (illegal != nullptr) env->ThrowNew(illegal, "the Surface cannot take the codec's output");
-        return;
     }
-    releaseWindow(v->window);
-    v->window = window;
 }
 
-/*
- * MediaCodec.setVideoScalingMode, which the bridge never registered (ExoPlayer calls it on every
- * video codec): OH scales the decoded frame to its window itself, so the mode has nothing to set.
- */
-void wSetVideoScalingMode(JNIEnv*, jobject, jint) {}
+void wSetVideoScalingMode(JNIEnv* env, jobject thiz, jint mode)
+{
+    if (g_context == nullptr || env->GetLongField(thiz, g_context) == 0) {
+        throwState(env, "the codec has been released");
+        return;
+    }
+    if (mode != 1 && mode != 2) {
+        jclass illegal = env->FindClass("java/lang/IllegalArgumentException");
+        if (illegal != nullptr) env->ThrowNew(illegal, "unrecognized video scaling mode");
+        return;
+    }
+    Codec* v = codecOf(env, thiz);
+    if (v == nullptr || v->audio) return;
+    std::lock_guard<std::mutex> lock(v->windowMu);
+    v->scalingMode = mode;
+    applyVideoScaling(v);
+}
 
 /* Returns how many natives were wrapped; 0 leaves both classes as the bridge registered them. */
 /*
