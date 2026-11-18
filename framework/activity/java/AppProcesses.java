@@ -165,13 +165,19 @@ public final class AppProcesses {
         if (!declares(process)) throw new IllegalArgumentException(sPackage + " declares no process " + process);
         synchronized (AppProcesses.class) {
             String socket = socketOf(process);
-            Integer known = sStarted.get(process);
-            if (known != null && alive(known) && serving(socket)) return;
+            // One process per name, as Android runs each of an app's processes once: a process of this app that
+            // serves already is that process, whether this process started it or an earlier instance of this one
+            // did. Play services' launched process ended itself on an uncaught exception and its spawner started it
+            // again while its :persistent and :unstable kept running; this process then started both again, and
+            // each second copy, unable to listen on the name the first held ("Address in use"), ran the app's code
+            // a second time beside it, on the same data, where nothing could reach it. Either way the other
+            // process must reach this one.
+            PlayServicesChannel.serveLaunchedProcess();
+            if (serving(socket)) return;
             Long retry = sFailed.get(process);
             if (retry != null && System.currentTimeMillis() < retry) {
                 throw new IOException(process + " failed to start; not tried again yet");
             }
-            PlayServicesChannel.serveLaunchedProcess();
             int pid = spawn(process);
             sStarted.put(process, pid);
             long deadline = System.currentTimeMillis() + START_TIMEOUT_MS;

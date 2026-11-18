@@ -1982,8 +1982,10 @@ public final class PlayServicesChannel {
     }
 
     private static void serve(String name) {
+        boolean listening = false;
         try {
             int listener = SocketBinder.listen(name);
+            listening = true;
             System.err.println(TAG + "serving on " + name);
             while (true) {
                 int fd = SocketBinder.accept(listener);
@@ -1992,6 +1994,12 @@ public final class PlayServicesChannel {
             }
         } catch (IOException | RuntimeException e) {
             System.err.println(TAG + "stopped serving: " + e);
+            // Another process of this app serves this process's name: that one is the app's process of the name
+            // and this is a second copy nothing can reach (see AppProcesses.ensure), which Android never runs.
+            if (!listening && AppProcesses.isSecondary() && AppProcesses.serving(name)) {
+                System.err.println(TAG + name + " is served by another process of this app; this copy ends");
+                Process.killProcess(Process.myPid());
+            }
         }
     }
 
