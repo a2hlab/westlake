@@ -259,11 +259,17 @@ final class LocalAccounts {
                         authenticator.hasFeatures(response, (Account) args[1], (String[]) args[2]));
                 return null;
             case "addAccount":
-            case "addAccountAsUser":
+            case "addAccountAsUser": {
+                // Binder caller identity belongs to this transaction thread.
+                Bundle options = withCaller((Bundle) args[5]);
+                String accountType = (String) args[1];
+                String tokenType = (String) args[2];
+                String[] requested = (String[]) args[3];
+                String[] features = requested == null ? null : requested.clone();
                 throughAuthenticator((IAccountManagerResponse) args[0], authenticator -> response ->
-                        authenticator.addAccount(response, (String) args[1], (String) args[2], (String[]) args[3],
-                                withCaller((Bundle) args[5])));
+                        authenticator.addAccount(response, accountType, tokenType, features, options));
                 return null;
+            }
             case "getAuthToken":
                 getAuthToken((IAccountManagerResponse) args[0], (Account) args[1], (String) args[2], (Bundle) args[5]);
                 return null;

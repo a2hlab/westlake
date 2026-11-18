@@ -1412,6 +1412,34 @@ through the last observation, 76 seconds after the tap. We then returned
 the board to Gmail's setup screen.
 [Play Store control and launcher revision](../tests/google-auth/full48/candidate112.json)
 
+### Caller identity during account enrollment
+
+The account service used to read the caller's UID and PID on the worker thread
+that delivers an enrollment request to the authenticator. Binder supplies those
+values on the original transaction thread. Westlake now captures them there
+and takes a copy of the requested features and options before binding.
+
+A board test ran a client and an in-memory authenticator in separate ART
+processes under different Linux UIDs. The service compared the identity in the
+delivered options with the client process identified by the kernel. The earlier
+runtime failed that comparison. On the repaired runtime, both `addAccount` and
+`addAccountAsUser` delivered the peer's UID and PID and the client received
+both callbacks. In a second test, a same-process client changed its options
+and features after submission. Only the repaired runtime delivered the original
+values. Both tests used an inert account type and contacted no account provider.
+[Board results and build identifiers](../tests/google-auth/full48/candidate113.json)
+
+The original Play Store still failed to sign in. After the Google service
+restart, its retained Store client used a dead account-service connection.
+Restarting the Store with the same data and using its **Sign in** button again
+also ended in `DeadObjectException` inside `IAccountManager.addAccount`.
+The platform log recorded a fatal exception in the official Google service:
+`droidGuardHandle` had not been initialized. The same exception occurred on
+cold starts with both the previous service framework and the updated one.
+These traces contain no backend registration decision. The board returned to
+the original Gmail **Set up email** screen. New mail remains unverified.
+[Original app retest](../tests/google-auth/full48/candidate113.json)
+
 ## Candidate 80: real periodic sync and the standard adapter caller guard
 
 LocalSyncService previously threw on `addPeriodicSync`. It now supports both
