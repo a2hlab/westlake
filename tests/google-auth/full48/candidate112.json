@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "candidate": 112,
+  "date": "2026-11-17",
+  "configuration": {
+    "client": "Original Gmail, fresh app data on the dedicated host. A second original Gmail process kept its earlier shared-host data.",
+    "servicePackages": [
+      "com.google.android.gms",
+      "com.android.vending"
+    ],
+    "channelIdentity": "enforce",
+    "delegatedAccountProvider": false
+  },
+  "originalBaseApkSha256": {
+    "com.google.android.gm": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "com.google.android.gms": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "com.android.vending": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272"
+  },
+  "concurrentGmailHosts": {
+    "dedicatedHost": "org.westlake.apk.com.google.android.gm",
+    "dedicatedHapSha256": "8e6db896d1ef62943f4fe8ec4a18cb9193000cc2dd623482e32ec77e75fa6013",
+    "dedicatedLinuxUid": 20010066,
+    "retainedLinuxUid": 20010060,
+    "distinctLiveProcesses": true,
+    "distinctMountNamespaces": true,
+    "distinctAppDataDirectories": true,
+    "dedicatedAppDataMode": "0700",
+    "retainedAppDataMode": "0755",
+    "eachDirectoryOwnedByRespectiveUid": true,
+    "distinctNativeHostWindows": true,
+    "bothProcessesOwnedAppWindows": true,
+    "peerVerification": {
+      "clients": [
+        "retained Gmail",
+        "dedicated Gmail"
+      ],
+      "verifiers": [
+        "official Play services",
+        "official Play Store"
+      ],
+      "eachMatchedRealClientProcess": true,
+      "apkFilesMatchedPerClient": 4,
+      "signerMatchedForEachClient": true
+    }
+  },
+  "gmailEnrollment": {
+    "originalAppSelections": [
+      "Got it",
+      "Add an email address",
+      "Google"
+    ],
+    "observedAccountManagerMethod": "addAccount",
+    "settledScreen": "Set up email",
+    "googleCredentialScreenObserved": false,
+    "boardRegression": {
+      "path": "tests/parity/EmptyAccountLookupProbe.java",
+      "case": "Separate inert account type on the same board runtime with no configured authenticator",
+      "callbackCount": 1,
+      "callbackError": "ERROR_CODE_REMOTE_EXCEPTION",
+      "loginIntentReturned": false,
+      "probeJarSha256": "a264d64010c0e5cf306cc7e99135a9eee446887e37c57de91722a052a375ae37",
+      "exitCode": 0
+    }
+  },
+  "playStoreControl": {
+    "entry": "Original signed Play Store welcome screen, blue Sign in button",
+    "initialTapOnExplanatoryTextExcluded": true,
+    "officialAuthenticator": "GoogleAccountAuthenticatorService",
+    "returnedAction": "com.google.android.gms.ui.UNPACKING_REDIRECT",
+    "redirectActivity": "com.google.android.gms.auth.uiflows.common.UnpackingRedirectActivity",
+    "declaration": {
+      "enabled": true,
+      "exported": true
+    },
+    "before": {
+      "remoteActivityRoutingEnabled": false,
+      "failure": "ActivityNotFoundException",
+      "storeProcessExited": true
+    },
+    "after": {
+      "manifestCommit": "600470119123f1422cec2e0be32e21990e903ae2",
+      "manifestHostTestsPassed": 56,
+      "remoteActivityRoutingEnabled": true,
+      "sameApkAndAppData": true,
+      "verifiedCallingPackage": "com.android.vending",
+      "targetProcess": "com.google.android.gms.ui",
+      "redirectReachedOfficialActivity": true,
+      "nextObservedFailure": "pending_activity_rejected type=SecurityException",
+      "activityResultCode": 0,
+      "storeProcessStayedAlive": true,
+      "signInScreenObservations": 7,
+      "lastObservationSecondsAfterTap": 76.03
+    }
+  },
+  "mailDelivery": {
+    "finalFocusedApp": "com.google.android.gm",
+    "finalScreen": "Set up email",
+    "newMessageVisibleInOriginalApp": false,
+    "deliveryVerified": false,
+    "independentServerReceiptChecked": false,
+    "observedAt": "2026-11-17T22:30:00-08:00"
+  },
+  "notEstablished": [
+    "Google account enrollment",
+    "End-to-end two-path mailbox refresh",
+    "Production isolation or separate-account behavior"
+  ]
+}

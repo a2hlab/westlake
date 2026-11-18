@@ -11,8 +11,9 @@ public final class EmptyAccountLookupProbe {
     private static final String TYPE = "org.westlake.test.account";
     private static final String PKG = "org.westlake.test.client";
 
-    private static class Response extends IAccountManagerResponse.Stub {
+    private static final class Response extends IAccountManagerResponse.Stub {
         int calls;
+        int errorCode;
         Bundle value;
 
         @Override public void onResult(Bundle result) {
@@ -21,7 +22,8 @@ public final class EmptyAccountLookupProbe {
         }
 
         @Override public void onError(int code, String message) {
-            throw new AssertionError("unexpected account error " + code);
+            calls++;
+            errorCode = code;
         }
     }
 
@@ -48,6 +50,14 @@ public final class EmptyAccountLookupProbe {
             throw new AssertionError("null account type accepted");
         } catch (IllegalArgumentException expected) {}
         if (invalid.calls != 0) throw new AssertionError("invalid request got a callback");
-        return "Empty account lookup and selection callbacks passed.\n";
+
+        Response enrollment = new Response();
+        service.addAccount(enrollment, TYPE, null, null, true, new Bundle());
+        if (enrollment.calls != 1 || enrollment.errorCode != AccountManager.ERROR_CODE_REMOTE_EXCEPTION
+                || enrollment.value != null) {
+            throw new AssertionError("missing authenticator must deliver exactly one error");
+        }
+        return "Empty account lookup and selection callbacks passed.\n"
+                + "Enrollment without an authenticator returned one error and no login intent.\n";
     }
 }
