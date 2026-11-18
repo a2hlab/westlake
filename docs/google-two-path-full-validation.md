@@ -11,7 +11,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Original app | Observed on the board | Still to verify |
 | --- | --- | --- |
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
-| Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The shared-host run displayed Spotify's date-of-birth signup form. On the dedicated host the return went to the wrong native window. A fix for that route passed development-machine tests. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host run](../tests/google-auth/full48/candidate93.json) · [Window fix](../tests/google-auth/full48/candidate95.json) | Automatic window handoff on the board under the dedicated UID, a Spotify session, library, playback, silent renewal and persistence. |
+| Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The shared-host run displayed Spotify's date-of-birth signup form. On the dedicated host the return went to the wrong native window. After a cold boot, the updated Spotify and Wattpad hosts both returned to the correct native window in a two-caller test. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host run](../tests/google-auth/full48/candidate93.json) · [Window fix](../tests/google-auth/full48/candidate95.json) · [Two-caller board test](../tests/google-auth/full48/candidate97.json) | Automatic window handoff during the original APK’s Google account selection, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. The recorded launch included a provider for all five suspected missing native functions. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) · [Media library audit](../tests/google-auth/full48/candidate96.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
@@ -20,7 +20,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
 | FotMob · Facebook | Fresh Facebook login returned to FotMob, its account menu displayed Sign out, and the session survived a process restart. [Board results](../tests/google-auth/full48/candidate76.json) | All four named Facebook checks have evidence on the tested build. |
 | Wattpad · Facebook | Facebook consent completed and the SDK delivered a successful activity result to the original Wattpad app. Wattpad displayed Create an Account. [SDK return](google-two-path-live44.md) | Wattpad account session and restart persistence. |
-| Spotify · Facebook | The recorded Facebook test stalled at a black startup screen before the Facebook login UI appeared. A later Google test reached Spotify’s account screen. [Facebook run](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Google run](../tests/google-auth/full48/candidate51-followup.json) | Facebook login on the newer runtime, authenticated return, Spotify session and persistence. |
+| Spotify · Facebook | The original APK opened Facebook’s HTTPS login form after the user selected Facebook. Westlake displayed the form in a WebView owned by the Spotify process. [Earlier startup failure](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Live form on the dedicated host](../tests/google-auth/full48/candidate97.json) | Account submission, authenticated return, Spotify session and persistence. |
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -1979,3 +1979,35 @@ For the next public-video run, pass the OHOS native builder output to
 the running artifact hash and check for advancing playback alongside the Java
 and native events. A native factory event establishes a codec request. A
 successful app test requires the original player's video to advance.
+
+## Native window return after a board restart
+
+Two native programs requested a result from the same OpenHarmony ability. The first
+received its assigned result code 41 and the second received 42. WindowManager still
+showed the service in front after each return. The caller needed a separate action to
+bring its window forward.
+
+The dedicated host had also stopped processing window requests. On a cold launch,
+a diagnostic Wattpad host recorded that the bridge was enabled and its first interval
+handle was the number zero. The host treated zero as an absent timer, so the request
+remained unread. The fixed host checks for an undefined handle when it starts, polls
+and clears the interval.
+
+The signed Spotify, Wattpad and service test hosts were updated in place under their
+existing UIDs. Each client opened the service window. With Wattpad as the current
+caller, a stale return to Spotify was rejected and the service kept focus. A return
+to Wattpad focused Wattpad. Spotify then opened the service again and regained focus
+on return. WindowManager confirmed the destination on all six steps. A test driver
+submitted the window requests directly to each host's mailbox. [Board steps, host hashes and regression test](../tests/google-auth/full48/candidate97.json)
+
+The original Spotify 9.1.94.1929 APK also ran after reboot. As a control, its process
+had no connections configured to the Google or Play Store service processes. Pressing
+Google reached the SDK sign-in activity, returned result code zero and displayed
+“Something went wrong. Try again.” A successful sign-in through the running two-path
+service pair and a Spotify account session still need a live test.
+
+On the newly signed Spotify host, the same original APK opened both Facebook SDK
+activities. Westlake's browser fallback navigated to Facebook’s HTTPS OAuth page.
+The board showed the mobile number or email and password fields, and the focused
+window belonged to Spotify. This was an app-owned WebView. No password was submitted
+during this observation. [Original APK and Facebook form](../tests/google-auth/full48/candidate97.json)

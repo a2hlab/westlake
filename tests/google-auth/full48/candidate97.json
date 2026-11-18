@@ -1,0 +1,176 @@
+{
+  "candidate": 97,
+  "date": "2026-11-17",
+  "board": {
+    "usbShellVerified": true,
+    "tcpShellVerified": true,
+    "matchingBootIdOnBothTransports": true,
+    "openHarmonyVersion": "6.1.0.31",
+    "frameworkPreloadPassed": true,
+    "verifiedFrameworkFiles": 468
+  },
+  "nativeAbilityControl": {
+    "apps": "Three native test HAPs under different UIDs, using startAbilityForResult and backToCallerAbilityWithResult. No APK login.",
+    "serviceReceivedBothCalls": true,
+    "returns": [
+      {
+        "caller": "A",
+        "resultCode": 41,
+        "callerFocusedWithinSevenSeconds": false
+      },
+      {
+        "caller": "B",
+        "resultCode": 42,
+        "callerFocusedWithinSevenSeconds": false
+      }
+    ]
+  },
+  "windowTimer": {
+    "source": "apps/imehost/EntryAbility.js",
+    "previousBehavior": "The dedicated host opted in. On the diagnostic Wattpad HAP the first poll received a numeric falsy timer handle. With the original checks the caller mailbox request remained unread.",
+    "diagnosticEvents": [
+      {
+        "event": "config",
+        "dedicated": true,
+        "matchesPattern": true,
+        "infoMatches": true,
+        "requested": true,
+        "requestType": "boolean"
+      },
+      {
+        "event": "firstPoll",
+        "timerType": "number",
+        "timerTruthy": false
+      }
+    ],
+    "regressionBeforeFix": "Repeated activation registered a second timer; the previous unit-test timer always started at one.",
+    "afterFix": "A zero handle stays active and is cleared when the ability is destroyed. Host lifecycle and routing regression passed."
+  },
+  "installedDevelopmentHosts": {
+    "org.westlake.apk.com.spotify.music": {
+      "uid": 20010067,
+      "installedSha256": "5985ad7f2b64e91250d6d214f60c2f5ed28879d034186dcd6bb4f90b2d8c36c8"
+    },
+    "org.westlake.apk.wp.wattpad": {
+      "uid": 20010068,
+      "installedSha256": "b2093bfc048293fe91aac60fa8bf0413b64764f6e538e912641644052aff121c"
+    },
+    "org.westlake.authservicehost": {
+      "uid": 20010061,
+      "installedSha256": "0995af6fd52ec60605d9ba7d8842619c7008c520385fe6e87542e52310d5d7c6"
+    }
+  },
+  "installedWindowHandoff": {
+    "method": "Synthetic window requests written in each host\u2019s private mailbox. The installed HAP called its real UIAbilityContext.startAbility. Native focus was read from WindowManager after every step. No Android OAuth result or account data traveled in this test.",
+    "A": "org.westlake.apk.com.spotify.music",
+    "B": "org.westlake.apk.wp.wattpad",
+    "S": "org.westlake.authservicehost",
+    "steps": [
+      {
+        "from": "A",
+        "target": "S",
+        "expectedAccepted": true,
+        "reply": {
+          "accepted": true,
+          "reason": "started"
+        },
+        "focus": "S"
+      },
+      {
+        "from": "B",
+        "target": "S",
+        "expectedAccepted": true,
+        "reply": {
+          "accepted": true,
+          "reason": "started"
+        },
+        "focus": "S"
+      },
+      {
+        "from": "S",
+        "target": "A",
+        "expectedAccepted": false,
+        "reply": {
+          "accepted": false,
+          "reason": "invalid"
+        },
+        "focus": "S"
+      },
+      {
+        "from": "S",
+        "target": "B",
+        "expectedAccepted": true,
+        "reply": {
+          "accepted": true,
+          "reason": "started"
+        },
+        "focus": "B"
+      },
+      {
+        "from": "A",
+        "target": "S",
+        "expectedAccepted": true,
+        "reply": {
+          "accepted": true,
+          "reason": "started"
+        },
+        "focus": "S"
+      },
+      {
+        "from": "S",
+        "target": "A",
+        "expectedAccepted": true,
+        "reply": {
+          "accepted": true,
+          "reason": "started"
+        },
+        "focus": "A"
+      }
+    ]
+  },
+  "spotifyGoogleControl": {
+    "version": "9.1.94.1929",
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "dedicatedUID": 20010067,
+    "freshClientData": true,
+    "hostBuild": "candidate 95",
+    "googleAndStoreServiceConnectionsConfigured": false,
+    "twoPathServicesRestarted": false,
+    "loginPageRendered": true,
+    "googleButtonLocatedAndPressed": true,
+    "appLoadedGoogleSdkSignInHubActivity": true,
+    "activityResultCode": 0,
+    "screen": "Something went wrong. Try again.",
+    "googleChooserObserved": false,
+    "accountSessionVerified": false
+  },
+  "liveTwoPathGoogleLoginRetested": false,
+  "spotifyFacebook": {
+    "version": "9.1.94.1929",
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "dedicatedUID": 20010067,
+    "installedHostSha256": "5985ad7f2b64e91250d6d214f60c2f5ed28879d034186dcd6bb4f90b2d8c36c8",
+    "freshAppData": true,
+    "originalAppFacebookButtonVerifiedAndPressed": true,
+    "originalFacebookSdkActivitiesObserved": [
+      "com.facebook.FacebookActivity",
+      "com.facebook.CustomTabMainActivity"
+    ],
+    "openedVia": "Westlake WebLinkDialog in the original Spotify process",
+    "initialNavigation": {
+      "scheme": "https",
+      "host": "m.facebook.com",
+      "pathFamily": "dialog/oauth"
+    },
+    "focusedOwnerWasOriginalSpotifyPid": true,
+    "visibleFormLabels": [
+      "Facebook",
+      "Mobile number or email",
+      "Password",
+      "Forgot password"
+    ],
+    "credentialsSubmitted": false,
+    "authenticatedReturnVerified": false,
+    "spotifySessionVerified": false
+  }
+}

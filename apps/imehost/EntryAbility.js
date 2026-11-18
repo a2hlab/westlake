@@ -46,7 +46,7 @@ class EntryAbility extends UIAbility {
                 this.apkVisit.caller = null;
             }
         }
-        if ((this.ownSettingsEnabled || this.remoteWindowsEnabled) && !this.windowBridgeTimer) {
+        if ((this.ownSettingsEnabled || this.remoteWindowsEnabled) && this.windowBridgeTimer === undefined) {
             this.windowBridgeTimer = setInterval(() => this.pollWindowBridge(), 50);
         }
     }
@@ -82,7 +82,7 @@ class EntryAbility extends UIAbility {
         hilog.info(0, TAG, 'window handoff %{public}s', reason);
     }
     pollWindowBridge() {
-        if (!this.windowBridgeTimer || this.windowBridgeBusy) return;
+        if (this.windowBridgeTimer === undefined || this.windowBridgeBusy) return;
         const directory = this.context.filesDir + '/westlake-host-window';
         try {
             const names = fs.listFileSync(directory);
@@ -160,7 +160,7 @@ class EntryAbility extends UIAbility {
         this.record('window-destroyed', {});
     }
     onDestroy() {
-        if (this.windowBridgeTimer) clearInterval(this.windowBridgeTimer);
+        if (this.windowBridgeTimer !== undefined) clearInterval(this.windowBridgeTimer);
         this.windowBridgeTimer = undefined;
         this.apkVisit = undefined;
         this.windowForeground = false;

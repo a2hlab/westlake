@@ -13,9 +13,11 @@ const nativeFS = {
   renameSync: (a, b) => { files.set(b, files.get(a)); files.delete(a); }, unlinkSync: p => files.delete(p),
   listFileSync: dir => [...files.keys()].filter(p => p.startsWith(dir + '/')).map(p => p.slice(dir.length + 1))
 };
+let nextTimer = 0;
+const clearedTimers = [];
 const context = {exports: {}, requireNapi: name => name === 'file.fs' ? nativeFS :
   name === 'process' ? {pid: 71} : name === 'hilog' ? {info() {}, error() {}} : class {},
-  setInterval: () => 1, clearInterval() {}, setTimeout() {}, Date};
+  setInterval: () => nextTimer++, clearInterval(id) { clearedTimers.push(id); }, setTimeout() {}, Date};
 vm.runInNewContext(source, context);
 const host = new context.exports.default();
 host.context = {filesDir: '/private', startAbility: async want => {
@@ -51,6 +53,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   const disabled = request(); host.pollWindowBridge(); await flush(); assert.equal(calls, 0);
   files.delete(`${root}/request-${disabled}.json`);
   host.configureWindowBridge({parameters: {'westlake.remoteHostWindows': true}});
+  assert.equal(host.windowBridgeTimer, 0);
+  host.onNewWant({parameters: {'westlake.remoteHostWindows': true}});
+  assert.equal(nextTimer, 1, 'a repeated launch must keep the first interval');
   const accepted = request(); host.pollWindowBridge(); await flush(); assert.equal(calls, 1); assert.equal(reply(accepted).accepted, true);
   files.set(`${root}/request-${accepted}.json`, JSON.stringify({id: accepted, target: 'org.westlake.authservicehost', created: Date.now()}));
   host.pollWindowBridge(); await flush(); assert.equal(calls, 1, 'duplicate request must not launch again');
@@ -64,6 +69,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   failOH = true; const denied = request(); host.pollWindowBridge(); await flush();
   assert.equal(reply(denied).reason, 'oh-denied'); assert.equal(reply(denied).accepted, false); assert.equal(calls, 2);
   host.onDestroy(); assert.equal(host.windowForeground, false);
+  assert.deepEqual(clearedTimers, [0]);
   const apkHost = 'org.westlake.apk.org.example.maps';
   const dedicatedContext = {...context, exports: {}};
   vm.runInNewContext(source.replace("const HOST_BUNDLE = 'org.westlake.authclienthost'",
