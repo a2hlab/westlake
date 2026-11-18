@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "candidate": 141,
+  "previous": "candidate140.json",
+  "date": "2026-11-18",
+  "test": "Package-specific account visibility in the connected Westlake account adapter",
+  "officialApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+  "signedApkEvidence": {
+    "component": "com.google.android.gms.auth.account.be.legacy.AccountContentProvider",
+    "exported": true,
+    "operation": "get_accounts",
+    "possibleAndroidLookups": [
+      "getAccountsByType",
+      "getAccountsByTypeForPackage"
+    ],
+    "scope": "Static paths in the signed original APK. This fixture does not identify which path Gmail used."
+  },
+  "implementation": "The official Play services APK contains separate Android calls for its own account list and for accounts visible to a named package. Westlake’s connected account adapter now checks the target of a package-specific request. An app can query its own granted account. A request for another app requires the existing live account-picker selection, and a remote request must match the picker’s connection. The system-only account query is refused for broker clients running as apps.",
+  "fixtureSource": "fixtures/PackageAccountVisibilityProbe.java",
+  "fixtureSha256": "a212ae2add6a9c79141e845abbf253453caeff5eb1d8b6b6a8d9690a02c77d52",
+  "board": {
+    "directGoogleAccounts": 1,
+    "selfQueryAllTypes": 1,
+    "absentTarget": 0,
+    "otherAccountType": 0,
+    "systemOnlyApiDenied": true,
+    "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "foregroundPrimary": true,
+    "inboxMatchesReference": true,
+    "distinctPrincipalCount": 4
+  },
+  "provenance": {
+    "testAdapterSha256": "bf44626e7b697bebd8e2eb7fbb00c830fcee6ccd9c7de076103707c19339ee40",
+    "productionAdapterSha256": "4b062e32870a02a555c953f3759e0f5081ab88557cbb42118da46ce7d6782be8",
+    "fullCurrentSourceTreeCompiled": true,
+    "testClassAbsentFromProductionJar": true,
+    "separateTestAdapterRemoved": true
+  },
+  "interpretation": "A test fixture in the original Gmail process on OpenHarmony used Android AccountManager. The ordinary Google account query and the all-types query for Gmail each returned one account. The absent package and the unrelated account type each returned zero. The system-only query raised SecurityException. The original Gmail Primary view displayed the same mailbox region as before. These five API checks do not establish a fresh Gmail account selection or receipt of the test message.",
+  "limits": [
+    "The five requests were made by the regression fixture inside the original Gmail process. They are separate from Gmail’s own startup requests.",
+    "An active authorized account picker for a different package and concurrent callers were not exercised by this fixture.",
+    "The fix applies to the connected broker client path. Gmail delivery, durable cross-app account visibility, and complete Android AccountManager parity remain open."
+  ]
+}

@@ -1729,6 +1729,12 @@ On the OpenHarmony board, Gmail opened a 720 × 1833 pixel folder list. Its adap
 
 In the same original Gmail process, Android’s account manager returned one Google account on 14 calls. The official Play services account provider returned an empty array on all 7 observed Google account queries. On 4 of those calls, the live stack included Gmail’s own account-list builder. Gmail’s internal account list had published zero entries in three samples. The Gmail process was connected to microG; the live official Play services listener had no account connector configured. These results locate the empty reply on this board configuration. An otherwise matched run with the official service also connected is still needed to determine the effect of that connection. [Same-process account counts and stack checks](../tests/google-auth/full48/candidate140.json)
 
+#### Package-specific account visibility
+
+The official Play services APK contains separate Android calls for its own account list and for accounts visible to a named package. Westlake’s connected account adapter now checks the target of a package-specific request. An app can query its own granted account. A request for another app requires the existing live account-picker selection, and a remote request must match the picker’s connection. The system-only account query is refused for broker clients running as apps.
+
+A test fixture in the original Gmail process on OpenHarmony used Android AccountManager. The ordinary Google account query and the all-types query for Gmail each returned one account. The absent package and the unrelated account type each returned zero. The system-only query raised SecurityException. The original Gmail Primary view displayed the same mailbox region as before. These five API checks do not establish a fresh Gmail account selection or receipt of the test message. [Board results and fixture provenance](../tests/google-auth/full48/candidate141.json)
+
 ### Gmail touch input on its dedicated host
 
 The hosted window path looked up `oh_owned_input_subscribe` at runtime.

@@ -211,6 +211,18 @@ public final class RemoteActivities {
         return false;
     }
 
+    /** A package-specific query can use a selection made by its own live account picker. */
+    public static boolean hasSelectedAccountForCaller(Account account, String packageName) {
+        synchronized (INCOMING) {
+            for (Incoming request : INCOMING) {
+                if (!request.done.get() && request.caller.getPackageName().equals(packageName)
+                        && (SocketBinder.callingPeer() == null || SocketBinder.isCallingPeer(request.callback))
+                        && GoogleAuthProxy.selectedInteractiveAccount(account, packageName)) return true;
+            }
+            return false;
+        }
+    }
+
     /** Only same-app channel callers reach this entry, or the official UI's own AccountManager. */
     static String readDelegatedAuth(String method, Account account, String input) {
         if (!GoogleAuthDelegation.enabled()) return null;

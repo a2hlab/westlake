@@ -241,12 +241,15 @@ public final class GoogleAuthProxy {
         finally { data.recycle(); }
     }
 
+    private static Account[] currentAccounts() throws Exception {
+        Parcel reply = call(ACCOUNTS, data -> {});
+        try { return reply.createTypedArray(Account.CREATOR); } finally { reply.recycle(); }
+    }
+
     private static Account[] accounts(String type) throws Exception {
         if (type != null && !"com.google".equals(type)) return new Account[0];
         try {
-            Parcel reply = call(ACCOUNTS, data -> {});
-            Account[] found;
-            try { found = reply.createTypedArray(Account.CREATOR); } finally { reply.recycle(); }
+            Account[] found = currentAccounts();
             rememberAccounts(found);
             return found;
         } catch (SecurityException denied) {
@@ -354,6 +357,25 @@ public final class GoogleAuthProxy {
     private static boolean interactiveCaller(String packageName) throws Exception {
         return (Boolean) Class.forName("adapter.activity.RemoteActivities")
                 .getMethod("isInteractiveCaller", String.class).invoke(null, packageName);
+    }
+
+    private static Account[] accountsForPackage(String type, String target, String opPackage) throws Exception {
+        String own = ActivityThread.currentPackageName();
+        if (own == null || !own.equals(opPackage)) throw new SecurityException("invalid account query origin");
+        if (target == null || target.isEmpty() || (type != null && !"com.google".equals(type))) {
+            return new Account[0];
+        }
+        if (own.equals(target)) return accounts(type);
+        // A broker client's own grant cannot supply accounts visible to another package.
+        if (!"com.google.android.gms".equals(own) || !interactiveCaller(target)) return new Account[0];
+        Account[] found = currentAccounts();
+        if (found != null && found.length == 1 && found[0] != null && "com.google".equals(found[0].type)
+                && (Boolean) Class.forName("adapter.activity.RemoteActivities")
+                        .getMethod("hasSelectedAccountForCaller", Account.class, String.class)
+                        .invoke(null, found[0], target)) {
+            return found;
+        }
+        return new Account[0];
     }
 
     private static int visibility(Account account, String packageName) throws Exception {
@@ -477,9 +499,11 @@ public final class GoogleAuthProxy {
                     int value = visibility((Account) args[0], (String) args[1]);
                     return value == AccountManager.VISIBILITY_VISIBLE || value == AccountManager.VISIBILITY_USER_MANAGED_VISIBLE;
                 }
-                case "getAccountsAsUser":
-                case "getAccountsByTypeForPackage": return accounts((String) args[0]);
-                case "getAccountsForPackage": return accounts(null);
+                case "getAccountsAsUser": return accounts((String) args[0]);
+                case "getAccountsByTypeForPackage":
+                    return accountsForPackage((String) args[0], (String) args[1], (String) args[2]);
+                case "getAccountsForPackage":
+                    throw new SecurityException("getAccountsForPackage requires the system UID");
                 case "getAccountsByFeatures":
                 case "getAccountByTypeAndFeatures":
                 case "hasFeatures": accountFeatures(method, args); return null;
