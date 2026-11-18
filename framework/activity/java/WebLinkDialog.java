@@ -76,7 +76,7 @@ final class WebLinkDialog {
 
     private static void open(final Activity activity, Uri uri) {
         if (activity.isFinishing() || activity.isDestroyed()) {
-            Log.i(TAG, "not opened, its activity is gone: " + uri);
+            Log.i(TAG, "Web link skipped because its activity is gone");
             return;
         }
         try {
@@ -92,7 +92,7 @@ final class WebLinkDialog {
                     try {
                         activity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                     } catch (Throwable throwable) {
-                        Log.i(TAG, "nothing handles " + next + ": " + throwable);
+                        Log.i(TAG, "Redirect failed: " + throwable.getClass().getSimpleName());
                     }
                     dialog.dismiss();
                     return true;
@@ -103,9 +103,9 @@ final class WebLinkDialog {
             dialog.setOnDismissListener(d -> web.destroy());
             dialog.show();
             web.loadUrl(uri.toString());
-            Log.i(TAG, "opened " + uri + " over " + activity.getComponentName());
+            Log.i(TAG, "Web link opened over " + activity.getComponentName());
         } catch (Throwable throwable) {
-            Log.w(TAG, "could not open " + uri + ": " + throwable);
+            Log.w(TAG, "Web link failed: " + throwable.getClass().getSimpleName());
         }
     }
 }
