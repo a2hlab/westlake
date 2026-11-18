@@ -1,0 +1,52 @@
+{
+  "candidate": 101,
+  "date": "2026-11-17",
+  "package": "com.zhiliaoapp.musically",
+  "versionName": "47.1.4",
+  "apkSha256": "4226ed5d3031b68208c29f62d80ac421b281fc74201bc4163d98e442d0991a40",
+  "signatureVerified": true,
+  "welcomeAsset": {
+    "path": "assets/welcome_screen_video4.mp4",
+    "sha256": "19cf1e34dad70708d05eeae7741e6f8b50795b2ec38e01bb68f91695dbcd5376",
+    "sizePixels": [
+      500,
+      500
+    ],
+    "pixelAspectRatio": "1:1",
+    "durationSeconds": 6.1,
+    "rotationMetadata": null,
+    "visualAtTwoSeconds": "Upright phone and hand inside a square canvas.",
+    "sourceUsage": "WelcomeVideoWidget in classes41.dex references the asset and the player component."
+  },
+  "window": {
+    "newUserJourneyActivityOrientation": "behind (3), as declared in the APK",
+    "reportedAndroidActivityPixels": [
+      1200,
+      1920
+    ],
+    "physicalScreenshotPixels": [
+      1200,
+      1920
+    ],
+    "observedOnFreshProfile": [
+      "Upright welcome slogan",
+      "Sign-up options with Skip",
+      "Birth-date prompt after Skip"
+    ],
+    "secondRun": "The guest For You page displayed an upright photo post."
+  },
+  "startup": {
+    "initialRun": "Native SIGSEGV on the ExecutorsHook$C thread before the feed.",
+    "repeatConfiguration": "Used the Android native namespace for the packaged C++ library and its direct consumers (192 target names). The repeat reached the feed."
+  },
+  "mediaBridge": {
+    "change": "Android MediaCodec scaling mode 1 (scale to surface) and mode 2 (crop) are forwarded to the OpenHarmony output window; a replaced output surface receives the selected mode.",
+    "ohModeOneReturnedSuccessInOriginalYouTube": true,
+    "beforeChangeSourceMissingNativeScaleSetter": true,
+    "androidSurfaceControlMatrixImplementation": "Empty in the tested source. Whether the welcome animation uses this path is unverified."
+  },
+  "liveWelcomeClipCaptured": false,
+  "endToEndSizingAccepted": false,
+  "credentialsOrBirthDateSubmitted": false,
+  "open": "The source frame and portrait activity are verified. The welcome clip itself has no live orientation or aspect-ratio verdict."
+}
