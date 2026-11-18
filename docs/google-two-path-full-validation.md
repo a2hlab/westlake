@@ -1545,6 +1545,27 @@ still showed **Set up email**. This locates a client enrollment failure before
 Google’s credential screen.
 [Original Gmail, provider and namespace evidence](../tests/google-auth/full48/candidate121.json)
 
+### Gmail sync settings and adapter completion
+
+The original APK exposes its preferences as an exported Android activity.
+Opening the retained account’s settings showed that **Sync Gmail** was on.
+Turning it off and back on in Gmail initialized its `gmail-ls` adapter. The
+app marked the account syncable. Both subsequent mailbox jobs called back
+with failure. Neither reported an authentication or I/O error or timed out.
+
+During initialization Gmail wrote the enabled setting a second time.
+Westlake handled this as another scheduling request. The setting now follows
+Android’s behavior for repeated writes and for reinitializing an adapter
+when the user enables sync. Completion diagnostics record Android’s compact
+sync result flags. They contain no mailbox content.
+
+The updated build received Android sync result `X1b1`. Gmail reported a database error. Android uses this flag for more than one failure, including a missing content provider. The flag alone does not identify which operation failed. The retained profile was already marked syncable during the repeat.
+The original Gmail inbox reopened with sync on. Two captures following a
+new swipe showed the same message-list pixels as the pre-test inbox. The
+local dispatcher recorded zero sync requests in that inbox process. The
+sender-confirmed message remains unverified.
+[Settings, dispatch and inbox observations](../tests/google-auth/full48/candidate122.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection

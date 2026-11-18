@@ -129,9 +129,17 @@ public final class LocalSyncService {
             case "setSyncAutomatically": case "setSyncAutomaticallyAsUser": {
                 Account account = (Account) a[0]; String authority = (String) a[1];
                 requireAdapter(account, authority);
-                save(settings.edit().putBoolean(key(account, authority) + ".auto", (Boolean) a[2]));
+                String key = key(account, authority);
+                boolean enable = (Boolean) a[2];
+                if (settings.getBoolean(key + ".auto", false) == enable) return null;
+                SharedPreferences.Editor edit = settings.edit().putBoolean(key + ".auto", enable);
+                if (enable && syncable(account, authority) == 2) {
+                    // Android retries initialization when the user enables a previously uninitialized adapter.
+                    edit.putInt(key + ".syncable", -1);
+                }
+                save(edit);
                 notifyStatus(ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
-                if ((Boolean) a[2]) request(account, authority, new Bundle(), app.getPackageName());
+                if (enable) request(account, authority, new Bundle(), app.getPackageName());
                 return null;
             }
             case "getIsSyncable": case "getIsSyncableAsUser":
@@ -605,7 +613,8 @@ public final class LocalSyncService {
                 if (bound) main.post(() -> { try { app.unbindService(this); } catch (Exception ignored) {} });
                 trace("finished=true job=" + id + " reason=" + reason + " success=" + success
                         + " auth_error=" + (result != null && result.stats.numAuthExceptions > 0)
-                        + " io_error=" + (result != null && result.stats.numIoExceptions > 0));
+                        + " io_error=" + (result != null && result.stats.numIoExceptions > 0)
+                        + " result_flags=" + (result == null ? "absent" : result.toDebugString()));
                 notifyStatus(ContentResolver.SYNC_OBSERVER_TYPE_ACTIVE | ContentResolver.SYNC_OBSERVER_TYPE_PENDING | ContentResolver.SYNC_OBSERVER_TYPE_STATUS);
             }
             worker.execute(LocalSyncService.this::pump);

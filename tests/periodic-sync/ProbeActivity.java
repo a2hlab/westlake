@@ -51,6 +51,11 @@ public final class ProbeActivity extends Activity {
                     Bundle invalid = new Bundle(); invalid.putBoolean(ContentResolver.SYNC_EXTRAS_MANUAL, true);
                     refused(() -> ContentResolver.addPeriodicSync(account, AUTHORITY, invalid, 900));
                     ContentResolver.setSyncAutomatically(account, AUTHORITY, true); await(false); yes(true);
+                    int callsAfterEnabling = prefs().getInt("calls", 0);
+                    ContentResolver.setSyncAutomatically(account, AUTHORITY, true);
+                    yes(!ContentResolver.isSyncPending(account, AUTHORITY)
+                            && !ContentResolver.isSyncActive(account, AUTHORITY)
+                            && prefs().getInt("calls", 0) == callsAfterEnabling);
                     Bundle extra = new Bundle(); extra.putBoolean("periodic_marker", true);
                     SyncRequest request = new SyncRequest.Builder().setSyncAdapter(account, AUTHORITY)
                             .setExtras(extra).syncPeriodic(900, 900).build();

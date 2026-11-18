@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "candidate": 122,
+  "previous": "candidate121.json",
+  "date": "2026-11-18",
+  "scope": "Gmail incremental refresh and settings-triggered adapter dispatch on the retained test profile.",
+  "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "settingsActivity": "com.android.mail.ui.settings.PublicPreferenceActivity",
+  "declaredMailboxProvider": "com.google.android.gm.provider.MailProvider",
+  "mailAuthority": "gmail-ls",
+  "settingsEntryExportedAndEnabled": true,
+  "accountSelectedInPreferences": true,
+  "beforeChange": {
+    "adapterJarSha256": "03db44ec84d3da479b4f87c971a03cca078a3fa556a010eb73a942efa967fdaa",
+    "initialAutoSync": true,
+    "confirmedOffAndBackOnInOriginalUi": true,
+    "syncableWasUnspecifiedAtFirstEnable": true,
+    "syncableAfterInitialization": 1,
+    "adapterSequence": [
+      {
+        "start": true,
+        "authority": "gmail-ls",
+        "initialize": true
+      },
+      {
+        "start": true,
+        "authority": "gmail-ls",
+        "initialize": false
+      },
+      {
+        "finished": true,
+        "reason": "adapter_finished",
+        "success": false,
+        "auth_error": false,
+        "io_error": false
+      },
+      {
+        "start": true,
+        "authority": "gmail-ls",
+        "initialize": false
+      },
+      {
+        "finished": true,
+        "reason": "adapter_finished",
+        "success": false,
+        "auth_error": false,
+        "io_error": false
+      }
+    ],
+    "automaticSyncWritesLogged": 2,
+    "requestCount": 2,
+    "timeoutCount": 0,
+    "primaryAfterClientRestart": {
+      "primaryVisibleSamples": 3,
+      "lastTimedPrimarySampleSeconds": 67.3,
+      "allVisibleListCropsIdenticalToOriginalBaseline": true,
+      "systemSwipeRun": true,
+      "localRequestsByLastSample": 0,
+      "additionalSamplesAfterConfirmedSwipe": 0
+    }
+  },
+  "afterChange": {
+    "adapterJarSha256": "a8ace2b26d13be67b452359f40da225a2580569079b36521dd04565d112b8fa9",
+    "adapterBootOatSha256": "012bf5b1cb03f273b348229c317a84d86cdb2418d91ae5fe8dbf56cd081d8645",
+    "preloadPassed": true,
+    "preloadFiles": 469,
+    "fullStackAcceptanceTestRun": false,
+    "startingSyncable": "1",
+    "confirmedOffAndBackOnInOriginalUi": true,
+    "adapterSequence": [
+      {
+        "start": true,
+        "authority": "gmail-ls",
+        "initialize": false
+      },
+      {
+        "finished": true,
+        "reason": "adapter_finished",
+        "success": false,
+        "auth_error": false,
+        "io_error": false,
+        "result_flags": "X1b1"
+      }
+    ],
+    "requestCount": 1,
+    "automaticSyncWritesLogged": 1,
+    "timeoutCount": 0,
+    "primaryAfterClientRestart": {
+      "primaryVisibleSamples": 2,
+      "lastTimedPrimarySampleSeconds": null,
+      "allVisibleListCropsIdenticalToOriginalBaseline": true,
+      "systemSwipeRun": true,
+      "localRequestsByLastSample": 0,
+      "additionalSamplesAfterConfirmedSwipe": 2
+    },
+    "finalAutoSync": true
+  },
+  "checks": {
+    "syncDispatchHostAssertions": 14,
+    "periodicScheduleHostAssertions": 26,
+    "periodicFixtureWithRepeatedEnableRegressionBuilt": true,
+    "newPeriodicFixtureExecutedOnBoard": false
+  },
+  "limits": [
+    "Calendar time for UI samples starts with the observer. The settings selection used the existing account and did not exercise enrollment.",
+    "A retained mailbox can display cached conversations. Fresh delivery of the sender-confirmed message remains unverified.",
+    "The original and updated settings runs started with different stored syncability. Their job counts cannot quantify the duplicate fix in isolation."
+  ]
+}

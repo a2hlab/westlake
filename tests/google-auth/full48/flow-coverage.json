@@ -138,7 +138,8 @@
           "candidate118.json",
           "candidate119.json",
           "candidate120.json",
-          "candidate121.json"
+          "candidate121.json",
+          "candidate122.json"
         ],
         "checks": {
           "account_selection": {
@@ -151,7 +152,7 @@
           },
           "refresh": {
             "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded."
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery."
           },
           "restart_persistence": {
             "status": "observed",
