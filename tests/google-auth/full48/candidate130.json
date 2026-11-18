@@ -1,0 +1,280 @@
+{
+  "schema": 1,
+  "candidate": 130,
+  "date": "2026-11-18",
+  "previous": "candidate129.json",
+  "scope": "Trace the original signed Gmail inbox refresh listener, its actual Android connectivity result and instrumented Android provider calls in the retained board profile.",
+  "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "nativeInputBridgeSha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070",
+  "profile": "Same retained Gmail profile, original APK and repaired input bridge. Two temporary framework builds observed existing Android framework operations. Both were removed after their respective runs.",
+  "apkInspection": {
+    "indicatorViewOverridesAnimationEnd": true,
+    "refreshListenerClass": "nnr",
+    "originalWidget": "com.android.mail.ui.layout.PullToRefreshLayout",
+    "releaseSettleAnimationClass": "kcj",
+    "releaseReturnAnimationClass": "kck",
+    "animationListenerClass": "kcf",
+    "postCallbackMethod": "kcb.getTop",
+    "staticOrdering": "The original animation listener starts the progress drawable when refreshing. When notification is enabled and the registered listener exists, it invokes the listener. The next call reads the circle top.",
+    "appConnectivityCheck": "The registered Gmail listener calls getActiveNetworkInfo and, when a NetworkInfo is present, checks isConnected. An absent object returns false to Gmail. In the original APK the disconnected branch can display its network_error resource, whose default text is No connection."
+  },
+  "releaseShortSwipeControl": {
+    "originalInbox": true,
+    "releaseForwarded": 1,
+    "observerEvents": 0
+  },
+  "observations": {
+    "framework144": {
+      "physicalPreloadVerifiedInputs": 469,
+      "instrumentedFrameworkSha256": "7041da59627c4a1dfc54acbf24eb64dd25ddd183509b6ef3b919332120956df0",
+      "restoredReleaseFrameworkSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+      "controls": {
+        "idle": {
+          "seconds": 19.0,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 0,
+            "appTokenRequest": 0,
+            "fatal": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 8,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 0,
+          "progressAnimatorStartedInListener": 0,
+          "returnedThroughOriginalListenerBranch": 0,
+          "usedCancelAnimation": 0,
+          "providerMethodEntries": {
+            "stage=resolver operation=query listenerStack=false": 41
+          }
+        },
+        "short": {
+          "seconds": 16.2,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 1,
+            "appTokenRequest": 0,
+            "fatal": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 0,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 0,
+          "progressAnimatorStartedInListener": 0,
+          "returnedThroughOriginalListenerBranch": 0,
+          "usedCancelAnimation": 1,
+          "providerMethodEntries": {}
+        },
+        "pull": {
+          "seconds": 39.0,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 1,
+            "appTokenRequest": 0,
+            "fatal": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 2,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 1,
+          "progressAnimatorStartedInListener": 1,
+          "returnedThroughOriginalListenerBranch": 1,
+          "usedCancelAnimation": 0,
+          "providerMethodEntries": {}
+        },
+        "secondPull": {
+          "seconds": 39.1,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 1,
+            "appTokenRequest": 0,
+            "fatal": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 1,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 1,
+          "progressAnimatorStartedInListener": 1,
+          "returnedThroughOriginalListenerBranch": 1,
+          "usedCancelAnimation": 0,
+          "providerMethodEntries": {}
+        }
+      },
+      "verifiedTemporaryPreloadFilesRemoved": 469
+    },
+    "framework145": {
+      "physicalPreloadVerifiedInputs": 469,
+      "instrumentedFrameworkSha256": "745aa8d72c1a13e62ed03172764be7dc72d2d141caa8b990dda0c53e71c9aa38",
+      "restoredReleaseFrameworkSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+      "controls": {
+        "idle": {
+          "seconds": 19.1,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 0,
+            "appTokenRequest": 0,
+            "fatal": 0,
+            "scheduledJobs": 0,
+            "workAdded": 0,
+            "finishedJobs": 0,
+            "startedJobs": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 7,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 0,
+          "progressAnimatorStartedInListener": 0,
+          "returnedThroughOriginalListenerBranch": 0,
+          "usedCancelAnimation": 0,
+          "providerMethodEntries": {
+            "stage=resolver operation=query listenerStack=false": 31,
+            "stage=resolver operation=clientcall listenerStack=false": 4
+          },
+          "onActualGmailListenerStack": {}
+        },
+        "short": {
+          "seconds": 16.2,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 1,
+            "appTokenRequest": 0,
+            "fatal": 0,
+            "scheduledJobs": 0,
+            "workAdded": 0,
+            "finishedJobs": 0,
+            "startedJobs": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 0,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 0,
+          "progressAnimatorStartedInListener": 0,
+          "returnedThroughOriginalListenerBranch": 0,
+          "usedCancelAnimation": 1,
+          "providerMethodEntries": {},
+          "onActualGmailListenerStack": {}
+        },
+        "pull": {
+          "seconds": 39.2,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 1,
+            "appTokenRequest": 0,
+            "fatal": 0,
+            "scheduledJobs": 0,
+            "workAdded": 0,
+            "finishedJobs": 0,
+            "startedJobs": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 1,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 1,
+          "progressAnimatorStartedInListener": 1,
+          "returnedThroughOriginalListenerBranch": 1,
+          "usedCancelAnimation": 0,
+          "providerMethodEntries": {},
+          "onActualGmailListenerStack": {
+            "stage=appNetworkInfo returned=present": 1,
+            "stage=appNetworkConnected result=true": 1
+          },
+          "verifiedListenerEventOrder": [
+            "stage=progressAnimatorStart",
+            "stage=appNetworkInfo returned=present",
+            "stage=appNetworkConnected result=true",
+            "stage=listenerBranchReturned"
+          ]
+        },
+        "secondPull": {
+          "seconds": 39.1,
+          "primaryVisible": true,
+          "visiblePrimaryRowsUnchanged": true,
+          "nativeTouchAndLocalCounters": {
+            "syncRequest": 0,
+            "syncStart": 0,
+            "syncFinish": 0,
+            "releaseForwarded": 1,
+            "appTokenRequest": 0,
+            "fatal": 0,
+            "scheduledJobs": 0,
+            "workAdded": 0,
+            "finishedJobs": 0,
+            "startedJobs": 0
+          },
+          "microGAccountListAndTokenOperationCounts": {
+            "lists": 1,
+            "token": 0
+          },
+          "registeredListenerObservedAtAnimationEnd": 1,
+          "progressAnimatorStartedInListener": 1,
+          "returnedThroughOriginalListenerBranch": 1,
+          "usedCancelAnimation": 0,
+          "providerMethodEntries": {},
+          "onActualGmailListenerStack": {
+            "stage=appNetworkInfo returned=present": 1,
+            "stage=appNetworkConnected result=true": 1
+          },
+          "verifiedListenerEventOrder": [
+            "stage=progressAnimatorStart",
+            "stage=appNetworkInfo returned=present",
+            "stage=appNetworkConnected result=true",
+            "stage=listenerBranchReturned"
+          ]
+        }
+      },
+      "verifiedTemporaryPreloadFilesRemoved": 469
+    }
+  },
+  "originalAppControllerControlFlow": {
+    "staticOnly": true,
+    "listenerContainsExceptionHandler": false,
+    "positiveNetworkBranchRequiresControllerAccountLookupAndCallOnEveryNormalReturn": true,
+    "negativeNetworkBranchReachesNeitherCall": true,
+    "controllerInterface": "opf",
+    "accountLookup": "lp()",
+    "accountMethod": "ci(GmailAndroidAccount)",
+    "accountValueInspected": false
+  },
+  "inference": "The original DEX has no exception handlers in the app listener. On every normal return after a positive network test it reads the current app account and calls the controller method ci(GmailAndroidAccount). Taken together, the observed network result and normal return place both full pulls through this account-specific call. The concrete work it selected was not observed.",
+  "interpretation": "On the board, four full pulls across two observation builds reached the original Gmail refresh listener and returned. Two short pulls took the cancel animation. In the enhanced build, both full pulls received a non-null active Android network and isConnected returned true on the Gmail listener stack. No monitored Android provider method ran directly on that stack and no new local mailbox sync or token request was observed. Delivery of the new email and Gmail’s asynchronous work after the listener remain open.",
+  "limits": [
+    "An Android connected-state result does not measure network traffic or acceptance by a Google server.",
+    "The provider counters cover the listed framework entry points. Asynchronous app workers and direct network clients can use other paths.",
+    "Only the visible Primary rows were compared. The observations do not identify a particular message in another folder."
+  ]
+}

@@ -1642,6 +1642,31 @@ next callback unresolved. This test used the retained host; fresh account
 enrollment remains a separate open item.
 [Matched board controls and original Gmail refresh outcome](../tests/google-auth/full48/candidate129.json)
 
+#### What happens after Gmail’s refresh arrow appears
+
+The original inbox registers its own refresh listener. On the board, four full
+pulls across two temporary framework builds crossed the refresh threshold.
+The widget started its progress animation, notified the app listener and
+returned through the next call in the original APK. Two 70-pixel pulls took
+the cancel animation. All runs used the same signed original APK.
+
+The listener checks Android’s active network before continuing. During each
+full pull on the second build, Gmail received a network object and its
+`isConnected()` call returned true. No monitored Android provider method ran
+directly on the listener stack. The local sync dispatcher recorded no new
+request, start or finish, and no new account token request appeared. Both
+tests ended on the same visible Primary rows. The experiment did not trace
+every asynchronous task or establish delivery at the server.
+
+The original APK also narrows the next step. On every normal return from
+this listener after a positive network check, Gmail looks up its current app
+account and calls its controller with that account. The connected result and
+the observed return place both pulls through that call. Its subsequent work
+remains unverified. No new Westlake job was scheduled or started in either
+full-pull window on the enhanced build. The normal framework and retained
+inbox were restored after each run.
+[Original Gmail callback and network-return controls](../tests/google-auth/full48/candidate130.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
