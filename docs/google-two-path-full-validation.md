@@ -1440,6 +1440,31 @@ These traces contain no backend registration decision. The board returned to
 the original Gmail **Set up email** screen. New mail remains unverified.
 [Original app retest](../tests/google-auth/full48/candidate113.json)
 
+### Play Store recovery after the Google account service exits
+
+On the previous runtime the original Store exited when a sign-in tap reached
+a dead account-service binder. The Store now retains a local AccountManager
+interface. A new request can reconnect through the existing verified service
+channel. A provider that disappears during enrollment yields one error. This
+also works when the provider first returns a login intent and then exits.
+The board regression covered overlapping requests, delayed callbacks, explicit
+retry and a permission refusal.
+[Account-service regression](../tests/google-auth/full48/candidate114.json)
+
+With the official Google service's main process absent, we tapped **Sign in**
+twice in the original Store. The account-service connection was refused both
+times. The same Store process stayed alive and owned the welcome screen
+through the final capture, about 33 seconds after each tap. We then restarted
+official Play services and tapped **Sign in** a third time in that same Store
+process. It reconnected and received a result from Google's exported redirect
+activity. The Google UI rejected the next pending activity with
+`SecurityException` and returned a canceled result. The Store remained on
+its sign-in screen through 58 seconds. The official Google main process again
+exited with an uninitialized `droidGuardHandle` exception. Retained Gmail
+still showed **Getting your messages** and dedicated Gmail showed **Set up
+email**. Delivery of the new test message remains open.
+[Original apps and framework hashes](../tests/google-auth/full48/candidate114.json)
+
 ## Candidate 80: real periodic sync and the standard adapter caller guard
 
 LocalSyncService previously threw on `addPeriodicSync`. It now supports both

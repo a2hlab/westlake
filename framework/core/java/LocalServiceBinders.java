@@ -248,11 +248,7 @@ public final class LocalServiceBinders {
     private static IBinder accountService() throws ClassNotFoundException {
         if (GoogleAuthProxy.client()) return new AccountManagerStub();
         if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
-        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
-            IBinder remote = playServicesHostService("account");
-            if (remote != null) return remote;
-        }
-        return proxy("account", "android.accounts.IAccountManager", (method, args) -> {
+        IBinder empty = proxy("account", "android.accounts.IAccountManager", (method, args) -> {
             if ("getAccountsByFeatures".equals(method) || "getAccountByTypeAndFeatures".equals(method)) {
                 IAccountManagerResponse response = (IAccountManagerResponse) args[0];
                 if (response == null) throw new IllegalArgumentException("response is null");
@@ -271,6 +267,10 @@ public final class LocalServiceBinders {
             }
             return DEFAULT;
         });
+        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
+            return StoreAccountService.create(() -> playServicesHostService("account"), empty);
+        }
+        return empty;
     }
 
     /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */

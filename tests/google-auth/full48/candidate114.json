@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "candidate": 114,
+  "date": "2026-11-17",
+  "previousOriginalAppControl": "candidate113.json",
+  "change": "The Store keeps a local AccountManager interface and resolves the existing official account service again when a later request finds the old binder dead. An interrupted enrollment receives a terminal error. The adapter does not replay that enrollment.",
+  "boardRegression": {
+    "source": "tests/parity/StoreAccountRecoveryProbe.java",
+    "probeDexJarSha256": "e61e125b482d12b08a70fe80ef08628faa67c9072409c71adfd36493251f689e",
+    "exitCode": 0,
+    "fixture": "Local inert services and actual Android account interfaces on OpenHarmony ART. No external account or Google server.",
+    "checks": [
+      "Missing provider returned one error",
+      "Two simultaneous pending enrollments had independent callbacks",
+      "A login intent kept an interactive enrollment open until provider death",
+      "Late result after death was ignored and completed request stayed complete",
+      "Death during dispatch delivered one error without replay",
+      "An explicit subsequent request used the replacement service and succeeded",
+      "Permission refusal propagated as SecurityException"
+    ]
+  },
+  "build": {
+    "preloadFilesVerified": 469,
+    "boardAdapterDexSha256": "7dbcab0cc5869b15c5a6ee056e28c8fbab580777297a3f689fd20cb2b2910e86",
+    "installedStoreAdapterDexSha256": "7dbcab0cc5869b15c5a6ee056e28c8fbab580777297a3f689fd20cb2b2910e86"
+  },
+  "originalAppControl": {
+    "storeBaseApkSha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+    "gmsBaseApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "sameStoreApkDataAndUidAsEarlierFailure": true,
+    "peerChecksEnforced": true,
+    "delegatedProviderConfigured": false,
+    "serviceUnavailable": [
+      {
+        "tap": 1,
+        "mainServiceProcessPresent": false,
+        "socketConnectionRefused": true,
+        "storeAliveAndFocusedThroughout": true,
+        "lastFocusedObservationSecondsAfterTap": 32.9
+      },
+      {
+        "tap": 2,
+        "mainServiceProcessPresent": false,
+        "socketConnectionRefused": true,
+        "storeAliveAndFocusedThroughout": true,
+        "lastFocusedObservationSecondsAfterTap": 33.1
+      }
+    ],
+    "newRequestAfterServiceRestart": {
+      "sameStoreProcessAsFirstAndSecondTap": true,
+      "googleServiceOpenedItsListener": true,
+      "accountServiceReconnected": true,
+      "userTappedSignIn": true,
+      "officialAuthenticatorHandledEnrollment": true,
+      "officialUiReceivedRedirectFrom": "com.android.vending",
+      "officialActivity": "com.google.android.gms.auth.uiflows.common.UnpackingRedirectActivity",
+      "pendingActivityOutcome": "SecurityException",
+      "activityResultReceivedByStore": 0,
+      "elapsedSecondsFromStoreRedirectSendToResult": 0.526,
+      "lastObservationSecondsAfterTap": 58.2,
+      "storeStayedAlive": true,
+      "lastFocusedStoreScreen": "Google Play / Sign in",
+      "googleCredentialEntryObserved": false,
+      "signInCompleted": false
+    },
+    "separateServiceFailure": {
+      "package": "com.google.android.gms",
+      "fatalException": "lateinit property droidGuardHandle has not been initialized",
+      "googleMainProcessExitedDuringObservation": true,
+      "backendRegistrationVerdictObserved": false
+    }
+  },
+  "gmail": {
+    "retainedClient": "Getting your messages",
+    "dedicatedClient": "Set up email",
+    "boardReturnedTo": "Dedicated original Gmail",
+    "newTestMessageObserved": false,
+    "serverReceiptChecked": false
+  },
+  "acceptance": "Store account-service disconnection and reconnection were exercised. Google account enrollment and Gmail receipt remain unverified."
+}
