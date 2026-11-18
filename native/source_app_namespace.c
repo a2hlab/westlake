@@ -55,6 +55,12 @@ static int merge_view(const char* view, const char* replacement, const char* ori
                 break;
             }
             if (pass && lstat(target, &target_st) == 0) continue;
+            // HapDomainSetcontext reads the firmware's app domain mappings here.
+            // Older staged runtimes may still contain an empty mount target at this path.
+            if (!strcmp(base, "/system/etc/selinux/targeted/contexts/sehap_contexts")) {
+                rc = bind_entry(target, base);
+                continue;
+            }
             int has_original = stat(base, &original_st) == 0;
             int has_mine = stat(mine, &mine_st) == 0;
             if (has_original && has_mine && S_ISDIR(original_st.st_mode) && S_ISDIR(mine_st.st_mode)) {

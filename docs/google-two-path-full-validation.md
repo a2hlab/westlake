@@ -22,7 +22,7 @@ at the app level.
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. After the Wi-Fi resolver fix, a repeat showed the same screen for 127 s. [Wi-Fi retest](../tests/google-auth/full48/candidate107.json) · [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The original APK played “Me at the zoo” to the end on fresh guest profiles and on two consecutive launches with retained guest data after the DNS repair. Nine samples per fresh run showed the 900 × 675 picture centered in the 1200 × 675 player. [Picture, color and audio](../tests/google-auth/full48/candidate106.json) · [Retained guest playback](../tests/google-auth/full48/candidate107.json) · [Original sign-in dialog](../tests/google-auth/full48/candidate108.json) | Google sign-in, signed-in restart persistence, physical audibility and picture geometry across other stream and player sizes. |
-| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) · [Repeat on the board](../tests/google-auth/full48/candidate117.json) · [Touch input and live-service refresh](../tests/google-auth/full48/candidate118.json) · [Feature query and enrollment](../tests/google-auth/full48/candidate119.json) |
+| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) · [Repeat on the board](../tests/google-auth/full48/candidate117.json) · [Touch input and live-service refresh](../tests/google-auth/full48/candidate118.json) · [Feature query and enrollment](../tests/google-auth/full48/candidate119.json) · [Inbox after restoring the private account provider](../tests/google-auth/full48/candidate121.json) |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
@@ -1501,6 +1501,49 @@ drag. Its window still displayed **Getting your messages** 38.5 seconds later,
 with zero new local sync requests, starts or completions. Server receipt and
 app delivery with the two paths active remain open.
 [Launcher comparison and refresh samples](../tests/google-auth/full48/candidate120.json)
+
+### Restoring the Gmail account connection
+
+A saved microG runtime failed before its app code started. OpenHarmony’s
+application-domain mappings file contained 2,510 bytes on the board. The
+provider’s old mount namespace showed a zero-byte placeholder at the same
+path. `HapDomainSetcontext` refused the app launch. Restaging the 355
+catalogued configuration and font files and using the restart-safe namespace
+helper let the original provider start in its ordinary HAP domain with
+SELinux enforcing. Its account directory stayed in place.
+
+The namespace helper now takes that mappings file from the installed firmware
+when merging the system configuration. In a separate board test with a stale
+placeholder, the previous helper failed the first comparison. The repaired
+helper preserved the firmware file across three launches. It also passed the
+three existing clean-input launches. The live provider recovery and this
+source-level regression used separate builds.
+[Board regression](../tests/source-namespace/repeated-overlay.sh)
+
+We reconnected the retained Gmail launcher to its prior, pinned private account
+provider while keeping the official Play services connection. Gmail, microG,
+official Play services and the Play Store ran under four distinct UIDs. Each
+service owned its configured listening socket. MicroG verified Gmail and
+answered account-list and feature queries. The original Gmail window went
+from **Getting your messages** to **Primary**. After a Gmail-only restart the
+provider verified the new client process and the inbox appeared again.
+
+During a separate pull-to-refresh check, the visible message list was identical
+in all four samples through 69.8 seconds. The local sync dispatcher recorded
+zero new requests, starts or completions. The retained app may display cached
+mail. The sender’s test message and a completed incremental refresh remain
+unverified. The official service itself had no delegated account connection
+in this configuration.
+The dedicated Gmail test host then connected to the same three services. It
+used a different UID and mount namespace from the retained Gmail instance,
+and its private app-data directory had mode 0700. Its previously exercised
+setup profile contained no copy of the retained mailbox. MicroG verified
+this Gmail process as well. In the original app, **Add an email address →
+Google** reached the delegated account service. The client log recorded
+`addAccount` once and reported that operation as unsupported. Three captures
+still showed **Set up email**. This locates a client enrollment failure before
+Google’s credential screen.
+[Original Gmail, provider and namespace evidence](../tests/google-auth/full48/candidate121.json)
 
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake

@@ -137,12 +137,13 @@
           "candidate117.json",
           "candidate118.json",
           "candidate119.json",
-          "candidate120.json"
+          "candidate120.json",
+          "candidate121.json"
         ],
         "checks": {
           "account_selection": {
             "status": "partial",
-            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear."
+            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear. With the private account provider connected on the dedicated UID, selecting Google invoked addAccount. The delegated adapter returned unsupported and setup stayed on the provider list."
           },
           "mailbox_sync": {
             "status": "observed",
@@ -150,11 +151,11 @@
           },
           "refresh": {
             "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds."
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded."
           },
           "restart_persistence": {
             "status": "observed",
-            "evidence": "The earlier configuration retained the account, inbox and automatic-sync preference across a client restart. The dedicated fresh-profile control stopped at setup."
+            "evidence": "The earlier configuration retained the account, inbox and automatic-sync preference across a client restart. The dedicated fresh-profile control stopped at setup. After the account provider was restored, it verified a newly restarted original Gmail process and the retained Primary inbox reappeared."
           }
         }
       },
