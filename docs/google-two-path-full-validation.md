@@ -11,7 +11,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Original app | Observed on the board | Still to verify |
 | --- | --- | --- |
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
-| Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The earlier shared-host run displayed Spotify's date-of-birth signup form. Under Spotify's dedicated UID, opening the chooser required a manual window switch and the return went to the shared host. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host retest](../tests/google-auth/full48/candidate93.json) | Automatic window handoff under the dedicated UID, a Spotify session, library, playback, silent renewal and persistence. |
+| Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The shared-host run displayed Spotify's date-of-birth signup form. On the dedicated host the return went to the wrong native window. A fix for that route passed development-machine tests. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host run](../tests/google-auth/full48/candidate93.json) · [Window fix](../tests/google-auth/full48/candidate95.json) | Automatic window handoff on the board under the dedicated UID, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
@@ -1921,3 +1921,24 @@ to SceneBoard's pending-session activation. The board subsequently stopped
 answering over USB and TCP. The new Spotify HAP was built and signed locally.
 Its live deployment, the two-caller return test and Spotify's authenticated
 session remain open. [Board observations](../tests/google-auth/full48/candidate94.json)
+
+## Returning the service window to the dedicated app
+
+The dedicated client host can now open the shared service window and keep
+access to its own OpenHarmony settings. The service uses the calling bundle
+and ability from the incoming native Want. A configured return to a dedicated
+host must match both the Android caller package and the native host that
+opened the current window. For a Spotify run, the service must configure
+Spotify's dedicated host as the return destination. The previous shared-host
+entry remains appropriate for a run using the shared client host.
+
+In a development-machine integration test, two clients sent six requests
+through the compiled Java adapter and the native host's JavaScript using real
+mailbox files. The test simulated the OpenHarmony ability calls. After the
+second client opened the service, a late result for the first client caused no
+window change. The second client regained its window. The first client then
+opened the service again and regained its window on return. No account was
+involved. The adapter, Android boot image, and signed Spotify, Wattpad, and
+service hosts built locally. Both board connections were offline. A live
+return after selection or cancellation in the original APKs remains open.
+[Builds and test results](../tests/google-auth/full48/candidate95.json) · [Host configuration](../tests/host-window/README.md)

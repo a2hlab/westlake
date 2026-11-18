@@ -42,11 +42,20 @@ final class RemoteHostWindows {
             }
         }
         String directory = System.getenv("WESTLAKE_HOST_CONTROL_DIR");
-        if (directory == null || target == null || !target.matches("org\\.westlake\\.[A-Za-z0-9_]+")) {
+        if (directory == null || !validTarget(target, packageName, reason)) {
             event(reason, "unconfigured");
             return false;
         }
         return send(directory, target, reason);
+    }
+
+    static boolean validTarget(String target, String packageName, String reason) {
+        if (target == null) return false;
+        if (target.matches("org\\.westlake\\.[A-Za-z0-9_]+")) return true;
+        // A dedicated result route must describe this exact Android caller.
+        // The native service host separately checks who opened its current window.
+        return "result".equals(reason) && target.equals("org.westlake.apk." + packageName)
+                && packageName.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+");
     }
 
     private static boolean send(String directory, String target, String reason) {

@@ -87,6 +87,66 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   dedicated.pollWindowBridge(); await flush();
   assert.equal(reply(backgroundSettings).accepted, false);
   assert.equal(opened.length, 1);
+  dedicated.onForeground();
+  dedicated.onNewWant({parameters: {'westlake.remoteHostWindows': true}});
+  const launch = request();
+  dedicated.pollWindowBridge(); await flush(); assert.equal(reply(launch).accepted, true);
+  assert.deepEqual(opened[1], {bundleName: 'org.westlake.authservicehost', abilityName: 'EntryAbility',
+    parameters: {'westlake.remoteHostWindows': true, 'westlake.fromApkWindow': true}});
   dedicated.onDestroy();
-  console.log('HOST_WINDOW_POLICY_PASS opt-in, foreground, route, expiry, replay, malformed, OH refusal');
+
+  files.clear();
+  const serviceName = 'org.westlake.authservicehost', shared = 'org.westlake.authclienthost';
+  const second = 'org.westlake.apk.org.example.reader';
+  const serviceContext = {...context, exports: {}};
+  vm.runInNewContext(source.replace("const HOST_BUNDLE = 'org.westlake.authclienthost'",
+    "const HOST_BUNDLE = '" + serviceName + "'"), serviceContext);
+  const service = new serviceContext.exports.default();
+  const destinations = [];
+  service.context = {filesDir: '/private', abilityInfo: {bundleName: serviceName},
+    startAbility: async want => destinations.push(want.bundleName)};
+  const visit = (caller, entry = 'EntryAbility') => service.onNewWant({parameters: {
+    ...opened[1].parameters, 'ohos.aafwk.param.callerBundleName': caller,
+    'ohos.aafwk.param.callerAbilityName': entry}});
+  async function restore(target) {
+    const id = request({target});
+    service.pollWindowBridge(); await flush();
+    const accepted = reply(id).accepted;
+    files.delete(`${root}/reply-${id}.json`);
+    return accepted;
+  }
+  service.onCreate({parameters: {'westlake.remoteHostWindows': true}}); service.onForeground();
+  assert.equal(await restore(apkHost), false);
+  visit(apkHost); visit(second);
+  assert.equal(await restore(apkHost), false);
+  assert.equal(await restore(shared), false);
+  assert.equal(await restore(second), true);
+  assert.equal(await restore(second), false);
+  visit(apkHost); assert.equal(await restore(apkHost), true);
+  visit(apkHost); service.onBackground(); service.onForeground();
+  assert.equal(await restore(apkHost), false);
+  visit(undefined); assert.equal(await restore(apkHost), false);
+  visit(apkHost, 'OtherAbility'); assert.equal(await restore(apkHost), false);
+  visit(apkHost); service.onNewWant({}); assert.equal(await restore(apkHost), false);
+  visit(apkHost);
+  const start = service.context.startAbility;
+  service.context.startAbility = () => { throw new Error('OS rejected the native launch'); };
+  assert.equal(await restore(apkHost), false);
+  service.context.startAbility = start;
+  assert.equal(await restore(apkHost), true);
+  let completeStart;
+  visit(apkHost);
+  service.context.startAbility = () => new Promise(resolve => { completeStart = resolve; });
+  const inFlight = request({target: apkHost});
+  service.pollWindowBridge(); await flush();
+  visit(second); completeStart(); await flush();
+  assert.equal(reply(inFlight).accepted, true);
+  service.context.startAbility = start;
+  assert.equal(await restore(second), true);
+  service.onNewWant({parameters: {'westlake.remoteHostWindows': true,
+    'ohos.aafwk.param.callerBundleName': shared, 'ohos.aafwk.param.callerAbilityName': 'EntryAbility'}});
+  assert.equal(await restore(shared), true);
+  assert.deepEqual(destinations, [second, apkHost, apkHost, second, shared]);
+  service.onDestroy();
+  console.log('HOST_WINDOW_POLICY_PASS foreground, dedicated and shared callers, overlap, expiry, replay and OH refusal');
 })().catch(error => { console.error(error); process.exitCode = 1; });
