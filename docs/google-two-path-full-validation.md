@@ -13,7 +13,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
-| YouTube · Google | With the source-built codec library, the original app played the public clip “Me at the zoo” to 19.063 seconds twice. The board showed moving video in the upper-left of the player window. [Original-player comparison](../tests/google-auth/full48/candidate100.json) | Google sign-in, account persistence, audible output, correct picture sizing and broader playback coverage. |
+| YouTube · Google | The original app played “Me at the zoo” to 19.063 seconds twice. After the SurfaceView fix, the 320 × 240 picture filled the 675-pixel player height at its original 4:3 aspect ratio. The player reached the end. Its PCM writes and playback position advanced. [Playback comparison](../tests/google-auth/full48/candidate100.json) · [Picture and audio measurements](../tests/google-auth/full48/candidate105.json) | Google sign-in, account persistence, physical audibility, horizontal centering, color fidelity and broader playback coverage. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
@@ -2078,6 +2078,24 @@ those buffers or the scale used while “Me at the zoo” was playing.
 OpenHarmony's audio service attributed a 48 kHz stereo PCM stream on the
 speaker to the YouTube app. The stream was paused or stopped at inspection.
 Audible output during playback remains unverified.
+
+An off-screen test on the same board submitted an 80 × 60 two-color
+buffer to a 240 × 120 test window. Giving its content layer an 80 × 60
+destination painted 4,800 pixels at the upper left. Changing only that
+destination to 240 × 120 painted all 28,800 pixels. A 160 × 120 destination
+at x = 40 painted exactly the middle 19,200 pixels.
+
+Android normally scales a SurfaceView's buffer using its parent layer.
+Westlake binds the buffer to its own OpenHarmony window. The patched
+framework gives that window's content layer the displayed view dimensions
+and preserves the decoder's requested buffer dimensions. The original
+YouTube player then displayed “Me at the zoo” in approximately 900 × 675
+pixels. Four sampled frames placed the picture at the left edge of the
+1200 × 675 player. The spare 300 pixels were on the right. The same app
+session accepted PCM writes and its Android AudioTrack position advanced
+to 779,508 frames. Those observations cover the playback pipeline. Physical
+audibility and exact color fidelity remain open.
+[Framework change](https://github.com/a2hlab/manifest/commit/4f4ed19) · [Board results](../tests/google-auth/full48/candidate105.json)
 
 ## TikTok welcome animation on the OpenHarmony board
 

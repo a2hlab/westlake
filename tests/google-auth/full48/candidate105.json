@@ -1,0 +1,96 @@
+{
+  "candidate": 105,
+  "date": "2026-11-17",
+  "package": "com.google.android.youtube",
+  "versionName": "21.43.523",
+  "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+  "mode": "Guest playback using the original APK",
+  "sourcePatch": {
+    "repository": "a2hlab/manifest",
+    "revision": "4f4ed19",
+    "path": "patches/android15/frameworks-base-toutiao-api-compat.patch"
+  },
+  "staging": {
+    "frameworkPreloadPassed": true,
+    "verifiedFiles": 469,
+    "frameworkJarSha256": "4ecedc4c5e0f99e2a8ec39b42cc807577f9db6ce7989db758fe4dbef898eafdb"
+  },
+  "controlledCompositor": {
+    "sourcePixels": [
+      80,
+      60
+    ],
+    "viewportPixels": [
+      240,
+      120
+    ],
+    "pattern": "Two solid color halves on a self-drawing child of an off-screen test window. No other application was captured.",
+    "scaleMode": 1,
+    "method": "RenderService snapshot of the test-owned parent; counted red and blue pixels after each transaction.",
+    "destination80x60": {
+      "coloredPixels": 4800,
+      "boundsXYWH": [
+        0,
+        0,
+        80,
+        60
+      ]
+    },
+    "destination240x120": {
+      "coloredPixels": 28800,
+      "boundsXYWH": [
+        0,
+        0,
+        240,
+        120
+      ]
+    },
+    "destination160x120AtX40": {
+      "coloredPixels": 19200,
+      "boundsXYWH": [
+        40,
+        0,
+        160,
+        120
+      ]
+    }
+  },
+  "originalPlayer": {
+    "clip": "Me at the zoo",
+    "sourcePixels": [
+      320,
+      240
+    ],
+    "activityPixels": [
+      1200,
+      1920
+    ],
+    "playerWindowPixels": [
+      1200,
+      675
+    ],
+    "approximateVisiblePicturePixels": [
+      900,
+      675
+    ],
+    "pictureLeftPixels": 0,
+    "measurement": "At one-fifth screenshot scale the picture occupied columns 0 to 179 inclusive on four sampled clip frames. The region to the right was black.",
+    "playerStates": "1.465:B,16.305:PL,32.789:EN",
+    "horizontalCentering": "Open; all spare width was on the right.",
+    "speakerRoute": "The app owned a 48 kHz stereo PCM speaker stream. A running state was sampled in this player session, which also included subsequent playback.",
+    "audioTrack": {
+      "acceptedWriteByteExamples": [
+        2592,
+        3840
+      ],
+      "largestObservedPositionFrames": 779508,
+      "audibleOutputVerified": false
+    }
+  },
+  "open": [
+    "Centered placement in the original player",
+    "Color fidelity against a trusted reference from the same clip",
+    "Physical audibility",
+    "Google sign-in and account persistence"
+  ]
+}
