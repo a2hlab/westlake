@@ -4,17 +4,26 @@ import android.app.Activity;
 import android.app.ActivityThread;
 import android.app.Dialog;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * A web link opened in the app, where Android opens it in the browser.
@@ -55,6 +64,27 @@ final class WebLinkDialog {
         return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
     }
 
+    /** Origin of a web document, as displayed above the page. Never include the URL's user data. */
+    static String webOrigin(String address) {
+        if (address == null) return null;
+        try {
+            URI uri = new URI(address);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            if (!("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
+                    || host == null || uri.getRawUserInfo() != null || host.indexOf('%') >= 0) {
+                return null;
+            }
+            int port = uri.getPort();
+            if (port > 65535) return null;
+            boolean defaultPort = port == -1 || port == ("https".equalsIgnoreCase(scheme) ? 443 : 80);
+            return scheme.toLowerCase(Locale.ROOT) + "://" + host.toLowerCase(Locale.ROOT)
+                    + (defaultPort ? "" : ":" + port);
+        } catch (URISyntaxException invalid) {
+            return null;
+        }
+    }
+
     /**
      * Shows uri over the activity resultTo names, else over the top activity of the app's task; on the
      * main thread, after the caller's current message, as a started activity would come. False when
@@ -81,10 +111,39 @@ final class WebLinkDialog {
         }
         try {
             final Dialog dialog = new Dialog(activity, android.R.style.Theme_DeviceDefault_Light_NoActionBar);
+            final TextView address = new TextView(dialog.getContext());
+            address.setTextDirection(View.TEXT_DIRECTION_LTR);
+            int inset = Math.round(8 * activity.getResources().getDisplayMetrics().density);
+            address.setPadding(inset * 2, inset, inset * 2, inset);
+            address.setText("Opening page…");
             final WebView web = new WebView(activity);
             web.getSettings().setJavaScriptEnabled(true);
             web.getSettings().setDomStorageEnabled(true);
             web.setWebViewClient(new WebViewClient() {
+                private boolean mainFrameFailed;
+
+                @Override
+                public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                    mainFrameFailed = false;
+                    address.setText("Opening page…");
+                }
+
+                @Override
+                public void onPageCommitVisible(WebView view, String url) {
+                    String committed = webOrigin(url);
+                    address.setText(!mainFrameFailed && committed != null && committed.equals(webOrigin(view.getUrl()))
+                            ? committed : "Page address unavailable");
+                }
+
+                @Override
+                public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                    if (request.isForMainFrame()) {
+                        mainFrameFailed = true;
+                        address.setText("Page address unavailable");
+                    }
+                    super.onReceivedError(view, request, error);
+                }
+
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     Uri next = request.getUrl();
@@ -98,7 +157,22 @@ final class WebLinkDialog {
                     return true;
                 }
             });
-            dialog.setContentView(web, new ViewGroup.LayoutParams(
+            LinearLayout layout = new LinearLayout(dialog.getContext());
+            layout.setOrientation(LinearLayout.VERTICAL);
+            // Some OH subwindows extend under the status bar without receiving a status-bar InsetsSource.
+            int statusBarDimen = layout.getResources().getIdentifier("status_bar_height", "dimen", "android");
+            int nominalBar = statusBarDimen == 0 ? 0 : layout.getResources().getDimensionPixelSize(statusBarDimen);
+            int[] position = new int[2];
+            layout.addOnLayoutChangeListener((v, l, t, r, b, oldL, oldT, oldR, oldB) -> {
+                WindowInsets insets = v.getRootWindowInsets();
+                int reportedBar = insets == null ? 0 : insets.getInsets(WindowInsets.Type.statusBars()).top;
+                v.getLocationOnScreen(position);
+                int padding = Math.max(0, Math.max(nominalBar, reportedBar) - position[1]);
+                if (padding != v.getPaddingTop()) v.setPadding(0, padding, 0, 0);
+            });
+            layout.addView(address, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            layout.addView(web, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+            dialog.setContentView(layout, new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             dialog.setOnDismissListener(d -> web.destroy());
             dialog.show();

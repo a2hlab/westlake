@@ -133,7 +133,8 @@
           "candidate80.json",
           "candidate112.json",
           "candidate114.json",
-          "candidate115.json"
+          "candidate115.json",
+          "candidate117.json"
         ],
         "checks": {
           "account_selection": {
@@ -146,7 +147,7 @@
           },
           "refresh": {
             "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app."
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds."
           },
           "restart_persistence": {
             "status": "observed",
@@ -252,12 +253,13 @@
         "app": "FotMob",
         "sources": [
           "candidate76.json",
-          "candidate116.json"
+          "candidate116.json",
+          "candidate117.json"
         ],
         "checks": {
           "sign_in": {
             "status": "observed",
-            "evidence": "Facebook login completed in the original FotMob flow. On the fresh dedicated host the Facebook form appeared. That separate run did not complete authentication."
+            "evidence": "Facebook login completed in the original FotMob flow. On the fresh dedicated host the Facebook form appeared. That separate run did not complete authentication. Its SDK form remained visible after Back in Spotify."
           },
           "authenticated_return": {
             "status": "observed",
@@ -301,12 +303,13 @@
         "app": "Spotify",
         "sources": [
           "candidate97.json",
-          "candidate108.json"
+          "candidate108.json",
+          "candidate117.json"
         ],
         "checks": {
           "sign_in": {
             "status": "partial",
-            "evidence": "The original Spotify host displayed Facebook’s HTTPS login form. No completed submission was observed in the recorded run."
+            "evidence": "Spotify showed the Facebook form and the full main-document origin in its own WebView on the dedicated host. Submission and authenticated return remain open."
           },
           "authenticated_return": {
             "status": "open",

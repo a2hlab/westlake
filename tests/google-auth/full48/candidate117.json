@@ -1,0 +1,164 @@
+{
+  "schema": 1,
+  "candidate": 117,
+  "date": "2026-11-18",
+  "previous": "candidate116.json",
+  "gmail": {
+    "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "profile": "Retained original app, official Play services and Store, delegated account provider disabled.",
+    "senderConfirmedSubmission": true,
+    "focusedObservations": [
+      {
+        "stage": "before",
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ]
+      },
+      {
+        "stage": "after",
+        "secondsAfterGesture": 2.0,
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ]
+      },
+      {
+        "stage": "after",
+        "secondsAfterGesture": 15.0,
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ]
+      },
+      {
+        "stage": "after",
+        "secondsAfterGesture": 35.0,
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ]
+      }
+    ],
+    "separateRefreshTrace": {
+      "intervalSeconds": 30,
+      "sameClientAndLogThroughout": true,
+      "baselineSyncMarkers": {
+        "allEvents": 6,
+        "request": 0,
+        "adapterStart": 0,
+        "adapterFinished": 0,
+        "scheduleRestored": 1,
+        "adapterDiscovered": 3
+      },
+      "newSyncMarkers": {
+        "allEvents": 0,
+        "request": 0,
+        "adapterStart": 0,
+        "adapterFinished": 0,
+        "scheduleRestored": 0,
+        "adapterDiscovered": 0
+      },
+      "finalLabels": [
+        "Getting your messages",
+        "Search in mail"
+      ]
+    },
+    "testSubjectAvailableToMatcher": false,
+    "testMessageObservedInApp": false,
+    "serverReceiptIndependentlyChecked": false,
+    "boardReturnedToOriginalGmail": true
+  },
+  "publicLinkHandling": {
+    "installedBundles": 72,
+    "arkWebEngineInstalled": true,
+    "arkWebEngineAbilities": 0,
+    "probes": [
+      {
+        "scheme": "https",
+        "started": false,
+        "reportedCodes": [
+          "10103101"
+        ],
+        "message": "No matching application for implicit launch"
+      },
+      {
+        "scheme": "http",
+        "started": false,
+        "reportedCodes": [
+          "10103101"
+        ],
+        "message": "No matching application for implicit launch"
+      }
+    ],
+    "withoutBrowsableCategory": [
+      {
+        "scheme": "https",
+        "exactNoMatchingApplication": true,
+        "code10103101": true
+      },
+      {
+        "scheme": "http",
+        "exactNoMatchingApplication": true,
+        "code10103101": true
+      }
+    ],
+    "platform": "OpenHarmony 6.1.0.31",
+    "platformApi": 23
+  },
+  "framework": [
+    {
+      "stage": 127,
+      "preloadReportPassed": true,
+      "filesInPreloadReport": 469,
+      "classInitializationFailures": 0,
+      "originFormattingCasesPassed": 11
+    },
+    {
+      "stage": 128,
+      "preloadReportPassed": true,
+      "filesInPreloadReport": 469,
+      "classInitializationFailures": 0,
+      "originFormattingCasesPassed": 11
+    }
+  ],
+  "spotify": {
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "version": "9.1.94.1929",
+    "uid": 20010067,
+    "initialLayout": {
+      "focusedFormCaptures": 29,
+      "completeOriginVisible": false,
+      "observedOverlap": "system clock over the beginning of the origin"
+    },
+    "revisedLayout": {
+      "focusedFormCaptureSeconds": [
+        101.8,
+        105.0
+      ],
+      "committedOriginDisplayed": "https://m.facebook.com",
+      "formLabels": [
+        "Mobile number or email",
+        "Password"
+      ],
+      "host": "WebView in original Spotify process"
+    }
+  },
+  "fotmob": {
+    "apkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "uid": 20010069,
+    "host": "Facebook SDK activity inside original FotMob process",
+    "focusedFormCaptures": 2,
+    "completeOriginVisible": false
+  },
+  "overlappingForms": {
+    "differentHostUids": true,
+    "bothOriginalProcessesRetained": true,
+    "fotmobFormObservedAfterSpotifyBack": true,
+    "spotifyMenuConfirmedAfterBackAndNativeForeground": false,
+    "fotmobMenuConfirmedAfterBackAndNativeForeground": false,
+    "credentialsSubmitted": false,
+    "authenticatedReturnObserved": false,
+    "procedure": "The test forwarded one Back input to each focused app in turn. The same native hosts were explicitly brought forward for recovery checks."
+  }
+}

@@ -22,13 +22,13 @@ at the app level.
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. After the Wi-Fi resolver fix, a repeat showed the same screen for 127 s. [Wi-Fi retest](../tests/google-auth/full48/candidate107.json) · [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The original APK played “Me at the zoo” to the end on fresh guest profiles and on two consecutive launches with retained guest data after the DNS repair. Nine samples per fresh run showed the 900 × 675 picture centered in the 1200 × 675 player. [Picture, color and audio](../tests/google-auth/full48/candidate106.json) · [Retained guest playback](../tests/google-auth/full48/candidate107.json) · [Original sign-in dialog](../tests/google-auth/full48/candidate108.json) | Google sign-in, signed-in restart persistence, physical audibility and picture geometry across other stream and player sizes. |
-| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) |
+| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) · [Repeat on the board](../tests/google-auth/full48/candidate117.json) |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
 | FotMob · Facebook | Fresh Facebook login returned to FotMob, its account menu displayed Sign out, and the session survived a process restart. [Board results](../tests/google-auth/full48/candidate76.json) | All four named Facebook checks have evidence on the tested build. |
 | Wattpad · Facebook | Facebook consent completed and the SDK delivered a successful activity result to the original Wattpad app. Wattpad displayed Create an Account. [SDK return](google-two-path-live44.md) | Wattpad account session and restart persistence. |
-| Spotify · Facebook | The original APK opened Facebook’s HTTPS login form after the user selected Facebook. Westlake displayed the form in a WebView owned by the Spotify process. [Earlier startup failure](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Live form on the dedicated host](../tests/google-auth/full48/candidate97.json) · [Login form after log redaction](../tests/google-auth/full48/candidate108.json) | Account submission, authenticated return, Spotify session and persistence. |
+| Spotify · Facebook | The original APK opened Facebook’s HTTPS login form after the user selected Facebook. Westlake displayed the form in a WebView owned by the Spotify process. [Earlier startup failure](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Live form on the dedicated host](../tests/google-auth/full48/candidate97.json) · [Login form after log redaction](../tests/google-auth/full48/candidate108.json) · [Visible Facebook domain and two open forms](../tests/google-auth/full48/candidate117.json) | Account submission, authenticated return, Spotify session and persistence. |
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -1483,6 +1483,15 @@ existing inbox message. This round did not show the newly sent message or
 establish delivery to the mailbox on Google's servers.
 [Original Gmail observations](../tests/google-auth/full48/candidate115.json)
 
+On November 18, the same original Gmail window showed **Getting your messages**
+before a new downward drag and at 2, 15 and 35 seconds afterward. A separate
+30-second gesture test checked the local sync dispatcher. The client log already
+contained three adapter discovery events and one restored schedule. The client emitted no new Westlake sync request, adapter start or completion marker in that interval.
+The UI stayed on the loading screen. This was the official-services-only
+configuration. The sender's confirmation and these client observations leave
+server receipt and delivery through the full two-path configuration open.
+[Refresh captures and dispatcher event counts](../tests/google-auth/full48/candidate117.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
@@ -2112,6 +2121,27 @@ profile, the OpenHarmony input method kit logged the app's enabled-list query.
 These checks concern keyboard metadata. Text entry and login have separate
 acceptance criteria.
 [Board regression and original Wattpad retest](../tests/google-auth/full48/candidate116.json)
+
+### Facebook login forms in Spotify and FotMob
+
+On the OpenHarmony 6.1 board, all four attempts to open ordinary HTTP and
+HTTPS links through the native system returned error `10103101`. The installed
+ArkWeb engine exposed no launchable ability. Selecting Facebook in the original
+Spotify APK opened an embedded WebView. Westlake now shows the main document's
+committed origin in a native text field above it. During navigation the field
+shows a loading label. An initial layout placed the field under the system clock.
+After correcting the inset, two focused captures showed the full
+`https://m.facebook.com` origin above the credential form. Each of the two
+builds passed the same 11 origin-formatting checks on board ART.
+[Original Spotify, native link handling and ART checks](../tests/google-auth/full48/candidate117.json)
+
+FotMob's Facebook SDK displayed its own form with no visible full origin. Both
+forms were open simultaneously under distinct host UIDs. After Back in Spotify,
+bringing FotMob forward showed its form intact. Both original processes survived
+a Back input in each app. The test could not confirm a return to either sign-in
+menu, even after bringing the native hosts forward. No credentials were
+submitted in this test. Authenticated return on these dedicated hosts remains
+open. [Two-app observations](../tests/google-auth/full48/candidate117.json)
 
 ## Spotify account selection under its dedicated OpenHarmony host
 
