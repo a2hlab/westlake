@@ -1,0 +1,254 @@
+{
+  "schema": 1,
+  "candidate": 124,
+  "date": "2026-11-18",
+  "previous": "candidate123.json",
+  "scope": "Look for a user-facing recovery request from original Gmail around failed mailbox syncs, following a separate release run with a recovery-bearing authentication reply.",
+  "baseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "productionFrameworkJarSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+  "observationFrameworkJarSha256": "e726579fbd277021170688c6f047593d3f563f9383f67ee20fc94d3551aed039",
+  "adapterJarSha256": "a8ace2b26d13be67b452359f40da225a2580569079b36521dd04565d112b8fa9",
+  "boardPreloadVerifiedFileCount": 469,
+  "productionFrameworkControl": {
+    "separateRun": true,
+    "job": {
+      "recoverableReply": 1,
+      "notificationEnqueueApiFirstUse": 0,
+      "remoteActivityEvent": 0,
+      "pendingIntentSend": 0,
+      "notificationBridgeEvent": 0
+    },
+    "afterJobThroughEndOfLog": {
+      "recoverableReply": 0,
+      "notificationEnqueueApiFirstUse": 0,
+      "remoteActivityEvent": 0,
+      "pendingIntentSend": 0,
+      "notificationBridgeEvent": 0
+    },
+    "wholeProcessNotificationChannelCreationFirstUse": 1,
+    "loggingCoverage": "Notification binder method logging records first use in this process."
+  },
+  "originalApkInspection": {
+    "baseDexFiles": 10,
+    "directReadsOfPrivateRecoveryIntentField": 1,
+    "directCallsToAccessor": 4,
+    "staticCallSiteRoles": [
+      "wrap exception",
+      "construct dialog",
+      "configure dialog action",
+      "configure snackbar action"
+    ]
+  },
+  "originalAppTrace": {
+    "methodEntryTimeRangesMs": {
+      "handlerPostDelayed": [
+        1284.5,
+        1284.5
+      ],
+      "gmailSync": [
+        664.0,
+        664.0
+      ],
+      "gmailDelegate": [
+        706.4,
+        706.4
+      ],
+      "gmailMainSync": [
+        1122.7,
+        1122.7
+      ]
+    },
+    "reportedMethodCount": 307917,
+    "totalMilliseconds": 14278.7,
+    "version": 3,
+    "recordCount": 307917,
+    "overflow": false,
+    "wallClockAvailable": true,
+    "callbackEntries": 1,
+    "callbackReturns": 0,
+    "recordBytes": 14,
+    "phaseBasis": "unplaced",
+    "callbackMilliseconds": null,
+    "millisecondsAfterCallbackReturn": null,
+    "phaseCounts": {
+      "unplaced": {
+        "handlerPostDelayed": 1,
+        "gmailSync": 1,
+        "gmailDelegate": 1,
+        "gmailMainSync": 1
+      },
+      "beforeCallback": {},
+      "duringCallback": {},
+      "afterCallback": {}
+    },
+    "signals": {
+      "activityLaunch": 0,
+      "classifyAuthError": 0,
+      "failedTaskFactory": 0,
+      "gmailDelegate": 1,
+      "gmailMainSync": 1,
+      "gmailSync": 1,
+      "handlerPostDelayed": 1,
+      "intentSenderSend": 0,
+      "notificationBuild": 0,
+      "notificationPost": 0,
+      "notificationPostCompat": 0,
+      "originalTokenTask": 0,
+      "pendingIntentCreation": 0,
+      "recoveryExceptionConstructor": 0,
+      "recoveryExceptionFactory": 0,
+      "recoveryIntentAccessor": 0,
+      "staticAccessorCaller_bktc_z": 0,
+      "staticAccessorCaller_cbbh$3_d": 0,
+      "staticAccessorCaller_qhj_call": 0,
+      "staticAccessorCaller_uqe_a": 0,
+      "westlakeActivityRouting": 0,
+      "westlakeIntentSenderSend": 0,
+      "westlakeNotificationPost": 0
+    },
+    "classifiedAncestors": []
+  },
+  "firstAttempt": {
+    "syncAdapter": {
+      "providerAcquired": 1,
+      "providerMissing": 0,
+      "securityDuringApp": 0,
+      "securityDuringAcquire": 0,
+      "returnedFromAppWithError": 1,
+      "returnedFromAppWithoutError": 0,
+      "databaseResult": 1,
+      "adapterCompletion": 1,
+      "resultSuccess": 0
+    },
+    "traceDecoded": false,
+    "restoredInbox": {
+      "originalInbox": [
+        {
+          "primary": true,
+          "listMatchesPriorBaseline": true
+        },
+        {
+          "primary": true,
+          "listMatchesPriorBaseline": true
+        }
+      ],
+      "autoSync": true,
+      "listeners": {
+        "microG": 1,
+        "officialGms": 1,
+        "store": 1
+      },
+      "verifiedPackage": true
+    }
+  },
+  "syncAdapter": {
+    "providerAcquired": 1,
+    "providerMissing": 0,
+    "securityDuringApp": 0,
+    "securityDuringAcquire": 0,
+    "returnedFromAppWithError": 1,
+    "returnedFromAppWithoutError": 0,
+    "databaseResult": 1,
+    "adapterCompletion": 1,
+    "resultSuccess": 0
+  },
+  "restoration": {
+    "priorOriginalBuildRestored": true,
+    "replacedFilesVerified": 10,
+    "originalGmailProcessAlive": true,
+    "autoSyncWasRestored": true,
+    "originalInbox": [
+      {
+        "primary": true,
+        "listMatchesPriorBaseline": true
+      },
+      {
+        "primary": true,
+        "listMatchesPriorBaseline": true
+      }
+    ],
+    "autoSync": true,
+    "listeners": {
+      "microG": 1,
+      "officialGms": 1,
+      "store": 1
+    },
+    "verifiedPackage": true,
+    "diagnosticPreloadRemoved": true
+  },
+  "limits": [
+    "Method tracing covered the Gmail process in this specific settings-triggered run. It does not observe other processes or a later user-initiated foreground recovery.",
+    "The authentication status does not identify whether the server rejected the device or the account. No cause for the database flag was attributed to this status.",
+    "Viewing the retained inbox does not establish delivery of the sender-confirmed new message.",
+    "The repeat method trace reports a duration of 14.3 seconds while the scheduler recorded a 40.3-second job. All 307,917 declared events decoded without overflow, but the callback return is absent. Absence of a recovery accessor entry in this file cannot establish non-use during the full operation. The first trace did not decode."
+  ],
+  "interpretation": "Two more original-Gmail mailbox jobs finished unsuccessfully after 44.7 and 40.3 seconds. The Gmail process logged no notification enqueue, remote activity launch, or pending intent send during either job or between completion and a diagnostic stop scheduled eight seconds after the original callback. A separate release-framework run observed the official authentication service return BadAuthentication with a recovery Intent. The new method trace recorded Gmail entering sync, but did not capture its return or the earlier authentication exception. It cannot establish whether Gmail read the recovery Intent. The restored Primary inbox still matched the baseline. Delivery of the sender-confirmed email remains open.",
+  "frameworkObservationWindows": {
+    "first": {
+      "job": {
+        "start": 1,
+        "completion": 1,
+        "delayedStop": 0,
+        "notificationEnqueueApiFirstUse": 0,
+        "notificationBridge": 0,
+        "remoteActivity": 0,
+        "pendingIntentSend": 0,
+        "channelCreationFirstUse": 0
+      },
+      "completionToDelayedStop": {
+        "start": 0,
+        "completion": 1,
+        "delayedStop": 1,
+        "notificationEnqueueApiFirstUse": 0,
+        "notificationBridge": 0,
+        "remoteActivity": 0,
+        "pendingIntentSend": 0,
+        "channelCreationFirstUse": 0
+      },
+      "whole": {
+        "start": 1,
+        "completion": 1,
+        "delayedStop": 1,
+        "notificationEnqueueApiFirstUse": 0,
+        "notificationBridge": 1,
+        "remoteActivity": 0,
+        "pendingIntentSend": 0,
+        "channelCreationFirstUse": 1
+      },
+      "schedulerWallMilliseconds": 44666
+    },
+    "repeat": {
+      "job": {
+        "start": 1,
+        "completion": 1,
+        "delayedStop": 0,
+        "notificationEnqueueApiFirstUse": 0,
+        "notificationBridge": 0,
+        "remoteActivity": 0,
+        "pendingIntentSend": 0,
+        "channelCreationFirstUse": 0
+      },
+      "completionToDelayedStop": {
+        "start": 0,
+        "completion": 1,
+        "delayedStop": 1,
+        "notificationEnqueueApiFirstUse": 0,
+        "notificationBridge": 0,
+        "remoteActivity": 0,
+        "pendingIntentSend": 0,
+        "channelCreationFirstUse": 0
+      },
+      "whole": {
+        "start": 1,
+        "completion": 1,
+        "delayedStop": 1,
+        "notificationEnqueueApiFirstUse": 0,
+        "notificationBridge": 1,
+        "remoteActivity": 0,
+        "pendingIntentSend": 0,
+        "channelCreationFirstUse": 1
+      },
+      "schedulerWallMilliseconds": 40302
+    }
+  }
+}
