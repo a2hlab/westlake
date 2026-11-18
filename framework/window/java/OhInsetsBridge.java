@@ -61,7 +61,11 @@ public final class OhInsetsBridge {
     }
 
     public static void systemAreaChanged(Object target, int type) {
-        if (type != 0 || !(target instanceof IWindow)) return;
+        if (type == 0) refreshSystemArea(target);
+    }
+
+    public static void refreshSystemArea(Object target) {
+        if (!(target instanceof IWindow)) return;
         IWindow window = (IWindow) target;
         new Handler(Looper.getMainLooper()).post(() -> {
             View view = WindowManagerGlobal.getInstance().getWindowView(window.asBinder());
@@ -69,12 +73,14 @@ public final class OhInsetsBridge {
             int session = InputEventBridge.getInstance().getSessionId(window.asBinder());
             int[] origin = new int[2];
             view.getLocationOnScreen(origin);
-            if (updateStatusBar(window, session, origin[0], origin[1])) {
-                InsetsState state = new InsetsState(view.getViewRootImpl().getInsetsController().getState(), true);
-                synchronized (STATES) { copyStatusBar(window.asBinder(), state); }
-                view.getViewRootImpl().getInsetsController().onStateChanged(state);
-                view.requestApplyInsets();
-            }
+            updateStatusBar(window, session, origin[0], origin[1]);
+            ViewRootImpl root = view.getViewRootImpl();
+            InsetsState current = root.getInsetsController().getState();
+            InsetsState next = new InsetsState(current, true);
+            synchronized (STATES) { copyStatusBar(window.asBinder(), next); }
+            if (next.equals(current)) return;
+            root.getInsetsController().onStateChanged(next);
+            view.requestApplyInsets();
         });
     }
 

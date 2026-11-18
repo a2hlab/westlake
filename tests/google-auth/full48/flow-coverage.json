@@ -148,7 +148,8 @@
           "candidate130.json",
           "candidate131.json",
           "candidate132.json",
-          "candidate133.json"
+          "candidate133.json",
+          "candidate134.json"
         ],
         "checks": {
           "account_selection": {
@@ -177,7 +178,8 @@
           "candidate89.json",
           "candidate116.json",
           "candidate125.json",
-          "candidate126.json"
+          "candidate126.json",
+          "candidate134.json"
         ],
         "checks": {
           "account_selection": {

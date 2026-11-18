@@ -1,0 +1,539 @@
+{
+  "schema": 1,
+  "candidate": 134,
+  "date": "2026-11-18",
+  "previous": "candidate133.json",
+  "scope": "Retained original Gmail and dedicated original Drive. Both use the same microG, official GMS and Store processes. Each app has its own OpenHarmony application UID and mount namespace.",
+  "unmodifiedReleaseApkSignersAtSdk34": {
+    "gmail": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053",
+    "drive": "1d4f2ef662f8d086abe035e9f5c3ad34700baa831f3e7e32edab303effb8f156"
+  },
+  "before": {
+    "1": {
+      "first": "gmail",
+      "elapsedSeconds": 128.5,
+      "distinctAppAndServiceUIDs": true,
+      "distinctClientMountNamespaces": true,
+      "unchangedSharedListenerProcesses": true,
+      "listeners": 3,
+      "installed": {
+        "gmail": {
+          "releaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+          "adapterJarSha256": "4baadb0b384e33b84754cd85f212f54cad45aa9c6a1d3a1f10db009e7eb71f4d",
+          "nativeAdapterSha256": "9ed70328ec89e34ed785174e568b33fde3e51b51f8962f5ce453d9ac5ce62026",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        },
+        "drive": {
+          "releaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+          "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+          "nativeAdapterSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        }
+      },
+      "verifiedOriginalApkMappings": {
+        "gmail": {
+          "expected": 4,
+          "mappedAndHashMatched": 4
+        },
+        "drive": {
+          "expected": 20,
+          "mappedAndHashMatched": 20
+        }
+      },
+      "accountResults": {
+        "gmail": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 21,
+          "otherListReplySizes": {},
+          "featureReplies": 9,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 0,
+            "windowDetached": 0,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 1
+          }
+        },
+        "drive": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 1,
+          "otherListReplySizes": {},
+          "featureReplies": 0,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 1,
+            "windowDetached": 1,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 1
+          }
+        }
+      },
+      "orderOfAccountListReplies": [
+        {
+          "app": "gmail",
+          "replies": 1
+        },
+        {
+          "app": "drive",
+          "replies": 1
+        },
+        {
+          "app": "gmail",
+          "replies": 20
+        }
+      ],
+      "pairedSamples": 8,
+      "bothClientsAliveAtAllSamples": true,
+      "gmailOwnedFocusAtLastSample": true,
+      "visibleDriveWindowSamplingCount": 2,
+      "inbox": {
+        "verifiedOriginalApp": true,
+        "primaryVisible": true,
+        "searchFieldY": 72,
+        "visibleListExactlyMatchesPriorFixedInbox": false,
+        "relativeToPriorInboxMeanAbsoluteError": 29.632
+      }
+    },
+    "2": {
+      "first": "drive",
+      "elapsedSeconds": 129.1,
+      "distinctAppAndServiceUIDs": true,
+      "distinctClientMountNamespaces": true,
+      "unchangedSharedListenerProcesses": true,
+      "listeners": 3,
+      "installed": {
+        "drive": {
+          "releaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+          "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+          "nativeAdapterSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        },
+        "gmail": {
+          "releaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+          "adapterJarSha256": "4baadb0b384e33b84754cd85f212f54cad45aa9c6a1d3a1f10db009e7eb71f4d",
+          "nativeAdapterSha256": "9ed70328ec89e34ed785174e568b33fde3e51b51f8962f5ce453d9ac5ce62026",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        }
+      },
+      "verifiedOriginalApkMappings": {
+        "gmail": {
+          "expected": 4,
+          "mappedAndHashMatched": 4
+        },
+        "drive": {
+          "expected": 20,
+          "mappedAndHashMatched": 20
+        }
+      },
+      "accountResults": {
+        "drive": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 1,
+          "otherListReplySizes": {},
+          "featureReplies": 0,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 1,
+            "windowDetached": 1,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 1
+          }
+        },
+        "gmail": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 21,
+          "otherListReplySizes": {},
+          "featureReplies": 9,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 0,
+            "windowDetached": 0,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 2
+          }
+        }
+      },
+      "orderOfAccountListReplies": [
+        {
+          "app": "drive",
+          "replies": 1
+        },
+        {
+          "app": "gmail",
+          "replies": 21
+        }
+      ],
+      "pairedSamples": 8,
+      "bothClientsAliveAtAllSamples": true,
+      "gmailOwnedFocusAtLastSample": true,
+      "visibleDriveWindowSamplingCount": 0,
+      "inbox": {
+        "verifiedOriginalApp": true,
+        "primaryVisible": true,
+        "searchFieldY": 72,
+        "visibleListExactlyMatchesPriorFixedInbox": false,
+        "relativeToPriorInboxMeanAbsoluteError": 29.632
+      }
+    }
+  },
+  "gmailReceipt": {
+    "senderReportedSubmission": true,
+    "intervalsAfterSystemPullSeconds": [
+      4,
+      18,
+      42
+    ],
+    "samples": [
+      {
+        "seconds": 4,
+        "primary": true,
+        "toolbarY": 72,
+        "meanMessagePixelChange": 0.0,
+        "eventDeltas": {
+          "touchRelease": 1,
+          "mailboxStart": 0,
+          "mailboxFinish": 0,
+          "fatal": 0
+        }
+      },
+      {
+        "seconds": 18,
+        "primary": true,
+        "toolbarY": 72,
+        "meanMessagePixelChange": 0.0,
+        "eventDeltas": {
+          "touchRelease": 1,
+          "mailboxStart": 0,
+          "mailboxFinish": 0,
+          "fatal": 0
+        }
+      },
+      {
+        "seconds": 42,
+        "primary": true,
+        "toolbarY": 72,
+        "meanMessagePixelChange": 0.0,
+        "eventDeltas": {
+          "touchRelease": 1,
+          "mailboxStart": 0,
+          "mailboxFinish": 0,
+          "fatal": 0
+        }
+      }
+    ],
+    "identifiedSenderMessage": false
+  },
+  "physicalScreen": {
+    "width": 1200,
+    "height": 1920,
+    "systemBarTop": 0,
+    "systemBarBottom": 87,
+    "pairedSearchCenterBefore": 72,
+    "previousSingleAppSearchCenter": 159
+  },
+  "limits": [
+    "Account-list replies establish local caller routing. Either app can still fail to use the account with the service backend.",
+    "The two launches overlap. Reply ordering alone does not prove simultaneous in-flight requests.",
+    "Neither two clients nor these short runs establish isolation or sustained use across all eight apps.",
+    "On the Gmail-first release run, three message regions matched the prior inbox and Compose was visible, but OCR did not identify the Primary heading after switching foregrounds. The completed input check covers the toolbar. After several Back inputs the window closed before Primary was confirmed. A separate cold launch is reported independently."
+  ],
+  "after": {
+    "4": {
+      "first": "drive",
+      "elapsedSeconds": 128.6,
+      "distinctAppAndServiceUIDs": true,
+      "distinctClientMountNamespaces": true,
+      "unchangedSharedListenerProcesses": true,
+      "listeners": 3,
+      "installed": {
+        "drive": {
+          "releaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+          "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+          "nativeAdapterSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        },
+        "gmail": {
+          "releaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+          "adapterJarSha256": "0a574e1b6b85dff4b087191a6f6921c66ac9ba272210917afec745537c7c3ccb",
+          "nativeAdapterSha256": "0215db8c1a4a48dbb2568d816c7689a6db7b951fecb89ae95effb5a24743ff95",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        }
+      },
+      "verifiedOriginalApkMappings": {
+        "gmail": {
+          "expected": 4,
+          "mappedAndHashMatched": 4
+        },
+        "drive": {
+          "expected": 20,
+          "mappedAndHashMatched": 20
+        }
+      },
+      "accountResults": {
+        "drive": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 1,
+          "otherListReplySizes": {},
+          "featureReplies": 0,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 1,
+            "windowDetached": 1,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 1
+          }
+        },
+        "gmail": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 25,
+          "otherListReplySizes": {},
+          "featureReplies": 13,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 0,
+            "windowDetached": 0,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 2
+          }
+        }
+      },
+      "orderOfAccountListReplies": [
+        {
+          "app": "gmail",
+          "replies": 4
+        },
+        {
+          "app": "drive",
+          "replies": 1
+        },
+        {
+          "app": "gmail",
+          "replies": 21
+        }
+      ],
+      "pairedSamples": 8,
+      "bothClientsAliveAtAllSamples": true,
+      "gmailOwnedFocusAtLastSample": true,
+      "visibleDriveWindowSamplingCount": 0,
+      "inbox": {
+        "verifiedOriginalApp": true,
+        "primaryVisible": true,
+        "searchFieldY": 159,
+        "visibleListExactlyMatchesPriorFixedInbox": true,
+        "relativeToPriorInboxMeanAbsoluteError": 0.0
+      },
+      "hostSwitch": {
+        "driveForegroundOwner": "host",
+        "gmailForegroundOwnerAfterReturn": "app",
+        "sameLiveClientProcesses": true,
+        "afterReturn": {
+          "verifiedOriginalApp": true,
+          "primaryVisible": true,
+          "searchFieldY": 159,
+          "visibleListExactlyMatchesPriorFixedInbox": true,
+          "relativeToPriorInboxMeanAbsoluteError": 0.0
+        }
+      },
+      "physicalSearchInput": {
+        "systemBarBounds": [
+          0,
+          0,
+          1200,
+          87
+        ],
+        "searchY": 159,
+        "tapSent": true,
+        "searchChipsDisplayed": true,
+        "releaseDelta": 1,
+        "fatalDelta": 0,
+        "returnedToPrimary": true
+      }
+    },
+    "5": {
+      "first": "gmail",
+      "elapsedSeconds": 129.0,
+      "distinctAppAndServiceUIDs": true,
+      "distinctClientMountNamespaces": true,
+      "unchangedSharedListenerProcesses": true,
+      "listeners": 3,
+      "installed": {
+        "gmail": {
+          "releaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+          "adapterJarSha256": "0a574e1b6b85dff4b087191a6f6921c66ac9ba272210917afec745537c7c3ccb",
+          "nativeAdapterSha256": "0215db8c1a4a48dbb2568d816c7689a6db7b951fecb89ae95effb5a24743ff95",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        },
+        "drive": {
+          "releaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+          "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+          "nativeAdapterSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+          "normalHapDomain": true,
+          "verifiedLauncher": true
+        }
+      },
+      "verifiedOriginalApkMappings": {
+        "gmail": {
+          "expected": 4,
+          "mappedAndHashMatched": 4
+        },
+        "drive": {
+          "expected": 20,
+          "mappedAndHashMatched": 20
+        }
+      },
+      "accountResults": {
+        "gmail": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 21,
+          "otherListReplySizes": {},
+          "featureReplies": 9,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 0,
+            "windowDetached": 0,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 1
+          }
+        },
+        "drive": {
+          "livePidMatchedProviderSignerCheck": true,
+          "otherNewVerifiedPeerCount": 0,
+          "verifiedPeerEvents": 1,
+          "oneAccountReplies": 1,
+          "otherListReplySizes": {},
+          "featureReplies": 0,
+          "appSide": {
+            "signedPeerOpened": 1,
+            "accountApiUsed": 1,
+            "playServiceVerified": 1,
+            "addAccount": 1,
+            "windowDetached": 1,
+            "fatal": 0,
+            "officialAccountProviderInvoked": 1
+          }
+        }
+      },
+      "orderOfAccountListReplies": [
+        {
+          "app": "gmail",
+          "replies": 1
+        },
+        {
+          "app": "drive",
+          "replies": 1
+        },
+        {
+          "app": "gmail",
+          "replies": 20
+        }
+      ],
+      "pairedSamples": 8,
+      "bothClientsAliveAtAllSamples": true,
+      "gmailOwnedFocusAtLastSample": true,
+      "visibleDriveWindowSamplingCount": 3,
+      "inbox": {
+        "verifiedOriginalApp": true,
+        "primaryVisible": false,
+        "matchedReferenceListBands": 3,
+        "searchFieldY": 159,
+        "visibleListExactlyMatchesPriorFixedInbox": false,
+        "relativeToPriorInboxMeanAbsoluteError": 29.632
+      },
+      "hostSwitch": {
+        "driveForegroundOwner": "host",
+        "gmailForegroundOwnerAfterReturn": "app",
+        "sameLiveClientProcesses": true,
+        "afterReturn": {
+          "verifiedOriginalApp": true,
+          "primaryVisible": false,
+          "matchedReferenceListBands": 3,
+          "searchFieldY": 159,
+          "visibleListExactlyMatchesPriorFixedInbox": false,
+          "relativeToPriorInboxMeanAbsoluteError": 29.632
+        }
+      },
+      "physicalSearchInput": {
+        "systemBarBounds": [
+          0,
+          0,
+          1200,
+          87
+        ],
+        "searchY": 159,
+        "tapSent": true,
+        "searchChipsDisplayed": true,
+        "releaseDelta": 1,
+        "fatalDelta": 0,
+        "returnedToPrimary": false,
+        "returnObservation": "Search chips opened. On backing out, a sample showed the search field and Dismiss. A subsequent Back closed the Gmail window before the sampler confirmed Primary."
+      }
+    }
+  },
+  "listenerOnlyIntermediate": {
+    "primaryVisible": true,
+    "pairedSearchCenterY": 72,
+    "singleAppRestartCenterY": 159,
+    "wholeRoundAccepted": false,
+    "reason": "The board monitor lost one HDC response while a framework preload was running. The two values come from separately verified focused screenshots."
+  },
+  "build": {
+    "windowBridgeSources": [
+      "framework/window/java/OhInsetsBridge.java",
+      "framework/window/java/WindowCallbackBridge.java",
+      "framework/window/jni/oh_window_manager_client.cpp"
+    ],
+    "javaInputCount": 144,
+    "checkedPreloadFiles": 469,
+    "hostWindowRouteTestsPassed": 1,
+    "releaseNativeSha256": "0215db8c1a4a48dbb2568d816c7689a6db7b951fecb89ae95effb5a24743ff95"
+  },
+  "preloadCleanup": {
+    "preloadedFilesVerified": 469,
+    "activeRuntimeVerifiedAfterRemoval": true,
+    "rollbackRetained": true
+  },
+  "lastGmailRestart": {
+    "verifiedOriginalApp": true,
+    "primaryVisible": true,
+    "matchedReferenceListBands": 3,
+    "searchFieldY": 159,
+    "visibleListExactlyMatchesPriorFixedInbox": true,
+    "relativeToPriorInboxMeanAbsoluteError": 0.0
+  },
+  "interpretation": "Two separately signed apps used the same three service processes under five distinct OpenHarmony UIDs. In both baseline launch orders, Gmail and Drive each received the one-account result for their verified package. Drive then asked to add an account. Gmail showed its retained Primary inbox. Its search field was covered by the 87-pixel status bar in both baseline runs. With per-window subscription and a refresh on focus, the search field cleared the status bar in both launch orders and after switching through the Drive host. A center tap opened Gmail search in each run. Receipt of the sender-confirmed email remains open."
+}

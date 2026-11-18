@@ -4,7 +4,7 @@ The [validation plan](../tests/google-auth/full48/validation-plan.json) covers
 eight Google app flows with 39 checks and three Facebook app flows with 12
 checks. The table records what the original APKs demonstrated on the board.
 Most rows combine observations from more than one build. The shared isolation,
-concurrency and sustained-use requirements remain open. The latest [process
+concurrency and sustained-use requirements remain open. A [paired Gmail and Drive test](#gmail-and-drive-running-together) checks caller identity and foreground switching in both launch orders. The latest [process
 and window checks](#live-app-and-service-isolation-on-the-board) cover six
 live roles and their native HAPs. All eight APKs now have [dedicated test hosts](#dedicated-hosts-for-the-eight-apks).
 
@@ -1692,6 +1692,14 @@ On the 1200 × 1920 board, the OpenHarmony status bar covered the top 87 pixels.
 The public NDK window lookup returned error 1300003 for this direct SceneBoard window. In the same Gmail process, the window’s own session returned a 1200 × 87 top avoid area on three samples. Westlake now reads the top system avoid area on relayout and publishes it as an Android status-bar inset for that window. The window also refreshes its inset when OpenHarmony reports a system avoid-area change. [OpenHarmony 6.1 session implementation](https://github.com/openharmony/window_window_manager/blob/OpenHarmony-6.1-Release/window_scene/session/host/src/zidl/session_proxy.cpp)
 
 With the fix, the search field center moved to y=159 and the account icon shifted down by 87 pixels. Tapping the icon’s center opened the Google panel. After a cold restart a center tap opened Gmail’s search controls. A further restart returned to Primary with automatic sync enabled. The account panel did not show a selectable test account during the samples. Gmail received a system pull-to-refresh gesture. Across three samples through 44.5 seconds, the visible message list stayed identical. New mail delivery remains unverified. [Toolbar geometry, touch delivery and restart observations](../tests/google-auth/full48/candidate133.json)
+
+#### Gmail and Drive running together
+
+We cold-started the original Gmail and Drive APKs six seconds apart, then reversed the launch order. Each app had its own OpenHarmony UID and mount namespace. They shared three unchanged service processes. In each baseline run, the service verified each caller’s signing certificate and live process. Gmail received 21 one-account replies and Drive received one. In the Gmail-first run, Drive’s reply arrived between Gmail’s first and second replies. Drive still requested another account and its window closed. Gmail returned to Primary.
+
+In both baseline runs, Gmail’s search field was centered at y=72 under the 87-pixel system status bar. A system swipe reached Gmail. At 4, 18 and 42 seconds the sampled inbox rows still matched the pre-swipe image and the observer recorded zero mailbox job starts. The sender’s message remains unidentified.
+
+Westlake now subscribes each direct window to SceneBoard’s system-area changes. When a window gains focus, Westlake also compares its current Android inset with the geometry reported for that window. We repeated both launch orders, switched to the Drive host and back, and tapped Gmail’s search field. Both times the field was centered at y=159 and the tap opened Gmail’s search controls. With Drive started first, Back returned to Primary. With Gmail started first, Compose and three known message-list regions were visible on the switch back, but OCR did not identify the Primary heading. Several Back inputs after opening search closed that window before the sampler confirmed Primary. A separate cold launch restored the inbox. These short runs cover two distinct callers. The dedicated Drive host’s file listing, new-mail delivery and eight-app sustained use remain open. [Paired runs and physical input results](../tests/google-auth/full48/candidate134.json) · [OpenHarmony listener implementation](https://github.com/openharmony/window_window_manager/blob/OpenHarmony-6.1-Release/window_scene/session_manager/src/zidl/scene_session_manager_proxy.cpp#L493)
 
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake

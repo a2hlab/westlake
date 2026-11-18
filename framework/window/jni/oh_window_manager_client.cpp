@@ -25,6 +25,7 @@
  */
 #include "oh_window_manager_client.h"
 #include "session/host/include/zidl/session_ipc_interface_code.h"
+#include "session_manager/include/zidl/scene_session_manager_interface.h"
 #include <limits>
 #include <window.h>
 #include <sys/syscall.h>
@@ -863,6 +864,25 @@ static void wl_icu_init_once() {
         fprintf(stderr, "[WESTLAKE-ICU] u_setDataDirectory symbol not found\n");
     }
     fflush(stderr);
+}
+
+// Subscribe only the direct session created by this client. SceneBoard checks
+// ownership when registering and delivers changes through its ISessionStage.
+static void setSystemAreaListener(const OHOS::sptr<OHOS::IRemoteObject>& manager,
+                                  int32_t session, bool enabled) {
+    if (!manager) return;
+    using Interface = OHOS::Rosen::ISceneSessionManager;
+    OHOS::MessageParcel data, reply;
+    OHOS::MessageOption option(OHOS::MessageOption::TF_SYNC);
+    if (!data.WriteInterfaceToken(Interface::GetDescriptor()) ||
+            !data.WriteInt32(session) || !data.WriteBool(enabled)) return;
+    const auto request = Interface::SceneSessionManagerMessage::TRANS_ID_UPDATE_AVOIDAREA_LISTENER;
+    int32_t status = -1;
+    const auto error = manager->SendRequest(static_cast<uint32_t>(request), data, reply, option);
+    const bool accepted = error == 0 && reply.ReadInt32(status) && status == 0;
+    if (!accepted) {
+        LOGW("SceneBoard avoid-area listener failed, transport=%{public}d status=%{public}d", error, status);
+    }
 }
 
 OHWindowSession OHWindowManagerClient::createSession(
@@ -1929,6 +1949,7 @@ OHWindowSession OHWindowManagerClient::createSession(
                     // the tap side-channel cannot drive the UI — every window here is ours anyway.
                     g_fgMainSession.store(persistentId);
                 }
+                setSystemAreaListener(sceneProxy_, persistentId, true);
                 // WESTLAKE §387: CPU-FILL PROBE — bypass hwui/EGL/GPU entirely.
                 // State of play: RS mounts our node correctly, acquires our buffers and calls
                 // RSUniRenderEngine::DrawSurfaceNodeWithParams on them (verified by hitrace in BOTH
@@ -2379,6 +2400,7 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
     // Both handlers read (bool isFromClient, string identityToken). Failures are logged and fall
     // through to the legacy path rather than being fatal.
     if (sessionRemote != nullptr) {
+        setSystemAreaListener(sceneProxy_, sessionId, false);
         auto sendSessionCall = [&](uint32_t code, const char* what) {
             OHOS::MessageParcel data;
             OHOS::MessageParcel reply;

@@ -431,6 +431,7 @@ public class WindowCallbackBridge {
         logBridged("UpdateFocusStatus",
                 "-> WindowInputEventReceiver.onFocusEvent(" + focused + ")");
         dispatchWindowFocusChanged(focused);
+        if (focused) OhInsetsBridge.refreshSystemArea(mAndroidWindow);
     }
 
     /**
