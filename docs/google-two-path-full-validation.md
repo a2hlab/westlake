@@ -20,7 +20,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
 | FotMob · Facebook | Fresh Facebook login returned to FotMob, its account menu displayed Sign out, and the session survived a process restart. [Board results](../tests/google-auth/full48/candidate76.json) | All four named Facebook checks have evidence on the tested build. |
 | Wattpad · Facebook | Facebook consent completed and the SDK delivered a successful activity result to the original Wattpad app. Wattpad displayed Create an Account. [SDK return](google-two-path-live44.md) | Wattpad account session and restart persistence. |
-| Spotify · Facebook | The original APK opened Facebook’s HTTPS login form after the user selected Facebook. Westlake displayed the form in a WebView owned by the Spotify process. [Earlier startup failure](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Live form on the dedicated host](../tests/google-auth/full48/candidate97.json) | Account submission, authenticated return, Spotify session and persistence. |
+| Spotify · Facebook | The original APK opened Facebook’s HTTPS login form after the user selected Facebook. Westlake displayed the form in a WebView owned by the Spotify process. [Earlier startup failure](../tests/google-auth/live44/com.spotify.music-facebook-candidate47.json) · [Live form on the dedicated host](../tests/google-auth/full48/candidate97.json) · [Login form after log redaction](../tests/google-auth/full48/candidate108.json) | Account submission, authenticated return, Spotify session and persistence. |
 
 ## Candidate 48: legacy Google sign-in eligibility
 
@@ -2011,6 +2011,13 @@ activities. Westlake's browser fallback navigated to Facebook’s HTTPS OAuth pa
 The board showed the mobile number or email and password fields, and the focused
 window belonged to Spotify. This was an app-owned WebView. No password was submitted
 during this observation. [Original APK and Facebook form](../tests/google-auth/full48/candidate97.json)
+
+On the rebuilt adapter, the same original APK again opened Facebook’s email
+and password form. The web-link dialog logged one open event and omitted the
+navigation URI. A separate package-manager entry retained the host with a
+redacted path and no query or fragment. This observation ended at the empty
+form. A completed Facebook login and return to Spotify remain open.
+[Board retest](../tests/google-auth/full48/candidate108.json)
 
 ## Where Spotify’s Google sign-in stopped with official Play services
 
