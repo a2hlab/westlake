@@ -14,7 +14,8 @@ const nativeFS = {
   listFileSync: dir => [...files.keys()].filter(p => p.startsWith(dir + '/')).map(p => p.slice(dir.length + 1))
 };
 const context = {exports: {}, requireNapi: name => name === 'file.fs' ? nativeFS :
-  name === 'hilog' ? {info() {}, error() {}} : class {}, setInterval: () => 1, clearInterval() {}, setTimeout() {}, Date};
+  name === 'process' ? {pid: 71} : name === 'hilog' ? {info() {}, error() {}} : class {},
+  setInterval: () => 1, clearInterval() {}, setTimeout() {}, Date};
 vm.runInNewContext(source, context);
 const host = new context.exports.default();
 host.context = {filesDir: '/private', startAbility: async want => {
@@ -31,6 +32,22 @@ function reply(id) { return JSON.parse(files.get(`${root}/reply-${id}.json`)); }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   host.onCreate({}); host.onForeground();
+  const windowState = () => JSON.parse(files.get('/private/window-state.json'));
+  const stage = id => ({
+    on(event, callback) { this.stageEvent = callback; },
+    loadContent(page, callback) { this.ready = callback; },
+    getMainWindowSync() { return {getWindowProperties: () => ({id}), setWindowBackgroundColor() {}}; }
+  });
+  assert.equal(windowState().mainWindowId, 0);
+  const oldStage = stage(16), newStage = stage(31);
+  host.onWindowStageCreate(oldStage); oldStage.ready();
+  host.onBackground(); host.onForeground();
+  assert.equal(windowState().ownerPid, 71);
+  assert.equal(windowState().mainWindowId, 16);
+  host.onWindowStageDestroy(); assert.equal(windowState().mainWindowId, 0);
+  host.onWindowStageCreate(newStage); newStage.stageEvent(1);
+  oldStage.ready(); oldStage.stageEvent(1);
+  assert.equal(windowState().mainWindowId, 31);
   const disabled = request(); host.pollWindowBridge(); await flush(); assert.equal(calls, 0);
   files.delete(`${root}/request-${disabled}.json`);
   host.configureWindowBridge({parameters: {'westlake.remoteHostWindows': true}});

@@ -2,16 +2,21 @@
 const UIAbility = globalThis.requireNapi('app.ability.UIAbility');
 const hilog = globalThis.requireNapi('hilog');
 const fs = globalThis.requireNapi('file.fs');
+const processInfo = globalThis.requireNapi('process');
 const TAG = 'WL_IME_HOST';
 const HOST_BUNDLE = 'org.westlake.imehost';
 class EntryAbility extends UIAbility {
     record(event, details) {
-        const value = JSON.stringify({event: event, time: Date.now(), details: details});
+        const value = JSON.stringify({event: event, time: Date.now(), details: details,
+            ownerPid: processInfo.pid, mainWindowId: this.mainWindowId || 0});
         hilog.info(0, TAG, '%{public}s', value);
         try {
-            const file = fs.openSync(this.context.filesDir + '/window-state.json',
+            const path = this.context.filesDir + '/window-state.json';
+            const temp = path + '.' + processInfo.pid + '.tmp';
+            const file = fs.openSync(temp,
                 fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
             try { fs.writeSync(file.fd, value); } finally { fs.closeSync(file); }
+            fs.renameSync(temp, path);
         } catch (error) {
             hilog.error(0, TAG, 'record failed %{public}s', String(error));
         }
@@ -94,19 +99,39 @@ class EntryAbility extends UIAbility {
     onNewWant(want) { this.configureWindowBridge(want); }
     onWindowStageCreate(stage) {
         this.stage = stage;
-        stage.on('windowStageEvent', event => this.record('stage-event', {
-            event: event, window: stage.getMainWindowSync().getWindowProperties()
-        }));
+        this.mainWindow = undefined;
+        this.mainWindowId = 0;
+        this.record('window-creating', {});
+        stage.on('windowStageEvent', event => {
+            if (this.stage !== stage) return;
+            const properties = stage.getMainWindowSync().getWindowProperties();
+            this.mainWindowId = properties.id;
+            this.record('stage-event', {event: event, window: properties});
+        });
         stage.loadContent('pages/Index', error => {
+            if (this.stage !== stage) return;
             if (error && error.code) { this.record('load-error', error); return; }
             this.mainWindow = stage.getMainWindowSync();
             this.mainWindow.setWindowBackgroundColor('#ff000000');
-            this.record('window-ready', this.mainWindow.getWindowProperties());
+            const properties = this.mainWindow.getWindowProperties();
+            this.mainWindowId = properties.id;
+            this.record('window-ready', properties);
         });
     }
     onForeground() { this.windowForeground = true; this.record('foreground', {}); }
     onBackground() { this.windowForeground = false; this.record('background', {}); }
-    onWindowStageDestroy() { this.record('window-destroyed', {}); this.stage = undefined; }
-    onDestroy() { if (this.windowBridgeTimer) clearInterval(this.windowBridgeTimer); this.windowForeground = false; this.record('destroyed', {}); }
+    onWindowStageDestroy() {
+        this.stage = undefined;
+        this.mainWindow = undefined;
+        this.mainWindowId = 0;
+        this.record('window-destroyed', {});
+    }
+    onDestroy() {
+        if (this.windowBridgeTimer) clearInterval(this.windowBridgeTimer);
+        this.windowForeground = false;
+        this.stage = undefined;
+        this.mainWindowId = 0;
+        this.record('destroyed', {});
+    }
 }
 globalThis.exports.default = EntryAbility;

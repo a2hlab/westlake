@@ -1900,3 +1900,24 @@ by the official Google UI process. The center of the board display capture was
 black. The account row could not be verified, so the tester made no selection
 on that run. The earlier shared-host run remains the evidence for the visible
 Spotify signup form. [Shared-host control](../tests/google-auth/full48/candidate93.json) · [Earlier signup result](../tests/google-auth/full48/candidate51-followup.json)
+
+## Selecting the current native host window
+
+The previous host wrote just its most recent lifecycle event. A foreground
+event had no window ID, and a terminated process could leave a window ID on
+disk. The updated host records its PID and current main window together,
+including across foreground changes, and clears the ID when its window stage
+is destroyed. Before launching the APK, the manifest tool checks the main
+window against OpenHarmony WindowManager and rechecks the host PID. With
+older HAPs it can recover the host's unique live main window. Both the
+FotMob and Wattpad captures yielded the expected client and service windows
+when replayed through the updated launcher. [Launcher change](https://github.com/a2hlab/manifest/pull/70) · [Checks and Spotify host build](../tests/google-auth/full48/candidate94.json)
+
+To examine the return to the originating app, three native HAPs were installed
+under different UIDs. They request no permissions and use no accounts.
+OpenHarmony failed to start the first caller and also failed to start the
+previously installed Wattpad host. The system log traced the launch failure
+to SceneBoard's pending-session activation. The board subsequently stopped
+answering over USB and TCP. The new Spotify HAP was built and signed locally.
+Its live deployment, the two-caller return test and Spotify's authenticated
+session remain open. [Board observations](../tests/google-auth/full48/candidate94.json)

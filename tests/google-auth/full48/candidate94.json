@@ -1,0 +1,62 @@
+{
+  "candidate": 94,
+  "schema": 1,
+  "test": "Select the current OpenHarmony host window and stage a two-caller native return trial",
+  "changedHost": "org.westlake.apk.com.spotify.music",
+  "signedHapSha256": "ba09d09faff4c3582956d15a9161113918acf2f4d18e2361a87661c62437e380",
+  "replacementInstalledOnBoard": false,
+  "verifiedLocally": {
+    "nativeHostLifecycleRegressionPassed": true,
+    "manifestTestsPassed": 52,
+    "recordedBoardWindowManagerTables": [
+      {
+        "app": "FotMob",
+        "role": "client host",
+        "expectedWindow": 687,
+        "observedWindow": 687
+      },
+      {
+        "app": "FotMob",
+        "role": "service host",
+        "expectedWindow": 686,
+        "observedWindow": 686
+      },
+      {
+        "app": "Wattpad",
+        "role": "client host",
+        "expectedWindow": 687,
+        "observedWindow": 687
+      },
+      {
+        "app": "Wattpad",
+        "role": "service host",
+        "expectedWindow": 686,
+        "observedWindow": 686
+      }
+    ]
+  },
+  "liveBoard": {
+    "nativeTestHosts": {
+      "org.westlake.windowtesta": {
+        "sha256": "dc1738515741134b43d3b14e970f375d27e0081bf5c407bf8001829f94684930",
+        "uid": 20010070
+      },
+      "org.westlake.windowtestb": {
+        "sha256": "929aff57b21208abf1c7c5f9c1150487d3b15cc1883adf381748c6db6ce58b8d",
+        "uid": 20010071
+      },
+      "org.westlake.windowtestservice": {
+        "sha256": "8a0fab42a78043d634f5c8022b912662e3f800298d654b3491b6b5e32dde8184",
+        "uid": 20010072
+      }
+    },
+    "nativeTestHostPermissionsRequested": [],
+    "firstCallerStarted": false,
+    "launchError": 10108101,
+    "previouslyInstalledWattpadHostSameLaunchError": true,
+    "systemWindowManager": "SceneBoard PendingSessionActivation SendRequest failed, status 1005",
+    "nativeCrossAppResultObserved": false,
+    "spotifyAfterFix": "not run; target USB offline and TCP shell unresponsive"
+  },
+  "spotifyAppSessionVerified": false
+}
