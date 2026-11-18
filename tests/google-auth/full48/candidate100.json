@@ -1,0 +1,82 @@
+{
+  "candidate": 100,
+  "date": "2026-11-17",
+  "package": "com.google.android.youtube",
+  "versionName": "21.43.523",
+  "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+  "publicVideo": "Me at the zoo",
+  "session": "Guest with original Google Play services and Play Store connected",
+  "baseline": {
+    "fatalErrors": [
+      {
+        "category": "progressive.fmt.noneavailable",
+        "severity": "fatal",
+        "playerSeconds": 0.38
+      },
+      {
+        "category": "progressive.fmt.noneavailable",
+        "severity": "fatal",
+        "playerSeconds": 0.273
+      }
+    ],
+    "formatLists": [
+      {
+        "progressive": [
+          18
+        ],
+        "adaptiveEntries": 19
+      },
+      {
+        "progressive": [
+          18
+        ],
+        "adaptiveEntries": 19
+      }
+    ],
+    "observedDecoderStart": false,
+    "librarySha256": "44e11a5f518c3811bce63058a9af2bfe5bc65de8616ee3f41a834b40000115d7"
+  },
+  "sourceCodec": {
+    "librarySha256": "cf9a0ded88e5c515f34d2330f8dbd907bd17d991388e3c35b2257412ffe6e112",
+    "matchedRuntimeFiles": 8,
+    "onlyChangedFileAmongCompared": "libwl_missing_natives.so",
+    "originalPlayerRuns": [
+      {
+        "states": "1.664:B,19.888:PL,37.285:EN",
+        "finalPositionSeconds": 19.063
+      },
+      {
+        "states": "0.998:B,18.213:PL,34.133:EN",
+        "finalPositionSeconds": 19.063
+      }
+    ],
+    "codec": "H.264, 320 by 240, OpenHarmony software decoder",
+    "standardFrameworkPreloadPassed": true,
+    "stagedFrameworkFileCount": 468,
+    "stagedFrameworkFilesChanged": [
+      "libwl_missing_natives.so"
+    ]
+  },
+  "display": {
+    "screenPixels": [
+      1200,
+      1920
+    ],
+    "surfaceViewPixels": [
+      1200,
+      675
+    ],
+    "approximateVisiblePicturePixels": [
+      320,
+      240
+    ],
+    "alignment": "upper left",
+    "assessment": "Decoded moving picture occupied only part of the player window."
+  },
+  "open": [
+    "Google sign-in and account persistence",
+    "audible speaker output",
+    "correct picture placement and sizing",
+    "coverage of other public videos and codecs"
+  ]
+}

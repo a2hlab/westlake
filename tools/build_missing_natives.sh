@@ -42,4 +42,28 @@ ${CC/clang /clang++ } -shared -fuse-ld=lld -Wl,-soname,libwl_missing_natives.so 
   $OBJ/missing_natives.o $OBJ/media_natives.o $OBJ/extractor_natives.o $OBJ/text_natives.o $OBJ/audiorecord_natives.o $OBJ/audioports_natives.o $OBJ/ojluni_nio_natives.o \
   $OBJ/localsocket_natives.o $OBJ/canvas_natives.o $OBJ/sqlite_natives.o $OBJ/notification_natives.o $OBJ/location_natives.o $OBJ/socketbinder_natives.o $OBJ/oj_*.o \
   $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/seccomp_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
-echo "built $OUT/libwl_missing_natives.so"
+# Export the same library for the manifest runtime composer and per-app launcher.
+# Keep the top-level output used by existing native callers.
+python3 - "$OUT" <<'PY'
+import hashlib
+import json
+import shutil
+import sys
+import tempfile
+from pathlib import Path
+
+output = Path(sys.argv[1])
+package = output / "runtime"
+library = Path("lib/libwl_missing_natives.so")
+(package / library.parent).mkdir(parents=True, exist_ok=True)
+with tempfile.TemporaryDirectory(dir=package) as temp:
+    copy = Path(temp) / library.name
+    shutil.copy2(output / library.name, copy)
+    entry = {"path": str(library), "bytes": copy.stat().st_size,
+             "sha256": hashlib.sha256(copy.read_bytes()).hexdigest()}
+    report = Path(temp) / "artifacts.json"
+    report.write_text(json.dumps({"artifacts": {library.name: entry}}, indent=2) + "\n")
+    copy.replace(package / library)
+    report.replace(package / report.name)
+PY
+echo "built $OUT/libwl_missing_natives.so and $OUT/runtime/artifacts.json"
