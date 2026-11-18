@@ -44,9 +44,10 @@ static int g_stream_click = 0;
 static int g_x_min = 0, g_x_max = 0, g_y_min = 0, g_y_max = 0;
 static int g_output_width = 1200, g_output_height = 1920;
 static int g_coordinate_gain = 1;
+static int g_x_now = -1, g_y_now = -1;  /* raw position when the forwarder starts */
 
 static int read_axis_range(int fd, int primary, int fallback,
-                           int* min_value, int* max_value) {
+                           int* min_value, int* max_value, int* now) {
     struct input_absinfo info;
     if (ioctl(fd, EVIOCGABS(primary), &info) != 0 &&
         ioctl(fd, EVIOCGABS(fallback), &info) != 0) {
@@ -54,6 +55,7 @@ static int read_axis_range(int fd, int primary, int fallback,
     }
     *min_value = info.minimum;
     *max_value = info.maximum;
+    *now = info.value;
     return info.maximum > info.minimum ? 0 : -1;
 }
 
@@ -107,8 +109,8 @@ int main(int argc, char** argv) {
     if (width && atoi(width) > 0) g_output_width = atoi(width);
     if (height && atoi(height) > 0) g_output_height = atoi(height);
     if (gain && atoi(gain) > 0) g_coordinate_gain = atoi(gain);
-    if (read_axis_range(fd, ABS_MT_POSITION_X, ABS_X, &g_x_min, &g_x_max) != 0 ||
-        read_axis_range(fd, ABS_MT_POSITION_Y, ABS_Y, &g_y_min, &g_y_max) != 0) {
+    if (read_axis_range(fd, ABS_MT_POSITION_X, ABS_X, &g_x_min, &g_x_max, &g_x_now) != 0 ||
+        read_axis_range(fd, ABS_MT_POSITION_Y, ABS_Y, &g_y_min, &g_y_max, &g_y_now) != 0) {
         fprintf(stderr,
                 "[touchfwd] ABS range unavailable; forwarding coordinates unchanged\n");
         g_x_min = g_x_max = g_y_min = g_y_max = 0;
@@ -129,7 +131,19 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[touchfwd] short-tap main-queue click fallback enabled\n");
         fflush(stderr);
     }
-    int x = -1, y = -1, downX = -1, downY = -1, touching = 0, sawDown = 0;
+    /* The kernel drops a position event that repeats the device's last value, so a first touch at the X or Y
+     * of the touch before this forwarder started comes without it: start from the device's current position.
+     * A multitouch device keeps it per slot (EVIOCGABS reports 0 for the MT axes): take slot 0's. */
+    {
+        struct { __u32 code; __s32 values[16]; } slots;
+        slots.code = ABS_MT_POSITION_X;
+        if (ioctl(fd, EVIOCGMTSLOTS(sizeof(slots)), &slots) == 0) g_x_now = slots.values[0];
+        slots.code = ABS_MT_POSITION_Y;
+        if (ioctl(fd, EVIOCGMTSLOTS(sizeof(slots)), &slots) == 0) g_y_now = slots.values[0];
+    }
+    int x = g_x_now >= 0 ? scale_axis(g_x_now, g_x_min, g_x_max, g_output_width) : -1;
+    int y = g_y_now >= 0 ? scale_axis(g_y_now, g_y_min, g_y_max, g_output_height) : -1;
+    int downX = -1, downY = -1, touching = 0, sawDown = 0;
     int streamDown = 0, lastMx = -1, lastMy = -1;
     struct input_event ev;
     while (read(fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
