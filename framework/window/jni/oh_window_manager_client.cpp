@@ -1564,11 +1564,31 @@ OHWindowSession OHWindowManagerClient::createSession(
     // called. Costs one small leak per window creation; unblocks window creation entirely.
     property->SetWindowName(windowName);
     property->SetWindowType(ohType);
+    // Classic window manager: WindowController::UpdateWindowAnimation gives every window whose property
+    // says WindowAnimation::DEFAULT an RS transition effect (scale + opacity). On our surface node that
+    // transition never plays, so RS keeps its start values -- Alpha 0 and Scale (0,0), modifiers owned by
+    // pid INT_MAX (rs_render_transition_effect.cpp) -- and the window is invisible although it is on top
+    // and its buffers arrive. Android animates its own windows, so ask for no OH window animation.
+    if (getenv("WL_OH_WINDOW_ANIMATION") == nullptr) {
+        property->SetAnimationFlag(static_cast<uint32_t>(OHOS::Rosen::WindowAnimation::NONE));
+    }
     // 2026-06-04 NATIVE TRANSLUCENT-DIALOG FIX: parent the sub-window to the main
     // window so OHOS composites it above the parent and keeps the parent visible.
     if (asSubWindow) {
         property->SetParentId(subParentWinId);
         LOGI("createSession: SetParentId(%{public}u) on SUB_WINDOW", subParentWinId);
+    } else if (ohType == OHOS::Rosen::WindowType::WINDOW_TYPE_APP_SUB_WINDOW) {
+        // Classic window manager (no SceneBoard, e.g. the OnePlus 6 port): WL_SUB_WINDOW makes the
+        // activity's own window a SUB_WINDOW as well, and the legacy WindowController::CreateWindow
+        // rejects a sub-window without a parent (CheckParentWindowValid -> WM_ERROR_INVALID_PARENT, 11).
+        // Parent it to the host window, as the SceneBoard path does (§340b: WL_PARENT_ID). Legacy WMS only
+        // checks that the parent window exists, not who owns it.
+        const int32_t wl_hostWin = wl_query_ability_main_window_id(nullptr);
+        if (wl_hostWin > 0) {
+            property->SetParentId(static_cast<uint32_t>(wl_hostWin));
+        }
+        fprintf(stderr, "[WESTLAKE-WMC] legacy SUB_WINDOW parent = host window %d\n", wl_hostWin);
+        fflush(stderr);
     }
     property->SetWindowMode(OHOS::Rosen::WindowMode::WINDOW_MODE_FULLSCREEN);
     OHOS::Rosen::Rect rect{0, 0,
