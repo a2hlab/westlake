@@ -2059,13 +2059,20 @@ all eight different UIDs.
 | Maps | 20010062 | Yes |
 | Uber | 20010063 | Yes |
 | YouTube | 20010064 | Yes. The original APK played a public clip across two retained-profile launches. [Guest playback](../tests/google-auth/full48/candidate107.json) · [Installed host and APK hashes](../tests/google-auth/full48/candidate115.json) |
-| Drive | 20010065 | Pending |
+| Drive | 20010065 | Yes. The startup activity requested an account. The local authenticator was unavailable. [Board evidence](../tests/google-auth/full48/candidate116.json) |
 | Gmail | 20010066 | Yes. The original APK opened account setup. [Board evidence](../tests/google-auth/full48/candidate112.json) |
 | Spotify | 20010067 | Yes. The original APK opened and received Google's activity result. |
-| Wattpad | 20010068 | Pending |
-| FotMob | 20010069 | Pending |
+| Wattpad | 20010068 | Yes. The original APK displayed its existing-account login screen. [Board evidence](../tests/google-auth/full48/candidate116.json) |
+| FotMob | 20010069 | Yes. The original welcome screen led to a Facebook login form. [Board evidence](../tests/google-auth/full48/candidate116.json) |
 
-Five of the eight original APKs have a recorded launch under their dedicated host UID. Drive, Wattpad and FotMob still lack that evidence.
+All eight original APKs now have a recorded launch under eight different
+OpenHarmony host UIDs. Six original processes were live when the reports were
+checked. Maps and Uber have earlier launch evidence. The three latest hosts
+used fresh app data, and each data directory had mode 0700 and belonged to
+the corresponding app UID. In all three cases the Android process had a
+different mount namespace from the retained Gmail process. Cross-app data
+access, concurrent authenticated use and sustained operation still require
+separate tests. [Eight-host audit](../tests/google-auth/full48/candidate116.json)
 
 All eight hosts have network access. Microphone, approximate location and
 precise location were denied for all eight when checked. The six new UIDs
@@ -2073,6 +2080,38 @@ had no running process after installation. The Drive instance that passed the
 file test remained alive under the earlier reusable client UID 20010060.
 Its app data and account results have not been transferred to the new host.
 [Installed HAP hashes, APK pins and permission checks](../tests/google-auth/full48/candidate92.json)
+
+### Drive, FotMob and Wattpad under their dedicated host UIDs
+
+The fresh Drive profile had no account. The original startup activity asked
+Android to add one and received `AuthenticatorException` from Westlake's local
+account service. The same failure occurred after restarting Drive with the
+official GMS main process active. Its client connected to both official GMS
+and the Store in that run. Earlier, the shared-host profile had listed and
+opened the fixture. File access on the fresh dedicated host remains open.
+[Drive evidence for both configurations](../tests/google-auth/full48/candidate116.json) · [Earlier fixture open](../tests/google-auth/full48/candidate89.json)
+
+FotMob opened its welcome screen and then showed Facebook and Apple on the
+sign-in menu. Selecting Facebook opened the SDK activity and an email/password
+form. This control did not verify the active HTTPS origin or an authenticated
+return. Wattpad's existing-account menu showed both Google and Facebook.
+Selecting Google while official GMS was live opened Google's **Checking
+info** screen. It was visible in five focused captures spanning 61 seconds.
+An authenticated Wattpad session remains open.
+[Original app flows](../tests/google-auth/full48/candidate116.json)
+
+Wattpad also exposed a keyboard integration error. With the optional
+metadata-library path unset, Westlake passed a null path to `System.load`.
+The class failed initialization, and later calls to list keyboards failed
+too. The default now loads the metadata methods from the native adapter bridge
+already shipped on the board. An explicit library path still takes precedence.
+The same ART probe reproduced the old failure. On the repaired build the
+default, empty path and explicit path each returned the current keyboard
+and two enabled metadata rows. After restarting the same Wattpad APK and
+profile, the OpenHarmony input method kit logged the app's enabled-list query.
+These checks concern keyboard metadata. Text entry and login have separate
+acceptance criteria.
+[Board regression and original Wattpad retest](../tests/google-auth/full48/candidate116.json)
 
 ## Spotify account selection under its dedicated OpenHarmony host
 

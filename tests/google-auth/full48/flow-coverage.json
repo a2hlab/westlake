@@ -12,7 +12,8 @@
         "app": "FotMob",
         "sources": [
           "candidate74.json",
-          "candidate75.json"
+          "candidate75.json",
+          "candidate116.json"
         ],
         "checks": {
           "sign_in": {
@@ -71,12 +72,13 @@
         "app": "Wattpad",
         "sources": [
           "candidate51-followup.json",
-          "candidate62.json"
+          "candidate62.json",
+          "candidate116.json"
         ],
         "checks": {
           "sign_in": {
             "status": "partial",
-            "evidence": "The original app received the Google sign-in result and reached Wattpad signup."
+            "evidence": "The original app received the Google sign-in result and reached Wattpad signup. The fresh dedicated host reached the official Google Checking info screen."
           },
           "account_session": {
             "status": "open",
@@ -157,12 +159,13 @@
         "sources": [
           "candidate81.json",
           "candidate82.json",
-          "candidate89.json"
+          "candidate89.json",
+          "candidate116.json"
         ],
         "checks": {
           "account_selection": {
             "status": "partial",
-            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice."
+            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice. Fresh dedicated Drive found no account and received authenticator unavailable when it asked to add one, including after connecting to both official services."
           },
           "file_listing": {
             "status": "observed",
@@ -248,12 +251,13 @@
       "com.mobilefootie.wc2010": {
         "app": "FotMob",
         "sources": [
-          "candidate76.json"
+          "candidate76.json",
+          "candidate116.json"
         ],
         "checks": {
           "sign_in": {
             "status": "observed",
-            "evidence": "Facebook login completed in the original FotMob flow."
+            "evidence": "Facebook login completed in the original FotMob flow. On the fresh dedicated host the Facebook form appeared. That separate run did not complete authentication."
           },
           "authenticated_return": {
             "status": "observed",

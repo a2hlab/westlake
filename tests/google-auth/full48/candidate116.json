@@ -1,0 +1,551 @@
+{
+  "schema": 1,
+  "candidate": 116,
+  "date": "2026-11-17",
+  "previous": "candidate115.json",
+  "control": "Fresh application profiles under dedicated OpenHarmony hosts. Clients configured verified official Play services and Store endpoints. No delegated account provider, account-data transfer or new app signup. Application and service processes were observed separately.",
+  "dedicatedHostAudit": {
+    "com.mobilefootie.wc2010": {
+      "hostUid": 20010069,
+      "originalBaseApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+      "installedHostHapSha256": "880d0ce4f620609d3a7839aef5bc4b74986b04056d879b2305440ab5df4c839b",
+      "exampleLaunchReport": "full126-dedicated-fotmob",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": true
+    },
+    "com.spotify.music": {
+      "hostUid": 20010067,
+      "originalBaseApkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+      "installedHostHapSha256": "5985ad7f2b64e91250d6d214f60c2f5ed28879d034186dcd6bb4f90b2d8c36c8",
+      "exampleLaunchReport": "full118-official-spotify",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": true
+    },
+    "wp.wattpad": {
+      "hostUid": 20010068,
+      "originalBaseApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+      "installedHostHapSha256": "b2093bfc048293fe91aac60fa8bf0413b64764f6e538e912641644052aff121c",
+      "exampleLaunchReport": "full126b-dedicated-wattpad",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": true
+    },
+    "com.google.android.youtube": {
+      "hostUid": 20010064,
+      "originalBaseApkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+      "installedHostHapSha256": "f4c8bec81e9ef561ede4ff7c392581336f123dec6ade2d062bc28599edba4063",
+      "exampleLaunchReport": "full125-restored-youtube",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": true
+    },
+    "com.google.android.gm": {
+      "hostUid": 20010066,
+      "originalBaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "installedHostHapSha256": "8e6db896d1ef62943f4fe8ec4a18cb9193000cc2dd623482e32ec77e75fa6013",
+      "exampleLaunchReport": "full122-gmail-dedicated",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": true
+    },
+    "com.google.android.apps.docs": {
+      "hostUid": 20010065,
+      "originalBaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+      "installedHostHapSha256": "6cc8741bd428a037ece1ca29254917134b03ae2537ddaca7bbbcf7bd87ff2cf2",
+      "exampleLaunchReport": "full126b-dedicated-drive",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": true
+    },
+    "com.google.android.apps.maps": {
+      "hostUid": 20010062,
+      "originalBaseApkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+      "installedHostHapSha256": "bd521baac20f7b6c3b4b36fdaa74c93e91840b329e9f3762648adb2e53587b63",
+      "exampleLaunchReport": "full88-maps-deny-restored",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": false
+    },
+    "com.ubercab": {
+      "hostUid": 20010063,
+      "originalBaseApkSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+      "installedHostHapSha256": "d0c433786ee1e0ded614a7dfe16152be1c7840447ff208c3a56874d4664d158f",
+      "exampleLaunchReport": "full89-uber-trip",
+      "exampleBuildHapMatchesInstalled": true,
+      "originalProcessLiveWhenAudited": false
+    }
+  },
+  "newDedicatedControls": {
+    "drive": {
+      "package": "com.google.android.apps.docs",
+      "version": "2.26.457.0.all.alldpi",
+      "hostUid": 20010065,
+      "nativeHost": "org.westlake.apk.com.google.android.apps.docs",
+      "hostHapSha256": "6cc8741bd428a037ece1ca29254917134b03ae2537ddaca7bbbcf7bd87ff2cf2",
+      "originalBaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+      "installedApkFilesVerified": 20,
+      "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+      "guestDataOwnerAndModeChecked": true,
+      "dataDirectoryMode": "0700",
+      "distinctMountNamespaceFromRetainedGmail": true,
+      "accountDataCopied": false,
+      "officialServiceEndpointsConfigured": true,
+      "delegatedAccountProviderConfigured": false,
+      "samples": [
+        {
+          "elapsedSeconds": 1.7,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 4.7,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 14.8,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 35.3,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        }
+      ]
+    },
+    "fotmob": {
+      "package": "com.mobilefootie.wc2010",
+      "version": "239.17834.20261016",
+      "hostUid": 20010069,
+      "nativeHost": "org.westlake.apk.com.mobilefootie.wc2010",
+      "hostHapSha256": "880d0ce4f620609d3a7839aef5bc4b74986b04056d879b2305440ab5df4c839b",
+      "originalBaseApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+      "installedApkFilesVerified": 2,
+      "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+      "guestDataOwnerAndModeChecked": true,
+      "dataDirectoryMode": "0700",
+      "distinctMountNamespaceFromRetainedGmail": true,
+      "accountDataCopied": false,
+      "officialServiceEndpointsConfigured": true,
+      "delegatedAccountProviderConfigured": false,
+      "samples": [
+        {
+          "elapsedSeconds": 1.8,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 4.5,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 16.1,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 2,
+          "originalAppFocused": true,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 36.9,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 2,
+          "originalAppFocused": true,
+          "labels": [
+            "Football",
+            "FotMob",
+            "Sign in"
+          ]
+        }
+      ]
+    },
+    "wattpad": {
+      "package": "wp.wattpad",
+      "version": "11.41.1",
+      "hostUid": 20010068,
+      "nativeHost": "org.westlake.apk.wp.wattpad",
+      "hostHapSha256": "b2093bfc048293fe91aac60fa8bf0413b64764f6e538e912641644052aff121c",
+      "originalBaseApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+      "installedApkFilesVerified": 4,
+      "adapterJarSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+      "guestDataOwnerAndModeChecked": true,
+      "dataDirectoryMode": "0700",
+      "distinctMountNamespaceFromRetainedGmail": true,
+      "accountDataCopied": false,
+      "officialServiceEndpointsConfigured": true,
+      "delegatedAccountProviderConfigured": false,
+      "samples": [
+        {
+          "elapsedSeconds": 1.6,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 4.4,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 0,
+          "originalAppFocused": false,
+          "labels": []
+        },
+        {
+          "elapsedSeconds": 16.0,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 1,
+          "originalAppFocused": true,
+          "labels": [
+            "Wattpad"
+          ]
+        },
+        {
+          "elapsedSeconds": 36.8,
+          "originalProcessAlive": true,
+          "originalProcessWindows": 2,
+          "originalAppFocused": true,
+          "labels": [
+            "Wattpad"
+          ]
+        }
+      ]
+    }
+  },
+  "drive": {
+    "initial": {
+      "startupActivity": true,
+      "surfaceRegistered": true,
+      "surfaceDetached": true,
+      "officialGmsConnectionLogged": false,
+      "officialStoreConnectionLogged": true,
+      "platformLogMarkerCounts": {
+        "noAccounts": 1,
+        "unsupportedDevice": 0,
+        "fatal": 0,
+        "missingActivity": 0,
+        "accountPicker": 0,
+        "unableToLaunch": 0,
+        "requiresAccount": 0,
+        "requiresSignIn": 0
+      },
+      "freshProfileReportedNoCurrentAccount": true,
+      "requestedAccountSetup": true,
+      "addAccountFailed": true,
+      "authenticatorUnavailable": true,
+      "localAccountServiceInStack": true
+    },
+    "afterNormalOfficialServiceStart": {
+      "startupActivity": true,
+      "surfaceRegistered": true,
+      "surfaceDetached": true,
+      "officialGmsConnectionLogged": true,
+      "officialStoreConnectionLogged": true,
+      "platformLogMarkerCounts": {
+        "noAccounts": 1,
+        "unsupportedDevice": 0,
+        "fatal": 0,
+        "missingActivity": 0,
+        "accountPicker": 0,
+        "unableToLaunch": 0,
+        "requiresAccount": 0,
+        "requiresSignIn": 0
+      },
+      "freshProfileReportedNoCurrentAccount": true,
+      "requestedAccountSetup": true,
+      "addAccountFailed": true,
+      "authenticatorUnavailable": true,
+      "localAccountServiceInStack": true
+    },
+    "afterRestartSamples": [
+      {
+        "elapsedSeconds": 0.6,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      },
+      {
+        "elapsedSeconds": 4.5,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      },
+      {
+        "elapsedSeconds": 14.5,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      },
+      {
+        "elapsedSeconds": 35.4,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      }
+    ],
+    "outcome": "The original Drive startup activity found no account and requested one. Both runs reached LocalAccounts.authenticatorUnavailable. The repeat connected to both official services. Neither run opened an account chooser, file list or file in the APK-owned observations.",
+    "separateOfficialServiceFailure": "The original GMS main process exited with an uninitialized droidGuardHandle after an earlier normal start."
+  },
+  "fotmob": {
+    "originalSignInMenu": true,
+    "visuallyConfirmedButtons": [
+      "Sign in with Facebook",
+      "Sign in with Apple"
+    ],
+    "googleButtonVisibleInMenuCapture": false,
+    "facebookButtonTapped": true,
+    "afterFacebook": [
+      {
+        "originalFotMobFocused": true,
+        "labels": [
+          "Email",
+          "Mobile number",
+          "Password",
+          "Forgot password",
+          "Create new account"
+        ]
+      },
+      {
+        "originalFotMobFocused": true,
+        "labels": [
+          "Email",
+          "Mobile number",
+          "Password",
+          "Forgot password",
+          "Create new account"
+        ]
+      },
+      {
+        "originalFotMobFocused": true,
+        "labels": [
+          "Email",
+          "Mobile number",
+          "Password",
+          "Forgot password",
+          "Create new account"
+        ]
+      }
+    ],
+    "originalHttpsFacebookLoginHostSeenInProcess": [],
+    "facebookActivityObserved": true,
+    "credentialsSubmitted": false,
+    "authenticatedReturnObserved": false
+  },
+  "wattpad": {
+    "officialSignInAttempt": {
+      "existingAccountMenu": true,
+      "visible": [
+        "Log in with Google",
+        "Log in with Facebook"
+      ],
+      "samples": [
+        {
+          "seconds": 3.7,
+          "foreground": "Wattpad",
+          "labels": [
+            "Sign up",
+            "Email or username",
+            "Password"
+          ],
+          "gmsMainLive": true
+        },
+        {
+          "seconds": 7.5,
+          "foreground": "Wattpad",
+          "labels": [
+            "Sign up",
+            "Email or username",
+            "Password"
+          ],
+          "gmsMainLive": true
+        },
+        {
+          "seconds": 17.4,
+          "foreground": "Wattpad",
+          "labels": [
+            "Sign up",
+            "Email or username",
+            "Password"
+          ],
+          "gmsMainLive": true
+        },
+        {
+          "seconds": 34.4,
+          "foreground": "Google",
+          "labels": [],
+          "gmsMainLive": true
+        }
+      ],
+      "googleButtonTapped": true,
+      "officialGmsMainLiveAtTap": true,
+      "credentialsSubmitted": false,
+      "laterOfficialServiceSample": {
+        "officialMainLiveAtLaterCheck": false,
+        "sameMainUninitializedHandleLogged": false,
+        "associatedGoogleUiProcessAlive": true
+      },
+      "laterOfficialUi": [
+        {
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        },
+        {
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        },
+        {
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        }
+      ],
+      "waitObservations": [
+        {
+          "seconds": 2.2,
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        },
+        {
+          "seconds": 17.8,
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        },
+        {
+          "seconds": 32.9,
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        },
+        {
+          "seconds": 48.3,
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        },
+        {
+          "seconds": 63.5,
+          "foreground": "Google",
+          "labels": [
+            "Checking info"
+          ]
+        }
+      ]
+    },
+    "restartedAppSamples": [
+      {
+        "elapsedSeconds": 0.4,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      },
+      {
+        "elapsedSeconds": 4.4,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      },
+      {
+        "elapsedSeconds": 14.4,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 0,
+        "originalAppFocused": false,
+        "labels": []
+      },
+      {
+        "elapsedSeconds": 36.8,
+        "originalProcessAlive": true,
+        "originalProcessWindows": 2,
+        "originalAppFocused": true,
+        "labels": [
+          "Wattpad"
+        ]
+      }
+    ]
+  },
+  "keyboardMetadata": {
+    "change": "Use the standard adapter bridge when the explicit metadata library path is unset or empty. The explicit override still loads the specified path.",
+    "regression": "tests/parity/ImeMetadataLoadProbe.java",
+    "immutableProbeDexJarSha256": "661067b45fc86b1d96db3a25c4e9da284dca1f4a83fb8abd34a61b26c4897160",
+    "unchangedNativeBridgeSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+    "previousAdapterDexSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+    "newAdapterDexSha256": "6ea36f61b6896fdc82b494c105acae4cc75f65bcfeceb0ec3bfa04dd6c04fdc3",
+    "devicePreloadFiles": 469,
+    "boardProbeResults": [
+      {
+        "frameworkStage": 125,
+        "pathSetting": "default",
+        "exitCode": 1,
+        "currentKeyboardReturned": false,
+        "enabledMetadataRows": null
+      },
+      {
+        "frameworkStage": 125,
+        "pathSetting": "overlay",
+        "exitCode": 0,
+        "currentKeyboardReturned": true,
+        "enabledMetadataRows": 2
+      },
+      {
+        "frameworkStage": 126,
+        "pathSetting": "default",
+        "exitCode": 0,
+        "currentKeyboardReturned": true,
+        "enabledMetadataRows": 2
+      },
+      {
+        "frameworkStage": 126,
+        "pathSetting": "empty",
+        "exitCode": 0,
+        "currentKeyboardReturned": true,
+        "enabledMetadataRows": 2
+      },
+      {
+        "frameworkStage": 126,
+        "pathSetting": "overlay",
+        "exitCode": 0,
+        "currentKeyboardReturned": true,
+        "enabledMetadataRows": 2
+      }
+    ],
+    "boardProbeScope": "Current and enabled keyboard metadata only. Overlay controls explicitly pointed at the same unchanged native bridge. Row counts do not identify distinct keyboards.",
+    "originalWattpad": {
+      "oldDefaultReportedInitializerAndListFailures": true,
+      "newDefaultAppPidLoggedEnabledListInOpenHarmonyInputMethodKit": true,
+      "loaderFailureRecurredInCapturedStartup": false,
+      "updatedBootImageMappedByOriginalApp": true,
+      "sameOriginalApkUidAndAppData": true,
+      "updatedRuntimeFiles": 9
+    }
+  },
+  "gmailAfterOtherApps": {
+    "focusedOriginalGmail": true,
+    "labels": [
+      "Getting your messages",
+      "Search in mail"
+    ]
+  },
+  "status": "All eight original APKs have dedicated-host startup evidence. The 51 provider checks retain the earlier classifications. These fresh-profile controls did not establish authenticated sessions, production isolation or universal account access."
+}
