@@ -22,6 +22,14 @@
     "westlake/native/include"
   ],
   "libraries": {
+    "libmediandk.so": {
+      "sources": [
+        "westlake/framework/media-ndk-shim/mediandk.c"
+      ],
+      "flags": ["-fvisibility=hidden"],
+      "linkflags": ["-Wl,--as-needed"],
+      "deps": []
+    },
     "libsoundpool.so": {
       "sources": [
         "westlake/framework/core/jni/oh_soundpool_jni.c"

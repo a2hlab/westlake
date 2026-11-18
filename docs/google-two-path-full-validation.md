@@ -13,7 +13,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
 | Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The shared-host run displayed Spotify's date-of-birth signup form. On the dedicated host the return went to the wrong native window. A fix for that route passed development-machine tests. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host run](../tests/google-auth/full48/candidate93.json) · [Window fix](../tests/google-auth/full48/candidate95.json) | Automatic window handoff on the board under the dedicated UID, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
-| YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
+| YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. The recorded launch included a provider for all five suspected missing native functions. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) · [Media library audit](../tests/google-auth/full48/candidate96.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
@@ -1879,7 +1879,7 @@ Its app data and account results have not been transferred to the new host.
 
 ## Spotify account selection under its dedicated OpenHarmony host
 
-Spotify 9.1.86.2432 started with fresh app data under UID 20010067. Tapping
+Spotify 9.1.94.1929 started with fresh app data under UID 20010067. Tapping
 Log in and choosing Google opened the official Google sign-in activity, but
 OpenHarmony left Spotify in front. Bringing the Google host forward with the
 OpenHarmony app launcher exposed the chooser. Selecting the existing Google
@@ -1942,3 +1942,40 @@ involved. The adapter, Android boot image, and signed Spotify, Wattpad, and
 service hosts built locally. Both board connections were offline. A live
 return after selection or cancellation in the original APKs remains open.
 [Builds and test results](../tests/google-auth/full48/candidate95.json) · [Host configuration](../tests/host-window/README.md)
+
+## Which media functions could YouTube call?
+
+The original YouTube APK contains both Java and native playback code. On the
+recorded public-video attempt, the main process queried the Java bridge for two
+video capabilities and five audio capabilities. That bridge recorded zero
+configure or start calls. The saved trace did not identify the path responsible
+for the player error. [Board run](../tests/google-auth/full48/candidate85.json)
+
+YouTube's native `libgoogle3.so` imports 33 codec and format functions. Five
+are absent from the exact `libmediandk.so` on the board. All five are exported
+by the hash-matched `libwebview_bionic_shim.so` on the preload list for the
+three recorded launches. That gives the linker a second possible provider.
+The saved evidence does not establish which functions the player called. The
+APK also ships software decoder libraries. [Artifact hashes, symbol names and Java call sites](../tests/google-auth/full48/candidate96.json)
+
+Across the eight original apps, 62 base and split APKs contained 116 libraries
+under `lib/arm64-v8a/`. Three libraries directly import functions from the
+codec, format or extractor API families. YouTube imports 33, Spotify imports 23,
+and Gmail imports 19. Only YouTube imports any of the five at issue. This count
+covers strong ELF imports. Java calls and runtime lookup can also reach media
+services. [Per-app inventory](../tests/google-auth/full48/candidate96.json)
+
+The standard native builder now produces a hash-recorded `libmediandk.so`.
+Its three codec factories still return null. A diagnostic build can report the
+first request for each kind of factory using fixed labels. The host test made
+768 calls, including concurrent calls and the caller-specific variants. Only
+the process with tracing enabled emitted the three expected messages. The
+OpenHarmony build was staged locally with the other 58 libraries from the
+recorded composition. Both board transports were offline.
+
+For the next public-video run, pass the OHOS native builder output to
+`--runtime-library-build`, select `--runtime-library libmediandk.so` and add
+`--runtime-env WESTLAKE_MEDIA_CODEC_TRACE=1` to the per-app launcher. Confirm
+the running artifact hash and check for advancing playback alongside the Java
+and native events. A native factory event establishes a codec request. A
+successful app test requires the original player's video to advance.
