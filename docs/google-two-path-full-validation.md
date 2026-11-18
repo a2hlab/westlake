@@ -1713,6 +1713,10 @@ backend verdict. The two classes that enforce the identity checks matched the
 previous build byte for byte. The diagnostic recorded only fixed reason codes.
 [Original Store and on-board refusal tests](../tests/google-auth/full48/candidate115.json)
 
+#### Searching for the test message by date
+
+On November 18 the original Gmail app displayed the same Primary inbox as the earlier board capture. We selected November 17–18 in its date picker and tapped the confirmation button. Its windows disappeared before any results appeared. The Gmail process stayed alive. Opening the host again left Gmail without a window for at least 30 seconds. A cold restart brought back the same visible inbox. Receipt remains unverified. [Physical board observations](../tests/google-auth/full48/candidate136.json)
+
 ### Gmail touch input on its dedicated host
 
 The hosted window path looked up `oh_owned_input_subscribe` at runtime.
