@@ -53,6 +53,7 @@ final class ViewGeometryDump {
                 View root = roots.get(i);
                 if (root == null) continue;
                 out.append("GEOM ==== root[").append(i).append("] ").append(root.getClass().getSimpleName())
+                        .append(" sdk=").append(android.os.Build.VERSION.SDK_INT)
                         .append(" attached=").append(root.isAttachedToWindow() ? 1 : 0)
                         .append(" vis=").append(visibility(root))
                         .append(" focus=").append(root.hasWindowFocus() ? 1 : 0)
@@ -116,8 +117,11 @@ final class ViewGeometryDump {
         }
         out.append(" vis=").append(visibility(view))
                 .append(" fits=").append(view.getFitsSystemWindows() ? 1 : 0)
-                .append(optionalFits(view) ? " optionalFits=1" : "");
+                .append(optionalFits(view) ? " optionalFits=1" : "")
+                .append(insetsListener(view) ? " insetsListener=1" : "");
         if (view instanceof ViewGroup) out.append(" children=").append(((ViewGroup) view).getChildCount());
+        // The action bar layout decides whether the content sits below the bar from its own flags.
+        if (view.getClass().getName().endsWith("ActionBarOverlayLayout")) out.append(booleanFields(view));
         out.append('\n');
         if (view.getVisibility() != View.VISIBLE || !(view instanceof ViewGroup)) return;
         ViewGroup group = (ViewGroup) view;
@@ -147,6 +151,36 @@ final class ViewGeometryDump {
         } catch (ReflectiveOperationException | RuntimeException unavailable) {
             return false;
         }
+    }
+
+    /** Whether the view has its own OnApplyWindowInsetsListener. */
+    private static boolean insetsListener(View view) {
+        try {
+            Field info = View.class.getDeclaredField("mListenerInfo");
+            info.setAccessible(true);
+            Object listeners = info.get(view);
+            if (listeners == null) return false;
+            Field listener = listeners.getClass().getDeclaredField("mOnApplyWindowInsetsListener");
+            listener.setAccessible(true);
+            return listener.get(listeners) != null;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    /** The boolean fields the view's own class declares, as " bools=name:0/1,...". */
+    private static String booleanFields(View view) {
+        StringBuilder out = new StringBuilder(" bools=");
+        for (Field field : view.getClass().getDeclaredFields()) {
+            if (field.getType() != boolean.class || java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+            try {
+                field.setAccessible(true);
+                out.append(field.getName()).append(':').append(field.getBoolean(view) ? 1 : 0).append(',');
+            } catch (ReflectiveOperationException | RuntimeException unreadable) {
+                out.append(field.getName()).append(":?,");
+            }
+        }
+        return out.toString();
     }
 
     /** A boolean field of the root's PhoneWindow (decor fits, edge-to-edge enforced), "?" when unknown. */
