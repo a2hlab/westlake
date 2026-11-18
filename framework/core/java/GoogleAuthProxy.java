@@ -439,15 +439,15 @@ public final class GoogleAuthProxy {
         event("package_accounts target=" + target + " serving=" + serving + " signer=" + (signer != null)
                 + " count=" + visible.length);
         if (visible.length > 0) return visible;
+        // Otherwise only the target's own live picker, which offers the account for the user to choose.
         if (!interactiveCaller(target)) return new Account[0];
         Account[] found = currentAccounts();
-        if (found != null && found.length == 1 && found[0] != null && "com.google".equals(found[0].type)
+        boolean offered = found != null && found.length == 1 && found[0] != null && "com.google".equals(found[0].type)
                 && (Boolean) Class.forName("adapter.activity.RemoteActivities")
-                        .getMethod("hasSelectedAccountForCaller", Account.class, String.class)
-                        .invoke(null, found[0], target)) {
-            return found;
-        }
-        return new Account[0];
+                        .getMethod("mayOfferAccountToCaller", Account.class, String.class)
+                        .invoke(null, found[0], target);
+        event("picker_accounts target=" + target + " offered=" + offered);
+        return offered ? found : new Account[0];
     }
 
     private static int visibility(Account account, String packageName) throws Exception {
@@ -488,6 +488,15 @@ public final class GoogleAuthProxy {
     }
 
     /** Selection already checked against the provider; never performs IPC during a witness callback. */
+    /** Whether the user hid the account from packageName during its live request. */
+    public static boolean hiddenInteractiveAccount(Account account, String packageName) {
+        synchronized (VISIBILITY) {
+            java.util.Map<String, Integer> selected = VISIBILITY.get(account);
+            return selected != null
+                    && selected.getOrDefault(packageName, 0) == AccountManager.VISIBILITY_NOT_VISIBLE;
+        }
+    }
+
     public static boolean selectedInteractiveAccount(Account account, String packageName) {
         synchronized (VISIBILITY) {
             java.util.Map<String, Integer> selected = VISIBILITY.get(account);

@@ -211,13 +211,18 @@ public final class RemoteActivities {
         return false;
     }
 
-    /** A package-specific query can use a selection made by its own live account picker. */
-    public static boolean hasSelectedAccountForCaller(Account account, String packageName) {
+    /**
+     * Whether packageName's own live, verified account picker may offer it the account. Android answers the
+     * account's authenticator with every account the package may be shown, including the user-managed ones the
+     * user has not chosen yet, so its picker can list them; only an account the user hid from the package is
+     * left out. Listing is not granting: tokens still require the picker's selection (see Incoming.selected).
+     */
+    public static boolean mayOfferAccountToCaller(Account account, String packageName) {
         synchronized (INCOMING) {
             for (Incoming request : INCOMING) {
                 if (!request.done.get() && request.caller.getPackageName().equals(packageName)
                         && (SocketBinder.callingPeer() == null || SocketBinder.isCallingPeer(request.callback))
-                        && GoogleAuthProxy.selectedInteractiveAccount(account, packageName)) return true;
+                        && !GoogleAuthProxy.hiddenInteractiveAccount(account, packageName)) return true;
             }
             return false;
         }
