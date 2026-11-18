@@ -304,6 +304,15 @@ public final class SocketBinder {
         return inbound == null ? null : inbound.channel.mPeerName;
     }
 
+    /**
+     * The uid setCaller gave the channel whose call this thread is serving, 0 if none. Unlike
+     * Binder.getCallingUid, Binder.clearCallingIdentity does not change it.
+     */
+    public static int callingPeerUid() {
+        Inbound inbound = sInbound.get();
+        return inbound == null ? 0 : inbound.channel.mCallerUid;
+    }
+
     /** Reports which remote interfaces were called and how they answered; off unless asked for. */
     private static final boolean TRACE = System.getenv("WESTLAKE_PLAY_TRACE") != null;
     private static final int PARCEL_HEADER = 0x53595354; // 'SYST', written by writeInterfaceToken.

@@ -387,9 +387,14 @@ public final class GoogleAuthProxy {
         } finally { reply.recycle(); }
     }
 
-    /** Whether the binder call this thread serves comes from packageName's own channel. */
+    /**
+     * Whether the call this thread serves comes from packageName's own channel. The channel's caller, not
+     * Binder.getCallingUid: Play services' accounts provider clears the calling identity before it asks
+     * AccountManager, so the binder caller read as Play services itself.
+     */
     private static boolean servingCallFrom(String packageName) {
-        int uid = Binder.getCallingUid();
+        int uid = SocketBinder.callingPeerUid();
+        if (uid == 0) uid = Binder.getCallingUid();
         return uid != android.os.Process.myUid()
                 && packageName.equals(adapter.packagemanager.RemotePackages.packageForUid(uid));
     }
