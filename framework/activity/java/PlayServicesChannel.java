@@ -141,6 +141,14 @@ public final class PlayServicesChannel {
     private static final Binder sCallback = new ClientCallback();
     private static final Set<String> sAbsent = Collections.synchronizedSet(new HashSet<>());
     private static final Set<String> sPresent = Collections.synchronizedSet(new HashSet<>());
+    /**
+     * The hosts' answers about their packages, parceled, by query (see remembered). Android's package manager
+     * answers for an installed package whether or not the package's process runs; a host answered only while
+     * its process ran. On the board Play services' launched process ended itself on an uncaught exception every
+     * few seconds and its spawner started it again: during each restart Gmail's package query found no Play
+     * services, so it asked the user to install them, and its binds and provider lookups found nothing.
+     */
+    private static final Map<String, byte[]> sAnswers = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** The connection to one host: the Play services process, or the Play Store's. */
     private static final class Channel {
@@ -209,8 +217,13 @@ public final class PlayServicesChannel {
         if (socket == null || process == null || process.equals(packageName)) return null;
         try {
             IBinder root = root(host);
-            if (root == null || !ensureProcess(root, process)) return null;
-            return processChannel(AppProcesses.socketOf(socket, packageName, process));
+            String own = AppProcesses.socketOf(socket, packageName, process);
+            // While the launched process restarts, a process of the app that outlived it serves on (Play services'
+            // :persistent, where its accounts provider runs), as on Android one process of an app dying leaves the
+            // others running.
+            if (root == null) return AppProcesses.serving(own) ? processChannel(own) : null;
+            if (!ensureProcess(root, process)) return null;
+            return processChannel(own);
         } catch (RemoteException | RuntimeException e) {
             System.err.println(TAG + process + " of " + packageName + " not started: " + e);
             return null;
@@ -949,6 +962,82 @@ public final class PlayServicesChannel {
         }
     }
 
+    /** Whether this process holds a live channel to c's host. */
+    private static boolean reachable(Channel c) {
+        synchronized (CLIENT_LOCK) {
+            return c != null && c.binder != null && c.binder.isAlive();
+        }
+    }
+
+    /**
+     * A host's answer to a query about its packages (see sAnswers): the live one, which is kept; while the host
+     * cannot be reached, the one it gave last. A live answer always stands, "none" included, so what the host
+     * stops reporting is gone here as soon as it says so.
+     */
+    private static <T extends Parcelable> T remembered(Channel c, String key, Parcelable.Creator<T> creator,
+            java.util.function.Supplier<T> live) {
+        T answer = live.get();
+        if (answer != null) {
+            remember(key, answer);
+            return answer;
+        }
+        if (reachable(c)) {
+            sAnswers.remove(key);
+            return null;
+        }
+        return recall(key, creator);
+    }
+
+    private static void remember(String key, Parcelable answer) {
+        Parcel p = Parcel.obtain();
+        try {
+            answer.writeToParcel(p, 0);
+            sAnswers.put(key, p.marshall());
+        } catch (RuntimeException e) {
+            sAnswers.remove(key); // An answer holding a binder or a descriptor is not kept.
+        } finally {
+            p.recycle();
+        }
+    }
+
+    private static <T> T recall(String key, Parcelable.Creator<T> creator) {
+        byte[] last = sAnswers.get(key);
+        if (last == null) return null;
+        Parcel p = Parcel.obtain();
+        try {
+            p.unmarshall(last, 0, last.length);
+            p.setDataPosition(0);
+            return creator.createFromParcel(p);
+        } finally {
+            p.recycle();
+        }
+    }
+
+    private static void rememberServices(String key, List<ResolveInfo> found) {
+        Parcel p = Parcel.obtain();
+        try {
+            p.writeTypedList(found);
+            sAnswers.put(key, p.marshall());
+        } catch (RuntimeException e) {
+            sAnswers.remove(key);
+        } finally {
+            p.recycle();
+        }
+    }
+
+    private static List<ResolveInfo> recallServices(String key) {
+        byte[] last = sAnswers.get(key);
+        if (last == null) return null;
+        Parcel p = Parcel.obtain();
+        try {
+            p.unmarshall(last, 0, last.length);
+            p.setDataPosition(0);
+            return p.createTypedArrayList(ResolveInfo.CREATOR);
+        } finally {
+            p.recycle();
+        }
+    }
+
     /** What the host calls in this app. */
     private static final class ClientCallback extends Binder {
         @Override
@@ -996,46 +1085,52 @@ public final class PlayServicesChannel {
         @Override
         public PackageInfo packageInfo(String packageName, long flags) {
             Channel c = channelFor(packageName);
-            return localize(c, callForObject(c, PACKAGE_INFO, PackageInfo.CREATOR, data -> {
-                data.writeString(packageName);
-                data.writeLong(flags);
-            }));
+            return remembered(c, "package " + packageName + " " + flags, PackageInfo.CREATOR,
+                    () -> localize(c, callForObject(c, PACKAGE_INFO, PackageInfo.CREATOR, data -> {
+                        data.writeString(packageName);
+                        data.writeLong(flags);
+                    })));
         }
 
         @Override
         public ApplicationInfo applicationInfo(String packageName, long flags) {
             Channel c = channelFor(packageName);
-            return localize(c, callForObject(c, APPLICATION_INFO, ApplicationInfo.CREATOR, data -> {
-                data.writeString(packageName);
-                data.writeLong(flags);
-            }));
+            return remembered(c, "application " + packageName + " " + flags, ApplicationInfo.CREATOR,
+                    () -> localize(c, callForObject(c, APPLICATION_INFO, ApplicationInfo.CREATOR, data -> {
+                        data.writeString(packageName);
+                        data.writeLong(flags);
+                    })));
         }
 
         @Override
         public ServiceInfo serviceInfo(ComponentName component, long flags) {
             Channel c = channelFor(component == null ? null : component.getPackageName());
-            return localize(c, callForObject(c, SERVICE_INFO, ServiceInfo.CREATOR, data -> {
-                data.writeTypedObject(component, 0);
-                data.writeLong(flags);
-            }));
+            return remembered(c, "service " + component + " " + flags, ServiceInfo.CREATOR,
+                    () -> localize(c, callForObject(c, SERVICE_INFO, ServiceInfo.CREATOR, data -> {
+                        data.writeTypedObject(component, 0);
+                        data.writeLong(flags);
+                    })));
         }
 
         @Override
         public ProviderInfo providerInfo(ComponentName component, long flags) {
             Channel c = channelFor(component == null ? null : component.getPackageName());
-            return localize(c, callForObject(c, PROVIDER_INFO, ProviderInfo.CREATOR, data -> {
-                data.writeTypedObject(component, 0);
-                data.writeLong(flags);
-            }));
+            return remembered(c, "provider " + component + " " + flags, ProviderInfo.CREATOR,
+                    () -> localize(c, callForObject(c, PROVIDER_INFO, ProviderInfo.CREATOR, data -> {
+                        data.writeTypedObject(component, 0);
+                        data.writeLong(flags);
+                    })));
         }
 
         @Override
         public ProviderInfo resolveProvider(String authority, long flags) {
             for (Channel c : channels()) {
-                ProviderInfo info = localize(c, callForObject(c, RESOLVE_PROVIDER, ProviderInfo.CREATOR, data -> {
-                    data.writeString(authority);
-                    data.writeLong(flags);
-                }));
+                ProviderInfo info = remembered(c, "authority " + c.label + " " + authority + " " + flags,
+                        ProviderInfo.CREATOR,
+                        () -> localize(c, callForObject(c, RESOLVE_PROVIDER, ProviderInfo.CREATOR, data -> {
+                            data.writeString(authority);
+                            data.writeLong(flags);
+                        })));
                 if (info != null) return info;
             }
             return null;
@@ -1049,19 +1144,34 @@ public final class PlayServicesChannel {
         @Override
         public List<ResolveInfo> queryServices(Intent intent, String type, long flags) {
             String target = targetPackage(intent);
-            if (target != null) return query(channelFor(target), intent, type, flags);
+            if (target != null) return services(channelFor(target), intent, type, flags);
             List<ResolveInfo> found = new ArrayList<>();
             for (Channel c : channels()) {
-                for (ResolveInfo item : query(c, intent, type, flags)) {
+                for (ResolveInfo item : services(c, intent, type, flags)) {
                     if (item.serviceInfo != null && channelFor(item.serviceInfo.packageName) == c) found.add(item);
                 }
             }
             return found;
         }
 
+        /** One host's services for the intent: its live answer, or while it cannot be reached its last (sAnswers). */
+        private List<ResolveInfo> services(Channel c, Intent intent, String type, long flags) {
+            String key = "services " + c.label + " " + (intent == null ? null : intent.toUri(0)) + " " + type
+                    + " " + flags;
+            List<ResolveInfo> found = query(c, intent, type, flags);
+            if (found != null) {
+                if (found.isEmpty()) sAnswers.remove(key);
+                else rememberServices(key, found);
+                return found;
+            }
+            List<ResolveInfo> last = recallServices(key);
+            return last != null ? last : Collections.emptyList();
+        }
+
+        /** The host's services for the intent; null when the host cannot be reached. */
         private List<ResolveInfo> query(Channel c, Intent intent, String type, long flags) {
             IBinder root = root(c);
-            if (root == null) return Collections.emptyList();
+            if (root == null) return null;
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             try {
@@ -1076,7 +1186,7 @@ public final class PlayServicesChannel {
                 return found;
             } catch (RemoteException | RuntimeException e) {
                 System.err.println(TAG + "query failed: " + e);
-                return Collections.emptyList();
+                return reachable(c) ? Collections.emptyList() : null;
             } finally {
                 data.recycle();
                 reply.recycle();
@@ -1124,6 +1234,8 @@ public final class PlayServicesChannel {
     /** A bound service's process that died is started again: after 1 s, four times longer each time, at most 60 s. */
     private static final int MAX_REBINDS = 8;
     private static final long REBIND_RESET_MS = 60_000;
+    /** How long a provider lookup waits for its restarting process: as long as the activity manager waits for a publish. */
+    private static final long PROVIDER_WAIT_MS = 20_000;
 
     private static void connect(Channel channel, Intent intent, int flags, ComponentName component,
             IServiceConnection connection) {
@@ -1141,8 +1253,12 @@ public final class PlayServicesChannel {
             ComponentName component, IServiceConnection connection, int rebinds) {
         Channel channel = where.get();
         IBinder root = channel == null ? null : root(channel);
+        // A first binding made while the service's process restarts (its package still answers, see sAnswers)
+        // waits for it if it may start it (BIND_AUTO_CREATE), as ActiveServices starts the process and connects
+        // the client once the service is up; dropped, the client never heard back. A host that refuses stays refused.
+        boolean starting = (flags & Context.BIND_AUTO_CREATE) != 0;
         if (root == null) {
-            if (rebinds > 0) rebindLater(where, intent, flags, component, connection, rebinds + 1);
+            if (rebinds > 0 || starting) rebindLater(where, intent, flags, component, connection, rebinds + 1);
             return;
         }
         Parcel data = Parcel.obtain();
@@ -1156,7 +1272,9 @@ public final class PlayServicesChannel {
             service = reply.readStrongBinder();
         } catch (RemoteException | RuntimeException e) {
             System.err.println(TAG + "bind of " + component.flattenToShortString() + " failed: " + e);
-            if (rebinds > 0) rebindLater(where, intent, flags, component, connection, rebinds + 1);
+            if (rebinds > 0 || (starting && !reachable(channel))) {
+                rebindLater(where, intent, flags, component, connection, rebinds + 1);
+            }
             return;
         } finally {
             data.recycle();
@@ -1251,11 +1369,25 @@ public final class PlayServicesChannel {
         // whose uid is not the one in the AttributionSource this app sends: Play services' GmsModuleProvider
         // (:persistent) refused every client ("Calling uid: <Play services> doesn't match source uid: <app>"),
         // so no client found a Dynamite module and the apps that wait for one stopped.
-        Channel channel = channelFor(info.packageName);
+        Channel host = channelFor(info.packageName);
         String process = AppProcesses.processOf(info);
-        Channel own = remoteProcess(channel, info.packageName, process);
-        if (own != null) channel = own;
-        IBinder root = root(channel);
+        // A provider whose process restarts (its host still answered for it, see sAnswers) is waited for, as the
+        // activity manager waits for a provider's process to start and publish it.
+        long deadline = android.os.SystemClock.uptimeMillis() + PROVIDER_WAIT_MS;
+        Channel own, channel;
+        IBinder root;
+        while (true) {
+            own = remoteProcess(host, info.packageName, process);
+            channel = own != null ? own : host;
+            root = root(channel);
+            if (root != null || reachable(host) || android.os.SystemClock.uptimeMillis() >= deadline) break;
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
         if (root == null) return null;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
