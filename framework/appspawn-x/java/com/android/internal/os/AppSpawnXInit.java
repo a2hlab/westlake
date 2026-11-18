@@ -2068,6 +2068,13 @@ public class AppSpawnXInit {
                             adapter.core.LocalContentObservers.notifyChange((android.net.Uri[]) args[0],
                                     (android.database.IContentObserver) args[1], (Boolean) args[2], (Integer) args[3],
                                     (Integer) args[4]);
+                            // ContentService hands a change marked NOTIFY_SYNC_TO_NETWORK to SyncManager.scheduleLocalSync.
+                            if (args[0] != null && (((Integer) args[3])
+                                    & android.content.ContentResolver.NOTIFY_SYNC_TO_NETWORK) != 0) {
+                                for (android.net.Uri uri : (android.net.Uri[]) args[0]) {
+                                    if (uri != null) adapter.activity.LocalSyncService.localChange(uri.getAuthority());
+                                }
+                            }
                             return null;
                         }
                     }

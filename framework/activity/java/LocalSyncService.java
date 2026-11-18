@@ -76,6 +76,43 @@ public final class LocalSyncService {
 
     public static boolean enabled() { return "1".equals(System.getenv("WESTLAKE_LOCAL_SYNC")); }
 
+    /** SyncManager's LOCAL_SYNC_DELAY: changes within it join one sync. */
+    private static final long LOCAL_SYNC_DELAY_MS = 30_000;
+    /** Authorities with a local-change sync scheduled and not yet requested. Guarded by LOCK. */
+    private final java.util.Set<String> localPending = new java.util.HashSet<>();
+
+    /**
+     * A change notified with ContentResolver.NOTIFY_SYNC_TO_NETWORK, the default of notifyChange(Uri, ContentObserver):
+     * ContentService hands it to SyncManager.scheduleLocalSync, an upload sync of the uri's authority after
+     * LOCAL_SYNC_DELAY for every account whose automatic sync is on (pump checks the settings, as SyncManager does
+     * for a sync that is not manual). An app's own changes never reached its sync adapter here: original Gmail's
+     * mailbox synced only when the user switched Sync Gmail on again, and never on its refresh.
+     */
+    public static void localChange(String authority) {
+        if (!enabled() || authority == null || authority.isEmpty()) return;
+        Application app = ActivityThread.currentApplication();
+        if (app == null) return;
+        synchronized (LOCK) {
+            if (instance == null) instance = new LocalSyncService(app);
+            final LocalSyncService service = instance;
+            if (service.adapters.stream().noneMatch(a -> a.type.authority.equals(authority))) return;
+            if (!service.localPending.add(authority)) return;
+            trace("local_change=true authority=" + authority);
+            service.timers.schedule(() -> {
+                Bundle extras = new Bundle();
+                extras.putBoolean(ContentResolver.SYNC_EXTRAS_UPLOAD, true);
+                synchronized (LOCK) {
+                    service.localPending.remove(authority);
+                    try {
+                        service.request(null, authority, extras, service.app.getPackageName());
+                    } catch (RuntimeException e) {
+                        trace("local_change_failed=" + e.getClass().getSimpleName());
+                    }
+                }
+            }, LOCAL_SYNC_DELAY_MS, TimeUnit.MILLISECONDS);
+        }
+    }
+
     /** Called by the process-local content service, not a globally accessible account service. */
     public static Object answer(String method, Object[] args) {
         if (!enabled() || !supported(method)) return UNHANDLED;
