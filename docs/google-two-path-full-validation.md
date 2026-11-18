@@ -11,7 +11,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | Original app | Observed on the board | Still to verify |
 | --- | --- | --- |
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
-| Spotify · Google | Google's account chooser returned successfully to Spotify. Spotify then requested a birth date to create its own account. [Board results](../tests/google-auth/full48/candidate51-followup.json) | Spotify account session, library, playback, silent renewal and persistence. The test stopped at signup. |
+| Spotify · Google | The original APK received Google's successful account-selection result under both host configurations. The earlier shared-host run displayed Spotify's date-of-birth signup form. Under Spotify's dedicated UID, opening the chooser required a manual window switch and the return went to the shared host. [Earlier signup screen](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated-host retest](../tests/google-auth/full48/candidate93.json) | Automatic window handoff under the dedicated UID, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The watch page displayed its title and comments. Two play attempts reported a player error. The independent decoder probe played three local H.264 profiles. [Original app](../tests/google-auth/full48/candidate86.json) · [Codec probe](../tests/google-auth/full48/candidate90.json) | Sign-in, an accepted YouTube session, online playback and persistence. The original app’s chosen stream and decoder remain unknown. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
@@ -1866,7 +1866,7 @@ all eight different UIDs.
 | YouTube | 20010064 | Pending |
 | Drive | 20010065 | Pending |
 | Gmail | 20010066 | Pending |
-| Spotify | 20010067 | Pending |
+| Spotify | 20010067 | Yes. The original APK opened and received Google's activity result. |
 | Wattpad | 20010068 | Pending |
 | FotMob | 20010069 | Pending |
 
@@ -1876,3 +1876,27 @@ had no running process after installation. The Drive instance that passed the
 file test remained alive under the earlier reusable client UID 20010060.
 Its app data and account results have not been transferred to the new host.
 [Installed HAP hashes, APK pins and permission checks](../tests/google-auth/full48/candidate92.json)
+
+## Spotify account selection under its dedicated OpenHarmony host
+
+Spotify 9.1.86.2432 started with fresh app data under UID 20010067. Tapping
+Log in and choosing Google opened the official Google sign-in activity, but
+OpenHarmony left Spotify in front. Bringing the Google host forward with the
+OpenHarmony app launcher exposed the chooser. Selecting the existing Google
+test account delivered Android `RESULT_OK` (−1) to Spotify.
+
+The Google host then foregrounded the shared test host. Its configured return
+route for Spotify still names `org.westlake.authclienthost`. Spotify's dedicated
+native host supports opening its own settings, while the sign-in window handoff
+is implemented for the original pair of shared hosts. Bringing Spotify's
+dedicated host forward manually restored the native host window. The Android
+process was alive, but WindowManager listed zero windows owned by that process
+and its next screen could not be read. The successful Android result therefore
+establishes account selection only. [Board observations](../tests/google-auth/full48/candidate93.json)
+
+A fresh run of the same APK and runtime in the shared host reached the Spotify
+login screen. Choosing Google automatically focused a full-screen window owned
+by the official Google UI process. The center of the board display capture was
+black. The account row could not be verified, so the tester made no selection
+on that run. The earlier shared-host run remains the evidence for the visible
+Spotify signup form. [Shared-host control](../tests/google-auth/full48/candidate93.json) · [Earlier signup result](../tests/google-auth/full48/candidate51-followup.json)
