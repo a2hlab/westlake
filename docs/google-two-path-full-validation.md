@@ -1721,6 +1721,10 @@ On the OpenHarmony board, submitting the November 17–18 date filter and select
 
 After a cold launch, original Gmail showed Primary again. A system swipe reached the app. Through 59.5 seconds the sampled rows matched the existing inbox reference and the app recorded zero mailbox job starts. Opening the Gmail navigation drawer displayed an empty panel below the title. The All mail control was unavailable in the sampled view. Dismissing the drawer restored Primary. [Board observations](../tests/google-auth/full48/candidate138.json)
 
+#### Why the Gmail folder menu appears empty
+
+On the OpenHarmony board, Gmail opened a 720 × 1833 pixel folder list. Its adapter reported two rows and both were on screen: the Gmail header and a divider. Layout was enabled. The original APK creates those two rows even when it receives no folder entries. In a separate run, Gmail’s internal current-account stream had published a null value at all three samples. The folder stream had an active observer and had never published a list. The signed APK’s Gmail label provider returns an uninitialized stream when its internal account is null. This explains how the drawer can stay empty while Primary still shows stored messages. What left Gmail’s internal account empty, and whether the reported sync authentication error shares that cause, remain open. [Drawer, adapter and account observations](../tests/google-auth/full48/candidate139.json)
+
 ### Gmail touch input on its dedicated host
 
 The hosted window path looked up `oh_owned_input_subscribe` at runtime.

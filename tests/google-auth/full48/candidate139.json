@@ -1,0 +1,175 @@
+{
+  "schema": 1,
+  "candidate": 139,
+  "date": "2026-11-18",
+  "test": "Original Gmail navigation drawer on the retained OpenHarmony host",
+  "previous": "candidate138.json",
+  "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "observations": {
+    "earlierAndCurrentRelease": {
+      "olderCapturesCompared": 3,
+      "currentReleaseCapturesCompared": 2,
+      "matchingSingleColorInteriorPixels": 1027915,
+      "forwardedSwipesInEmptyDrawer": 2
+    },
+    "viewHierarchy": {
+      "allWalksFinished": true,
+      "visitedAtRequestedDelays": [
+        {
+          "timerDelayMs": 0,
+          "viewsVisited": 329
+        },
+        {
+          "timerDelayMs": 1500,
+          "viewsVisited": 329
+        },
+        {
+          "timerDelayMs": 9000,
+          "viewsVisited": 329
+        }
+      ],
+      "class": "com.google.android.libraries.hub.drawer.ui.impl.DrawerRecyclerView",
+      "width": 720,
+      "height": 1833,
+      "visibleWhenOpen": true,
+      "directChildren": [
+        {
+          "class": "android.widget.LinearLayout",
+          "width": 720,
+          "height": 122,
+          "descendantCountOneLevel": 1
+        },
+        {
+          "class": "android.widget.FrameLayout",
+          "width": 720,
+          "height": 37,
+          "descendantCountOneLevel": 1
+        }
+      ],
+      "visibleHeader": "ProductLockupView",
+      "visibleDividerHeightPixels": 1
+    },
+    "adapterComparison": [
+      {
+        "timerDelayMs": 0,
+        "layoutSuppressed": false,
+        "adapterRows": 2,
+        "attachedChildren": 2
+      },
+      {
+        "timerDelayMs": 1500,
+        "layoutSuppressed": false,
+        "adapterRows": 2,
+        "attachedChildren": 2
+      },
+      {
+        "timerDelayMs": 9000,
+        "layoutSuppressed": false,
+        "adapterRows": 2,
+        "attachedChildren": 2
+      }
+    ],
+    "drawerDataSources": [
+      {
+        "timerDelayMs": 0,
+        "drawerSourceStarted": true,
+        "drawerListEverPublished": false,
+        "drawerActiveObservers": 1,
+        "providerResultMapSize": 0,
+        "hubAccountEverPublished": true,
+        "hubAccountValuePresent": false,
+        "hubAccountActiveObservers": 11
+      },
+      {
+        "timerDelayMs": 1500,
+        "drawerSourceStarted": true,
+        "drawerListEverPublished": false,
+        "drawerActiveObservers": 1,
+        "providerResultMapSize": 0,
+        "hubAccountEverPublished": true,
+        "hubAccountValuePresent": false,
+        "hubAccountActiveObservers": 11
+      },
+      {
+        "timerDelayMs": 9000,
+        "drawerSourceStarted": true,
+        "drawerListEverPublished": false,
+        "drawerActiveObservers": 1,
+        "providerResultMapSize": 0,
+        "hubAccountEverPublished": true,
+        "hubAccountValuePresent": false,
+        "hubAccountActiveObservers": 11
+      }
+    ],
+    "systemAccountLookup": {
+      "verifiedCurrentOriginalGmailPeer": true,
+      "samePackageAccountListRepliesWithOneAccount": 15,
+      "samePackageProcessesOnBoard": 2,
+      "otherPeersVerifiedForGmailWithinInterval": 0,
+      "threeDistinctServiceListeners": true,
+      "scope": "The account provider recorded the package on its replies. Those records omit the per-request PID."
+    }
+  },
+  "signedApkInspection": {
+    "uiFragment": "com.google.android.libraries.hub.drawer.ui.api.DrawerFragment",
+    "initialAdapterCallUsesEmptyList": true,
+    "adapterAlwaysPrependsTwoEntries": true,
+    "eachInputEntryAddsAtLeastOneRow": true,
+    "adapterCountMethodReadsCurrentListSize": true,
+    "displayUpdateObservesAppListSource": true,
+    "apkContainsDrawerProvidersForHubAccount": 4,
+    "instructionReferences": [
+      {
+        "dex": "classes2.dex",
+        "dexSha256": "8caa6614d51362ef10729bab76957bc8b47b91b5d278a763f2603d00bf6d3b04",
+        "classDescriptor": "Lcom/google/android/libraries/hub/drawer/ui/api/DrawerFragment;",
+        "method": "P",
+        "instructionByteOffset": "0xa2",
+        "meaning": "Supplies the initial empty list to the drawer adapter."
+      },
+      {
+        "dex": "classes2.dex",
+        "dexSha256": "8caa6614d51362ef10729bab76957bc8b47b91b5d278a763f2603d00bf6d3b04",
+        "classDescriptor": "Lashg;",
+        "method": "f",
+        "instructionByteOffset": "0x2e",
+        "meaning": "Starts iterating over supplied entries after adding the two fixed rows."
+      },
+      {
+        "dex": "classes2.dex",
+        "dexSha256": "8caa6614d51362ef10729bab76957bc8b47b91b5d278a763f2603d00bf6d3b04",
+        "classDescriptor": "Lashg;",
+        "method": "a",
+        "instructionByteOffset": "0x8",
+        "meaning": "Returns the size of the current adapter data list."
+      },
+      {
+        "dex": "classes2.dex",
+        "dexSha256": "8caa6614d51362ef10729bab76957bc8b47b91b5d278a763f2603d00bf6d3b04",
+        "classDescriptor": "Lzeo;",
+        "method": "a",
+        "instructionByteOffset": "0x8",
+        "meaning": "Branches on the hub account before constructing the Gmail label source."
+      }
+    ],
+    "labelProviderOnNullHubAccount": "Constructs and returns a fresh LiveData object without publishing any value."
+  },
+  "diagnosticControls": {
+    "releaseAdapterJarSha256": "0a574e1b6b85dff4b087191a6f6921c66ac9ba272210917afec745537c7c3ccb",
+    "temporaryAdapterJarSha256s": [
+      "61e734d6647930c9b1b85ce96a521f6fe1e9496db3c0ce3b5e6d2c52ea27bd89",
+      "b1340bcff4ce84d429408e2dbc4d612dcb00fcd2a1dd1f104b135aa4f82cdb8a",
+      "7a30eba1d7e03d1c867b2d31b3abbb5d9aacdfa7c6f147927d1b0cffed8e558d"
+    ],
+    "releaseRestoredAfterEachPass": true,
+    "finalPrimaryVisible": true,
+    "finalVisibleRowsMatchedReference": true
+  },
+  "interpretation": "On the OpenHarmony board, Gmail opened a 720 × 1833 pixel folder list. Its adapter reported two rows and both were on screen: the Gmail header and a divider. Layout was enabled. The original APK creates those two rows even when it receives no folder entries. In a separate run, Gmail’s internal current-account stream had published a null value at all three samples. The folder stream had an active observer and had never published a list. The signed APK’s Gmail label provider returns an uninitialized stream when its internal account is null. This explains how the drawer can stay empty while Primary still shows stored messages. What left Gmail’s internal account empty, and whether the reported sync authentication error shares that cause, remain open.",
+  "limits": [
+    "Timer labels are the requested delays for callbacks on the Gmail main thread. They do not measure when the board displayed a frame.",
+    "App resource identities and count methods apply to the pinned Gmail APK.",
+    "This test does not verify server-side message delivery or explain the origin of the mailbox sync authentication error.",
+    "An empty internal account and an uninitialized folder list were observed in Gmail. This does not establish whether an operating-system account notification, a local identity lookup or a server operation produced that state."
+  ]
+}
