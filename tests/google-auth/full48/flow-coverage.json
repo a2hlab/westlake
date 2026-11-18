@@ -1,0 +1,335 @@
+{
+  "schema": 1,
+  "plan": "validation-plan.json",
+  "meaning": {
+    "observed": "Direct evidence for the named operation in the stated profile and build. Guest playback or guest Maps navigation does not establish signed-in behavior.",
+    "partial": "One or more relevant steps ran. The intended result or a necessary control remains unverified.",
+    "open": "The records cited for the app do not demonstrate the named operation."
+  },
+  "providers": {
+    "Google": {
+      "com.mobilefootie.wc2010": {
+        "app": "FotMob",
+        "sources": [
+          "candidate74.json",
+          "candidate75.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "observed",
+            "evidence": "The original app reached its signed-in screen from a fresh app profile."
+          },
+          "private_preference_cloud_round_trip": {
+            "status": "observed",
+            "evidence": "The changed favorite was restored after the local favorites cache was cleared. The read endpoint also accepted an invalid-token control, so the read alone does not establish authorization."
+          },
+          "silent_token_renewal": {
+            "status": "observed",
+            "evidence": "A fresh signed ID token reached FotMob after expiry of its saved token."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The signed-in UI and account identifier survived client restart."
+          }
+        }
+      },
+      "com.spotify.music": {
+        "app": "Spotify",
+        "sources": [
+          "candidate51-followup.json",
+          "candidate93.json",
+          "candidate107.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "Google returned a successful activity result on the earlier shared host. Spotify asked for a separate signup. Later official-services-only setup on a dedicated host stayed on Checking info."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "library_load": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "playback": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "silent_token_renewal": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          }
+        }
+      },
+      "wp.wattpad": {
+        "app": "Wattpad",
+        "sources": [
+          "candidate51-followup.json",
+          "candidate62.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "The original app received the Google sign-in result and reached Wattpad signup."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No established Wattpad profile was observed after Google sign-in."
+          },
+          "library_or_reading": {
+            "status": "open",
+            "gap": "No established Wattpad profile was observed after Google sign-in."
+          },
+          "silent_token_renewal": {
+            "status": "partial",
+            "evidence": "Expiry of the local SDK selection led back to signup. Actual Google token expiry and renewal for a Wattpad session remain unverified."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No established Wattpad profile was observed after Google sign-in."
+          }
+        }
+      },
+      "com.google.android.youtube": {
+        "app": "YouTube",
+        "sources": [
+          "candidate106.json",
+          "candidate107.json",
+          "candidate108.json",
+          "candidate115.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "The original app opened its add-account path and returned with no signed-in account."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No signed-in YouTube session was observed."
+          },
+          "video_playback": {
+            "status": "observed",
+            "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open."
+          },
+          "restart_persistence": {
+            "status": "partial",
+            "evidence": "A guest profile played after restart. A signed-in YouTube session has not been observed after restart."
+          }
+        }
+      },
+      "com.google.android.gm": {
+        "app": "Gmail",
+        "sources": [
+          "candidate63.json",
+          "candidate79.json",
+          "candidate80.json",
+          "candidate112.json",
+          "candidate114.json",
+          "candidate115.json"
+        ],
+        "checks": {
+          "account_selection": {
+            "status": "partial",
+            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email."
+          },
+          "mailbox_sync": {
+            "status": "observed",
+            "evidence": "In the earlier delegated configuration, original Gmail populated its inbox and opened an existing message after enabling sync and restarting."
+          },
+          "refresh": {
+            "status": "partial",
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The earlier configuration retained the account, inbox and automatic-sync preference across a client restart. The dedicated fresh-profile control stopped at setup."
+          }
+        }
+      },
+      "com.google.android.apps.docs": {
+        "app": "Drive",
+        "sources": [
+          "candidate81.json",
+          "candidate82.json",
+          "candidate89.json"
+        ],
+        "checks": {
+          "account_selection": {
+            "status": "partial",
+            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice."
+          },
+          "file_listing": {
+            "status": "observed",
+            "evidence": "My Drive listed the approved fixture after a process restart."
+          },
+          "file_open": {
+            "status": "observed",
+            "evidence": "The original Drive preview rendered the three expected lines of the 107-byte file."
+          },
+          "token_renewal": {
+            "status": "partial",
+            "evidence": "The restarted process got successful native account replies. The previous token was not shown to have expired."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The same profile listed and opened the fixture after restart. Its contents could have been cached."
+          }
+        }
+      },
+      "com.google.android.apps.maps": {
+        "app": "Maps",
+        "sources": [
+          "candidate83.json",
+          "candidate88.json"
+        ],
+        "checks": {
+          "startup": {
+            "status": "observed",
+            "evidence": "Original Maps opened in guest mode."
+          },
+          "map_tiles": {
+            "status": "observed",
+            "evidence": "The guest UI displayed labeled map tiles."
+          },
+          "search": {
+            "status": "observed",
+            "evidence": "Guest place search returned a result with the services connected. Signed-in place search remains open."
+          },
+          "real_location": {
+            "status": "partial",
+            "evidence": "OpenHarmony accepted two requests during the temporary permission grant. No real fix was delivered. Permission was restored to Deny."
+          },
+          "route_preview": {
+            "status": "observed",
+            "evidence": "The guest directions screen displayed a route preview between specified endpoints."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The retained guest configuration survived restart and repeated the directions flow."
+          }
+        }
+      },
+      "com.ubercab": {
+        "app": "Uber",
+        "sources": [
+          "uber-trip-link89.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "Continue with Google opened Uber’s email-or-phone sign-in screen. The rider session was not established."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No authenticated rider session was observed."
+          },
+          "destination_search": {
+            "status": "open",
+            "gap": "Uber opened onboarding for a link with fixed endpoints. The user did not exercise in-app destination search."
+          },
+          "fare_preview_without_booking": {
+            "status": "open",
+            "gap": "No fare preview was displayed."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No authenticated rider session was available for a restart test."
+          }
+        }
+      }
+    },
+    "Facebook": {
+      "com.mobilefootie.wc2010": {
+        "app": "FotMob",
+        "sources": [
+          "candidate76.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "observed",
+            "evidence": "Facebook login completed in the original FotMob flow."
+          },
+          "authenticated_return": {
+            "status": "observed",
+            "evidence": "The SDK returned to the original FotMob app. An independent check of the Facebook account endpoint matched the app-saved identity."
+          },
+          "account_session": {
+            "status": "observed",
+            "evidence": "The account menu showed the signed-in session."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The account and signed-in UI survived process restart."
+          }
+        }
+      },
+      "wp.wattpad": {
+        "app": "Wattpad",
+        "sources": [
+          "../../../docs/google-two-path-live44.md"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "observed",
+            "evidence": "Facebook accepted login and showed its consent screen."
+          },
+          "authenticated_return": {
+            "status": "observed",
+            "evidence": "The Facebook SDK and original Wattpad onboarding activity received a successful result."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed."
+          }
+        }
+      },
+      "com.spotify.music": {
+        "app": "Spotify",
+        "sources": [
+          "candidate97.json",
+          "candidate108.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "The original Spotify host displayed Facebook’s HTTPS login form. No completed submission was observed in the recorded run."
+          },
+          "authenticated_return": {
+            "status": "open",
+            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+          }
+        }
+      }
+    }
+  },
+  "counts": {
+    "Google": {
+      "observed": 15,
+      "partial": 11,
+      "open": 13
+    },
+    "Facebook": {
+      "observed": 6,
+      "open": 5,
+      "partial": 1
+    }
+  }
+}

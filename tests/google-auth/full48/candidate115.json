@@ -1,0 +1,129 @@
+{
+  "schema": 1,
+  "candidate": 115,
+  "date": "2026-11-17",
+  "previousOriginalAppControl": "candidate114.json",
+  "gmail": {
+    "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "configuration": "Retained and fresh dedicated original Gmail clients using official Play services and Store without a delegated account provider.",
+    "senderConfirmedSubmission": true,
+    "retained": {
+      "beforeRefresh": [
+        "Getting your messages",
+        "Search in mail"
+      ],
+      "gesture": "A downward drag was issued while the retained original Gmail window owned focus. The observations do not establish that a sync job ran.",
+      "afterGesture": [
+        {
+          "elapsedSeconds": 1.0,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ]
+        },
+        {
+          "elapsedSeconds": 10.0,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ]
+        },
+        {
+          "elapsedSeconds": 30.0,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ]
+        }
+      ]
+    },
+    "freshDedicated": {
+      "uid": 20010066,
+      "visible": [
+        "Set up email"
+      ]
+    },
+    "newTestMessageObserved": false,
+    "mailboxDeliveryIndependentlyVerified": false,
+    "endOfTest": "Retained original Gmail was in the foreground on Getting your messages."
+  },
+  "officialStoreEnrollment": {
+    "gmsApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "storeApkSha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+    "channelIdentityEnforced": true,
+    "delegatedProviderConfigured": false,
+    "officialAuthenticatorReached": true,
+    "signInTaps": 1,
+    "officialRedirectReceived": true,
+    "reasonReported": "forwarding_peer_not_verified_same_app",
+    "meaning": "The returned message matches the Westlake guard for reading a stored Intent across an unverified or different-app connection. It does not identify the particular intermediary.",
+    "activityResultReceivedByStore": 0,
+    "storeSamples": 4,
+    "storeAliveThroughSeconds": 46.8,
+    "lastStoreUi": "Google Play / Sign in",
+    "credentialEntryObserved": false,
+    "backendRegistrationDecisionObserved": false,
+    "separateGmsMainExit": "lateinit property droidGuardHandle has not been initialized",
+    "causalLinkBetweenRejectionAndMainExitEstablished": false
+  },
+  "diagnosticBuild": {
+    "frameworkStage": 125,
+    "preloadFilesVerified": 469,
+    "gmsAdapterDexSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+    "unchangedGuardClassSha256": {
+      "adapter/activity/LocalIntentSenders$SenderBinder.class": "f8de4ca1f8da07f6846b37a652fd358855d05c85d3df5f7480fd62f84d0cb537",
+      "adapter/core/SocketBinder$Proxy.class": "92d5cb0a4e97d4bc60f2e4ccf5ce337e630527af8dbf109e513c0cb34e785629"
+    },
+    "regression": "PendingActivityDenialProbe.java",
+    "probeDexJarSha256": "be447dd3d19996b948e263dff04d3c8f23740499f3888e0835640c089acd4422",
+    "inertRefusalsPerBuild": 3,
+    "bothBuildsReturnedNoIntent": true,
+    "previousBuildLoggedReason": false,
+    "newBuildLoggedFixedReasons": [
+      "forwarding_peer_not_verified_same_app",
+      "creator_rejected_preparation",
+      "other_security_exception"
+    ],
+    "arbitraryPeerMessageInEitherLog": false
+  },
+  "dedicatedYouTube": {
+    "nativeHost": "org.westlake.apk.com.google.android.youtube",
+    "currentUid": 20010064,
+    "installedHostHapSha256": "f4c8bec81e9ef561ede4ff7c392581336f123dec6ade2d062bc28599edba4063",
+    "originalApkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "retainedPlaybackLaunchesChecked": 2,
+    "separateRecordedClientProcesses": true,
+    "historicalSource": "candidate107.json",
+    "priorAcceptedMode": "Original APK, public guest playback. The two retained-profile runs used separate client processes.",
+    "additionalPublicClip": {
+      "guestMode": true,
+      "targetLinkReachedOriginalProcess": true,
+      "playbackStatesFromThatProcess": [
+        "0.000:N",
+        "4.258:B,12.149:PL",
+        "47.333:ER"
+      ],
+      "successfulAudioWritesSampled": 14,
+      "maxReportedAudioFramesPresented": 1883694,
+      "videoLayerResizes": [
+        [
+          1200,
+          675,
+          854,
+          480
+        ],
+        [
+          854,
+          480,
+          1200,
+          674
+        ]
+      ],
+      "focusedPictureSamples": 0,
+      "clipIdMatchedInPlaybackTelemetry": false,
+      "onScreenTitleConfirmed": false,
+      "outcome": "The process reported playback followed by an error. These samples do not verify which segment produced audio, the rendered picture, or completion of this clip. The original guest launcher was restored."
+    }
+  },
+  "acceptance": "The official Store login and Gmail new-mail checks remain incomplete. Earlier evidence for public guest YouTube playback still stands."
+}

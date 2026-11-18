@@ -272,6 +272,7 @@ public final class SocketBinder {
     private volatile boolean mVerifiedSameApp;
     /** Private protocol: stored activity Intents can cross only verified same-app connections. */
     public static final int SAME_APP_ACTIVITY_INTENT = 0x574c41;
+    public static final String FOREIGN_ACTIVITY_INTENT_HOP = "stored activity Intent crossed an unverified or foreign hop";
 
     /** Set only after the channel's package, APK files and signer were checked against its spawner. */
     public void setVerifiedSameApp(boolean sameApp) { mVerifiedSameApp = sameApp; }
@@ -472,7 +473,7 @@ public final class SocketBinder {
             if (code == SAME_APP_ACTIVITY_INTENT) {
                 for (Inbound inbound = sInbound.get(); inbound != null; inbound = inbound.outer)
                     if (!inbound.channel.mVerifiedSameApp)
-                        throw new SecurityException("stored activity Intent crossed an unverified or foreign hop");
+                        throw new SecurityException(FOREIGN_ACTIVITY_INTENT_HOP);
             }
             if (!TRACE || code == INTERFACE_TRANSACTION) return channel.call(id, code, data, reply, flags);
             if (code == 46) sLastService = serviceIdOf(data);

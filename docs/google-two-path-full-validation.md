@@ -8,13 +8,21 @@ concurrency and sustained-use requirements remain open. The latest [process
 and window checks](#live-app-and-service-isolation-on-the-board) cover six
 live roles and their native HAPs. All eight APKs now have [dedicated test hosts](#dedicated-hosts-for-the-eight-apks).
 
+Across the recorded builds, 15 of the 39 Google checks have a direct observation,
+11 have partial evidence and 13 remain open. For Facebook the corresponding
+counts are 6, 1 and 5 out of 12. Public YouTube playback and guest Maps
+navigation count only for the operations exercised. Each row in the coverage
+file names its configuration or limitation and links the underlying evidence
+at the app level.
+[Status of all 51 checks](../tests/google-auth/full48/flow-coverage.json)
+
 | Original app | Observed on the board | Still to verify |
 | --- | --- | --- |
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. After the Wi-Fi resolver fix, a repeat showed the same screen for 127 s. [Wi-Fi retest](../tests/google-auth/full48/candidate107.json) · [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
 | YouTube · Google | The original APK played “Me at the zoo” to the end on fresh guest profiles and on two consecutive launches with retained guest data after the DNS repair. Nine samples per fresh run showed the 900 × 675 picture centered in the 1200 × 675 player. [Picture, color and audio](../tests/google-auth/full48/candidate106.json) · [Retained guest playback](../tests/google-auth/full48/candidate107.json) · [Original sign-in dialog](../tests/google-auth/full48/candidate108.json) | Google sign-in, signed-in restart persistence, physical audibility and picture geometry across other stream and player sizes. |
-| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) |
+| Gmail · Google | Enabling sync and restarting the original app populated the inbox in an earlier run. An existing message body opened. The daily periodic registration survived a restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | With official services and no delegated account provider, retained Gmail stayed on **Getting your messages**. Fresh Gmail on its dedicated host stayed on **Set up email** after selecting Google. New mail and incremental refresh remain unverified. [Retained host](../tests/google-auth/full48/candidate111.json) · [Dedicated host](../tests/google-auth/full48/candidate112.json) · [Post-send refresh](../tests/google-auth/full48/candidate115.json) |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
 | Uber · Google | The installed rider app received a trip link for two fixed places. Continue with Google opened Uber’s sign-in form. [Board results](../tests/google-auth/full48/uber-trip-link89.json) | Rider sign-in, authenticated session, in-app destination search, fare preview and persistence. |
@@ -1465,6 +1473,28 @@ still showed **Getting your messages** and dedicated Gmail showed **Set up
 email**. Delivery of the new test message remains open.
 [Original apps and framework hashes](../tests/google-auth/full48/candidate114.json)
 
+### Gmail after the sender confirmed submission
+
+The retained original Gmail app showed **Getting your messages** before a
+downward drag and in focused captures 1, 10 and 30 seconds later. The fresh
+dedicated instance still showed **Set up email**. Both used official Google
+services without a delegated account provider. An earlier build displayed an
+existing inbox message. This round did not show the newly sent message or
+establish delivery to the mailbox on Google's servers.
+[Original Gmail observations](../tests/google-auth/full48/candidate115.json)
+
+In a related sign-in control, the original Store reached the official Google
+authenticator and its redirect activity. The rejection reported the Westlake
+check that protects a stored activity Intent when a forwarding connection
+cannot be verified as belonging to the same app. The log did not identify
+which intermediary failed that check. The Store received a canceled result
+and stayed on **Sign in** through the final sample at 46.8 seconds. The
+official Google service also exited with an uninitialized `droidGuardHandle`.
+The run established neither a causal link between those events nor a Google
+backend verdict. The two classes that enforce the identity checks matched the
+previous build byte for byte. The diagnostic recorded only fixed reason codes.
+[Original Store and on-board refusal tests](../tests/google-auth/full48/candidate115.json)
+
 ## Candidate 80: real periodic sync and the standard adapter caller guard
 
 LocalSyncService previously threw on `addPeriodicSync`. It now supports both
@@ -2028,12 +2058,14 @@ all eight different UIDs.
 | --- | ---: | --- |
 | Maps | 20010062 | Yes |
 | Uber | 20010063 | Yes |
-| YouTube | 20010064 | Pending |
+| YouTube | 20010064 | Yes. The original APK played a public clip across two retained-profile launches. [Guest playback](../tests/google-auth/full48/candidate107.json) · [Installed host and APK hashes](../tests/google-auth/full48/candidate115.json) |
 | Drive | 20010065 | Pending |
 | Gmail | 20010066 | Yes. The original APK opened account setup. [Board evidence](../tests/google-auth/full48/candidate112.json) |
 | Spotify | 20010067 | Yes. The original APK opened and received Google's activity result. |
 | Wattpad | 20010068 | Pending |
 | FotMob | 20010069 | Pending |
+
+Five of the eight original APKs have a recorded launch under their dedicated host UID. Drive, Wattpad and FotMob still lack that evidence.
 
 All eight hosts have network access. Microphone, approximate location and
 precise location were denied for all eight when checked. The six new UIDs
