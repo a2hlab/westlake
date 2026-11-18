@@ -1621,6 +1621,27 @@ action produced a new local sync request, start, or completion marker. The
 check covered the visible Primary list only.
 [Post-send Gmail refresh and input controls](../tests/google-auth/full48/candidate128.json)
 
+The retained Gmail runtime was still loading the older native input library.
+With the original APK, mailbox, host UID and launcher held constant, we
+restarted Gmail with the window-input library previously tested on the
+dedicated setup host. The system accepted the guest window’s input subscription.
+On the old build the visible rows stayed fixed during all three system swipes.
+On the updated build an upward swipe scrolled the list and a downward swipe
+brought the starting rows back.
+
+A slow pull from the top displayed Gmail’s green refresh arrow. After a
+separate restart using the release launcher, the touch diagnostics placed
+Gmail’s pull-to-refresh layout and its thread list under the gesture. Through
+69.0 seconds the inbox rows stayed unchanged. Gmail logged no new local sync
+request, start, completion or account-token request to official Play services.
+During those 69 seconds, microG logged two account-list operations for Gmail.
+In two further 40-second controls, it logged one while the inbox was idle and
+two after another pull. Neither period recorded a token request.
+A separate method-tracing launch produced an empty file, leaving the app’s
+next callback unresolved. This test used the retained host; fresh account
+enrollment remains a separate open item.
+[Matched board controls and original Gmail refresh outcome](../tests/google-auth/full48/candidate129.json)
+
 In a related sign-in control, the original Store reached the official Google
 authenticator and its redirect activity. The rejection reported the Westlake
 check that protects a stored activity Intent when a forwarding connection
