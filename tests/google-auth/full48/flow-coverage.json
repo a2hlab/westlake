@@ -135,12 +135,13 @@
           "candidate114.json",
           "candidate115.json",
           "candidate117.json",
-          "candidate118.json"
+          "candidate118.json",
+          "candidate119.json"
         ],
         "checks": {
           "account_selection": {
             "status": "partial",
-            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other."
+            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear."
           },
           "mailbox_sync": {
             "status": "observed",
@@ -148,7 +149,7 @@
           },
           "refresh": {
             "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen."
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval."
           },
           "restart_persistence": {
             "status": "observed",

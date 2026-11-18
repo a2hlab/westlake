@@ -249,6 +249,14 @@ public final class LocalServiceBinders {
         if (GoogleAuthProxy.client()) return new AccountManagerStub();
         if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
         IBinder empty = proxy("account", "android.accounts.IAccountManager", (method, args) -> {
+            if ("hasFeatures".equals(method)) {
+                if (args[1] == null) throw new IllegalArgumentException("account is null");
+                if (args[0] == null) throw new IllegalArgumentException("response is null");
+                if (args[2] == null) throw new IllegalArgumentException("features is null");
+                // This service has no visible authenticator types. Android checks type access
+                // before starting a feature query, even when the requested feature list is empty.
+                throw new SecurityException("Account type is not visible to the caller");
+            }
             if ("getAccountsByFeatures".equals(method) || "getAccountByTypeAndFeatures".equals(method)) {
                 IAccountManagerResponse response = (IAccountManagerResponse) args[0];
                 if (response == null) throw new IllegalArgumentException("response is null");
