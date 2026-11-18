@@ -8,9 +8,10 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Reports the asynchronous terminal result of an unencrypted video track on the target device. */
+/** Reports the asynchronous terminal result of the first unencrypted video or audio track on the target device. */
 public final class VideoDecoderErrorProbe {
     public static String query(String library, String path) throws Exception {
         if (!library.isEmpty()) System.load(library);
@@ -19,14 +20,21 @@ public final class VideoDecoderErrorProbe {
         Handler handler = new Handler(thread.getLooper());
         CountDownLatch finished = new CountDownLatch(1);
         AtomicReference<String> result = new AtomicReference<>("timeout");
+        AtomicInteger inputs = new AtomicInteger();
+        AtomicInteger outputs = new AtomicInteger();
+        AtomicInteger formats = new AtomicInteger();
+        AtomicInteger wrongThread = new AtomicInteger();
         MediaExtractor media = new MediaExtractor();
         MediaCodec codec = null;
         try {
             media.setDataSource(path);
             int track = 0;
-            while (track < media.getTrackCount() && !media.getTrackFormat(track)
-                    .getString(MediaFormat.KEY_MIME).startsWith("video/")) track++;
-            if (track == media.getTrackCount()) throw new IllegalArgumentException("no video track");
+            while (track < media.getTrackCount()) {
+                String mime = media.getTrackFormat(track).getString(MediaFormat.KEY_MIME);
+                if (mime.startsWith("video/") || mime.startsWith("audio/")) break;
+                track++;
+            }
+            if (track == media.getTrackCount()) throw new IllegalArgumentException("no media track");
             media.selectTrack(track);
             MediaFormat format = media.getTrackFormat(track);
             FutureTask<MediaCodec> create = new FutureTask<>(
@@ -36,7 +44,13 @@ public final class VideoDecoderErrorProbe {
             codec.setCallback(new MediaCodec.Callback() {
                 private boolean inputEnded;
 
+                private void count(AtomicInteger events) {
+                    events.incrementAndGet();
+                    if (Thread.currentThread() != thread) wrongThread.incrementAndGet();
+                }
+
                 @Override public synchronized void onInputBufferAvailable(MediaCodec decoder, int index) {
+                    count(inputs);
                     if (inputEnded) return;
                     ByteBuffer input = decoder.getInputBuffer(index);
                     int bytes = media.readSampleData(input, 0);
@@ -52,6 +66,7 @@ public final class VideoDecoderErrorProbe {
                 }
 
                 @Override public void onOutputBufferAvailable(MediaCodec decoder, int index, MediaCodec.BufferInfo info) {
+                    count(outputs);
                     decoder.releaseOutputBuffer(index, false);
                     if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         result.set("eos");
@@ -66,12 +81,22 @@ public final class VideoDecoderErrorProbe {
                     finished.countDown();
                 }
 
-                @Override public void onOutputFormatChanged(MediaCodec decoder, MediaFormat newFormat) {}
+                @Override public void onOutputFormatChanged(MediaCodec decoder, MediaFormat newFormat) {
+                    count(formats);
+                }
             }, handler);
             codec.configure(format, null, null, 0);
             codec.start();
+            boolean rejectedInput = false;
+            boolean rejectedOutput = false;
+            try { codec.dequeueInputBuffer(0); }
+            catch (IllegalStateException expected) { rejectedInput = true; }
+            try { codec.dequeueOutputBuffer(new MediaCodec.BufferInfo(), 0); }
+            catch (IllegalStateException expected) { rejectedOutput = true; }
             finished.await(12, TimeUnit.SECONDS);
-            return "CALLBACK " + result.get() + "\n";
+            return "CALLBACK " + result.get() + "\nHANDLER inputs=" + inputs.get() + " outputs=" + outputs.get()
+                    + " formats=" + formats.get() + " wrongThread=" + wrongThread.get()
+                    + " dequeueRejected=" + rejectedInput + "," + rejectedOutput + "\n";
         } finally {
             if (codec != null) codec.release();
             media.release();

@@ -543,7 +543,6 @@ struct Codec {
     bool configured = false;                     /* OH took a configuration since it was created or reset */
     int outputsLogged = 0;
     jobject javaCodec = nullptr;                 /* async mode */
-    jobject callback = nullptr;
     bool asyncFormatSent = false;
 };
 
@@ -555,9 +554,9 @@ std::set<Codec*> g_codecs;
 jfieldID g_context;
 jfieldID g_infoOffset, g_infoSize, g_infoPts, g_infoFlags;
 JavaVM* g_vm;
-jclass g_hashMap, g_integer, g_infoClass, g_formatClass, g_string;
-jmethodID g_hashMapInit, g_hashMapPut, g_integerValueOf, g_infoInit, g_infoSet, g_formatFromMap;
-jmethodID g_cbInput, g_cbOutput, g_cbFormat;
+jclass g_hashMap, g_integer, g_infoClass, g_string;
+jmethodID g_hashMapInit, g_hashMapPut, g_integerValueOf, g_infoInit, g_infoSet;
+enum CallbackEvent { INPUT_AVAILABLE = 1, OUTPUT_AVAILABLE = 2, CODEC_ERROR = 3, FORMAT_CHANGE = 4 };
 jclass g_codecException;
 jmethodID g_codecExceptionInit, g_postCodecEvent;
 jmethodID g_bufferOrder, g_bufferLimit, g_bufferPosition;
@@ -662,16 +661,11 @@ void readOutputDescription(Codec* v, OH_AVFormat* format)
         v->sliceHeight = value;
 }
 
-void fireAsyncFormat(JNIEnv* env, Codec* v)
+/* MediaCodec queues these messages on the Handler selected by setCallback. */
+void postCodecEvent(JNIEnv* env, jobject codec, CallbackEvent event, jint index, jobject payload)
 {
-    if (v->asyncFormatSent || g_cbFormat == nullptr || g_formatFromMap == nullptr) return;
-    v->asyncFormatSent = true;
-    jobject map = outputFormat(env, v);
-    jobject format = map != nullptr ? env->NewObject(g_formatClass, g_formatFromMap, map) : nullptr;
-    if (format != nullptr) env->CallVoidMethod(v->callback, g_cbFormat, v->javaCodec, format);
+    env->CallVoidMethod(codec, g_postCodecEvent, 1 /* EVENT_CALLBACK */, event, index, payload);
     if (env->ExceptionCheck()) env->ExceptionClear();
-    if (format != nullptr) env->DeleteLocalRef(format);
-    if (map != nullptr) env->DeleteLocalRef(map);
 }
 
 /* The first bytes of an input, for the log of what a player feeds the decoder first. */
@@ -743,7 +737,7 @@ void onError(OH_AVCodec*, int32_t error, void* user)
         std::lock_guard<std::mutex> l(v->mu);
         if (v->errorCode != 0) return;
         v->errorCode = error;
-        if (v->callback != nullptr) {
+        if (v->javaCodec != nullptr) {
             env = attachedEnv();
             if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
         }
@@ -754,7 +748,7 @@ void onError(OH_AVCodec*, int32_t error, void* user)
         jthrowable exception = codecException(env, error);
         if (exception != nullptr) {
             // Let MediaCodec dispatch on the Handler supplied to setCallback.
-            env->CallVoidMethod(codec, g_postCodecEvent, 1 /* EVENT_CALLBACK */, 3 /* CB_ERROR */, 0, exception);
+            postCodecEvent(env, codec, CODEC_ERROR, 0, exception);
             env->DeleteLocalRef(exception);
         }
         env->DeleteLocalRef(codec);
@@ -781,20 +775,24 @@ void onStreamChanged(OH_AVCodec*, OH_AVFormat* format, void* user)
 void onNeedInput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
 {
     Codec* v = static_cast<Codec*>(user);
-    bool forApp;
+    JNIEnv* env = nullptr;
+    jobject codec = nullptr;
     {
-        std::lock_guard<std::mutex> l(v->mu);
-        if (v->errorCode != 0) return;
-        forApp = !submitCodecData(v, index, buffer);
-        if (forApp) { v->inputs.push_back(index); v->inputBuffers[index] = buffer; }
+        std::lock_guard<std::mutex> lock(v->mu);
+        if (v->errorCode != 0 || submitCodecData(v, index, buffer)) return;
+        v->inputBuffers[index] = buffer;
+        if (v->javaCodec != nullptr) {
+            env = attachedEnv();
+            if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
+        } else {
+            v->inputs.push_back(index);
+        }
     }
-    if (!forApp) return;
-    v->cv.notify_all();
-    if (v->callback != nullptr && g_cbInput != nullptr) {
-        JNIEnv* env = attachedEnv();
-        if (env == nullptr) return;
-        env->CallVoidMethod(v->callback, g_cbInput, v->javaCodec, (jint) index);
-        if (env->ExceptionCheck()) env->ExceptionClear();
+    if (codec != nullptr) {
+        postCodecEvent(env, codec, INPUT_AVAILABLE, (jint) index, nullptr);
+        env->DeleteLocalRef(codec);
+    } else {
+        v->cv.notify_all();
     }
 }
 
@@ -802,6 +800,9 @@ void onNewOutput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
 {
     Codec* v = static_cast<Codec*>(user);
     OH_AVCodecBufferAttr attr{0, 0, 0, 0};
+    JNIEnv* env = nullptr;
+    jobject codec = nullptr;
+    jobject format = nullptr;
     if (buffer != nullptr) oh.bufferGetAttr(buffer, &attr);
     {
         std::lock_guard<std::mutex> l(v->mu);
@@ -813,7 +814,16 @@ void onNewOutput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
             int32_t w = v->stride > 0 ? v->stride : v->width, h = v->sliceHeight > 0 ? v->sliceHeight : v->height;
             attr.size = w > 0 && h > 0 ? w * h * 3 / 2 : 1;
         }
-        v->outputs.push_back({index, attr});
+        if (v->javaCodec != nullptr) {
+            env = attachedEnv();
+            if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
+            if (codec != nullptr && !v->asyncFormatSent) {
+                format = outputFormat(env, v);
+                v->asyncFormatSent = format != nullptr;
+            }
+        } else {
+            v->outputs.push_back({index, attr});
+        }
         v->outputBuffers[index] = buffer;
         if (v->audio) v->outputData[index] = attr;
     }
@@ -822,19 +832,22 @@ void onNewOutput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
         vlog("[WL-AUDIOCODEC] output %u: %d bytes at %d, pts %lld, flags %#x", index, attr.size, attr.offset,
              (long long) attr.pts, attr.flags);
     }
-    v->cv.notify_all();
-    if (v->callback != nullptr && g_cbOutput != nullptr) {
-        JNIEnv* env = attachedEnv();
-        if (env == nullptr) return;
-        fireAsyncFormat(env, v);
+    if (codec != nullptr) {
+        if (format != nullptr) {
+            postCodecEvent(env, codec, FORMAT_CHANGE, 0, format);
+            env->DeleteLocalRef(format);
+        }
         jobject info = env->NewObject(g_infoClass, g_infoInit);
         if (info != nullptr) {
             jint flags = ((attr.flags & OH_FLAG_EOS) ? MC_FLAG_EOS : 0) | ((attr.flags & OH_FLAG_SYNC) ? MC_FLAG_SYNC : 0);
             env->CallVoidMethod(info, g_infoSet, attr.offset, attr.size, (jlong) attr.pts, flags);
-            env->CallVoidMethod(v->callback, g_cbOutput, v->javaCodec, (jint) index, info);
+            postCodecEvent(env, codec, OUTPUT_AVAILABLE, (jint) index, info);
             env->DeleteLocalRef(info);
         }
+        env->DeleteLocalRef(codec);
         if (env->ExceptionCheck()) env->ExceptionClear();
+    } else {
+        v->cv.notify_all();
     }
 }
 
@@ -1535,7 +1548,7 @@ void wFlush(JNIEnv* env, jobject thiz)
          * codec offers no buffer after a flush until the app's start(): ExoPlayer clears its own
          * queues first and then starts the codec, so a buffer offered before that would be lost. */
         clearQueues(v);
-        if (v->callback != nullptr) {
+        if (v->javaCodec != nullptr) {
             v->running = false;
             return;
         }
@@ -1550,7 +1563,6 @@ void destroy(JNIEnv* env, jobject thiz, Codec* v)
     v->api->destroy(v->codec);
     if (!v->audio) clearOutputWindow(v);
     if (v->javaCodec != nullptr) env->DeleteGlobalRef(v->javaCodec);
-    if (v->callback != nullptr) env->DeleteGlobalRef(v->callback);
     env->SetLongField(thiz, g_context, 0);
     delete v;
 }
@@ -1588,6 +1600,10 @@ jint wDequeueInput(JNIEnv* env, jobject thiz, jlong timeoutUs)
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) return b_dequeueInput != nullptr ? b_dequeueInput(env, thiz, timeoutUs) : MC_TRY_AGAIN;
     std::unique_lock<std::mutex> l(v->mu);
+    if (v->javaCodec != nullptr) {
+        throwState(env, "dequeue is unavailable in asynchronous mode");
+        return MC_TRY_AGAIN;
+    }
     auto ready = [&] { return !v->inputs.empty() || v->errorCode != 0; };
     if (!ready() && timeoutUs != 0) {
         if (timeoutUs < 0) v->cv.wait(l, ready);
@@ -1670,6 +1686,10 @@ jint wDequeueOutput(JNIEnv* env, jobject thiz, jobject info, jlong timeoutUs)
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) return b_dequeueOutput != nullptr ? b_dequeueOutput(env, thiz, info, timeoutUs) : MC_TRY_AGAIN;
     std::unique_lock<std::mutex> l(v->mu);
+    if (v->javaCodec != nullptr) {
+        throwState(env, "dequeue is unavailable in asynchronous mode");
+        return MC_TRY_AGAIN;
+    }
     auto ready = [&] { return !v->outputs.empty() || v->errorCode != 0; };
     if (!ready() && timeoutUs != 0) {
         if (timeoutUs < 0) v->cv.wait(l, ready);
@@ -1755,21 +1775,9 @@ void wSetCallback(JNIEnv* env, jobject thiz, jobject callback)
 {
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) { if (b_setCallback != nullptr) b_setCallback(env, thiz, callback); return; }
-    if (g_vm == nullptr) env->GetJavaVM(&g_vm);
-    if (callback != nullptr && g_cbInput == nullptr) {
-        jclass c = env->GetObjectClass(callback);
-        g_cbInput = env->GetMethodID(c, "onInputBufferAvailable", "(Landroid/media/MediaCodec;I)V");
-        g_cbOutput = env->GetMethodID(c, "onOutputBufferAvailable",
-                                      "(Landroid/media/MediaCodec;ILandroid/media/MediaCodec$BufferInfo;)V");
-        g_cbFormat = env->GetMethodID(c, "onOutputFormatChanged",
-                                      "(Landroid/media/MediaCodec;Landroid/media/MediaFormat;)V");
-        if (env->ExceptionCheck()) env->ExceptionClear();
-    }
     std::lock_guard<std::mutex> lock(v->mu);
     if (v->javaCodec != nullptr) env->DeleteGlobalRef(v->javaCodec);
-    if (v->callback != nullptr) env->DeleteGlobalRef(v->callback);
-    v->javaCodec = env->NewGlobalRef(thiz);
-    v->callback = callback != nullptr ? env->NewGlobalRef(callback) : nullptr;
+    v->javaCodec = callback != nullptr ? env->NewGlobalRef(thiz) : nullptr;
 }
 
 /* ---- MediaCodecList: the bridge's entries, then the video and audio decoders ---------------- */
@@ -2043,13 +2051,12 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     jclass list = env->FindClass("android/media/MediaCodecList");
     jclass info = env->FindClass("android/media/MediaCodec$BufferInfo");
     jclass exception = env->FindClass("android/media/MediaCodec$CodecException");
-    jclass format = env->FindClass("android/media/MediaFormat");
     jclass map = env->FindClass("java/util/HashMap");
     jclass integer = env->FindClass("java/lang/Integer");
     jclass string = env->FindClass("java/lang/String");
     jclass byteBuffer = env->FindClass("java/nio/ByteBuffer");
     jclass byteOrder = env->FindClass("java/nio/ByteOrder");
-    if (codec == nullptr || list == nullptr || info == nullptr || exception == nullptr || format == nullptr || map == nullptr
+    if (codec == nullptr || list == nullptr || info == nullptr || exception == nullptr || map == nullptr
             || integer == nullptr || string == nullptr || byteBuffer == nullptr || byteOrder == nullptr) {
         env->ExceptionClear();
         return 0;
@@ -2066,8 +2073,6 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     g_postCodecEvent = env->GetMethodID(codec, "postEventFromNative", "(IIILjava/lang/Object;)V");
     g_infoInit = env->GetMethodID(info, "<init>", "()V");
     g_infoSet = env->GetMethodID(info, "set", "(IIJI)V");
-    g_formatClass = (jclass) env->NewGlobalRef(format);
-    g_formatFromMap = env->GetMethodID(format, "<init>", "(Ljava/util/Map;)V");
     g_hashMap = (jclass) env->NewGlobalRef(map);
     g_hashMapInit = env->GetMethodID(map, "<init>", "()V");
     g_hashMapPut = env->GetMethodID(map, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
@@ -2083,7 +2088,7 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     if (order != nullptr) g_nativeOrder = env->NewGlobalRef(order);
     if (env->ExceptionCheck()) env->ExceptionClear();
     if (g_context == nullptr || g_codecException == nullptr || g_codecExceptionInit == nullptr
-            || g_postCodecEvent == nullptr || g_infoOffset == nullptr || g_infoInit == nullptr || g_formatFromMap == nullptr
+            || g_postCodecEvent == nullptr || g_infoOffset == nullptr || g_infoInit == nullptr
             || g_hashMapInit == nullptr || g_integerValueOf == nullptr || g_nativeOrder == nullptr) {
         vlog("[WL-VIDEOCODEC] framework classes incomplete; video and audio decoding not offered");
         return 0;
