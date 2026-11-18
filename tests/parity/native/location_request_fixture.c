@@ -97,7 +97,7 @@ Location_ResultCode OH_Location_StopLocating(const Location_RequestConfig *confi
 Location_BasicInfo OH_LocationInfo_GetBasicInfo(Location_Info *location)
 {
     assert(location == (Location_Info *)&sample);
-    return (Location_BasicInfo){.timeForFix = 1, .timeSinceBoot = 1};
+    return (Location_BasicInfo){.timeForFix = 1, .timeSinceBoot = 1, .locationSourceType = LOCATION_SOURCE_TYPE_NETWORK};
 }
 
 #ifndef LOCATION_REQUEST_STANDALONE

@@ -2258,6 +2258,14 @@ fix. Both network provider parameters still returned error 106 on the board.
 The local OpenHarmony source returns before requesting a network position when
 the provider bundle name is missing. [Test scope and runtime hashes](../tests/google-auth/full48/candidate109.json)
 
+### Can a network position appear as a GPS fix?
+
+The old adapter selected OpenHarmony’s high-power mode when an Android app requested high accuracy, even if the app explicitly chose the network provider. It also kept one last fix for all providers and changed the provider name when an app read it. A network position could therefore appear as the last GPS position. Android defines separate network and satellite providers. OpenHarmony’s high-power mode can deliver a network position while waiting for satellites. [Android location providers](https://developer.android.com/reference/android/location/LocationManager#NETWORK_PROVIDER) · [OpenHarmony LocationKit source types and power modes](https://github.com/openharmony/base_location/blob/OpenHarmony-6.1-Release/interfaces/c_api/include/oh_location_type.h)
+
+Westlake now selects low power for network requests, checks the source of incoming fixes for explicit GPS and network requests, and keeps the last fix per provider. Two runs of the same board fixture on the old adapter reproduced different failures. With satellite policy enabled, a high-accuracy network request selected satellite power. With the policy disabled, the network listener accepted a synthetic satellite sample. The rebuilt adapter passed both configurations, including checks for GNSS, RTK, indoor and network sources, out-of-order samples and passive cache origin.
+
+The original Maps APK displayed its map and queried its last location on the rebuilt adapter. The Maps host had both location permissions denied. After a system tap on the matched location button, nine samples through 69 seconds recorded zero physical fixes, zero GPS starts and none of the location-dialog labels the observer checked. A read-only inspection found the board’s vendor GNSS firmware and three loaded GNSS kernel modules. Both network-provider configuration parameters were still missing. Physical GNSS stayed off throughout the app runs. The positive source checks used only the isolated fixture. [Original Maps and source-routing tests](../tests/google-auth/full48/candidate135.json)
+
 ## Drive account discovery on the current board configuration
 
 The dedicated Drive host and the retained host both resolved two different

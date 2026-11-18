@@ -27,6 +27,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -52,7 +53,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   PendingIntent or callback as Android's location manager delivers them, with the request's minimum distance,
  *   minimum interval and maximum update count applied. Unregistering stops the OH request. getCurrentLocation
  *   answers its first fix, or null at its duration (30 seconds by default), and can be cancelled.
- * - getLastLocation answers the last fix this process received, or null.
+ * - getLastLocation answers the most recent accepted fix for the requested provider, or null.
  * - For a foreground location request, the APK must declare a location permission and its HAP must hold
  *   the corresponding OH grant. Android fine location maps to ohos.permission.LOCATION and coarse location
  *   maps to ohos.permission.APPROXIMATELY_LOCATION. The checks read the current grant.
@@ -77,6 +78,11 @@ public final class LocationManagerAdapter {
     private static final int OH_HIGH_POWER = 0x0601;
     private static final int OH_LOW_POWER = 0x0602;
     private static final int OH_NO_POWER = 0x0603;
+    // Location_SourceType from the OpenHarmony LocationKit NDK.
+    private static final int OH_GNSS = 1;
+    private static final int OH_NETWORK = 2;
+    private static final int OH_INDOOR = 3;
+    private static final int OH_RTK = 4;
     /** LocationManager.getCurrentLocation's default timeout. */
     private static final long CURRENT_LOCATION_TIMEOUT_MS = 30_000;
 
@@ -88,7 +94,8 @@ public final class LocationManagerAdapter {
     private static final Map<Integer, Request> REQUESTS = new ConcurrentHashMap<>();
     /** Requests by what the app registered: a listener's binder, or a PendingIntent. */
     private static final Map<Object, Request> BY_KEY = new ConcurrentHashMap<>();
-    private static volatile Location sLast;
+    // Passive observers see accepted fixes from all providers, with the producing provider intact.
+    private static final Map<String, Location> LAST_LOCATIONS = new HashMap<>();
     private static volatile boolean sNoNatives;
 
     private static native int nativeEnabled();
@@ -168,6 +175,9 @@ public final class LocationManagerAdapter {
 
         Request(String provider, LocationRequest request, Object key) {
             this.provider = provider != null ? provider : LocationManager.FUSED_PROVIDER;
+            if (!PROVIDERS.contains(this.provider)) {
+                throw new IllegalArgumentException("Unknown location provider: " + this.provider);
+            }
             this.request = request;
             this.key = key;
         }
@@ -175,7 +185,7 @@ public final class LocationManagerAdapter {
 
     /**
      * OH's power scene for a request: GNSS (high power) for the gps provider, as Android's gps provider is GNSS, and
-     * for a high-accuracy request; passive for the passive provider or interval; otherwise OH's low-power scene,
+     * for high-accuracy fused requests; network requests stay on low power; passive for the passive provider or interval; otherwise OH's low-power scene,
      * network positioning. On a device without a network location service (this board: OH's NetworkAbility finds
      * none) OH files a low-power request as passive and it gets fixes only while someone else locates.
      *
@@ -187,7 +197,7 @@ public final class LocationManagerAdapter {
     private static int powerScene(String provider, LocationRequest request) {
         if (LocationManager.PASSIVE_PROVIDER.equals(provider)) return OH_NO_POWER;
         if (request != null && request.getIntervalMillis() == LocationRequest.PASSIVE_INTERVAL) return OH_NO_POWER;
-        if (!GNSS) return OH_LOW_POWER;
+        if (!GNSS || LocationManager.NETWORK_PROVIDER.equals(provider)) return OH_LOW_POWER;
         if (LocationManager.GPS_PROVIDER.equals(provider)) return OH_HIGH_POWER;
         return request != null && request.getQuality() == LocationRequest.QUALITY_HIGH_ACCURACY
                 ? OH_HIGH_POWER : OH_LOW_POWER;
@@ -281,7 +291,17 @@ public final class LocationManagerAdapter {
             double speedAccuracy, double bearingAccuracy, int sourceType) {
         Request r = REQUESTS.get(id);
         if (r == null) return;
-        Location location = new Location(r.provider);
+        boolean satellite = sourceType == OH_GNSS || sourceType == OH_RTK;
+        // OpenHarmony includes indoor positioning in its network provider.
+        boolean network = sourceType == OH_NETWORK || sourceType == OH_INDOOR;
+        if (LocationManager.GPS_PROVIDER.equals(r.provider) && !satellite) return;
+        if (LocationManager.NETWORK_PROVIDER.equals(r.provider) && !network) return;
+        String provider = r.provider;
+        if (LocationManager.PASSIVE_PROVIDER.equals(provider)) {
+            if (satellite) provider = LocationManager.GPS_PROVIDER;
+            else if (network) provider = LocationManager.NETWORK_PROVIDER;
+        }
+        Location location = new Location(provider);
         location.setLatitude(latitude);
         location.setLongitude(longitude);
         location.setAltitude(altitude);
@@ -293,8 +313,28 @@ public final class LocationManagerAdapter {
         if (altitudeAccuracy > 0) location.setVerticalAccuracyMeters((float) altitudeAccuracy);
         if (speedAccuracy > 0) location.setSpeedAccuracyMetersPerSecond((float) speedAccuracy);
         if (bearingAccuracy > 0) location.setBearingAccuracyDegrees((float) bearingAccuracy);
-        sLast = location;
+        synchronized (LAST_LOCATIONS) {
+            rememberLocation(r.provider, location);
+            if (!LocationManager.PASSIVE_PROVIDER.equals(r.provider)) {
+                rememberLocation(LocationManager.PASSIVE_PROVIDER, location);
+            }
+        }
         deliver(r, location, sourceType);
+    }
+
+    // Caller holds LAST_LOCATIONS. A delayed callback must not replace a newer stored fix.
+    private static void rememberLocation(String provider, Location location) {
+        Location previous = LAST_LOCATIONS.get(provider);
+        if (previous == null || previous.getElapsedRealtimeNanos() <= location.getElapsedRealtimeNanos()) {
+            LAST_LOCATIONS.put(provider, location);
+        }
+    }
+
+    private static Location lastLocation(String provider) {
+        synchronized (LAST_LOCATIONS) {
+            Location last = LAST_LOCATIONS.get(provider);
+            return last == null ? null : new Location(last);
+        }
     }
 
     private static void deliver(Request r, Location location, int sourceType) {
@@ -427,11 +467,9 @@ public final class LocationManagerAdapter {
                 case "getProviderProperties":
                     return properties((String) args[0]);
                 case "getLastLocation": {
-                    Location last = sLast;
-                    if (last == null || disabledProvider((String) args[0]) || !locationOn() || !hostMayLocate()) return null;
-                    Location copy = new Location(last);
-                    copy.setProvider((String) args[0]);
-                    return copy;
+                    String provider = (String) args[0];
+                    if (disabledProvider(provider) || !locationOn() || !hostMayLocate()) return null;
+                    return lastLocation(provider);
                 }
                 case "getCurrentLocation":
                     return currentLocation((String) args[0], (LocationRequest) args[1], (ILocationCallback) args[2]);

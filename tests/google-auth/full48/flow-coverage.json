@@ -209,7 +209,8 @@
         "sources": [
           "candidate83.json",
           "candidate88.json",
-          "candidate127.json"
+          "candidate127.json",
+          "candidate135.json"
         ],
         "checks": {
           "startup": {
@@ -226,7 +227,7 @@
           },
           "real_location": {
             "status": "partial",
-            "evidence": "OpenHarmony accepted two requests during the temporary permission grant. No real fix was delivered. Permission was restored to Deny. With GNSS disabled, the adapter now reports GPS disabled to Android and withholds explicit GPS requests. Original Maps exercised the change on its dedicated host. Network provider configuration and a physical fix remain open."
+            "evidence": "OpenHarmony accepted two requests during the temporary permission grant. No real fix was delivered. Permission was restored to Deny. With GNSS disabled, the adapter now reports GPS disabled to Android and withholds explicit GPS requests. Original Maps exercised the change on its dedicated host. Network provider configuration and a physical fix remain open. A board fixture verified provider selection, source filtering and per-provider caches on the rebuilt adapter. Original Maps queried last location with its host permission denied. It received zero physical fixes."
           },
           "route_preview": {
             "status": "observed",

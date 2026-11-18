@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "candidate": 135,
+  "date": "2026-11-18",
+  "related": [
+    "candidate88.json",
+    "candidate109.json",
+    "candidate127.json"
+  ],
+  "originalMaps": {
+    "package": "com.google.android.apps.maps",
+    "versionName": "26.43.00.1002020710",
+    "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+    "signerAtSdk34Sha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053",
+    "originalApkInodeMapped": true,
+    "standaloneApk": true,
+    "normalAppDomain": true
+  },
+  "build": {
+    "changedProductionInput": "framework/core/java/LocationManagerAdapter.java",
+    "matchedJavaSources": 143,
+    "adapterSha256": "7de22e64f77cc2a2432bab2bc3e7576a68f4a2fdcf175dd9401ea2f9266ca22d",
+    "frameworkSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc"
+  },
+  "boardFixture": {
+    "procedure": "Each build ran the same probe twice in separate ART processes with a process-local synthetic OpenHarmony LocationKit provider. The fixture verified its own symbol binding. Explicit GPS policy was enabled only inside the isolated fixture. Source-filter and cache checks injected synthetic callback metadata; the real app and hardware received no synthetic positions.",
+    "beforeAndAfter": {
+      "before": {
+        "satellitePolicyEnabled": {
+          "matchesExpected": true,
+          "result": "explicit network request selected satellite power",
+          "fixtureIsolated": true,
+          "adapterSha256": "e4a5ef712a8ab2a21643e70e73ec90e98d94ce58cc667c0f9f3c15561c1f8727",
+          "gnssEnabledOnlyInsideFixture": true,
+          "probeSha256": "ad6b48ee66f759e958865d8d01299e1d7cb82b914f73078c243e7052360f0ada",
+          "fixtureSha256": "927698a76c940613aa1ab5e04853701dac7103cc7f8b2e1b97f32623831d4551"
+        },
+        "satellitePolicyDisabled": {
+          "matchesExpected": true,
+          "result": "satellite sample delivered as network",
+          "fixtureIsolated": true,
+          "adapterSha256": "e4a5ef712a8ab2a21643e70e73ec90e98d94ce58cc667c0f9f3c15561c1f8727",
+          "gnssEnabledOnlyInsideFixture": false,
+          "probeSha256": "ad6b48ee66f759e958865d8d01299e1d7cb82b914f73078c243e7052360f0ada",
+          "fixtureSha256": "927698a76c940613aa1ab5e04853701dac7103cc7f8b2e1b97f32623831d4551"
+        }
+      },
+      "after": {
+        "satellitePolicyEnabled": {
+          "matchesExpected": true,
+          "result": "provider, cache and request lifecycle assertions passed",
+          "fixtureIsolated": true,
+          "adapterSha256": "7de22e64f77cc2a2432bab2bc3e7576a68f4a2fdcf175dd9401ea2f9266ca22d",
+          "gnssEnabledOnlyInsideFixture": true,
+          "probeSha256": "ad6b48ee66f759e958865d8d01299e1d7cb82b914f73078c243e7052360f0ada",
+          "fixtureSha256": "927698a76c940613aa1ab5e04853701dac7103cc7f8b2e1b97f32623831d4551"
+        },
+        "satellitePolicyDisabled": {
+          "matchesExpected": true,
+          "result": "provider, cache and request lifecycle assertions passed",
+          "fixtureIsolated": true,
+          "adapterSha256": "7de22e64f77cc2a2432bab2bc3e7576a68f4a2fdcf175dd9401ea2f9266ca22d",
+          "gnssEnabledOnlyInsideFixture": false,
+          "probeSha256": "ad6b48ee66f759e958865d8d01299e1d7cb82b914f73078c243e7052360f0ada",
+          "fixtureSha256": "927698a76c940613aa1ab5e04853701dac7103cc7f8b2e1b97f32623831d4551"
+        }
+      }
+    },
+    "acceptedSourceChecks": [
+      "Explicit high-accuracy network selects low power. Fused high accuracy follows GNSS configuration. Passive remains no power.",
+      "Network and indoor samples qualify for a network request; satellite does not.",
+      "Explicit GPS rejects network, indoor, and unclassified samples. GNSS and RTK qualify.",
+      "A fused request can accept both network and GNSS. Its updates preserve the network cache.",
+      "Last fixes are per requested provider. The passive cache preserves the producer and high-water elapsed time. An older sample and a caller mutation do not replace the newer cached fix.",
+      "The Android service rejects an uninstalled provider. Turning system location off prevents returning a cached network fix.",
+      "One-shot delivery, replacement, cancellation and native handle cleanup also passed."
+    ]
+  },
+  "liveOriginalMaps": {
+    "before": {
+      "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+      "adapterSha256": "e4a5ef712a8ab2a21643e70e73ec90e98d94ce58cc667c0f9f3c15561c1f8727",
+      "originalAppOwnsWindow": true,
+      "visibleMapControls": [
+        "Contribute",
+        "Explore",
+        "Search here",
+        "You"
+      ],
+      "gpsDisabledEvents": 1,
+      "checkedProvider": true,
+      "lastLocationQueried": true,
+      "gpsRequestsSentToOH": 0,
+      "fixEvents": 0,
+      "locationGrants": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "after": {
+      "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+      "adapterSha256": "7de22e64f77cc2a2432bab2bc3e7576a68f4a2fdcf175dd9401ea2f9266ca22d",
+      "originalAppOwnsWindow": true,
+      "visibleMapControls": [
+        "Contribute",
+        "Explore",
+        "Search here",
+        "You"
+      ],
+      "gpsDisabledEvents": 1,
+      "checkedProvider": true,
+      "lastLocationQueried": true,
+      "gpsRequestsSentToOH": 0,
+      "fixEvents": 0,
+      "locationGrants": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "locationButton": {
+      "matchingIconMeanDifferences": [
+        0.0,
+        0.0
+      ],
+      "matchedTwice": true,
+      "sentSystemTouch": true,
+      "samples": [
+        {
+          "seconds": 7.3,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 2,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 15.5,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 2,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 23.4,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 2,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 30.6,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 2,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 37.8,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 3,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 45.9,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 3,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 53.2,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 3,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 61.0,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 3,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        },
+        {
+          "seconds": 69.2,
+          "appOwnedWindow": true,
+          "locationDialogLabels": [],
+          "gpsDisabled": 3,
+          "gpsStarts": 0,
+          "fixEvents": 0
+        }
+      ],
+      "finalPermissions": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      },
+      "physicalLocationObserved": false
+    },
+    "physicalFixObserved": false
+  },
+  "boardInventory": {
+    "installedAndHashed": {
+      "libgnssmgt.z.so": "248758dbb5596f8150c76403cbb40e3b9bf5d03ee1e19c4b51fc338d6f9ccb5c",
+      "vendorGnssAdapter.so": "d3c63ac828074bf744199f6de4f9b65cfbbf17f638cc0dd847e1c27426d8c24d",
+      "libgnss_interface_service_2.0.z.so": "7e86a527b501be8c4ebc04ea75b132dcdb35f77bce0754cf829f4bd3f0a79f0b",
+      "liblbsservice_gnss.z.so": "bbe06639af8c42f714f7292f1344c9ec2653c2ad7878e478ed6001f27a4522f6",
+      "gnssmodem.bin": "5a2de3e05e9ea582dc1a4952e5d9709c26bd8c334bcb3ddba227d76f311e1962",
+      "init.uis7885.gnss.cfg": "acaf44f3e4b07443163530a418958572f41384514c1bec51f48610d8913887f7"
+    },
+    "gnssKernelModules": [
+      "unisoc_gnss_pmnotify_ctl",
+      "unisoc_gnss_dbg",
+      "unisoc_gnss_common_ctl_all"
+    ],
+    "gnssDeviceNodeCount": 6,
+    "missingNetworkProviderParameters": {
+      "const.location.nlp_service_name": 106,
+      "const.location.nlp_ability_name": 106
+    },
+    "hardwareGnssStartedByThisTest": false
+  },
+  "restoredGmail": {
+    "originalAppInForeground": true,
+    "primaryVisible": true
+  },
+  "interpretation": "On the board fixture, the old adapter selected satellite power for high-accuracy network requests and could label a satellite sample as network. The rebuilt adapter passed the source, cache and lifecycle checks in both configurations. The original Maps APK displayed its map, queried the last location and respected the denied permission. A physical position in Maps remains unverified.",
+  "runtimeCleanup": {
+    "intermediateFilesRemoved": 9,
+    "baselineRollbackFilesVerified": 9,
+    "freeMiB": 509
+  }
+}
