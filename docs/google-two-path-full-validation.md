@@ -13,7 +13,7 @@ live roles and their native HAPs. All eight APKs now have [dedicated test hosts]
 | FotMob · Google | Fresh sign-in completed. A changed favorite reached the server and returned after clearing the local favorites. A fresh Google-signed ID token reached the app after the saved token expired. The account survived a restart. [Cloud and renewal](../tests/google-auth/full48/candidate74.json) · [Fresh sign-in and restart](../tests/google-auth/full48/candidate75.json) | All four named Google checks have evidence across those two runs. The favorite read endpoint also answered an invalid-token control, so the read alone cannot establish server authorization. |
 | Spotify · Google | Earlier runs returned account selection to Spotify and reached its signup form on the shared host. The dedicated hosts later passed the two-caller window test. With a fresh profile using official Play services and Play Store, the original Spotify APK automatically foregrounded Google’s sign-in window. It stayed on “Checking info” for at least 7 min 57 s. [Signup](../tests/google-auth/full48/candidate51-followup.json) · [Dedicated host](../tests/google-auth/full48/candidate93.json) · [Two callers](../tests/google-auth/full48/candidate97.json) · [Official Google setup](../tests/google-auth/full48/candidate98.json) · [Back and DNS retest](../tests/google-auth/full48/candidate99.json) | Automatic return after successful Google sign-in on the dedicated host, a Spotify session, library, playback, silent renewal and persistence. |
 | Wattpad · Google | Google sign-in returned to Wattpad. After the local SDK selection was deliberately expired, silent sign-in returned to the separate Wattpad signup form. [Activity return](../tests/google-auth/full48/candidate51-followup.json) · [Expiry control](../tests/google-auth/full48/candidate62.json) | Established Wattpad account, reading or library, persistence and renewal after actual token expiry. |
-| YouTube · Google | The original APK played “Me at the zoo” to the end on separate fresh guest profiles. Nine samples per run showed the 900 × 675 picture centered in the 1200 × 675 player. The speaker stream and PCM playback position advanced. A two-color control verified red and blue after correcting the AVC output. [Guest playback and restart controls](../tests/google-auth/full48/candidate106.json) | A preserved guest profile returned to home placeholders on restart. Google sign-in, account persistence, physical audibility and broader playback coverage remain open. |
+| YouTube · Google | The original APK played “Me at the zoo” to the end on fresh guest profiles and on two consecutive launches with retained guest data after the DNS repair. Nine samples per fresh run showed the 900 × 675 picture centered in the 1200 × 675 player. [Picture, color and audio](../tests/google-auth/full48/candidate106.json) · [Retained guest playback](../tests/google-auth/full48/candidate107.json) | Google sign-in, signed-in restart persistence, physical audibility and picture geometry across other stream and player sizes. |
 | Gmail · Google | Enabling sync and restarting the original app populated the inbox. An existing message body opened. The app’s daily periodic registration survived another restart. [Inbox and message](../tests/google-auth/full48/candidate79.json) · [Periodic registration](../tests/google-auth/full48/candidate80.json) | The pull-to-refresh gesture was exercised. Completion of an incremental refresh with a server-side change remains open. |
 | Drive · Google | The approved account listed the existing 107-byte fixture. Its three lines rendered from a search result and again from My Drive after a process restart. [Board results](../tests/google-auth/full48/candidate89.json) | Silent renewal after actual token expiry. The second open could reuse cached file content. |
 | Maps · Google | Guest startup, map tiles, place search, a route preview and restart were observed with both service connections enabled. The native permission prompt and revocation worked. [Guest search and route](../tests/google-auth/full48/candidate83.json) · [Permission and location](../tests/google-auth/full48/candidate88.json) | A real position fix. OpenHarmony accepted two location requests and delivered no fix during the observation. Permission was restored to Deny. Signed-in place search also remains open. |
@@ -2117,6 +2117,31 @@ data the app stayed on home placeholders for 109 seconds. One earlier
 preserved-profile run logged a certificate name mismatch. The 109-second
 retest did not reproduce that error.
 [Framework change](https://github.com/a2hlab/manifest/commit/d555997) · [Board evidence](../tests/google-auth/full48/candidate106.json)
+
+### YouTube reported offline on a connected Wi-Fi network
+
+On the same runtime and Wi-Fi, fresh guest data reached the end of the clip.
+The retained profile showed home placeholders and later “Connect to the
+internet.” Keeping that profile and temporarily setting aside only its cache
+reproduced the failure. In both runs OpenHarmony reported an available,
+validated network. The original app opened sockets to a resolver listed in
+the system-wide `resolv.conf`.
+
+OpenHarmony Wi-Fi uses address-family tags 1 and 2 for IPv4 and IPv6. Its C
+API copies those tags to the link properties. Westlake interpreted them as
+POSIX socket families, which use 2 and 10 on the board. It discarded the
+Wi-Fi IPv4 DNS entry and supplied global fallback addresses. The repaired
+bridge validates the numeric address, normalizes the family and preserves the
+link's resolver list. Global resolvers are used as a fallback when no usable
+link resolver is available.
+
+The staged runtime changed only `liboh_connectivity_state.so`. With the
+original guest cache restored, YouTube used the Wi-Fi resolver and played the
+public clip to the end. A second restart with that same guest profile also
+reached the end. Both runs had advancing audio and moving pictures. These
+runs cover guest playback. Google account sign-in and signed-in persistence
+still need separate evidence.
+[Original-app before/after and native fixture](../tests/google-auth/full48/candidate107.json)
 
 ## TikTok welcome animation on the OpenHarmony board
 

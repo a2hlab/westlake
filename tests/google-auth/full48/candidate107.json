@@ -1,0 +1,90 @@
+{
+  "candidate": 107,
+  "date": "2026-11-17",
+  "originalApp": {
+    "package": "com.google.android.youtube",
+    "version": "21.43.523",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "mode": "Guest",
+    "publicClip": "Me at the zoo"
+  },
+  "nativeChange": {
+    "beforeSha256": "091fc804ffa6985f3e47ab05359892c56442e9ab1d70945a5e1ca6c7870aa491",
+    "afterSha256": "4130188ca61c07f4ffc3e82c87df27b594f3c89a1d2cb6405cd52323412b9d28",
+    "changedStagedFiles": [
+      "liboh_connectivity_state.so"
+    ],
+    "verifiedFrameworkStageFiles": 469,
+    "appData": "The existing guest profile and its original cache were retained for the first repaired launch. The second launch reused the resulting app data verbatim.",
+    "reason": "OH Wi-Fi numbers IPv4/IPv6 as 1/2. POSIX uses 2/10. The bridge had rejected the link DNS address during serialization and supplied global fallback resolvers. It now normalizes a valid numeric address at the OH boundary and uses link DNS exclusively when the link supplies a usable list.",
+    "fixture": "Compiled native fixture passed on board for OH and POSIX IPv4/IPv6 tags, invalid numeric DNS, list order, link and route normalization and a denied NetConn response."
+  },
+  "guestRuns": {
+    "warmBefore": {
+      "secondsObserved": 108.72,
+      "foregroundSamples": 54,
+      "playerTimeline": [],
+      "mediaReachedEnd": false,
+      "pcmWritesObserved": false,
+      "maxObservedPresentedAudioFrames": 0,
+      "androidReportedAvailable": true,
+      "ohReportedValidatedInternet": true,
+      "androidLinkDnsCount": 2,
+      "directDnsConnectsToResolvConf": 6,
+      "directDnsConnectsToLinkResolver": 0,
+      "returnedToOriginalTikTokWindow": true
+    },
+    "warmWithoutAppCacheBefore": {
+      "secondsObserved": 108.35,
+      "foregroundSamples": 50,
+      "playerTimeline": [],
+      "mediaReachedEnd": false,
+      "pcmWritesObserved": false,
+      "maxObservedPresentedAudioFrames": 0,
+      "androidReportedAvailable": true,
+      "ohReportedValidatedInternet": true,
+      "androidLinkDnsCount": 2,
+      "directDnsConnectsToResolvConf": 7,
+      "directDnsConnectsToLinkResolver": 0,
+      "returnedToOriginalTikTokWindow": true
+    },
+    "sameWarmProfileWithOriginalCacheAfter": {
+      "secondsObserved": 25.58,
+      "foregroundSamples": 13,
+      "playerTimeline": [
+        "0.000:N",
+        "4.693:B,10.060:PL",
+        "26.219:EN"
+      ],
+      "mediaReachedEnd": true,
+      "pcmWritesObserved": true,
+      "maxObservedPresentedAudioFrames": 653844,
+      "androidReportedAvailable": true,
+      "ohReportedValidatedInternet": true,
+      "androidLinkDnsCount": 1,
+      "directDnsConnectsToResolvConf": 0,
+      "directDnsConnectsToLinkResolver": 14,
+      "returnedToOriginalTikTokWindow": true
+    },
+    "secondProcessRestartAfter": {
+      "secondsObserved": 27.06,
+      "foregroundSamples": 13,
+      "playerTimeline": [
+        "0.000:N",
+        "5.451:B,13.987:PL",
+        "27.622:EN"
+      ],
+      "mediaReachedEnd": true,
+      "pcmWritesObserved": true,
+      "maxObservedPresentedAudioFrames": 743838,
+      "androidReportedAvailable": true,
+      "ohReportedValidatedInternet": true,
+      "androidLinkDnsCount": 1,
+      "directDnsConnectsToResolvConf": 0,
+      "directDnsConnectsToLinkResolver": 25,
+      "returnedToOriginalTikTokWindow": true
+    }
+  },
+  "appUiBefore": "After the home placeholders the original app displayed Connect to the internet. You are offline. Retry was visible.",
+  "coverage": "Guest playback after process restart with real network data and unchanged trust settings. Google sign-in, signed-in persistence, physical speaker audibility and general video geometry on arbitrary streams remain open."
+}

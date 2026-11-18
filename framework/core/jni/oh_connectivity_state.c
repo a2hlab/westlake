@@ -646,6 +646,55 @@ static uint32_t bearer_mask(const NetConn_NetCapabilities *caps)
     return mask;
 }
 
+/* OH Wi-Fi copies INetAddr's IPv4=1 / IPv6=2 tags into NetConn_NetAddr.
+ * Other suppliers can use socket families (AF_INET=2 / AF_INET6=10).
+ * The numeric address disambiguates tag 2 before merging with kernel data. */
+static int normalize_oh_address(NetConn_NetAddr *entry)
+{
+    struct in6_addr binary;
+    int tag = entry->family;
+    if (strnlen(entry->address, sizeof(entry->address)) < sizeof(entry->address)) {
+        if ((tag == 0 || tag == 1 || tag == AF_INET) &&
+                inet_pton(AF_INET, entry->address, &binary) == 1) {
+            entry->family = AF_INET;
+            return 1;
+        }
+        if ((tag == 0 || tag == 2 || tag == AF_INET6) &&
+                inet_pton(AF_INET6, entry->address, &binary) == 1) {
+            entry->family = AF_INET6;
+            return 1;
+        }
+    }
+    entry->family = AF_UNSPEC;
+    return 0;
+}
+
+static int32_t get_oh_link_properties(NetConn_NetHandle *handle,
+        NetConn_ConnectionProperties *props)
+{
+    int32_t rc = OH_NetConn_GetConnectionProperties(handle, props);
+    if (rc != 0) return rc;
+    if (props->netAddrListSize < 0 || props->netAddrListSize > NETCONN_MAX_ADDR_SIZE ||
+            props->dnsListSize < 0 || props->dnsListSize > NETCONN_MAX_ADDR_SIZE ||
+            props->routeListSize < 0 || props->routeListSize > NETCONN_MAX_ROUTE_SIZE) return -EINVAL;
+    for (int32_t i = 0; i < props->netAddrListSize; ++i) {
+        normalize_oh_address(&props->netAddrList[i]);
+    }
+    int32_t resolvers = 0;
+    for (int32_t i = 0; i < props->dnsListSize; ++i) {
+        if (normalize_oh_address(&props->dnsList[i])) {
+            if (resolvers != i) props->dnsList[resolvers] = props->dnsList[i];
+            ++resolvers;
+        }
+    }
+    props->dnsListSize = resolvers;
+    for (int32_t i = 0; i < props->routeListSize; ++i) {
+        normalize_oh_address(&props->routeList[i].destination);
+        if (props->routeList[i].hasGateway) normalize_oh_address(&props->routeList[i].gateway);
+    }
+    return 0;
+}
+
 static int numeric_address_wire(char *output, size_t capacity,
         const NetConn_NetAddr *addresses, int32_t count, int with_prefix)
 {
@@ -853,8 +902,11 @@ static void supplement_direct_oh_links(const NetConn_NetHandle *handle,
         if (props->mtu == 0) props->mtu = observed->mtu;
         merge_observed_addresses(props->netAddrList, &props->netAddrListSize,
                 observed->netAddrList, observed->netAddrListSize, 1);
-        merge_observed_addresses(props->dnsList, &props->dnsListSize,
-                observed->dnsList, observed->dnsListSize, 0);
+        /* A link's resolver list takes precedence over the system-wide fallback. */
+        if (props->dnsListSize == 0) {
+            merge_observed_addresses(props->dnsList, &props->dnsListSize,
+                    observed->dnsList, observed->dnsListSize, 0);
+        }
         merge_observed_routes(props, observed);
         static char last_log[256];
         char current_log[256];
@@ -901,7 +953,7 @@ static int uncached_oh_default(NetConn_NetHandle *handle, NetConn_NetCapabilitie
             NetConn_NetHandle listed = all_nets.netHandles[i];
             if (listed.netId <= 0) continue;
             memset(detail, 0, sizeof(*detail));
-            int32_t detail_rc = OH_NetConn_GetConnectionProperties(&listed, detail);
+            int32_t detail_rc = get_oh_link_properties(&listed, detail);
             if (detail_rc != 0 ||
                     strnlen(detail->ifaceName, sizeof(detail->ifaceName)) ==
                             sizeof(detail->ifaceName) ||
@@ -931,8 +983,10 @@ static int uncached_oh_default(NetConn_NetHandle *handle, NetConn_NetCapabilitie
             if (candidate->mtu == 0) candidate->mtu = props->mtu;
             merge_observed_addresses(candidate->netAddrList, &candidate->netAddrListSize,
                     props->netAddrList, props->netAddrListSize, 1);
-            merge_observed_addresses(candidate->dnsList, &candidate->dnsListSize,
-                    props->dnsList, props->dnsListSize, 0);
+            if (candidate->dnsListSize == 0) {
+                merge_observed_addresses(candidate->dnsList, &candidate->dnsListSize,
+                        props->dnsList, props->dnsListSize, 0);
+            }
             merge_observed_routes(candidate, props);
             memcpy(props, candidate, sizeof(*props));
             *handle = candidate_handle;
@@ -994,7 +1048,7 @@ Java_adapter_core_OhConnectivityState_nativeSnapshot(JNIEnv *env, jclass klass)
     metered_rc = OH_NetConn_IsDefaultNetMetered(&metered);
     if (default_rc == 0 && handle.netId > 0) {
         caps_rc = OH_NetConn_GetNetCapabilities(&handle, &caps);
-        props_rc = OH_NetConn_GetConnectionProperties(&handle, props);
+        props_rc = get_oh_link_properties(&handle, props);
         if (props_rc == 0) supplement_direct_oh_links(&handle, props);
     } else {
         int route_rc = kernel_route_snapshot(&handle, &caps, props);
