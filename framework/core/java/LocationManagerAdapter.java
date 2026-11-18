@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * ILocationManager over OH's location service (westlake ADR-0009 decision 1): the service a HAP asks for the
@@ -159,7 +160,8 @@ public final class LocationManagerAdapter {
         ILocationListener listener;
         PendingIntent pendingIntent;
         ILocationCallback callback;
-        volatile long handle;
+        // Zero until StartLocating returns its handle. A negative value closes the request.
+        final AtomicLong handle = new AtomicLong();
         int delivered;
         Location lastDelivered;
         long lastDeliveredAt;
@@ -205,6 +207,7 @@ public final class LocationManagerAdapter {
      */
     private static boolean start(Request r, String how) {
         REQUESTS.put(r.id, r);
+        if (r.key != null) stop(BY_KEY.put(r.key, r), "replaced");
         if (!locationOn()) {
             System.err.println("[" + TAG + "] " + how + " " + r.id + " for " + r.provider
                     + ": registered, no fixes while location is " + describe(state()));
@@ -229,28 +232,38 @@ public final class LocationManagerAdapter {
                     : code == OH_SERVICE_UNAVAILABLE ? "service unavailable" : "code " + code) + "); no fixes");
             return false;
         }
-        r.handle = handle;
+        if (!attachNativeHandle(r, handle)) return false;
         System.err.println("[" + TAG + "] " + how + " " + r.id + " for " + r.provider + ": OH request started, every "
                 + intervalSeconds(r.request) + " s, power scene 0x" + Integer.toHexString(powerScene(r.provider, r.request)));
         return true;
     }
 
-    private static void stop(Request r, String why) {
-        if (r == null) return;
-        REQUESTS.remove(r.id);
+    private static boolean attachNativeHandle(Request r, long handle) {
+        if (r.handle.compareAndSet(0, handle)) return true;
+        // A single fix or an unregister can finish this request inside StartLocating.
+        stopNative(r, handle, "finished during start");
+        return false;
+    }
+
+    private static boolean stop(Request r, String why) {
+        if (r == null) return false;
+        long handle = r.handle.getAndSet(-1);
+        if (handle < 0) return false;
+        REQUESTS.remove(r.id, r);
         if (r.key != null) BY_KEY.remove(r.key, r);
-        long handle = r.handle;
-        r.handle = 0;
-        if (handle > 0) {
-            int rc;
-            try {
-                rc = nativeStop(handle);
-            } catch (UnsatisfiedLinkError e) {
-                rc = -1;
-            }
-            System.err.println("[" + TAG + "] request " + r.id + " stopped (" + why + "), OH " + rc + ", "
-                    + r.delivered + " fix(es) delivered");
+        if (handle > 0) stopNative(r, handle, why);
+        return true;
+    }
+
+    private static void stopNative(Request r, long handle, String why) {
+        int rc;
+        try {
+            rc = nativeStop(handle);
+        } catch (UnsatisfiedLinkError e) {
+            rc = -1;
         }
+        System.err.println("[" + TAG + "] request " + r.id + " stopped (" + why + "), OH " + rc + ", "
+                + r.delivered + " fix(es) delivered");
     }
 
     /** A fix from OH (location_natives.c), on the thread OH calls back on. */
@@ -292,8 +305,7 @@ public final class LocationManagerAdapter {
         }
         try {
             if (r.callback != null) {
-                r.callback.onLocation(new Location(location));
-                stop(r, "answered");
+                if (stop(r, "answered")) r.callback.onLocation(new Location(location));
                 return;
             }
             if (r.listener != null) {
@@ -333,8 +345,7 @@ public final class LocationManagerAdapter {
         long timeout = request != null && request.getDurationMillis() != Long.MAX_VALUE
                 ? request.getDurationMillis() : CURRENT_LOCATION_TIMEOUT_MS;
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (!REQUESTS.containsKey(r.id)) return;   // answered or cancelled
-            stop(r, running ? "no fix in " + timeout + " ms" : "unavailable");
+            if (!stop(r, running ? "no fix in " + timeout + " ms" : "unavailable")) return;
             try {
                 callback.onLocation(null);
             } catch (RemoteException | RuntimeException ignored) {
@@ -345,18 +356,14 @@ public final class LocationManagerAdapter {
 
     private static void registerListener(String provider, LocationRequest request, ILocationListener listener) {
         IBinder key = listener.asBinder();
-        stop(BY_KEY.get(key), "replaced");
         Request r = new Request(provider, request, key);
         r.listener = listener;
-        BY_KEY.put(key, r);
         start(r, "listener");
     }
 
     private static void registerPendingIntent(String provider, LocationRequest request, PendingIntent pendingIntent) {
-        stop(BY_KEY.get(pendingIntent), "replaced");
         Request r = new Request(provider, request, pendingIntent);
         r.pendingIntent = pendingIntent;
-        BY_KEY.put(pendingIntent, r);
         start(r, "PendingIntent");
     }
 

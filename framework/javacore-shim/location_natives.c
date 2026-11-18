@@ -11,8 +11,8 @@
  * result code (LOCATION_PERMISSION_DENIED 201 when the host application holds no location permission,
  * LOCATION_SWITCH_OFF 3301100, LOCATION_SERVICE_UNAVAILABLE 3301000).
  *
- * nativeStop(handle): OH_Location_StopLocating, then the request is destroyed. Its id is cleared first, so
- * that a fix OH is delivering while it stops reaches no listener.
+ * nativeStop(handle): OH_Location_StopLocating, then the configuration is destroyed. A late
+ * callback carries only the Android request ID. Java has already removed it from its registry.
  *
  * The library is opened at run time, as libohnotification.so is for the notification switch: a board
  * without it answers -1 and Westlake keeps its compatibility floor (location off).
@@ -23,7 +23,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include <LocationKit/oh_location.h>
 #include <LocationKit/oh_location_type.h>
@@ -56,12 +55,6 @@ static jclass g_adapter;
 static jmethodID g_onLocation;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* One OH request: the id its fixes go to, cleared when it stops. */
-struct request {
-    Location_RequestConfig* config;
-    volatile int id;
-};
-
 static int bind_location(void)
 {
     pthread_mutex_lock(&g_lock);
@@ -91,8 +84,7 @@ static int bind_location(void)
 
 static void on_location(Location_Info* location, void* user_data)
 {
-    struct request* request = (struct request*) user_data;
-    int id = request != NULL ? request->id : 0;
+    jint id = (jint) (intptr_t) user_data;
     if (id == 0 || location == NULL || g_vm == NULL || g_onLocation == NULL) return;
     Location_BasicInfo info = oh.basicInfo(location);
     JNIEnv* env = NULL;
@@ -126,36 +118,27 @@ static jlong native_start(JNIEnv* env, jclass cls, jint id, jint interval_second
     (void) env;
     (void) cls;
     if (!bind_location()) return -1;
-    struct request* request = calloc(1, sizeof(*request));
-    if (request == NULL) return -1;
-    request->config = oh.create();
-    if (request->config == NULL) {
-        free(request);
-        return -1;
-    }
-    request->id = id;
-    oh.setPower(request->config, (Location_PowerConsumptionScene) power_scene);
-    oh.setInterval(request->config, interval_seconds > 0 ? interval_seconds : 1);
-    oh.setCallback(request->config, on_location, request);
-    Location_ResultCode rc = oh.start(request->config);
+    Location_RequestConfig* config = oh.create();
+    if (config == NULL) return -1;
+    oh.setPower(config, (Location_PowerConsumptionScene) power_scene);
+    oh.setInterval(config, interval_seconds > 0 ? interval_seconds : 1);
+    oh.setCallback(config, on_location, (void*) (intptr_t) id);
+    Location_ResultCode rc = oh.start(config);
     if (rc != LOCATION_SUCCESS) {
-        oh.destroy(request->config);
-        free(request);
+        oh.destroy(config);
         return -(jlong) rc;
     }
-    return (jlong) (intptr_t) request;
+    return (jlong) (intptr_t) config;
 }
 
 static jint native_stop(JNIEnv* env, jclass cls, jlong handle)
 {
     (void) env;
     (void) cls;
-    struct request* request = (struct request*) (intptr_t) handle;
-    if (request == NULL || handle <= 0 || !bind_location()) return -1;
-    request->id = 0;
-    Location_ResultCode rc = oh.stop(request->config);
-    oh.destroy(request->config);
-    /* Not freed: OH may be inside the callback with this pointer, and a stopped request is tiny. */
+    if (handle <= 0 || !bind_location()) return -1;
+    Location_RequestConfig* config = (Location_RequestConfig*) (intptr_t) handle;
+    Location_ResultCode rc = oh.stop(config);
+    oh.destroy(config);
     return (jint) rc;
 }
 

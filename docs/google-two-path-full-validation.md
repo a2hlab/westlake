@@ -1745,6 +1745,28 @@ we cannot attribute its missing fix to that event alone. The board has demonstra
 approximate grant and its revocation. Delivery of a physical location remains
 open. [Board evidence](../tests/google-auth/full48/candidate88.json)
 
+### Location request completion and cancellation
+
+A board test reproduced a duplicate one-shot answer when the provider delivered
+another callback during the first answer. Westlake now claims the request before
+notifying its caller. If the first answer or cancellation arrives while
+OpenHarmony is starting the request, Westlake stops the handle as soon as it
+becomes available. Late callbacks carry the request ID and can be discarded
+after unregistering. [Board comparison](../tests/google-auth/full48/candidate109.json)
+
+| Headless test on the board | Previous runtime | Rebuilt runtime |
+| --- | --- | --- |
+| Answers to one request during a reentrant delivery | 2 | 1 |
+| Native request records left allocated after 4,096 successful start/stop cycles | 4,096 | 0 |
+
+The rebuilt runtime also released each of two test handles exactly once,
+ignored a callback after cancellation, and removed a replaced listener through
+Android’s location service interface. These tests used a synthetic provider
+inside the test process. The original Maps APK still needs a real position
+fix. Both network provider parameters still returned error 106 on the board.
+The local OpenHarmony source returns before requesting a network position when
+the provider bundle name is missing. [Test scope and runtime hashes](../tests/google-auth/full48/candidate109.json)
+
 ## Drive lists and opens the test file
 
 The operator approved the additional read-only Drive labels scope. Westlake
