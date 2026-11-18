@@ -1781,7 +1781,9 @@ activity and recorded 23 failed account callbacks in its observation window.
 | Restart Drive with the same app data | **Files → My Drive** listed the fixture. Selecting it opened the preview and displayed the same three lines. |
 
 The observed client windows each contained two successful AccountManager replies
-and zero failed replies. The file already existed. This test made no new upload,
+and zero failed replies. A later count across the restarted Drive process found
+three requests and three successful replies naming Drive and the official GMS
+route. The trace counts do not establish whether the previous token had expired. The file already existed. This test made no new upload,
 edit or deletion. It verifies listing, opening and retention across a Drive
 process restart. The restart could reuse cached file data. Token renewal after
 expiry still needs a separate observation. [Board results](../tests/google-auth/full48/candidate89.json)

@@ -49,6 +49,14 @@
       "silentRenewalAfterTokenExpiryVerified": false,
       "freshDownloadAfterRestartVerified": false
     },
-    "evidenceMethod": "On-board app UI. Search or filename alone did not pass opening. All three fixture lines were matched in the rendered preview on both attempts. Only known labels and aggregate callback counts are retained here."
+    "evidenceMethod": "On-board app UI. Search or filename alone did not pass opening. All three fixture lines were matched in the rendered preview on both attempts. Only known labels and aggregate callback counts are retained here.",
+    "laterReviewOfRestartedClient": {
+      "method": "Counted fixed diagnostic labels in the recorded original Drive process trace on the board. The three success markers all named the Drive package and official GMS route. No credentials or token values were inspected.",
+      "earlierFileOpenObservationSuccessfulReplies": 2,
+      "wholeTraceRequests": 3,
+      "wholeTraceSuccessfulReplies": 3,
+      "wholeTraceFailedReplies": 0,
+      "previousTokenExpiryEstablishedForAdditionalRequest": false
+    }
   }
 }
