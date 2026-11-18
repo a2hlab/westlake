@@ -1725,6 +1725,10 @@ After a cold launch, original Gmail showed Primary again. A system swipe reached
 
 On the OpenHarmony board, Gmail opened a 720 × 1833 pixel folder list. Its adapter reported two rows and both were on screen: the Gmail header and a divider. Layout was enabled. The original APK creates those two rows even when it receives no folder entries. In a separate run, Gmail’s internal current-account stream had published a null value at all three samples. The folder stream had an active observer and had never published a list. The signed APK’s Gmail label provider returns an uninitialized stream when its internal account is null. This explains how the drawer can stay empty while Primary still shows stored messages. What left Gmail’s internal account empty, and whether the reported sync authentication error shares that cause, remain open. [Drawer, adapter and account observations](../tests/google-auth/full48/candidate139.json)
 
+#### Which account list Gmail uses
+
+In the same original Gmail process, Android’s account manager returned one Google account on 14 calls. The official Play services account provider returned an empty array on all 7 observed Google account queries. On 4 of those calls, the live stack included Gmail’s own account-list builder. Gmail’s internal account list had published zero entries in three samples. The Gmail process was connected to microG; the live official Play services listener had no account connector configured. These results locate the empty reply on this board configuration. An otherwise matched run with the official service also connected is still needed to determine the effect of that connection. [Same-process account counts and stack checks](../tests/google-auth/full48/candidate140.json)
+
 ### Gmail touch input on its dedicated host
 
 The hosted window path looked up `oh_owned_input_subscribe` at runtime.

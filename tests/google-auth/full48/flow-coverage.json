@@ -153,12 +153,13 @@
           "candidate136.json",
           "candidate137.json",
           "candidate138.json",
-          "candidate139.json"
+          "candidate139.json",
+          "candidate140.json"
         ],
         "checks": {
           "account_selection": {
             "status": "partial",
-            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear. With the private account provider connected on the dedicated UID, selecting Google invoked addAccount. The delegated adapter returned unsupported and setup stayed on the provider list. After the window inset repair, a normal tap at the center of the account icon opened the Google panel. The test account was absent from the sampled controls. A later retained-profile test found that Gmail’s internal drawer account was null while the system account provider was serving one-account lists for the Gmail package."
+            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear. With the private account provider connected on the dedicated UID, selecting Google invoked addAccount. The delegated adapter returned unsupported and setup stayed on the provider list. After the window inset repair, a normal tap at the center of the account icon opened the Google panel. The test account was absent from the sampled controls. A later retained-profile test found that Gmail’s internal drawer account was null while the system account provider was serving one-account lists for the Gmail package. In the same Gmail process Android returned one Google account, while the official provider returned zero on all 7 observed queries, including 4 from its catalog builder. In that run only Gmail had the account connector."
           },
           "mailbox_sync": {
             "status": "observed",
