@@ -1,0 +1,85 @@
+{
+  "candidate": 102,
+  "date": "2026-11-17",
+  "package": "com.zhiliaoapp.musically",
+  "versionName": "47.1.4",
+  "apkSha256": "4226ed5d3031b68208c29f62d80ac421b281fc74201bc4163d98e442d0991a40",
+  "assetSha256": "19cf1e34dad70708d05eeae7741e6f8b50795b2ec38e01bb68f91695dbcd5376",
+  "asset": {
+    "codec": "HEVC Main",
+    "sizePixels": [
+      500,
+      500
+    ],
+    "rotationMetadata": null,
+    "frames": 122,
+    "seconds": 6.1
+  },
+  "orientation": {
+    "previousReport": "candidate101.json",
+    "screenshotPixels": [
+      1200,
+      1920
+    ],
+    "capturedScreen": "Portrait TikTok welcome slogan.",
+    "inAppWelcomeAnimationFrameCaptured": false
+  },
+  "nativeOpenHarmony": {
+    "hardwareDecoder": "OMX.sprd.hevc.decoder",
+    "bufferAndSurfaceOutput": {
+      "startResult": 0,
+      "framesPerRun": 0,
+      "endOfStream": false,
+      "terminalError": 6
+    },
+    "publicSoftwareHevcProviderAvailable": false
+  },
+  "independentSoftwareDecode": {
+    "source": "OpenHarmony third_party/ffmpeg",
+    "sourceCommit": "520f5adfa70807f04a250c494e8bb1743011481e",
+    "testBinarySha256": "2d718527c85bb615ae3769225be8e2d516fad1c0a1ee8ee35934269325d1b3ee",
+    "frames": 122,
+    "sizePixels": [
+      500,
+      500
+    ],
+    "pixelFormat": "yuv420p",
+    "boardAndHostRawFrameSha256": "eb9617be93658cf548ce6d24ce7c5f1ec80ddc24a6b13644b1bcb524a2ff0f0c",
+    "integratedIntoAppPlayer": false
+  },
+  "androidMediaCodec": {
+    "controlLibrarySha256": "019842a00529de5557f09d89a1563dcc8c33556bc0830084584939ad0270d933",
+    "candidateLibrarySha256": "2d339fa55bbbf9b0efa0b0e116210fdc5e3e08af4c2dd8973b0e7ea2374bd891",
+    "originalAsyncControl": "No terminal callback within the 12-second observation.",
+    "originalAsyncCandidate": "One terminal result observed on the requested handler, generic error code -2147483648, non-transient and non-recoverable.",
+    "originalSyncCandidate": "Both input and output dequeue continued to throw CodecException after the first terminal error.",
+    "healthyAvcAsync": "End of stream.",
+    "healthyAvcSurfaceHandoff": {
+      "inputPixels": [
+        320,
+        240
+      ],
+      "framesBefore": 3,
+      "framesAfter": 9,
+      "endOfStream": true
+    },
+    "sameAnimationAvcTranscodeSurfaceHandoff": {
+      "inputPixels": [
+        500,
+        500
+      ],
+      "framesBefore": 3,
+      "framesAfter": 119,
+      "endOfStream": true
+    },
+    "wallSecondsIncludingVmStartup": {
+      "candidate-square-sync": 1.69,
+      "candidate-square-async": 2.0,
+      "control-square-async": 13.63,
+      "candidate-same-motion-sync": 2.28,
+      "candidate-landscape-async": 1.73,
+      "candidate-landscape-sync": 2.04
+    }
+  },
+  "remaining": "Playback and displayed bounds of the original HEVC animation in the TikTok app still need a live frame. The isolated decoder failure does not establish why the reported picture looked wide."
+}

@@ -532,7 +532,7 @@ struct Codec {
     std::mutex windowMu;
     bool surface = false;
     bool software = false;                       /* OH's software decoder replaced the hardware one */
-    bool err = false;
+    int32_t errorCode = 0;                       /* first terminal OH error since configure/reset */
     bool running = false;                       /* OH started, and not stopped since */
     bool formatPending = true;                   /* sync mode: FORMAT_CHANGED before the first output */
     int32_t width = 0, height = 0, stride = 0, sliceHeight = 0;
@@ -558,6 +558,8 @@ JavaVM* g_vm;
 jclass g_hashMap, g_integer, g_infoClass, g_formatClass, g_string;
 jmethodID g_hashMapInit, g_hashMapPut, g_integerValueOf, g_infoInit, g_infoSet, g_formatFromMap;
 jmethodID g_cbInput, g_cbOutput, g_cbFormat;
+jclass g_codecException;
+jmethodID g_codecExceptionInit, g_postCodecEvent;
 jmethodID g_bufferOrder, g_bufferLimit, g_bufferPosition;
 jobject g_nativeOrder;
 
@@ -704,12 +706,60 @@ bool submitCodecData(Codec* v, uint32_t index, OH_AVBuffer* buffer)
     return v->api->pushInput(v->codec, index) == 0;
 }
 
+jthrowable codecException(JNIEnv* env, int32_t ohError)
+{
+    // MediaCodec exposes public codes for insufficient resources and a reclaimed codec.
+    // For other failures keep the platform's reason in the detail message.
+    int32_t code = INT32_MIN; // android::UNKNOWN_ERROR
+    if (ohError == 1) code = 1100; // AV_ERR_NO_MEMORY
+    if (ohError == 7) code = 1101; // AV_ERR_SERVICE_DIED
+    char detail[80];
+    snprintf(detail, sizeof(detail), "OpenHarmony decoder error %d", ohError);
+    jstring message = env->NewStringUTF(detail);
+    if (message == nullptr) return nullptr;
+    auto exception = static_cast<jthrowable>(env->NewObject(g_codecException, g_codecExceptionInit,
+                                                            code, 0 /* fatal */, message));
+    env->DeleteLocalRef(message);
+    return exception;
+}
+
+/* Caller holds the codec mutex. Both dequeue operations must expose a terminal failure
+ * even when an input index or a format change had already been queued. */
+bool throwPendingCodecError(JNIEnv* env, const Codec* v)
+{
+    if (v->errorCode == 0) return false;
+    jthrowable exception = codecException(env, v->errorCode);
+    if (exception != nullptr) env->Throw(exception);
+    return true;
+}
+
 void onError(OH_AVCodec*, int32_t error, void* user)
 {
     Codec* v = static_cast<Codec*>(user);
-    { std::lock_guard<std::mutex> l(v->mu); v->err = true; }
+    if (error == 0) return;
+    JNIEnv* env = nullptr;
+    jobject codec = nullptr;
+    {
+        std::lock_guard<std::mutex> l(v->mu);
+        if (v->errorCode != 0) return;
+        v->errorCode = error;
+        if (v->callback != nullptr) {
+            env = attachedEnv();
+            if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
+        }
+    }
     v->cv.notify_all();
     vlog("%s OH decoder error %d (%s)", logTag(v), error, v->mime.c_str());
+    if (codec != nullptr) {
+        jthrowable exception = codecException(env, error);
+        if (exception != nullptr) {
+            // Let MediaCodec dispatch on the Handler supplied to setCallback.
+            env->CallVoidMethod(codec, g_postCodecEvent, 1 /* EVENT_CALLBACK */, 3 /* CB_ERROR */, 0, exception);
+            env->DeleteLocalRef(exception);
+        }
+        env->DeleteLocalRef(codec);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
 }
 
 void onStreamChanged(OH_AVCodec*, OH_AVFormat* format, void* user)
@@ -734,6 +784,7 @@ void onNeedInput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
     bool forApp;
     {
         std::lock_guard<std::mutex> l(v->mu);
+        if (v->errorCode != 0) return;
         forApp = !submitCodecData(v, index, buffer);
         if (forApp) { v->inputs.push_back(index); v->inputBuffers[index] = buffer; }
     }
@@ -754,6 +805,7 @@ void onNewOutput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
     if (buffer != nullptr) oh.bufferGetAttr(buffer, &attr);
     {
         std::lock_guard<std::mutex> l(v->mu);
+        if (v->errorCode != 0) return;
         /* Rendered to a window, OH's frame carries no bytes for the app, so its size is 0; Android
          * reports the frame's size there, and players take a size-0 output for an empty one (or
          * the end of the stream) and drop it without rendering. */
@@ -1264,7 +1316,7 @@ void resetAudio(Codec* v)
     clearQueues(v);
     {
         std::lock_guard<std::mutex> l(v->mu);
-        v->err = false;
+        v->errorCode = 0;
         v->formatPending = true;
         v->asyncFormatSent = false;
     }
@@ -1362,6 +1414,7 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
         if (b_configure != nullptr) b_configure(env, thiz, keys, values, surface, crypto, descrambler, flags);
         return;
     }
+    { std::lock_guard<std::mutex> lock(v->mu); v->errorCode = 0; }
     if (v->audio) {
         configureAudio(env, v, keys, values, crypto);
         return;
@@ -1535,11 +1588,12 @@ jint wDequeueInput(JNIEnv* env, jobject thiz, jlong timeoutUs)
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) return b_dequeueInput != nullptr ? b_dequeueInput(env, thiz, timeoutUs) : MC_TRY_AGAIN;
     std::unique_lock<std::mutex> l(v->mu);
-    auto ready = [&] { return !v->inputs.empty() || v->err; };
+    auto ready = [&] { return !v->inputs.empty() || v->errorCode != 0; };
     if (!ready() && timeoutUs != 0) {
         if (timeoutUs < 0) v->cv.wait(l, ready);
         else v->cv.wait_for(l, std::chrono::microseconds(timeoutUs), ready);
     }
+    if (throwPendingCodecError(env, v)) return MC_TRY_AGAIN;
     if (v->inputs.empty()) return MC_TRY_AGAIN;
     uint32_t index = v->inputs.front();
     v->inputs.pop_front();
@@ -1616,11 +1670,12 @@ jint wDequeueOutput(JNIEnv* env, jobject thiz, jobject info, jlong timeoutUs)
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) return b_dequeueOutput != nullptr ? b_dequeueOutput(env, thiz, info, timeoutUs) : MC_TRY_AGAIN;
     std::unique_lock<std::mutex> l(v->mu);
-    auto ready = [&] { return !v->outputs.empty() || v->err; };
+    auto ready = [&] { return !v->outputs.empty() || v->errorCode != 0; };
     if (!ready() && timeoutUs != 0) {
         if (timeoutUs < 0) v->cv.wait(l, ready);
         else v->cv.wait_for(l, std::chrono::microseconds(timeoutUs), ready);
     }
+    if (throwPendingCodecError(env, v)) return MC_TRY_AGAIN;
     if (v->outputs.empty()) return MC_TRY_AGAIN;
     /* The format a frame comes in is announced before the frame, as Android's codec does. */
     if (v->formatPending) {
@@ -1710,6 +1765,7 @@ void wSetCallback(JNIEnv* env, jobject thiz, jobject callback)
                                       "(Landroid/media/MediaCodec;Landroid/media/MediaFormat;)V");
         if (env->ExceptionCheck()) env->ExceptionClear();
     }
+    std::lock_guard<std::mutex> lock(v->mu);
     if (v->javaCodec != nullptr) env->DeleteGlobalRef(v->javaCodec);
     if (v->callback != nullptr) env->DeleteGlobalRef(v->callback);
     v->javaCodec = env->NewGlobalRef(thiz);
@@ -1986,13 +2042,14 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     jclass codec = env->FindClass("android/media/MediaCodec");
     jclass list = env->FindClass("android/media/MediaCodecList");
     jclass info = env->FindClass("android/media/MediaCodec$BufferInfo");
+    jclass exception = env->FindClass("android/media/MediaCodec$CodecException");
     jclass format = env->FindClass("android/media/MediaFormat");
     jclass map = env->FindClass("java/util/HashMap");
     jclass integer = env->FindClass("java/lang/Integer");
     jclass string = env->FindClass("java/lang/String");
     jclass byteBuffer = env->FindClass("java/nio/ByteBuffer");
     jclass byteOrder = env->FindClass("java/nio/ByteOrder");
-    if (codec == nullptr || list == nullptr || info == nullptr || format == nullptr || map == nullptr
+    if (codec == nullptr || list == nullptr || info == nullptr || exception == nullptr || format == nullptr || map == nullptr
             || integer == nullptr || string == nullptr || byteBuffer == nullptr || byteOrder == nullptr) {
         env->ExceptionClear();
         return 0;
@@ -2004,6 +2061,9 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     g_infoPts = env->GetFieldID(info, "presentationTimeUs", "J");
     g_infoFlags = env->GetFieldID(info, "flags", "I");
     g_infoClass = (jclass) env->NewGlobalRef(info);
+    g_codecException = (jclass) env->NewGlobalRef(exception);
+    g_codecExceptionInit = env->GetMethodID(exception, "<init>", "(IILjava/lang/String;)V");
+    g_postCodecEvent = env->GetMethodID(codec, "postEventFromNative", "(IIILjava/lang/Object;)V");
     g_infoInit = env->GetMethodID(info, "<init>", "()V");
     g_infoSet = env->GetMethodID(info, "set", "(IIJI)V");
     g_formatClass = (jclass) env->NewGlobalRef(format);
@@ -2022,7 +2082,8 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     jobject order = nativeOrder != nullptr ? env->CallStaticObjectMethod(byteOrder, nativeOrder) : nullptr;
     if (order != nullptr) g_nativeOrder = env->NewGlobalRef(order);
     if (env->ExceptionCheck()) env->ExceptionClear();
-    if (g_context == nullptr || g_infoOffset == nullptr || g_infoInit == nullptr || g_formatFromMap == nullptr
+    if (g_context == nullptr || g_codecException == nullptr || g_codecExceptionInit == nullptr
+            || g_postCodecEvent == nullptr || g_infoOffset == nullptr || g_infoInit == nullptr || g_formatFromMap == nullptr
             || g_hashMapInit == nullptr || g_integerValueOf == nullptr || g_nativeOrder == nullptr) {
         vlog("[WL-VIDEOCODEC] framework classes incomplete; video and audio decoding not offered");
         return 0;

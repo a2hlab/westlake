@@ -2065,3 +2065,28 @@ the Google background configuration service had logged a hostname-resolution
 failure. In the retest the adapter recorded successful lookups of Google domains
 from Play services. Setup still did not reach an email or password field. Its
 dependency at that point remains unidentified. [Input, window and DNS evidence](../tests/google-auth/full48/candidate99.json)
+
+## TikTok welcome animation on the OpenHarmony board
+
+The original TikTok 47.1.4 APK contains a 6.1-second, 500 × 500 HEVC welcome
+animation with square pixels and no rotation metadata. A decoded frame shows
+an upright handset. The board screenshot shows the welcome slogan upright in a
+1200 × 1920 activity. It did not capture a moving frame of the welcome clip,
+so the displayed width, height and rotation of the animation are still unknown.
+[App and screen measurements](../tests/google-auth/full48/candidate101.json)
+
+In a separate board test, OpenHarmony’s hardware decoder accepted the original
+clip and then returned error 6 before its first output frame. Both memory
+output and surface output produced this result. The public codec API offered
+no software HEVC decoder on this image. A standalone software decoder built
+from OpenHarmony’s FFmpeg source decoded all 122 frames on the same board.
+The decoded pixels matched the host reference byte for byte. This decoder ran
+outside the app. [Decoder measurements](../tests/google-auth/full48/candidate102.json)
+
+The Westlake bridge now delivers terminal decoder failures through Android
+`MediaCodec.CodecException`. On the original clip, both input and output
+dequeue reported the error, and callback mode delivered it on the requested
+handler. The previous bridge waited past the 12-second callback deadline. As a
+control, an H.264 transcode of the same animation delivered all 122 frames
+across an output-surface change. On-screen sizing still requires a capture from
+the original TikTok player. [Board results](../tests/google-auth/full48/candidate102.json)
