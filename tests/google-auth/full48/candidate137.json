@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "test": "Account lookup in original Gmail after submitting a search",
+  "package": "com.google.android.gm",
+  "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "originalApkUnmodified": true,
+  "profile": "Retained test mailbox on the OpenHarmony board",
+  "releaseControl": {
+    "action": "Select a previously saved synthetic search term",
+    "ownedWindowsBeforeAction": 1,
+    "firstSampleWithNoWindowsSeconds": 8.5,
+    "aliveAndWindowlessAtLastSample": true
+  },
+  "diagnostic": {
+    "androidRuntimeMatchedSourceInputs": 144,
+    "addedObservers": [
+      "Android activity start",
+      "Android activity finish",
+      "Android window removal"
+    ],
+    "runs": {
+      "recent": {
+        "ownedWindowsBeforeAction": 1,
+        "observedActivityFinishes": 1,
+        "finishStackAtOriginalGmail": [
+          "ooi.ck(PG:793)",
+          "ooi.cm(PG:624)"
+        ],
+        "lastWindowRemovalCalledFrom": "android.app.ActivityThread.handleDestroyActivity",
+        "originalAppStillAliveAtLastSample": true,
+        "registeredWindowsAtLastSample": 0,
+        "lastSampleSeconds": 40.7,
+        "searchResultShown": false
+      },
+      "date": {
+        "ownedWindowsBeforeAction": 5,
+        "observedActivityFinishes": 1,
+        "finishStackAtOriginalGmail": [
+          "ooi.ck(PG:793)",
+          "ooi.cm(PG:624)"
+        ],
+        "lastWindowRemovalCalledFrom": "android.app.ActivityThread.handleDestroyActivity",
+        "originalAppStillAliveAtLastSample": true,
+        "registeredWindowsAtLastSample": 0,
+        "lastSampleSeconds": 25.8,
+        "searchResultShown": false
+      }
+    },
+    "changedFrameworkFiles": [
+      "framework/activity/java/ActivityClientControllerAdapter.java",
+      "framework/activity/java/ActivityTaskManagerAdapter.java",
+      "framework/window/java/WindowSessionAdapter.java"
+    ]
+  },
+  "originalApk": {
+    "debugLocations": {
+      "ck": {
+        "debugLine": 793,
+        "dexPcCodeUnits": 792,
+        "byteOffset": 1584,
+        "instruction": "invoke-virtual",
+        "target": "Lory;->finish()V"
+      },
+      "cm": {
+        "debugLine": 624,
+        "dexPcCodeUnits": 623,
+        "byteOffset": 1246,
+        "instruction": "invoke-virtual",
+        "target": "Looi;->ck(Landroid/content/Intent;)V"
+      }
+    },
+    "accountLookup": {
+      "targetType": "Gmail internal AccountId",
+      "inputType": "android.accounts.Account",
+      "waitSeconds": 2,
+      "declaredCatchTypes": [
+        "Ljava/util/concurrent/ExecutionException;",
+        "Ljava/lang/InterruptedException;",
+        "Ljava/util/concurrent/TimeoutException;",
+        "Ljava/lang/IllegalStateException;",
+        "Ljava/lang/NullPointerException;"
+      ]
+    },
+    "execution": "The search callback reads a non-null Gmail mail-provider account and calls the app lookup for its Android account. The empty result reaches the recorded finish call. The original app uses a distinct branch when the search omits the mail-provider account."
+  },
+  "testMessageIdentified": false,
+  "afterColdRestart": {
+    "verifiedOriginalApp": true,
+    "primaryVisible": true,
+    "matchedReferenceListBands": 3,
+    "searchFieldY": 159,
+    "visibleListExactlyMatchesPriorFixedInbox": true,
+    "relativeToPriorInboxMeanAbsoluteError": 0.0,
+    "releasedRuntimeVerified": true
+  },
+  "methodTrace": {
+    "formatVersion": 3,
+    "recordCount": 342836,
+    "overflow": false,
+    "lookupCalls": 0,
+    "lookups": [],
+    "relatedExceptionConstructors": [],
+    "searchLifecycleEntries": []
+  },
+  "interpretation": "On the OpenHarmony board, submitting the November 17–18 date filter and selecting a saved search term both reached the same instruction in the original Gmail APK. Gmail received a mail account in its search request, looked up its internal account ID using the Android account, and called Activity.finish() when that lookup yielded no usable account. Android then removed the inbox window. The Gmail process stayed alive. A separate three-second method trace missed the lookup, so the underlying exception and any connection to the earlier mailbox authentication failure remain undetermined.",
+  "limits": [
+    "This result covers two search actions in the retained Gmail profile on one board.",
+    "The earlier sync test and the search test used different operations. The search evidence does not identify a Google backend decision.",
+    "The separate method trace changed timing. Its file contained 342836 events with no entry for the target lookup. It cannot identify a timeout, an unregistered account, or a storage failure.",
+    "Receipt of the test email remains unverified."
+  ]
+}

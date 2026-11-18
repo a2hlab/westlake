@@ -1717,6 +1717,8 @@ previous build byte for byte. The diagnostic recorded only fixed reason codes.
 
 On November 18 the original Gmail app displayed the same Primary inbox as the earlier board capture. We selected November 17–18 in its date picker and tapped the confirmation button. Its windows disappeared before any results appeared. The Gmail process stayed alive. Opening the host again left Gmail without a window for at least 30 seconds. A cold restart brought back the same visible inbox. Receipt remains unverified. [Physical board observations](../tests/google-auth/full48/candidate136.json)
 
+On the OpenHarmony board, submitting the November 17–18 date filter and selecting a saved search term both reached the same instruction in the original Gmail APK. Gmail received a mail account in its search request, looked up its internal account ID using the Android account, and called Activity.finish() when that lookup yielded no usable account. Android then removed the inbox window. The Gmail process stayed alive. A separate three-second method trace missed the lookup, so the underlying exception and any connection to the earlier mailbox authentication failure remain undetermined. [Original Gmail searches, call stacks and account lookup](../tests/google-auth/full48/candidate137.json)
+
 ### Gmail touch input on its dedicated host
 
 The hosted window path looked up `oh_owned_input_subscribe` at runtime.
