@@ -344,6 +344,13 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             Rect cutoutSafe = new Rect();
             state.getDisplayCutoutSafe(cutoutSafe);
             ClientWindowFrames frames = new ClientWindowFrames();
+            // A child window (a popup, a panel) is laid out in its parent's frame, as WMS lays it out
+            // and as its ViewRootImpl does with the attached frame addToDisplay gave it
+            // (attachedFrameFor). Laid out in the display frame instead, a popup moved down by the
+            // status bar once its window had OH's bars as insets, while its views, and so its taps,
+            // stayed where ViewRootImpl put them: on an overflow menu a tap on the first item opened
+            // the second.
+            frames.attachedFrame = attachedFrameFor(attrs.type);
             new android.view.WindowLayout().computeFrames(attrs, state, cutoutSafe, bounds,
                     android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN, width, height,
                     android.view.WindowInsets.Type.defaultVisible(), 1f, frames);
