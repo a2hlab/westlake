@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class GoogleAuthProxy {
     public static final String DESCRIPTOR = "org.westlake.IGoogleAuthProxy.v1";
-    private static final int ACCOUNTS = 1, TOKEN = 2, INVALIDATE = 3, FEATURES = 4, ACCOUNT_ID = 5;
+    private static final int ACCOUNTS = 1, TOKEN = 2, INVALIDATE = 3, FEATURES = 4, ACCOUNT_ID = 5, PACKAGE_ACCOUNTS = 6;
     private static final ExecutorService REQUESTS = Executors.newCachedThreadPool();
     private static final AtomicLong IDS = new AtomicLong();
     private static final Object TOKEN_LOCK = new Object();
@@ -136,6 +136,30 @@ public final class GoogleAuthProxy {
                     Account selected = account(null);
                     reply.writeNoException(); reply.writeTypedArray(new Account[] {selected}, 0);
                     event("request=" + request + " operation=accounts owner=" + owner + " count=1");
+                    return true;
+                }
+                if (code == PACKAGE_ACCOUNTS) {
+                    // Android's AccountManager answers Play services, a privileged caller, with the accounts that
+                    // another package may see. Official Play services asks only on that package's own request
+                    // (packageAccounts); the account is shown when the package's own grant, pinned to its current
+                    // signer, would show it to the package's own connection. No grant, no account.
+                    if (!"com.google.android.gms".equals(owner))
+                        throw new SecurityException("only Play services asks for another package's accounts");
+                    String target = data.readString(), targetSha256 = data.readString();
+                    if (target == null || targetSha256 == null || data.dataAvail() != 0
+                            || (flags & IBinder.FLAG_ONEWAY) != 0) {
+                        throw new SecurityException("invalid package account request");
+                    }
+                    Account[] found;
+                    try {
+                        GoogleAuthPolicy.require(policy, target, targetSha256, null);
+                        found = new Account[] {account(null)};
+                    } catch (SecurityException notGranted) {
+                        found = new Account[0];
+                    }
+                    reply.writeNoException(); reply.writeTypedArray(found, 0);
+                    event("request=" + request + " operation=package_accounts owner=" + owner + " target=" + target
+                            + " count=" + found.length);
                     return true;
                 }
                 if (code == FEATURES) {
@@ -354,6 +378,35 @@ public final class GoogleAuthProxy {
         return false;
     }
 
+    /** The accounts the provider would show packageName itself (its own grant), asked by Play services. */
+    private static Account[] packageAccounts(String packageName, String signerSha256) throws Exception {
+        Parcel reply = call(PACKAGE_ACCOUNTS, data -> { data.writeString(packageName); data.writeString(signerSha256); });
+        try {
+            Account[] found = reply.createTypedArray(Account.CREATOR);
+            return found == null ? new Account[0] : found;
+        } finally { reply.recycle(); }
+    }
+
+    /** Whether the binder call this thread serves comes from packageName's own channel. */
+    private static boolean servingCallFrom(String packageName) {
+        int uid = Binder.getCallingUid();
+        return uid != android.os.Process.myUid()
+                && packageName.equals(adapter.packagemanager.RemotePackages.packageForUid(uid));
+    }
+
+    /** packageName's one current signer, as its verified channel registered it in this process; else null. */
+    private static String currentSigner(String packageName) {
+        try {
+            android.content.pm.PackageInfo info = ActivityThread.currentApplication().getPackageManager()
+                    .getPackageInfo(packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
+            android.content.pm.Signature[] current = info == null || info.signingInfo == null ? null
+                    : info.signingInfo.getApkContentsSigners();
+            return current == null || current.length != 1 ? null : digest(current[0].toByteArray(), "SHA-256");
+        } catch (Exception unknown) {
+            return null;
+        }
+    }
+
     private static boolean interactiveCaller(String packageName) throws Exception {
         return (Boolean) Class.forName("adapter.activity.RemoteActivities")
                 .getMethod("isInteractiveCaller", String.class).invoke(null, packageName);
@@ -367,7 +420,21 @@ public final class GoogleAuthProxy {
         }
         if (own.equals(target)) return accounts(type);
         // A broker client's own grant cannot supply accounts visible to another package.
-        if (!"com.google.android.gms".equals(own) || !interactiveCaller(target)) return new Account[0];
+        if (!"com.google.android.gms".equals(own)) return new Account[0];
+        // As Android answers Play services: the account the target may see, which the provider decides from the
+        // target's own signer-pinned grant. Asked only while serving the target's own request: original Gmail's
+        // account list comes from Play services' accounts provider, which asks for Gmail's accounts by package.
+        boolean serving = servingCallFrom(target);
+        String signer = serving ? currentSigner(target) : null;
+        Account[] visible = new Account[0];
+        if (signer != null) {
+            try { visible = packageAccounts(target, signer); }
+            catch (Exception unavailable) { visible = new Account[0]; }
+        }
+        event("package_accounts target=" + target + " serving=" + serving + " signer=" + (signer != null)
+                + " count=" + visible.length);
+        if (visible.length > 0) return visible;
+        if (!interactiveCaller(target)) return new Account[0];
         Account[] found = currentAccounts();
         if (found != null && found.length == 1 && found[0] != null && "com.google".equals(found[0].type)
                 && (Boolean) Class.forName("adapter.activity.RemoteActivities")
