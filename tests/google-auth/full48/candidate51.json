@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "candidate": 51,
+  "sourceBaseRevision": "67eba841a1be748468cf422978beb748288e657d",
+  "changedSourceHashes": {
+    "framework/core/java/GoogleIdentityServicePolicy.java": "e17619d10288a00d5d042d5fe2d12e1486ef7514c75b4f2b2bda941e98555526"
+  },
+  "adapterJarSha256": "3032185371445c3bea8d40a08f9a46ef1b2f5221f26c0fab3939ba25ea12370e",
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "policyHostChecksPassed": 20,
+  "adapterBuildPassed": true,
+  "bootImageBuildPassed": true,
+  "boardPreloadPassed": true,
+  "nativeArtifactsRebuilt": false,
+  "policyChange": "Add SignIn.API service 44, the internal dependency of legacy service 91.",
+  "preservationBeforeWattpadGrant": {
+    "identityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "serviceExceptions": "151,130,40,25,257,185,51,218,212,213,91,44",
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false
+  },
+  "wattpad": {
+    "apkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+    "previousLegacyCallbackStatus": 8,
+    "legacyCallbackStatuses": [
+      4,
+      4
+    ],
+    "accountChooserReached": true,
+    "existingAccountSelected": true,
+    "beforeAppGrant": "Provider rejected the origin as not granted; GMS fell back to its uncertified-device page.",
+    "afterBasicIdentityGrant": "Provider rejected the request as scope not granted. The APK requests user.birthday.read in its legacy sign-in options; the test grant currently excludes it.",
+    "appGrant": {
+      "package": "wp.wattpad",
+      "signerSha256": "012de45837d20561255a02bbc22334c1f681d01b366fe31bef418baf535903ef",
+      "scopes": [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile"
+      ],
+      "explicitServerClientIdGranted": false,
+      "birthdayScopeGranted": false,
+      "existingEntriesPreserved": true,
+      "basis": "Original APK signer verified; app GoogleAuthUtil requests oauth2:openid email profile. No server client ID embedded in inspected APK; ID-token requests remain ungranted."
+    },
+    "birthDatePermission": "User clarification pending; no birth-date grant added.",
+    "authenticatedReturn": false,
+    "fullApplicationAcceptance": false
+  },
+  "rawLogsAndScreenshotsPublic": false
+}

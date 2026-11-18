@@ -27,12 +27,14 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * ILocationManager over OH's location service (westlake ADR-0009 decision 1): the service a HAP asks for the
@@ -45,19 +47,19 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * What it answers:
  * - Location is on when OH's location switch is (OH_Location_IsLocatingEnabled). The providers are Android's four:
- *   gps, network, fused and passive. OH chooses the source itself.
+ *   gps, network, fused and passive. Disabling GNSS in the runtime also disables Android's GPS provider.
  * - Requests (registerLocationListener, registerLocationPendingIntent, getCurrentLocation) become OH requests:
  *   the interval from the LocationRequest, the power scene from its quality. Their fixes reach the listener,
  *   PendingIntent or callback as Android's location manager delivers them, with the request's minimum distance,
  *   minimum interval and maximum update count applied. Unregistering stops the OH request. getCurrentLocation
  *   answers its first fix, or null at its duration (30 seconds by default), and can be cancelled.
- * - getLastLocation answers the last fix this process received, or null.
- * - Location is OH's: the host application must hold OH's location permission
- *   (ohos.permission.APPROXIMATELY_LOCATION), which is what Westlake answers an app's runtime permission request
- *   with. Without it, or with the switch off, a request is accepted and gets no fixes, getCurrentLocation answers
- *   null and getLastLocation null: the answers Android gives while location is unavailable. A SecurityException,
- *   Android's answer to an app without the permission, would reach apps that checkSelfPermission told it had
- *   been granted (runtime permissions are not yet answered consistently: phase B of ADR-0004).
+ * - getLastLocation answers the most recent accepted fix for the requested provider, or null.
+ * - For a foreground location request, the APK must declare a location permission and its HAP must hold
+ *   the corresponding OH grant. Android fine location maps to ohos.permission.LOCATION and coarse location
+ *   maps to ohos.permission.APPROXIMATELY_LOCATION. The checks read the current grant.
+ *   With neither permission, or with location switched off, listeners receive no fixes, getCurrentLocation
+ *   returns null and there is no last known location. The host's permission applies to the HAP;
+ *   independent user grants for APKs sharing that HAP need separate enforcement.
  * - Without OH's location library the compatibility floor stays: providers absent, location off, no fixes.
  * - Not bridged: geocoding (isGeocodeAvailable false), GNSS status, NMEA, measurements and batching (accepted, no
  *   callbacks, as on a device without that data). Coordinates are never logged.
@@ -76,6 +78,11 @@ public final class LocationManagerAdapter {
     private static final int OH_HIGH_POWER = 0x0601;
     private static final int OH_LOW_POWER = 0x0602;
     private static final int OH_NO_POWER = 0x0603;
+    // Location_SourceType from the OpenHarmony LocationKit NDK.
+    private static final int OH_GNSS = 1;
+    private static final int OH_NETWORK = 2;
+    private static final int OH_INDOOR = 3;
+    private static final int OH_RTK = 4;
     /** LocationManager.getCurrentLocation's default timeout. */
     private static final long CURRENT_LOCATION_TIMEOUT_MS = 30_000;
 
@@ -87,7 +94,8 @@ public final class LocationManagerAdapter {
     private static final Map<Integer, Request> REQUESTS = new ConcurrentHashMap<>();
     /** Requests by what the app registered: a listener's binder, or a PendingIntent. */
     private static final Map<Object, Request> BY_KEY = new ConcurrentHashMap<>();
-    private static volatile Location sLast;
+    // Passive observers see accepted fixes from all providers, with the producing provider intact.
+    private static final Map<String, Location> LAST_LOCATIONS = new HashMap<>();
     private static volatile boolean sNoNatives;
 
     private static native int nativeEnabled();
@@ -159,13 +167,17 @@ public final class LocationManagerAdapter {
         ILocationListener listener;
         PendingIntent pendingIntent;
         ILocationCallback callback;
-        volatile long handle;
+        // Zero until StartLocating returns its handle. A negative value closes the request.
+        final AtomicLong handle = new AtomicLong();
         int delivered;
         Location lastDelivered;
         long lastDeliveredAt;
 
         Request(String provider, LocationRequest request, Object key) {
             this.provider = provider != null ? provider : LocationManager.FUSED_PROVIDER;
+            if (!PROVIDERS.contains(this.provider)) {
+                throw new IllegalArgumentException("Unknown location provider: " + this.provider);
+            }
             this.request = request;
             this.key = key;
         }
@@ -173,11 +185,11 @@ public final class LocationManagerAdapter {
 
     /**
      * OH's power scene for a request: GNSS (high power) for the gps provider, as Android's gps provider is GNSS, and
-     * for a high-accuracy request; passive for the passive provider or interval; otherwise OH's low-power scene,
+     * for high-accuracy fused requests; network requests stay on low power; passive for the passive provider or interval; otherwise OH's low-power scene,
      * network positioning. On a device without a network location service (this board: OH's NetworkAbility finds
      * none) OH files a low-power request as passive and it gets fixes only while someone else locates.
      *
-     * WESTLAKE_LOCATION_GNSS=0 keeps every request off GNSS (low power instead), for a device where starting GNSS
+     * WESTLAKE_LOCATION_GNSS=0 disables explicit GPS and keeps fused requests on low power for a device where GNSS
      * does harm. On the test board OH's GNSS start fails, and about two minutes later its WiFi driver fails every
      * scan and WiFi stays down until a reboot (seen twice; the radio is likely shared). A HAP asking for GNSS does
      * the same there; the switch keeps Westlake's apps from doing it.
@@ -185,13 +197,17 @@ public final class LocationManagerAdapter {
     private static int powerScene(String provider, LocationRequest request) {
         if (LocationManager.PASSIVE_PROVIDER.equals(provider)) return OH_NO_POWER;
         if (request != null && request.getIntervalMillis() == LocationRequest.PASSIVE_INTERVAL) return OH_NO_POWER;
-        if (!GNSS) return OH_LOW_POWER;
+        if (!GNSS || LocationManager.NETWORK_PROVIDER.equals(provider)) return OH_LOW_POWER;
         if (LocationManager.GPS_PROVIDER.equals(provider)) return OH_HIGH_POWER;
         return request != null && request.getQuality() == LocationRequest.QUALITY_HIGH_ACCURACY
                 ? OH_HIGH_POWER : OH_LOW_POWER;
     }
 
     private static final boolean GNSS = !"0".equals(System.getenv("WESTLAKE_LOCATION_GNSS"));
+
+    private static boolean disabledProvider(String provider) {
+        return !GNSS && LocationManager.GPS_PROVIDER.equals(provider);
+    }
 
     private static int intervalSeconds(LocationRequest request) {
         long millis = request != null ? request.getIntervalMillis() : 1000;
@@ -205,9 +221,14 @@ public final class LocationManagerAdapter {
      */
     private static boolean start(Request r, String how) {
         REQUESTS.put(r.id, r);
+        if (r.key != null) stop(BY_KEY.put(r.key, r), "replaced");
         if (!locationOn()) {
             System.err.println("[" + TAG + "] " + how + " " + r.id + " for " + r.provider
                     + ": registered, no fixes while location is " + describe(state()));
+            return false;
+        }
+        if (disabledProvider(r.provider)) {
+            System.err.println("[" + TAG + "] " + how + " " + r.id + ": GPS disabled by runtime configuration");
             return false;
         }
         if (!hostMayLocate()) {
@@ -229,28 +250,38 @@ public final class LocationManagerAdapter {
                     : code == OH_SERVICE_UNAVAILABLE ? "service unavailable" : "code " + code) + "); no fixes");
             return false;
         }
-        r.handle = handle;
+        if (!attachNativeHandle(r, handle)) return false;
         System.err.println("[" + TAG + "] " + how + " " + r.id + " for " + r.provider + ": OH request started, every "
                 + intervalSeconds(r.request) + " s, power scene 0x" + Integer.toHexString(powerScene(r.provider, r.request)));
         return true;
     }
 
-    private static void stop(Request r, String why) {
-        if (r == null) return;
-        REQUESTS.remove(r.id);
+    private static boolean attachNativeHandle(Request r, long handle) {
+        if (r.handle.compareAndSet(0, handle)) return true;
+        // A single fix or an unregister can finish this request inside StartLocating.
+        stopNative(r, handle, "finished during start");
+        return false;
+    }
+
+    private static boolean stop(Request r, String why) {
+        if (r == null) return false;
+        long handle = r.handle.getAndSet(-1);
+        if (handle < 0) return false;
+        REQUESTS.remove(r.id, r);
         if (r.key != null) BY_KEY.remove(r.key, r);
-        long handle = r.handle;
-        r.handle = 0;
-        if (handle > 0) {
-            int rc;
-            try {
-                rc = nativeStop(handle);
-            } catch (UnsatisfiedLinkError e) {
-                rc = -1;
-            }
-            System.err.println("[" + TAG + "] request " + r.id + " stopped (" + why + "), OH " + rc + ", "
-                    + r.delivered + " fix(es) delivered");
+        if (handle > 0) stopNative(r, handle, why);
+        return true;
+    }
+
+    private static void stopNative(Request r, long handle, String why) {
+        int rc;
+        try {
+            rc = nativeStop(handle);
+        } catch (UnsatisfiedLinkError e) {
+            rc = -1;
         }
+        System.err.println("[" + TAG + "] request " + r.id + " stopped (" + why + "), OH " + rc + ", "
+                + r.delivered + " fix(es) delivered");
     }
 
     /** A fix from OH (location_natives.c), on the thread OH calls back on. */
@@ -260,7 +291,17 @@ public final class LocationManagerAdapter {
             double speedAccuracy, double bearingAccuracy, int sourceType) {
         Request r = REQUESTS.get(id);
         if (r == null) return;
-        Location location = new Location(r.provider);
+        boolean satellite = sourceType == OH_GNSS || sourceType == OH_RTK;
+        // OpenHarmony includes indoor positioning in its network provider.
+        boolean network = sourceType == OH_NETWORK || sourceType == OH_INDOOR;
+        if (LocationManager.GPS_PROVIDER.equals(r.provider) && !satellite) return;
+        if (LocationManager.NETWORK_PROVIDER.equals(r.provider) && !network) return;
+        String provider = r.provider;
+        if (LocationManager.PASSIVE_PROVIDER.equals(provider)) {
+            if (satellite) provider = LocationManager.GPS_PROVIDER;
+            else if (network) provider = LocationManager.NETWORK_PROVIDER;
+        }
+        Location location = new Location(provider);
         location.setLatitude(latitude);
         location.setLongitude(longitude);
         location.setAltitude(altitude);
@@ -272,8 +313,28 @@ public final class LocationManagerAdapter {
         if (altitudeAccuracy > 0) location.setVerticalAccuracyMeters((float) altitudeAccuracy);
         if (speedAccuracy > 0) location.setSpeedAccuracyMetersPerSecond((float) speedAccuracy);
         if (bearingAccuracy > 0) location.setBearingAccuracyDegrees((float) bearingAccuracy);
-        sLast = location;
+        synchronized (LAST_LOCATIONS) {
+            rememberLocation(r.provider, location);
+            if (!LocationManager.PASSIVE_PROVIDER.equals(r.provider)) {
+                rememberLocation(LocationManager.PASSIVE_PROVIDER, location);
+            }
+        }
         deliver(r, location, sourceType);
+    }
+
+    // Caller holds LAST_LOCATIONS. A delayed callback must not replace a newer stored fix.
+    private static void rememberLocation(String provider, Location location) {
+        Location previous = LAST_LOCATIONS.get(provider);
+        if (previous == null || previous.getElapsedRealtimeNanos() <= location.getElapsedRealtimeNanos()) {
+            LAST_LOCATIONS.put(provider, location);
+        }
+    }
+
+    private static Location lastLocation(String provider) {
+        synchronized (LAST_LOCATIONS) {
+            Location last = LAST_LOCATIONS.get(provider);
+            return last == null ? null : new Location(last);
+        }
     }
 
     private static void deliver(Request r, Location location, int sourceType) {
@@ -292,8 +353,7 @@ public final class LocationManagerAdapter {
         }
         try {
             if (r.callback != null) {
-                r.callback.onLocation(new Location(location));
-                stop(r, "answered");
+                if (stop(r, "answered")) r.callback.onLocation(new Location(location));
                 return;
             }
             if (r.listener != null) {
@@ -333,8 +393,7 @@ public final class LocationManagerAdapter {
         long timeout = request != null && request.getDurationMillis() != Long.MAX_VALUE
                 ? request.getDurationMillis() : CURRENT_LOCATION_TIMEOUT_MS;
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            if (!REQUESTS.containsKey(r.id)) return;   // answered or cancelled
-            stop(r, running ? "no fix in " + timeout + " ms" : "unavailable");
+            if (!stop(r, running ? "no fix in " + timeout + " ms" : "unavailable")) return;
             try {
                 callback.onLocation(null);
             } catch (RemoteException | RuntimeException ignored) {
@@ -345,18 +404,14 @@ public final class LocationManagerAdapter {
 
     private static void registerListener(String provider, LocationRequest request, ILocationListener listener) {
         IBinder key = listener.asBinder();
-        stop(BY_KEY.get(key), "replaced");
         Request r = new Request(provider, request, key);
         r.listener = listener;
-        BY_KEY.put(key, r);
         start(r, "listener");
     }
 
     private static void registerPendingIntent(String provider, LocationRequest request, PendingIntent pendingIntent) {
-        stop(BY_KEY.get(pendingIntent), "replaced");
         Request r = new Request(provider, request, pendingIntent);
         r.pendingIntent = pendingIntent;
-        BY_KEY.put(pendingIntent, r);
         start(r, "PendingIntent");
     }
 
@@ -389,7 +444,7 @@ public final class LocationManagerAdapter {
                 case "isLocationEnabledForUser":
                     return locationOn();
                 case "isProviderEnabledForUser":
-                    return locationOn() && PROVIDERS.contains((String) args[0]);
+                    return locationOn() && PROVIDERS.contains((String) args[0]) && !disabledProvider((String) args[0]);
                 case "hasProvider":
                     return available() && PROVIDERS.contains((String) args[0]);
                 case "getAllProviders":
@@ -397,22 +452,24 @@ public final class LocationManagerAdapter {
                 case "getProviders": {
                     boolean enabledOnly = (Boolean) args[1];
                     boolean none = !available() || (enabledOnly && !locationOn());
-                    return none ? new ArrayList<String>() : new ArrayList<>(PROVIDERS);
+                    if (none) return new ArrayList<String>();
+                    List<String> providers = new ArrayList<>(PROVIDERS);
+                    if (enabledOnly) providers.removeIf(LocationManagerAdapter::disabledProvider);
+                    return providers;
                 }
                 case "getBestProvider": {
-                    if (!available() || ((Boolean) args[1] && !locationOn())) return null;
+                    boolean enabledOnly = (Boolean) args[1];
+                    if (!available() || (enabledOnly && !locationOn())) return null;
                     Criteria criteria = (Criteria) args[0];
-                    return criteria != null && criteria.getAccuracy() == Criteria.ACCURACY_FINE
+                    return criteria != null && criteria.getAccuracy() == Criteria.ACCURACY_FINE && (!enabledOnly || GNSS)
                             ? LocationManager.GPS_PROVIDER : LocationManager.FUSED_PROVIDER;
                 }
                 case "getProviderProperties":
                     return properties((String) args[0]);
                 case "getLastLocation": {
-                    Location last = sLast;
-                    if (last == null || !locationOn() || !hostMayLocate()) return null;
-                    Location copy = new Location(last);
-                    copy.setProvider((String) args[0]);
-                    return copy;
+                    String provider = (String) args[0];
+                    if (disabledProvider(provider) || !locationOn() || !hostMayLocate()) return null;
+                    return lastLocation(provider);
                 }
                 case "getCurrentLocation":
                     return currentLocation((String) args[0], (LocationRequest) args[1], (ILocationCallback) args[2]);

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "candidate": 59,
+  "phase": "Wattpad OAuth after provider restart",
+  "implementationRevision": "6a01bdff11fab8bd93e40f2c8030e68469b2d12d",
+  "package": "wp.wattpad",
+  "originalApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+  "clientAdapterCandidate": 52,
+  "nativeWatchdogFixCandidate": 54,
+  "gmsAndProviderAdapterCandidate": 59,
+  "metadataOptInEnabled": true,
+  "existingCacheRun": {
+    "startupReachedLogin": true,
+    "modernBeginStatus": 16,
+    "legacyStatuses": [
+      4,
+      4
+    ],
+    "legacyAccountPresent": false,
+    "providerOAuthTokenIssued": false,
+    "authenticatedActivityResult": false
+  },
+  "cacheComparison": {
+    "storedSdkIdEqualsAccountEmail": true,
+    "storedEmailMatchesProviderAccount": true,
+    "storedSdkIdMatchesNumericProviderGoogleId": false,
+    "soleCauseEstablished": false
+  },
+  "manualRecoveryAttempts": [
+    {
+      "reset": "Only the client Google sign-in preference",
+      "backupVerified": true,
+      "result": "Legacy status 4; no provider OAuth exchange"
+    },
+    {
+      "reset": "Only three Wattpad keys in common.selected_account_prefs.xml",
+      "backupVerified": true,
+      "otherGmsEntriesPreserved": 9,
+      "gmsAndClientRestarted": true,
+      "result": "Legacy status 4; no provider OAuth exchange"
+    }
+  ],
+  "providerAccountRemoved": false,
+  "newOAuthScopeGranted": false,
+  "newWattpadAccountCreated": false,
+  "uninterruptedRestartPassed": false,
+  "manualMigrationPassed": false,
+  "fullApplicationPassed": false,
+  "nextDiagnosis": "Controlled comparison of metadata opt-in and tracing of the missing chooser/recovery transition; no attribution to Google server rejection without a provider exchange",
+  "privacy": "No account identifier, email, token, raw capture or private configuration included"
+}

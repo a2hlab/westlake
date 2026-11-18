@@ -1,0 +1,80 @@
+{
+  "candidate": 103,
+  "date": "2026-11-17",
+  "candidateLibrarySha256": "fd370ad3969cfe687bdbefc521b1b37e3314be07f14a20a284a27d9a0c1a0413",
+  "controlLibrarySha256": "2d339fa55bbbf9b0efa0b0e116210fdc5e3e08af4c2dd8973b0e7ea2374bd891",
+  "callbackBoardTests": {
+    "control-landscape-async": {
+      "inputEvents": 13,
+      "outputEvents": 13,
+      "formatEvents": 1,
+      "eventsOnWrongThread": 27,
+      "syncDequeueRejected": [
+        false,
+        false
+      ],
+      "terminal": "CALLBACK eos"
+    },
+    "candidate-landscape-async": {
+      "inputEvents": 14,
+      "outputEvents": 13,
+      "formatEvents": 1,
+      "eventsOnWrongThread": 0,
+      "syncDequeueRejected": [
+        true,
+        true
+      ],
+      "terminal": "CALLBACK eos"
+    },
+    "candidate-same-motion-async": {
+      "inputEvents": 123,
+      "outputEvents": 123,
+      "formatEvents": 1,
+      "eventsOnWrongThread": 0,
+      "syncDequeueRejected": [
+        true,
+        true
+      ],
+      "terminal": "CALLBACK eos"
+    },
+    "candidate-square-async": {
+      "inputEvents": 4,
+      "outputEvents": 0,
+      "formatEvents": 0,
+      "eventsOnWrongThread": 0,
+      "syncDequeueRejected": [
+        true,
+        true
+      ],
+      "terminal": "CALLBACK error onRequestedHandler=true transient=false recoverable=false code=-2147483648"
+    },
+    "candidate-audio-async": {
+      "inputEvents": 54,
+      "outputEvents": 46,
+      "formatEvents": 1,
+      "eventsOnWrongThread": 0,
+      "syncDequeueRejected": [
+        true,
+        true
+      ],
+      "terminal": "CALLBACK eos"
+    }
+  },
+  "assetSurfaceProbe": {
+    "apkAssetSha256": "19cf1e34dad70708d05eeae7741e6f8b50795b2ec38e01bb68f91695dbcd5376",
+    "softwareProbeSha256": "8705af535c77f56768bb29bb1cdd29fe4ddb45c556b64a389b274889dbbf1ddc",
+    "method": "Android MediaExtractor to in-process FFmpeg software decoder to two Android YUV_420_888 ImageReaders. Digest computed by Java from the visible Y, U and V samples of every acquired Image.",
+    "sourceSamples": 122,
+    "firstSurfaceFrames": 3,
+    "secondSurfaceFrames": 119,
+    "imageSize": [
+      500,
+      500
+    ],
+    "readbackYuv420pSha256": "eb9617be93658cf548ce6d24ce7c5f1ec80ddc24a6b13644b1bcb524a2ff0f0c",
+    "matchesReference": true,
+    "inAppDisplayVerified": false
+  },
+  "hardwareRetest": "Original HEVC Main clip returned error 6 and zero frames with and without explicit Main profile, using either demuxer format or a minimal format. Main 10 control also failed. AVC baseline reached end of stream.",
+  "appProcessObservation": "During the guest birthday screen the original TikTok process had its packaged player and FFmpeg libraries mapped. The recorded app startup log contained no Westlake video codec create/configure event. The decoder used by the live welcome widget remains unknown."
+}

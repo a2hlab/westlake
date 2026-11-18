@@ -4,6 +4,7 @@ import adapter.core.GoogleAuthDelegation;
 import adapter.core.GoogleAuthDelegationPolicy;
 import adapter.core.GoogleAuthProxy;
 import adapter.core.GoogleAuthSessions;
+import adapter.core.GoogleNativeAuthConsent;
 import adapter.core.SocketBinder;
 import android.accounts.Account;
 import android.app.ActivityThread;
@@ -48,9 +49,21 @@ public final class GoogleAuthOperations {
         GoogleAuthDelegation.event("session_granted=true owner=" + origin.packageName);
     }
 
+    static void rememberOAuth(PackageInfo origin, Account account, java.util.List<String> providerKeys,
+            String epoch) throws Exception {
+        if (!enabled()) return;
+        GoogleAuthSessions.grantOAuth(directory(), origin.packageName,
+                GoogleAuthProxy.digest(origin.signingInfo.getApkContentsSigners()[0].toByteArray(), "SHA-256"),
+                GoogleAuthProxy.digest(origin.signatures[0].toByteArray(), "SHA-1"),
+                account.type, account.name, providerKeys, epoch);
+        GoogleAuthDelegation.event("session_granted=true owner=" + origin.packageName + " kind=oauth2");
+    }
+
     /** Installed only by HELLO after independent APK/spawner verification, never from request extras. */
     static SocketBinder.CallScope enter(PackageInfo origin, int pid, String spawner, SocketBinder channel,
             IBinder target, int code, Parcel data, int flags) throws RemoteException {
+        if (enabled() && code == 101)
+            return GoogleAsyncAuthOperations.enter(origin, pid, spawner, channel, target, code, data, flags);
         if (!enabled() || code != 5 || !AUTH.equals(target.getInterfaceDescriptor())) return null;
         Operation operation = new Operation(origin, pid, spawner, channel, CURRENT.get());
         int position = data.dataPosition();
@@ -60,10 +73,20 @@ public final class GoogleAuthOperations {
             operation.account = data.readTypedObject(Account.CREATOR);
             operation.service = data.readString();
             Bundle extras = data.readTypedObject(Bundle.CREATOR);
+            if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE"))) {
+                GoogleAuthDelegation.event("silent_request_metadata=true owner=" + origin.packageName + " "
+                        + adapter.core.GoogleAuthBoundaryTrace.requestService(operation.service) + " "
+                        + adapter.core.GoogleAuthBoundaryTrace.requestExtras(extras == null ? null : extras.keySet()));
+            }
             if (data.dataAvail() != 0 || operation.account == null || !"com.google".equals(operation.account.type)
-                    || operation.service == null || operation.service.length() > 512
-                    || !operation.service.matches("audience:server:client_id:[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com"))
+                    || operation.service == null || operation.service.length() > GoogleAuthDelegationPolicy.MAX_KEY_LENGTH)
                 throw new SecurityException("silent request unsupported");
+            // The parser also bounds the complete package:signer:service key. First-party
+            // OAuth scope lists can exceed 512 characters without changing authorization.
+            operation.requested = GoogleAuthDelegationPolicy.parse(origin.packageName + ":"
+                    + operation.legacySigner + ":" + operation.service);
+            GoogleAuthSessions.requireReusable(operation.requested);
+            if (!operation.requested.options.isEmpty()) throw new SecurityException("silent options unsupported");
             if (extras != null) for (String key : extras.keySet()) {
                 if ("androidPackageName".equals(key) || "clientPackageName".equals(key)) {
                     if (!origin.packageName.equals(extras.getString(key))) throw new SecurityException("silent origin mismatch");
@@ -72,7 +95,17 @@ public final class GoogleAuthOperations {
                 } else throw new SecurityException("silent options unsupported");
             }
             operation.epoch = generation(origin.packageName);
+            // A native account request has separate, explicitly provisioned operator consent.
+            // This selects a provider protocol, not permission: the provider checks the account,
+            // signer, scope set, epoch and expiry before and after network I/O. No session is saved.
+            operation.nativeConsent = "1".equals(System.getenv("WESTLAKE_GOOGLE_NATIVE_ACCOUNT_CONSENT"))
+                    && GoogleNativeAuthConsent.reusable(operation.requested)
+                    && !GoogleAuthSessions.allows(directory(), origin.packageName,
+                            operation.signer, operation.legacySigner, operation.account.type,
+                            operation.account.name, operation.requested, operation.epoch);
             operation.accepted = true;
+            if ("1".equals(System.getenv("WESTLAKE_GOOGLE_AUTH_BOUNDARY_TRACE")))
+                GoogleAuthDelegation.event("silent_request_accepted=true owner=" + origin.packageName);
         } catch (Exception error) {
             // Still install a denying scope so an unsupported foreign call cannot borrow a live picker.
             GoogleAuthDelegation.event("silent_request_denied=true " + GoogleAuthDelegation.failure(error));
@@ -98,9 +131,10 @@ public final class GoogleAuthOperations {
         final long deadline = SystemClock.elapsedRealtime() + 100_000L;
         final String signer, legacySigner;
         volatile boolean active = true;
-        boolean accepted;
+        boolean accepted, nativeConsent;
         Account account;
         String service, epoch, issuedKey;
+        GoogleAuthDelegationPolicy requested;
         Bundle issued;
 
         Operation(PackageInfo origin, int pid, String spawner, SocketBinder channel, Operation outer) {
@@ -117,8 +151,10 @@ public final class GoogleAuthOperations {
         boolean allowed(GoogleAuthDelegationPolicy request) {
             try {
                 return accepted && active && channel.isAlive() && SystemClock.elapsedRealtime() < deadline
-                        && service.equals(request.service) && GoogleAuthSessions.allows(directory(), origin.packageName,
-                        signer, legacySigner, account.type, account.name, request, epoch);
+                        && GoogleAuthSessions.sameService(requested, request)
+                        && (nativeConsent ? epoch.equals(generation(origin.packageName))
+                            : GoogleAuthSessions.allows(directory(), origin.packageName,
+                                signer, legacySigner, account.type, account.name, request, epoch));
             } catch (Exception denied) { return false; }
         }
 
@@ -142,10 +178,12 @@ public final class GoogleAuthOperations {
                         reply.writeNoException(); reply.writeBoolean(allowed(parsed)); return true;
                     }
                 };
-                Bundle result = PlayServicesChannel.delegatedAuth(origin, pid, spawner, requested, key, witness, null);
+                Bundle result = PlayServicesChannel.delegatedAuth(origin, pid, spawner, requested, key, witness, null,
+                        nativeConsent ? epoch : null);
                 if (!allowed(parsed) || result == null || result.getString("token") == null) return null;
                 issuedKey = key; issued = result;
-                GoogleAuthDelegation.event("silent_token=true owner=" + origin.packageName + " token_present=true");
+                GoogleAuthDelegation.event("silent_token=true owner=" + origin.packageName
+                        + " token_present=true native_consent=" + nativeConsent);
                 return result.getString("token");
             } catch (Exception error) {
                 GoogleAuthDelegation.event("silent_read_denied=true " + GoogleAuthDelegation.failure(error));

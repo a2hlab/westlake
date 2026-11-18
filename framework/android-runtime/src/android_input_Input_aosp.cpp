@@ -8,11 +8,9 @@
 // class layout under adapter control (see include/input/Input.h header for
 // rationale).  Phase 1 implements what HelloWorld single-tap needs:
 //   - MotionEvent::initialize / addSample / copyFrom
-//   - axis-value getters (raw vs transformed; transform is identity in
-//     Phase 1, so getRawAxisValue == getAxisValue)
+//   - distinct raw and transformed axis values, including history
 //   - offsetLocation / scale (simple in-place mutation)
-//   - transform / applyTransform (no-op in Phase 1; Phase 2 adds real matrix
-//     composition)
+//   - composed view transforms and explicitly applied raw-sample transforms
 //
 // Out of scope (Phase 2):
 //   - real history-sample retrieval (samples vector currently keeps current +
@@ -29,6 +27,43 @@
 #include <cstring>
 
 namespace android {
+
+namespace {
+constexpr std::array<float, 9> IDENTITY = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+// frameworks/native/libs/input/android/os/IInputConstants.aidl.
+constexpr int32_t SUPPORTS_ORIENTATION = 0x80;
+constexpr int32_t SUPPORTS_DIRECTIONAL_ORIENTATION = 0x100;
+
+float rounded(float value) { return std::round(value * 1024.f) / 1024.f; }
+bool ignoresTransform(int32_t source) {
+    return (source & AINPUT_SOURCE_CLASS_JOYSTICK) == AINPUT_SOURCE_CLASS_JOYSTICK
+            || (source & AINPUT_SOURCE_CLASS_POSITION) == AINPUT_SOURCE_CLASS_POSITION
+            || (source & AINPUT_SOURCE_MOUSE_RELATIVE) == AINPUT_SOURCE_MOUSE_RELATIVE;
+}
+
+float transformedAxis(const std::array<float, 9>& m, int32_t source, int32_t flags,
+                      const PointerCoords& pc, int32_t axis) {
+    if (ignoresTransform(source)) return pc.getAxisValue(axis);
+    if (axis == AMOTION_EVENT_AXIS_X || axis == AMOTION_EVENT_AXIS_Y
+            || axis == AMOTION_EVENT_AXIS_RELATIVE_X || axis == AMOTION_EVENT_AXIS_RELATIVE_Y) {
+        bool relative = axis == AMOTION_EVENT_AXIS_RELATIVE_X || axis == AMOTION_EVENT_AXIS_RELATIVE_Y;
+        float x = pc.getAxisValue(relative ? AMOTION_EVENT_AXIS_RELATIVE_X : AMOTION_EVENT_AXIS_X);
+        float y = pc.getAxisValue(relative ? AMOTION_EVENT_AXIS_RELATIVE_Y : AMOTION_EVENT_AXIS_Y);
+        bool translate = !relative && (source & AINPUT_SOURCE_CLASS_POINTER) != 0;
+        int row = (axis == AMOTION_EVENT_AXIS_X || axis == AMOTION_EVENT_AXIS_RELATIVE_X) ? 0 : 3;
+        // AOSP ui::Transform maps XY without a perspective divide.
+        return rounded(m[row] * x + m[row + 1] * y + (translate ? m[row + 2] : 0.f));
+    }
+    if (axis == AMOTION_EVENT_AXIS_ORIENTATION) {
+        if (!(flags & SUPPORTS_ORIENTATION)) return 0.f;
+        float a = pc.getAxisValue(axis), x = std::sin(a), y = -std::cos(a);
+        float tx = m[0] * x + m[1] * y, ty = m[3] * x + m[4] * y;
+        if (!(flags & SUPPORTS_DIRECTIONAL_ORIENTATION) && ty > 0.f) { tx = -tx; ty = -ty; }
+        return std::atan2(tx, -ty);
+    }
+    return pc.getAxisValue(axis);
+}
+}  // namespace
 
 // ---------------- PointerCoords ----------------
 
@@ -91,8 +126,9 @@ void MotionEvent::initialize(int32_t id, int32_t deviceId, int32_t source, int32
     mMetaState = metaState;
     mButtonState = buttonState;
     mClassification = classification;
-    mXOffset = xOffset;
-    mYOffset = yOffset;
+    mTransform = IDENTITY;
+    mTransform[2] = xOffset;
+    mTransform[5] = yOffset;
     mXPrecision = xPrecision;
     mYPrecision = yPrecision;
     mXCursorPosition = rawXCursorPosition;
@@ -131,8 +167,7 @@ void MotionEvent::copyFrom(const MotionEvent* other, bool keepHistory) {
     mMetaState = other->mMetaState;
     mButtonState = other->mButtonState;
     mClassification = other->mClassification;
-    mXOffset = other->mXOffset;
-    mYOffset = other->mYOffset;
+    mTransform = other->mTransform;
     mXPrecision = other->mXPrecision;
     mYPrecision = other->mYPrecision;
     mXCursorPosition = other->mXCursorPosition;
@@ -205,18 +240,14 @@ bool MotionEvent::isTouchEvent() const {
     return (mSource & AINPUT_SOURCE_CLASS_POINTER) != 0;
 }
 
-// Phase 1: raw == transformed (identity transform).  getXOffset/getYOffset
-// are applied to X/Y axes to mirror AOSP semantics.
+// Raw samples remain unchanged by transform(), including historical samples.
 float MotionEvent::getRawAxisValue(int32_t axis, size_t pointerIndex) const {
     size_t historyIdx = mSampleEventTimes.empty() ? 0 : mSampleEventTimes.size() - 1;
     return getHistoricalRawAxisValue(axis, pointerIndex, historyIdx);
 }
 
 float MotionEvent::getAxisValue(int32_t axis, size_t pointerIndex) const {
-    float v = getRawAxisValue(axis, pointerIndex);
-    if (axis == AMOTION_EVENT_AXIS_X) v += mXOffset;
-    if (axis == AMOTION_EVENT_AXIS_Y) v += mYOffset;
-    return v;
+    return getHistoricalAxisValue(axis, pointerIndex, getHistorySize());
 }
 
 float MotionEvent::getHistoricalRawAxisValue(int32_t axis, size_t pointerIndex,
@@ -230,10 +261,8 @@ float MotionEvent::getHistoricalRawAxisValue(int32_t axis, size_t pointerIndex,
 
 float MotionEvent::getHistoricalAxisValue(int32_t axis, size_t pointerIndex,
                                           size_t historicalIndex) const {
-    float v = getHistoricalRawAxisValue(axis, pointerIndex, historicalIndex);
-    if (axis == AMOTION_EVENT_AXIS_X) v += mXOffset;
-    if (axis == AMOTION_EVENT_AXIS_Y) v += mYOffset;
-    return v;
+    const PointerCoords* pc = getHistoricalRawPointerCoords(pointerIndex, historicalIndex);
+    return pc ? transformedAxis(mTransform, mSource, mFlags, *pc, axis) : 0.f;
 }
 
 const PointerCoords* MotionEvent::getRawPointerCoords(size_t pointerIndex) const {
@@ -244,22 +273,27 @@ const PointerCoords* MotionEvent::getRawPointerCoords(size_t pointerIndex) const
 const PointerCoords* MotionEvent::getHistoricalRawPointerCoords(size_t pointerIndex,
                                                                 size_t historicalIndex) const {
     size_t n = mPointerProperties.size();
-    if (n == 0) return nullptr;
+    if (n == 0 || pointerIndex >= n) return nullptr;
     size_t base = historicalIndex * n + pointerIndex;
     if (base >= mSamplePointerCoords.size()) return nullptr;
     return &mSamplePointerCoords[base];
 }
 
 void MotionEvent::offsetLocation(float xOffset, float yOffset) {
-    mXOffset += xOffset;
-    mYOffset += yOffset;
+    mTransform[2] += xOffset;
+    mTransform[5] += yOffset;
 }
 
 void MotionEvent::scale(float scaleFactor) {
-    mXOffset *= scaleFactor;
-    mYOffset *= scaleFactor;
+    mTransform[2] *= scaleFactor;
+    mTransform[5] *= scaleFactor;
+    mXPrecision *= scaleFactor;
+    mYPrecision *= scaleFactor;
     for (PointerCoords& pc : mSamplePointerCoords) {
-        for (int axis = 0; axis < 32; ++axis) {
+        for (int axis : {AMOTION_EVENT_AXIS_X, AMOTION_EVENT_AXIS_Y,
+                AMOTION_EVENT_AXIS_TOUCH_MAJOR, AMOTION_EVENT_AXIS_TOUCH_MINOR,
+                AMOTION_EVENT_AXIS_TOOL_MAJOR, AMOTION_EVENT_AXIS_TOOL_MINOR,
+                AMOTION_EVENT_AXIS_RELATIVE_X, AMOTION_EVENT_AXIS_RELATIVE_Y}) {
             if (pc.bits & (uint64_t(1) << axis)) {
                 pc.values[axis] *= scaleFactor;
             }
@@ -267,11 +301,46 @@ void MotionEvent::scale(float scaleFactor) {
     }
 }
 
-// Phase 1: transform / applyTransform are no-ops.  HelloWorld in landscape /
-// portrait switch + window transforms are not in scope.  Phase 2: real
-// matrix composition.
-void MotionEvent::transform(const std::array<float, 9>& /*matrix*/) {}
-void MotionEvent::applyTransform(const std::array<float, 9>& /*matrix*/) {}
+void MotionEvent::transform(const std::array<float, 9>& matrix) {
+    std::array<float, 9> result{};
+    for (size_t row = 0; row < 3; ++row)
+        for (size_t col = 0; col < 3; ++col)
+            for (size_t k = 0; k < 3; ++k)
+                result[row * 3 + col] += matrix[row * 3 + k] * mTransform[k * 3 + col];
+    mTransform = result;
+}
+
+void MotionEvent::applyTransform(const std::array<float, 9>& matrix) {
+    if (!ignoresTransform(mSource)) {
+        for (PointerCoords& pc : mSamplePointerCoords) {
+            const PointerCoords original = pc;
+            for (int axis : {AMOTION_EVENT_AXIS_X, AMOTION_EVENT_AXIS_Y,
+                    AMOTION_EVENT_AXIS_RELATIVE_X, AMOTION_EVENT_AXIS_RELATIVE_Y,
+                    AMOTION_EVENT_AXIS_ORIENTATION})
+                pc.setAxisValue(axis, transformedAxis(matrix, mSource, mFlags, original, axis));
+        }
+    }
+    if (!std::isnan(mXCursorPosition) && !std::isnan(mYCursorPosition)) {
+        float x = mXCursorPosition, y = mYCursorPosition;
+        mXCursorPosition = matrix[0] * x + matrix[1] * y + matrix[2];
+        mYCursorPosition = matrix[3] * x + matrix[4] * y + matrix[5];
+    }
+}
+
+float MotionEvent::getXCursorPosition() const {
+    return rounded(mTransform[0] * mXCursorPosition + mTransform[1] * mYCursorPosition + mTransform[2]);
+}
+
+float MotionEvent::getYCursorPosition() const {
+    return rounded(mTransform[3] * mXCursorPosition + mTransform[4] * mYCursorPosition + mTransform[5]);
+}
+
+void MotionEvent::setCursorPosition(float x, float y) {
+    float determinant = mTransform[0] * mTransform[4] - mTransform[1] * mTransform[3];
+    x -= mTransform[2]; y -= mTransform[5];
+    mXCursorPosition = (mTransform[4] * x - mTransform[1] * y) / determinant;
+    mYCursorPosition = (-mTransform[3] * x + mTransform[0] * y) / determinant;
+}
 
 int32_t MotionEvent::readFromParcel(void* /*parcel*/) {
     // Phase 1: cross-process input dispatch is not used; HelloWorld receives

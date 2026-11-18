@@ -17,6 +17,7 @@
     "westlake/framework/window/jni/oh_window_policy.cpp",
     "westlake/framework/window/jni/oh_anativewindow_shim.cpp",
     "westlake/framework/window/jni/oh_input_bridge.cpp",
+    "westlake/framework/window/jni/oh_owned_input_bridge.cpp",
     "westlake/framework/window/jni/oh_input_manager_bridge.cpp",
     "westlake/framework/window/jni/window_callback_adapter.cpp",
     "westlake/framework/window/jni/session_stage_adapter.cpp",
@@ -544,6 +545,10 @@
     "westlake/framework/core/jni/oh_notification_client.cpp": [
       "westlake/native/include/oh-notification-standin",
       "android-source/oh61-notification-headers/include"
+    ],
+    "westlake/framework/window/jni/oh_owned_input_bridge.cpp": [
+      "android-source/oh-eventhandler/interfaces/inner_api",
+      "android-source/oh-eventhandler/frameworks/eventhandler/include"
     ]
   },
   "source_replacements": {

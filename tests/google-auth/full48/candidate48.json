@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "candidate": 48,
+  "sourceBaseRevision": "fd1b14caf7b5e94eb175305f9e67cec5adab91b2",
+  "changedSourceHashes": {
+    "framework/core/java/GoogleIdentityServicePolicy.java": "52b5a559f9d17055b50a44783befa9019580ae6f65853e404fb5867c440e9daa",
+    "framework/core/java/GoogleIdentityServiceConfig.java": "194a417d78019818cf65b57c25dc3d8b01ec68c92d47658d69831eca5b75985c"
+  },
+  "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+  "adapterJarSha256": "0e15a6477c41b6a638f44d93e82c885713f850d135473fd31738bd8549cf3bb3",
+  "policyHostChecksPassed": 18,
+  "adapterBuildPassed": true,
+  "bootImageBuildPassed": true,
+  "boardPreloadPassed": true,
+  "nativeArtifactsRebuilt": false,
+  "preservation": {
+    "identityPreserved": true,
+    "providerGrantsUnchanged": true,
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "serviceExceptions": "151,130,40,25,257,185,51,218,212,213,91",
+    "gmsAndProviderAlive": true
+  },
+  "wattpad": {
+    "apkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+    "beforeService91Status": 9,
+    "afterService91Status": 0,
+    "legacySignInServiceInvoked": true,
+    "legacyCallbacksObserved": true,
+    "accountChooserReached": false,
+    "authenticatedReturn": false,
+    "observation": "Modern begin-sign-in and legacy silent sign-in callbacks return without opening an account chooser. Numeric sign-in callback status needs further tracing; service eligibility is fixed for this request, full login is not.",
+    "diagnostics": {
+      "aliveAtCapture": true,
+      "markerCounts": {
+        "relayout": 33,
+        "bind": 2,
+        "activity": 0,
+        "fatal": 0,
+        "physicalDisplayAbort": 0
+      },
+      "requestedServiceIds": [
+        8,
+        91,
+        93,
+        116,
+        212,
+        270,
+        300
+      ],
+      "callbackStatusesByApproximateService": {
+        "270": [
+          9
+        ],
+        "300": [
+          9
+        ],
+        "93": [
+          9
+        ],
+        "8": [
+          9
+        ],
+        "116": [
+          9
+        ],
+        "212": [
+          0
+        ],
+        "91": [
+          0
+        ]
+      },
+      "authMarkers": {
+        "token_details_present=true": 0,
+        "result_received result_code=-1": 0,
+        "result_received result_code=0": 0,
+        "silent_request_denied": 0,
+        "Fatal signal 5": 0,
+        "Fatal signal 6": 0
+      },
+      "hostsAlive": {
+        "google-restricted-official48": true,
+        "google-auth-delegation-microg11": true
+      }
+    }
+  },
+  "fullApplicationAcceptance": false,
+  "rawLogsAndScreenshotsPublic": false
+}

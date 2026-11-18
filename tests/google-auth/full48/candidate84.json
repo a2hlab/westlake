@@ -1,0 +1,97 @@
+{
+  "candidate": 84,
+  "phase": "Open the approved Drive fixture and test original YouTube playback on OpenHarmony",
+  "baseline": "61a828c1c2ceaa9426652ccfb7e6af0505e4ce53",
+  "clientBuild": {
+    "adapterRuntimeSha256": "4df125261a5227b39c552112ab0d8dd4c778196ba80c67240d1e2fd883020b82",
+    "frameworkSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "compiledSources": 143,
+    "compiledClasses": 297,
+    "bootJars": 9,
+    "bootArtifacts": 27,
+    "officialServiceBuild": 81,
+    "providerBuild": 81
+  },
+  "drive": {
+    "package": "com.google.android.apps.docs",
+    "apkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "fileName": "Westlake-Drive-validation.txt",
+    "fileBytes": 107,
+    "fileSha256": "bb1aaa517e9c48bea77f4102e386e2968b3c087b87873689c6c87c647600f4aa",
+    "priorBackendReadHttpStatus": 200,
+    "backendReadBytesCheckedAgainOffline": true,
+    "filesUploadedInThisRetest": 0,
+    "fileLeftInPlace": true,
+    "accountScopeChanges": 0,
+    "previousAppSearch": "Files could not refresh; the exact filename produced no entry to open.",
+    "directLink": {
+      "entry": "An explicit choice of the original APK for the existing file’s ordinary Drive HTTPS link",
+      "handler": "com.google.android.apps.docs.common.openurl.DriveOpenUrlActivityAlias",
+      "handlerScheduled": true,
+      "timeSinceLaunchAtFinalCaptureSeconds": 99,
+      "screen": "Black client surface with the system bars. The file name and contents never appeared.",
+      "processAliveAtFinalCapture": true,
+      "clientAccountTokenRequestsAtSample": 22,
+      "failedClientAccountTokenCallbacksAtSample": 21,
+      "badAuthenticationMarkersAtSample": 21,
+      "underlyingCauseOfIndividualFailuresProven": false
+    },
+    "fileListingPassed": false,
+    "originalAppFileOpenPassed": false,
+    "tokenRenewalValidated": false,
+    "extraReturnedScopeFromPriorRun": "drive.labels.readonly",
+    "extraScopeApproved": false
+  },
+  "youtube": {
+    "package": "com.google.android.youtube",
+    "version": "21.43.523",
+    "versionCode": 1561307650,
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "connected": {
+      "verifiedPublicGmsApks": 9,
+      "signInDisplayedError": true,
+      "signInTarget": "com.google.android.gms.auth.uiflows.common.UnpackingRedirectActivity",
+      "serviceDiagnostic": "pending_activity_rejected type=SecurityException",
+      "clientReceivedResultCode": 0,
+      "resultMeaning": "RESULT_CANCELED",
+      "serviceHostRemainedForeground": true,
+      "clientControlsRecoveredAfterManualForeground": true,
+      "searchQuery": "Me at the zoo",
+      "searchProducedPlayableResult": false,
+      "accountsMenu": "Returned to the sign-in error",
+      "recoverableAuthenticationMarkersAtAccountsSample": 5
+    },
+    "disconnectedControl": {
+      "changedClientSettings": [
+        "Play services connection disabled",
+        "Play Store connection disabled"
+      ],
+      "servicesKeptRunning": true,
+      "prompt": "Install Google Play services",
+      "appWindowAfterDismissal": false,
+      "clientProcessAlive": true
+    },
+    "publicWatchLink": {
+      "publicVideoId": "jNQXAC9IVRw",
+      "normalOpenHarmonyImplicitLaunchError": "10103101",
+      "normalOpenHarmonyImplicitLaunchMatched": false,
+      "explicitlyChosenOriginalApkHandler": "com.google.android.youtube.UrlActivity",
+      "watchActivity": "com.google.android.apps.youtube.app.watchwhile.InternalMainActivity",
+      "watchActivityScheduleEntriesInSample": 35,
+      "secondsAtBlackScreenCapture": 52,
+      "pictureOrTimeProgressObserved": false,
+      "audioVerified": false
+    },
+    "signInPassed": false,
+    "accountSessionPassed": false,
+    "playbackPassed": false,
+    "restartPersistenceValidated": false
+  },
+  "testLauncher": {
+    "optIn": "WESTLAKE_TEST_VIEW_HTTPS",
+    "filter": "HTTPS VIEW, BROWSABLE, MATCH_DEFAULT_ONLY, enabled application and exported enabled activity in the current APK and process, no component permission",
+    "unmatchedDomainRefusedBeforeScheduling": true,
+    "productionAppLinkRegistrationTestPassed": false
+  },
+  "goalComplete": false
+}

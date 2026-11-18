@@ -2,16 +2,24 @@
 const UIAbility = globalThis.requireNapi('app.ability.UIAbility');
 const hilog = globalThis.requireNapi('hilog');
 const fs = globalThis.requireNapi('file.fs');
+const processInfo = globalThis.requireNapi('process');
 const TAG = 'WL_IME_HOST';
 const HOST_BUNDLE = 'org.westlake.imehost';
+const CLIENT_HOST = 'org.westlake.authclienthost';
+const SERVICE_HOST = 'org.westlake.authservicehost';
+const APK_HOST = /^org\.westlake\.apk\.[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
 class EntryAbility extends UIAbility {
     record(event, details) {
-        const value = JSON.stringify({event: event, time: Date.now(), details: details});
+        const value = JSON.stringify({event: event, time: Date.now(), details: details,
+            ownerPid: processInfo.pid, mainWindowId: this.mainWindowId || 0});
         hilog.info(0, TAG, '%{public}s', value);
         try {
-            const file = fs.openSync(this.context.filesDir + '/window-state.json',
+            const path = this.context.filesDir + '/window-state.json';
+            const temp = path + '.' + processInfo.pid + '.tmp';
+            const file = fs.openSync(temp,
                 fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
             try { fs.writeSync(file.fd, value); } finally { fs.closeSync(file); }
+            fs.renameSync(temp, path);
         } catch (error) {
             hilog.error(0, TAG, 'record failed %{public}s', String(error));
         }
@@ -21,11 +29,46 @@ class EntryAbility extends UIAbility {
     // state. The mailbox shares the host UID's trust boundary; it is not per-APK
     // isolation. It carries window routing only, never authentication material.
     configureWindowBridge(want) {
-        if (want && want.parameters && want.parameters['westlake.remoteHostWindows'] === true) {
-            this.windowBridgeEnabled = true;
+        const params = (want && want.parameters) || {};
+        const dedicated = APK_HOST.test(HOST_BUNDLE) && this.context.abilityInfo.bundleName === HOST_BUNDLE;
+        if (dedicated && params['westlake.ownAppSettings'] === true) this.ownSettingsEnabled = true;
+        if ((dedicated || HOST_BUNDLE === CLIENT_HOST || HOST_BUNDLE === SERVICE_HOST) &&
+                params['westlake.remoteHostWindows'] === true) this.remoteWindowsEnabled = true;
+        if (HOST_BUNDLE === SERVICE_HOST) {
+            // AbilityManager supplies these reserved fields from the calling ability token.
+            const caller = params['ohos.aafwk.param.callerBundleName'];
+            const entry = params['ohos.aafwk.param.callerAbilityName'] === 'EntryAbility';
+            if (params['westlake.fromApkWindow'] === true) {
+                this.apkVisit = {caller: entry && typeof caller === 'string' && APK_HOST.test(caller) ? caller : null};
+            } else if (entry && caller === CLIENT_HOST) {
+                this.apkVisit = undefined;
+            } else if (this.apkVisit) {
+                this.apkVisit.caller = null;
+            }
         }
-        if (this.windowBridgeEnabled && !this.windowBridgeTimer) {
+        if ((this.ownSettingsEnabled || this.remoteWindowsEnabled) && this.windowBridgeTimer === undefined) {
             this.windowBridgeTimer = setInterval(() => this.pollWindowBridge(), 50);
+        }
+    }
+    windowWant(target) {
+        if (target === 'app-settings' && this.ownSettingsEnabled) {
+            return {bundleName: 'com.ohos.settings', abilityName: 'com.ohos.settings.MainAbility',
+                uri: 'application_info_entry', parameters: {pushParams: HOST_BUNDLE}};
+        }
+        if (!this.remoteWindowsEnabled) return;
+        if (target === SERVICE_HOST && (HOST_BUNDLE === CLIENT_HOST || APK_HOST.test(HOST_BUNDLE))) {
+            const parameters = {'westlake.remoteHostWindows': true};
+            if (HOST_BUNDLE !== CLIENT_HOST) parameters['westlake.fromApkWindow'] = true;
+            return {bundleName: SERVICE_HOST, abilityName: 'EntryAbility', parameters};
+        }
+        if (HOST_BUNDLE !== SERVICE_HOST) return;
+        if (this.apkVisit) {
+            if (this.apkVisit.caller && target === this.apkVisit.caller) {
+                return {bundleName: this.apkVisit.caller, abilityName: 'EntryAbility',
+                    parameters: {'westlake.remoteHostWindows': true, 'westlake.ownAppSettings': true}};
+            }
+        } else if (target === CLIENT_HOST) {
+            return {bundleName: CLIENT_HOST, abilityName: 'EntryAbility', parameters: {'westlake.remoteHostWindows': true}};
         }
     }
     windowReply(directory, id, accepted, reason) {
@@ -39,13 +82,8 @@ class EntryAbility extends UIAbility {
         hilog.info(0, TAG, 'window handoff %{public}s', reason);
     }
     pollWindowBridge() {
-        if (!this.windowBridgeEnabled || this.windowBridgeBusy) return;
+        if (this.windowBridgeTimer === undefined || this.windowBridgeBusy) return;
         const directory = this.context.filesDir + '/westlake-host-window';
-        // These separate development HAPs keep this experiment away from hosts
-        // already running unrelated APKs. General routing needs installer policy.
-        const peer = HOST_BUNDLE === 'org.westlake.authclienthost' ? 'org.westlake.authservicehost' :
-            HOST_BUNDLE === 'org.westlake.authservicehost' ? 'org.westlake.authclienthost' : undefined;
-        if (!peer) return;
         try {
             const names = fs.listFileSync(directory);
             for (const name of names.slice(0, 32)) {
@@ -65,8 +103,9 @@ class EntryAbility extends UIAbility {
                 if (this.windowHandledIds.has(id)) continue;
                 this.windowHandledIds.add(id);
                 if (this.windowHandledIds.size > 64) this.windowHandledIds.delete(this.windowHandledIds.values().next().value);
-                const age = Date.now() - body.created;
-                if (body.id !== id || body.target !== peer || typeof body.created !== 'number' ||
+                const age = body ? Date.now() - body.created : NaN;
+                const want = body && this.windowWant(body.target);
+                if (!want || body.id !== id || typeof body.created !== 'number' ||
                     !Number.isFinite(age) || age < -1000 || age > 1500) {
                     this.windowReply(directory, id, false, 'invalid'); continue;
                 }
@@ -74,8 +113,9 @@ class EntryAbility extends UIAbility {
                     this.windowReply(directory, id, false, 'background'); continue;
                 }
                 this.windowBridgeBusy = true;
-                this.context.startAbility({bundleName: peer, abilityName: 'EntryAbility',
-                    parameters: {'westlake.remoteHostWindows': true}}).then(() => {
+                const visit = this.apkVisit;
+                Promise.resolve().then(() => this.context.startAbility(want)).then(() => {
+                    if (visit && visit === this.apkVisit) visit.caller = null;
                     this.windowReply(directory, id, true, 'started');
                 }).catch(error => {
                     this.windowReply(directory, id, false, 'oh-denied');
@@ -88,19 +128,45 @@ class EntryAbility extends UIAbility {
     onNewWant(want) { this.configureWindowBridge(want); }
     onWindowStageCreate(stage) {
         this.stage = stage;
-        stage.on('windowStageEvent', event => this.record('stage-event', {
-            event: event, window: stage.getMainWindowSync().getWindowProperties()
-        }));
+        this.mainWindow = undefined;
+        this.mainWindowId = 0;
+        this.record('window-creating', {});
+        stage.on('windowStageEvent', event => {
+            if (this.stage !== stage) return;
+            const properties = stage.getMainWindowSync().getWindowProperties();
+            this.mainWindowId = properties.id;
+            this.record('stage-event', {event: event, window: properties});
+        });
         stage.loadContent('pages/Index', error => {
+            if (this.stage !== stage) return;
             if (error && error.code) { this.record('load-error', error); return; }
             this.mainWindow = stage.getMainWindowSync();
             this.mainWindow.setWindowBackgroundColor('#ff000000');
-            this.record('window-ready', this.mainWindow.getWindowProperties());
+            const properties = this.mainWindow.getWindowProperties();
+            this.mainWindowId = properties.id;
+            this.record('window-ready', properties);
         });
     }
     onForeground() { this.windowForeground = true; this.record('foreground', {}); }
-    onBackground() { this.windowForeground = false; this.record('background', {}); }
-    onWindowStageDestroy() { this.record('window-destroyed', {}); this.stage = undefined; }
-    onDestroy() { if (this.windowBridgeTimer) clearInterval(this.windowBridgeTimer); this.windowForeground = false; this.record('destroyed', {}); }
+    onBackground() {
+        this.windowForeground = false;
+        if (this.apkVisit) this.apkVisit.caller = null;
+        this.record('background', {});
+    }
+    onWindowStageDestroy() {
+        this.stage = undefined;
+        this.mainWindow = undefined;
+        this.mainWindowId = 0;
+        this.record('window-destroyed', {});
+    }
+    onDestroy() {
+        if (this.windowBridgeTimer !== undefined) clearInterval(this.windowBridgeTimer);
+        this.windowBridgeTimer = undefined;
+        this.apkVisit = undefined;
+        this.windowForeground = false;
+        this.stage = undefined;
+        this.mainWindowId = 0;
+        this.record('destroyed', {});
+    }
 }
 globalThis.exports.default = EntryAbility;

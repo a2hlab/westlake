@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "package": "com.ubercab",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "manifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "apkSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+  "observation": {
+    "status": "failed_return",
+    "launchRendered": true,
+    "googleSignInAttempted": true,
+    "authenticationRoute": "Google web OAuth fallback",
+    "googleWebCredentialsAccepted": true,
+    "googleProfileEmailConsentAccepted": true,
+    "remoteGmsAccountChooserObserved": false,
+    "applicationSessionAccepted": false,
+    "bookingAttempted": false,
+    "locationTested": false,
+    "explanation": "Uber renders its login screen. Continue with Google opens web OAuth. Google accepts the authorized test credentials and presents ordinary profile/email consent. After consent, an Uber-branded page says Sorry, we could not find that page. No successful return into a signed-in Uber application session is established. This is a web fallback observation, not evidence of two-path GMS token delegation. Service212 broker status0 alone is insufficient. The failed redirect cause is not isolated; no booking or separate app signup was attempted."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 33,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "exceptionTypes": [
+      "java.lang.AssertionError",
+      "java.lang.ExceptionInInitializerError",
+      "java.lang.NoClassDefFoundError",
+      "java.lang.NoSuchFieldException",
+      "java.lang.NullPointerException",
+      "java.lang.RuntimeException"
+    ],
+    "requestedServiceIds": [
+      14,
+      23,
+      93,
+      126,
+      212,
+      258,
+      300,
+      326,
+      381
+    ],
+    "callbackStatusCounts": {
+      "0": 1,
+      "9": 17
+    },
+    "callbackStatusesByApproximateService": {
+      "23": [
+        9
+      ],
+      "258": [
+        9
+      ],
+      "300": [
+        9
+      ],
+      "326": [
+        9
+      ],
+      "93": [
+        9
+      ],
+      "126": [
+        9
+      ],
+      "381": [
+        9
+      ],
+      "212": [
+        0
+      ]
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 0,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "serviceAttribution": "Process-global approximate attribution, not causal proof; status0 is a broker connection only.",
+  "nativeArtifactsRebuilt": false,
+  "fullApplicationAcceptance": false,
+  "rawLogsAndScreenshotsPublic": false
+}

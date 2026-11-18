@@ -1,0 +1,79 @@
+{
+  "candidate": 108,
+  "date": "2026-11-17",
+  "configuration": "Official Google Play services and Play Store were running. YouTube used a dedicated guest profile. No microG account provider was configured for this control.",
+  "youtube": {
+    "package": "com.google.android.youtube",
+    "version": "21.43.523",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "hostUid": 20010064,
+    "unchangedGuestData": true,
+    "publicEntry": "https://www.youtube.com/feed/subscriptions",
+    "intentResolution": "Original APK manifest",
+    "observedUi": [
+      "Subscriptions signed-out prompt",
+      "Sign in button",
+      "Accounts dialog",
+      "Add account row"
+    ],
+    "accountManagerAddAccountObservedBeforeAndAfter": true,
+    "returnedToGoogleUi": false,
+    "afterAddAccountSecondsObserved": 43.1,
+    "credentialFieldObserved": false,
+    "signedInSessionVerified": false,
+    "otherLiveApps": "Spotify, Google Play services and Play Store each used a different OpenHarmony UID. The YouTube account dialog stayed in YouTube. A handoff between overlapping Google sign-ins was not exercised."
+  },
+  "localAccountManager": {
+    "affectedRole": "An app with the fallback account service and no configured authenticator",
+    "oldBehavior": "A void return without invoking the supplied IAccountManagerResponse left the caller waiting.",
+    "currentBehavior": "addAccount and addAccountAsUser each report the same unavailable-authenticator error used after a failed local authenticator bind.",
+    "boardProbe": "UnavailableAccountAuthenticatorProbe",
+    "identicalProbeDexSha256": "1f8c47004f9ccb9f7d6fe31ffd139d0bb665fd0f790ae78f92bdb91faf8123e3",
+    "before": {
+      "runtimeStage": 117,
+      "callbackObserved": false,
+      "failure": "addAccount left the caller waiting",
+      "exitCode": 1
+    },
+    "after": {
+      "runtimeStage": 118,
+      "bothMethodsReturnedErrorExactlyOnce": true,
+      "errorCode": 1,
+      "accountResultReturned": false,
+      "exitCode": 0
+    }
+  },
+  "build": {
+    "preloadPassed": true,
+    "verifiedRuntimeFiles": 469,
+    "changedFilesInYouTubeRuntime": 9,
+    "appMappedRebuiltAdapterBootOat": true,
+    "adapterRuntimeJarSha256": "8270fba58a1d7037622a9e13711eadee3655651b73430f36d4528e33159c3fb8"
+  },
+  "acceptance": "The fallback callback hang is fixed. The original YouTube account sheet still offered Add account. Official authenticator UI, successful YouTube account sign-in, and signed-in persistence remain open.",
+  "spotifyFacebook": {
+    "package": "com.spotify.music",
+    "version": "9.1.94.1929",
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "adapterRuntimeJarSha256": "8270fba58a1d7037622a9e13711eadee3655651b73430f36d4528e33159c3fb8",
+    "openedForm": true,
+    "focusedOwner": "Spotify on its dedicated OpenHarmony host",
+    "formLabels": [
+      "Mobile number or email",
+      "Password",
+      "Forgot password"
+    ],
+    "webLinkOpenedEvents": 1,
+    "webLinkEventsContainingUri": 0,
+    "otherDiagnostic": "Package manager recorded the HTTPS host with a redacted path and no query or fragment. The Spotify process log sample contained no OAuth query parameter names.",
+    "credentialsSubmittedDuringObservation": false,
+    "authenticatedReturnVerified": false
+  },
+  "windowRouteConfiguration": {
+    "youtubeOutboundToGoogleConfigured": true,
+    "spotifyOutboundToGoogleConfigured": true,
+    "googleReturnToSpotifyConfigured": true,
+    "googleReturnToYouTubeConfigured": false,
+    "observedImpact": "YouTube stayed in its own account dialog. The test never reached the Google return step. The missing return route is an independent fixture gap."
+  }
+}

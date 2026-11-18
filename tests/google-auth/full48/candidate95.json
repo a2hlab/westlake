@@ -1,0 +1,104 @@
+{
+  "schema": 1,
+  "candidate": 95,
+  "previousBoardFailure": "candidate93.json",
+  "implementation": "Dedicated client and service HAP foreground routing",
+  "verificationScope": "Development machine, with OpenHarmony foreground transitions simulated",
+  "hostTests": {
+    "nativeHostPolicyAndLifecycle": "passed",
+    "javaConfiguredRouteChecks": "passed against source-built adapter classes",
+    "manifestUnitTestsPassed": 54,
+    "fileMailboxIntegration": {
+      "implementation": "Compiled adapter, Android JSON implementation, production HAP JavaScript and actual filesystem operations. Current package, monotonic clock and native OS ability calls supplied by host test doubles.",
+      "javaRequests": [
+        {
+          "method": "launch",
+          "requestingApp": "org.example.reader",
+          "target": "org.example.service",
+          "outcome": "accepted"
+        },
+        {
+          "method": "launch",
+          "requestingApp": "org.example.maps",
+          "target": "org.example.service",
+          "outcome": "accepted"
+        },
+        {
+          "method": "result",
+          "requestingApp": "org.example.service",
+          "target": "org.example.reader",
+          "outcome": "denied"
+        },
+        {
+          "method": "result",
+          "requestingApp": "org.example.service",
+          "target": "org.example.maps",
+          "outcome": "accepted"
+        },
+        {
+          "method": "launch",
+          "requestingApp": "org.example.reader",
+          "target": "org.example.service",
+          "outcome": "accepted"
+        },
+        {
+          "method": "result",
+          "requestingApp": "org.example.service",
+          "target": "org.example.reader",
+          "outcome": "accepted"
+        }
+      ],
+      "observedHostStartRequests": [
+        [
+          "org.westlake.apk.org.example.reader",
+          "org.westlake.authservicehost"
+        ],
+        [
+          "org.westlake.apk.org.example.maps",
+          "org.westlake.authservicehost"
+        ],
+        [
+          "org.westlake.authservicehost",
+          "org.westlake.apk.org.example.maps"
+        ],
+        [
+          "org.westlake.apk.org.example.reader",
+          "org.westlake.authservicehost"
+        ],
+        [
+          "org.westlake.authservicehost",
+          "org.westlake.apk.org.example.reader"
+        ]
+      ]
+    }
+  },
+  "build": {
+    "javaClassCount": 297,
+    "adapterClassesSha256": "6cb124710be85e45c391c295022d43a5d5670033d454ef5d97b0f9716fe85912",
+    "androidAdapterJarSha256": "6a43fd7b86d1a51b29ca509b118d0ef683c296b7140a409bcfbeffc5e454ac79",
+    "bootArtifactCount": 27,
+    "bootAdapterArtSha256": "5f01677cbf66bc07890ace69f5607364c4c00dfc47a245b4fefd5cf422857cd2",
+    "signedHapSha256": {
+      "org.westlake.apk.com.spotify.music": "17300829faed1ecc62ca9adef8bd0d9328cc7bbf5e0f5decf3c4e0ddcee7c0cc",
+      "org.westlake.apk.wp.wattpad": "a1b90cb64247fdbb01627360cbe2c9e661b8ed3ca365713c8023eb6be91a1f7a",
+      "org.westlake.authservicehost": "c81a069316bcfdb7dc877b0342923233afda9dcce16d31bbe046ffdc0625effa"
+    },
+    "changedAdapterClassFilesComparedWithCandidate88": [
+      "adapter/activity/RemoteHostWindows.class"
+    ]
+  },
+  "device": {
+    "connectedDuringValidation": false,
+    "usb": "offline",
+    "tcp": "offline",
+    "newBuildDeployed": false,
+    "observedOriginalApkReturnWithFix": false,
+    "appSessionVerifiedWithFix": false
+  },
+  "outstanding": [
+    "Native foreground transitions after selection and cancellation",
+    "Real overlapping callers",
+    "Behavior after native host process replacement",
+    "Application session and authenticated features in the original APKs"
+  ]
+}

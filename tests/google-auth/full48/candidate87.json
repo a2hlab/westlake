@@ -1,0 +1,91 @@
+{
+  "candidate": 87,
+  "baseline": "fc49700927a44986097d61b5b2a3adf788ecce7e",
+  "phase": "Compare OpenHarmony foreground location grants with the answers and behavior of the original Google Maps APK",
+  "maps": {
+    "package": "com.google.android.apps.maps",
+    "version": "26.43.00.1002020710",
+    "originalApkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+    "accountMode": "Maps guest mode retained from the earlier route test",
+    "sourceApkHasSeparateInstalledHap": false,
+    "hostBundle": "org.westlake.authclienthost",
+    "locationSwitchOn": true,
+    "hostPermissionStatusBeforeAndAfter": {
+      "APPROXIMATELY_LOCATION": -1,
+      "LOCATION": -1
+    },
+    "hostPermissionGrantsChanged": 0,
+    "clientGnssEnabled": false
+  },
+  "before": {
+    "adapterSha256": "5016be949c97bafd80d3bdf84218ee2fa03798bc68f91cb3eb4873f7f827c7b0",
+    "androidDeviceChecks": {
+      "ACCESS_COARSE_LOCATION": "granted",
+      "ACCESS_FINE_LOCATION": "granted"
+    },
+    "noHostGrantMessages": 6,
+    "requestStarted": false,
+    "yourLocationControl": "Blue dot button. The map remained at continental scale after tapping it."
+  },
+  "after": {
+    "processFileHashes": {
+      "adapter": "db3bd9fd7e3628485c47d9a50bccb95673cb53f8a814d4a1961d765e8360e544",
+      "framework": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+      "bootFrameworkArt": "943fe018318ec94108f6bb0acd8f8ec26b1705fa08510989107e2a096b607974",
+      "mapsApk": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec"
+    },
+    "build": {
+      "javaSources": 143,
+      "classes": 297,
+      "bootJars": 9,
+      "bootArtifacts": 27,
+      "secondCleanAdapterCompileMatched": true
+    },
+    "mappingTest": "Java runtime and C++ install mappers round-trip Android coarse, fine and background names independently. The original mappers failed this test.",
+    "attempts": [
+      {
+        "coldRestart": false,
+        "sampleAgeSeconds": 105,
+        "androidDeviceChecks": {
+          "ACCESS_COARSE_LOCATION": "denied",
+          "ACCESS_FINE_LOCATION": "denied"
+        },
+        "ohRequestStartMarkers": 0,
+        "firstFixMarkers": 0,
+        "resultOnTappingYourLocation": "App permission denied."
+      },
+      {
+        "coldRestart": true,
+        "sampleAgeSeconds": 101,
+        "androidDeviceChecks": {
+          "ACCESS_COARSE_LOCATION": "denied",
+          "ACCESS_FINE_LOCATION": "denied"
+        },
+        "ohRequestStartMarkers": 0,
+        "firstFixMarkers": 0,
+        "resultOnTappingYourLocation": "App permission denied."
+      }
+    ],
+    "settings": {
+      "action": "android.settings.APPLICATION_DETAILS_SETTINGS",
+      "originalMapsPidScopedMatchingLines": 5,
+      "resolverReturnedFalse": true,
+      "adapterLoggedNothingOpens": true
+    },
+    "openHarmonyPermissionPanelShown": false
+  },
+  "discardedBuild": {
+    "mapsTerminatedAtStartup": "SIGSEGV",
+    "rootCauseProven": false,
+    "retainedBuild": "Checks the live host grant, then reads the registered source APK manifest without calling the package manager when that registry is available."
+  },
+  "acceptance": {
+    "deniedForegroundLocationReflectedInOriginalApp": true,
+    "clientRestartDenialReproduced": true,
+    "testedApproximateOnlyHostGrantOnBoard": false,
+    "physicalLocationObserved": false,
+    "distinctPerApkUserGrantVerified": false,
+    "productionIsolationVerified": false,
+    "fullValidationComplete": false
+  }
+}

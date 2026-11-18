@@ -1,0 +1,58 @@
+{
+  "candidate": 68,
+  "phase": "Private Android log capture diagnoses Gmail code-loading and GMS version gaps",
+  "baseCommit": "afcba5a21d90a43e9c9b5d87d726404a552a96d9",
+  "changes": {
+    "capture": "Opt-in Android Log sink requiring an app-owned 0700 directory, 0600 regular file, no final symlinks or hardlinks, nonblocking file lock, 4096-byte records and 8 MiB total cap",
+    "activation": "WESTLAKE_GOOGLE_PRIVATE_LOGS=1 and WESTLAKE_ANDROID_LOG_CAPTURE_DIR; absent opt-in preserves muted logs",
+    "sharedLogging": "No stderr or HiLog fallback on sink failure",
+    "methodTracing": "Disabled for this Gmail comparison"
+  },
+  "validation": {
+    "hostChecksPassed": 14,
+    "nativeBuildPassed": true,
+    "nativeSha256": "04e22cf3a2532e1450f7156805666a15943be6752a32a95ca36104d7c00717fc",
+    "javaArtifactsUnchangedFrom": 67,
+    "gmailLaunched": true,
+    "privateFileMode": "0600",
+    "privateFileOwnerMatchesClient": true,
+    "unchangedApk": true,
+    "syncTapSubmitted": true,
+    "fullApplicationPassed": false,
+    "codeReadabilityControl": {
+      "rootVerifiedOriginalApk": true,
+      "openAfterUidDropOutsideAppSecurityContextSucceeded": true,
+      "exactAppContextOpenValidated": false
+    }
+  },
+  "observedFailures": {
+    "gmsVersionRequired": 250200000,
+    "gmsVersionReported": 244034029,
+    "remoteGmsBaseAndConfigSplitAssetPathsUnreadable": true,
+    "gmsAppComponentFactoryUnavailable": true,
+    "cronetDynamiteLoaderUnavailable": true,
+    "providerInstallerDynamiteLoaderUnavailable": true,
+    "availabilityDialogStatus": 9,
+    "gmailMailboxObserved": false
+  },
+  "inferenceLimits": [
+    "The private capture reveals concrete loading/version failures; it does not establish either as the sole mailbox blocker.",
+    "These errors are not evidence of Google rejecting a newly issued Gmail token.",
+    "Gmail disables one of its own logger backends; private capture is incomplete and may drop contended or capped messages.",
+    "Version numbers are not overridden. Updating official GMS requires revalidating pinned worker routing.",
+    "A native probe outside the app SELinux context can open the APK after dropping to the client UID. Unix UID permissions alone are not established as the cause of AssetManager failure."
+  ],
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerAccountStoreByteIdentical": true,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true
+  },
+  "privacy": "Only fixed outcomes and public code identifiers. Raw app logs remain in private test storage and are not published."
+}

@@ -1,0 +1,201 @@
+{
+  "schema": 1,
+  "candidate": 96,
+  "date": "2026-11-17",
+  "scope": "Offline investigation of media calls in the original APKs. The app observations below come from earlier board runs.",
+  "board": {
+    "usb": "offline",
+    "tcp": "offline",
+    "candidateInstalled": false,
+    "newAppSessions": 0
+  },
+  "youtube": {
+    "version": "21.43.523",
+    "nativeConsumer": "libgoogle3.so",
+    "declaresNeededLibrary": "libmediandk.so",
+    "strongImports": {
+      "AMediaCodec": 20,
+      "AMediaFormat": 13
+    },
+    "boardLibmediandkSha256": "028c673cdea2a44004eeaedf1ed77efe031c5e6e77be4e786eb4fd2eca676628",
+    "absentFromThatLibrary": [
+      "AMediaCodec_createInputSurface",
+      "AMediaCodec_getName",
+      "AMediaCodec_releaseName",
+      "AMediaCodec_setAsyncNotifyCallback",
+      "AMediaCodec_signalEndOfInputStream"
+    ],
+    "alternateProvider": {
+      "sonameInLaunch": "libwebview_bionic_shim.so",
+      "sourceOfSelection": "LD_PRELOAD in both candidate 85 launches and the candidate 86 launch",
+      "artifactSha256": "ab8282f6d2cda34c49712b8d2c64d4d76eccf12cb4fd1af4c01e4416e55bad1c",
+      "allFiveDefaultVisibilityGlobalFunctions": true
+    },
+    "javaCallSitesInEightDexFiles": {
+      "createByCodecName": 10,
+      "createDecoderByType": 4,
+      "configure": 14,
+      "start": 13,
+      "releaseOutputBuffer": 24,
+      "setCallback": 2
+    },
+    "savedPlayerRun": {
+      "reference": "candidate85.json",
+      "mainProcessJavaBridgeVideoCapabilityQueries": 2,
+      "mainProcessJavaBridgeAudioCapabilityQueries": 5,
+      "observedConfigureCalls": 0,
+      "observedStartMarkers": 0
+    },
+    "bundledLibraries": [
+      "libvpx.so",
+      "libvpxV2JNI.so",
+      "libdav1dJNI.so"
+    ],
+    "loadOfNativeConsumerDuringPlaybackVerified": false,
+    "selectedStreamOrDecoderVerified": false,
+    "onlinePlaybackVerified": false
+  },
+  "nativeMediaSurvey": {
+    "inputs": "Manifest app-inputs.lock.json, all eight hk inputs. Base and split APK hashes and all conventional arm64 library hashes verified.",
+    "scope": "Strong undefined AMediaCodec_, AMediaFormat_ and AMediaExtractor_ symbols in lib/arm64-v8a/*.so. Dynamic lookup, software paths, downloaded modules and other packaging are outside this count.",
+    "archives": 62,
+    "libraries": 116,
+    "apps": {
+      "com.google.android.apps.docs": {
+        "apkFiles": 20,
+        "arm64Libraries": 9,
+        "baseSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {},
+        "version": "2.26.457.0.all.alldpi"
+      },
+      "com.google.android.apps.maps": {
+        "apkFiles": 1,
+        "arm64Libraries": 19,
+        "baseSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {},
+        "version": "26.43.00.1002020710"
+      },
+      "com.google.android.gm": {
+        "apkFiles": 4,
+        "arm64Libraries": 10,
+        "baseSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {
+          "libvideochat_jni.so": {
+            "importsOfFive": [],
+            "strongMediaImports": 19
+          }
+        },
+        "version": "2026.10.19.1003431317.Release"
+      },
+      "com.google.android.youtube": {
+        "apkFiles": 1,
+        "arm64Libraries": 37,
+        "baseSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {
+          "libgoogle3.so": {
+            "importsOfFive": [
+              "AMediaCodec_createInputSurface",
+              "AMediaCodec_getName",
+              "AMediaCodec_releaseName",
+              "AMediaCodec_setAsyncNotifyCallback",
+              "AMediaCodec_signalEndOfInputStream"
+            ],
+            "strongMediaImports": 33
+          }
+        },
+        "version": "21.43.523"
+      },
+      "com.mobilefootie.wc2010": {
+        "apkFiles": 2,
+        "arm64Libraries": 2,
+        "baseSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {},
+        "version": "239.17834.20261016"
+      },
+      "com.spotify.music": {
+        "apkFiles": 1,
+        "arm64Libraries": 12,
+        "baseSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {
+          "liborbit-jni-spotify.so": {
+            "importsOfFive": [],
+            "strongMediaImports": 23
+          }
+        },
+        "version": "9.1.94.1929"
+      },
+      "com.ubercab": {
+        "apkFiles": 29,
+        "arm64Libraries": 15,
+        "baseSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {},
+        "version": "4.653.10004"
+      },
+      "wp.wattpad": {
+        "apkFiles": 4,
+        "arm64Libraries": 12,
+        "baseSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+        "exportsOfFive": {},
+        "nativeMediaConsumers": {},
+        "version": "11.41.1"
+      }
+    }
+  },
+  "sourceBuild": {
+    "builder": "tools/build_android_native.py --library libmediandk.so",
+    "host": {
+      "sha256": "244aeffbc436963a86c4f8943258f09ad887299eaa343065cab3a23e8ba27b12",
+      "bytes": 63136
+    },
+    "ohos": {
+      "sha256": "7f30884e8b8d7c14c494de67bfad1383edcff2678631c9c47c768fec03a79ad4",
+      "bytes": 62544
+    },
+    "oldPublicExports": 168,
+    "sourcePublicExports": 310,
+    "oldExportsMissingFromNew": 0,
+    "sourcePublicExportSetMatchesStandaloneBuild": true,
+    "coversAll33YouTubeImports": true,
+    "ldNeededOhos": [
+      "libc.so"
+    ],
+    "staging": {
+      "baseLibrariesMatchingBoardRecord": 59,
+      "replacements": [
+        "libmediandk.so"
+      ],
+      "otherFilesWithChangedHashes": 0
+    },
+    "diagnosticOption": "WESTLAKE_MEDIA_CODEC_TRACE=1",
+    "test": "tests/media-ndk/check_codec_factories.py",
+    "hostTest": {
+      "variants": 6,
+      "settings": [
+        "unset",
+        "0",
+        "01",
+        "1"
+      ],
+      "callsPerVariantPerSetting": 32,
+      "callsReturningNull": 768,
+      "messagesPerEnabledProcess": 3,
+      "messagesPerOtherProcess": 0
+    },
+    "nativeDecoderImplemented": false
+  },
+  "spotify": {
+    "verifiedVersionName": "9.1.94.1929",
+    "versionCode": 147600575,
+    "verification": "aapt dump badging against the original APK matching the SHA-256 in both the candidate 51 and candidate 93 board reports. Corrects the version label in candidate 93.",
+    "googleSelectionReturnedOnDedicatedHost": true,
+    "existingSpotifySessionVerified": false
+  },
+  "boardRetest": "Use the per-app launcher with the OHOS native build, --runtime-library libmediandk.so and --runtime-env WESTLAKE_MEDIA_CODEC_TRACE=1. Check the loaded library hash, public video watch page, Java codec events, NDK factory events and advancing playback."
+}

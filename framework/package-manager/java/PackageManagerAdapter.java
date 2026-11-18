@@ -216,6 +216,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
 
     @Override
     public int checkUidPermission(String permName, int uid) {
+        if (PermissionManagerAdapter.isForegroundLocation(permName)) {
+            return PermissionManagerAdapter.checkProcessPermission(permName, -1, uid);
+        }
         return 0;
     }
 
@@ -1170,6 +1173,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     @Override
     public int checkPermission(String permName, String pkgName, int userId) {
         logBridged("checkPermission", permName + " for " + pkgName);
+        if (PermissionManagerAdapter.isForegroundLocation(permName)) {
+            return PermissionManagerAdapter.checkPackageLocation(pkgName, permName, userId);
+        }
         if (RemotePackages.contains(pkgName)) {
             return RemotePackages.holdsPermission(pkgName, permName)
                     ? android.content.pm.PackageManager.PERMISSION_GRANTED

@@ -142,7 +142,10 @@ public final class SocketBinder {
     private volatile int mCallerPid;
 
     /** Optional verified per-connection policy. A scope ends even when the target throws. */
-    public interface CallScope extends AutoCloseable { @Override void close(); }
+    public interface CallScope extends AutoCloseable {
+        default void returned(boolean handled, Parcel reply) {}
+        @Override void close();
+    }
     public interface CallScopes {
         CallScope enter(IBinder target, int code, Parcel data, int flags) throws RemoteException;
     }
@@ -152,6 +155,18 @@ public final class SocketBinder {
     public static boolean isCallingChannel(SocketBinder channel) {
         Inbound inbound = sInbound.get();
         return inbound != null && inbound.channel == channel;
+    }
+
+    /** Observe completion on a callback owned by this verified inbound connection. */
+    public static CallScope observeCallback(IBinder callback, int code, Runnable completion) {
+        if (!isCallingPeer(callback) || completion == null || code <= 0)
+            throw new SecurityException("callback must belong to the calling channel");
+        Proxy proxy = (Proxy) callback;
+        synchronized (proxy) {
+            if (proxy.completions.putIfAbsent(code, completion) != null)
+                throw new SecurityException("callback already has an operation");
+        }
+        return () -> { synchronized (proxy) { proxy.completions.remove(code, completion); } };
     }
 
     /** Per caller uid set with setCaller: {pid, elapsedRealtime of its latest incoming call}. */
@@ -257,6 +272,7 @@ public final class SocketBinder {
     private volatile boolean mVerifiedSameApp;
     /** Private protocol: stored activity Intents can cross only verified same-app connections. */
     public static final int SAME_APP_ACTIVITY_INTENT = 0x574c41;
+    public static final String FOREIGN_ACTIVITY_INTENT_HOP = "stored activity Intent crossed an unverified or foreign hop";
 
     /** Set only after the channel's package, APK files and signer were checked against its spawner. */
     public void setVerifiedSameApp(boolean sameApp) { mVerifiedSameApp = sameApp; }
@@ -369,6 +385,33 @@ public final class SocketBinder {
                 data.setDataPosition(position);
             }
         }
+        if (GoogleSignInDiagnostics.supported(descriptor, code)
+                && "1".equals(System.getenv("WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS"))
+                && "1".equals(System.getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS"))) {
+            GoogleSignInQueueTrace.schedule(descriptor, code, target);
+            int position = data.dataPosition();
+            try {
+                // Binder versions differ in their policy/work-source header words. Validate
+                // the exact public interface token within the bounded header, without
+                // enforceInterface's thread-policy side effects or reading credential fields.
+                boolean token = false;
+                for (int at = 0; at <= 16 && at <= data.dataSize() - 4; at += 4) {
+                    data.setDataPosition(at);
+                    if (data.readInt() != descriptor.length()) continue;
+                    data.setDataPosition(at);
+                    if (descriptor.equals(data.readString())) { token = true; break; }
+                }
+                if (token) {
+                    result = GoogleSignInDiagnostics.describe(descriptor, code, new GoogleSignInDiagnostics.Reader() {
+                        public int position() { return data.dataPosition(); }
+                        public int size() { return data.dataSize(); }
+                        public int readInt() { return data.readInt(); }
+                        public void seek(int at) { data.setDataPosition(at); }
+                    });
+                } else result = "status=unreadable";
+            } catch (RuntimeException ignored) { result = "status=unreadable"; }
+            finally { data.setDataPosition(position); }
+        }
         trace("in", descriptor, code, -1, result);
     }
 
@@ -408,6 +451,7 @@ public final class SocketBinder {
         final long id;
         private long mReferences;
         private String mDescriptor;
+        final Map<Integer, Runnable> completions = new HashMap<>();
 
         Proxy(SocketBinder channel, long id) {
             this.channel = channel;
@@ -420,12 +464,16 @@ public final class SocketBinder {
 
         @Override
         protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
+            Runnable completed;
+            synchronized (this) { completed = completions.remove(code); }
+            // Revoke before forwarding the result; never inspect or replace the callback payload.
+            if (completed != null) completed.run();
             // Every forwarding hop must preserve the same-app restriction. Checking only the
             // final creator would reveal its stored Intent to a foreign holder via an intermediary.
             if (code == SAME_APP_ACTIVITY_INTENT) {
                 for (Inbound inbound = sInbound.get(); inbound != null; inbound = inbound.outer)
                     if (!inbound.channel.mVerifiedSameApp)
-                        throw new SecurityException("stored activity Intent crossed an unverified or foreign hop");
+                        throw new SecurityException(FOREIGN_ACTIVITY_INTENT_HOP);
             }
             if (!TRACE || code == INTERFACE_TRANSACTION) return channel.call(id, code, data, reply, flags);
             if (code == 46) sLastService = serviceIdOf(data);
@@ -457,7 +505,13 @@ public final class SocketBinder {
                     summary = "bundle_present=true error=" + GoogleAuthBoundaryTrace.responseError(result.getString("Error"))
                             + " token_details_present=" + result.containsKey("tokenDetails")
                             + " auth_token_present=" + result.containsKey("authtoken")
-                            + " recovery_intent_present=" + result.containsKey("userRecoveryIntent");
+                            + " recovery_intent_key_present=" + result.containsKey("userRecoveryIntent");
+                    try {
+                        summary += " recovery_intent_present="
+                                + (result.getParcelable("userRecoveryIntent", android.content.Intent.class) != null);
+                    } catch (RuntimeException unreadable) {
+                        summary += " recovery_intent_unreadable=true";
+                    }
                     if ("1".equals(System.getenv("WESTLAKE_GOOGLE_TOKEN_FINGERPRINT"))) {
                         String fingerprint = "token_fingerprint_unavailable=true";
                         Parcel tokenParcel = Parcel.obtain();
@@ -748,7 +802,11 @@ public final class SocketBinder {
             if (TRACE) traceInbound(target, call.code, data);
             CallScopes scopes = mCallScopes;
             CallScope scope = scopes == null ? null : scopes.enter(target, call.code, data, call.flags);
-            try { return target.transact(call.code, data, reply, call.flags); }
+            try {
+                boolean handled = target.transact(call.code, data, reply, call.flags);
+                if (scope != null) scope.returned(handled, reply);
+                return handled;
+            }
             finally { if (scope != null) scope.close(); }
         } catch (RemoteException | RuntimeException e) {
             if (oneway) {

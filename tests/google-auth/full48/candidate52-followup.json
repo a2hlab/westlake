@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "candidate": 52,
+  "sourceRevision": "cd468ed4bd665dc18a5d49b05a0b6f65ea229a5d",
+  "package": "wp.wattpad",
+  "apkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+  "officialGmsAdapterJarSha256": "a43d27c88532cbf8f1ce72516813e1dd968420e9d088851ef363147e0f583e0b",
+  "clientAdapterJarSha256": "a43d27c88532cbf8f1ce72516813e1dd968420e9d088851ef363147e0f583e0b",
+  "nativeArtifactsRebuilt": false,
+  "freshDataAcceptance": false,
+  "dataProvenance": "Preserved pre-login candidate50 Wattpad app data copied into the candidate52 runtime; original fresh data and the copied code cache were retained separately.",
+  "observedAuthentication": {
+    "accountChooserDisplayed": true,
+    "existingGoogleTestAccountSelected": true,
+    "interactiveOAuthProviderTokens": 3,
+    "googleActivityResult": -1,
+    "oauthSelectionSaved": true,
+    "subsequentSilentOAuthProviderTokens": 1,
+    "silentTokenEventOwner": "wp.wattpad",
+    "clientTokenBearingAuthReplyObserved": true,
+    "visibleAppResult": "Create an Account; username and birthday requested",
+    "newAccountCreated": false,
+    "followupOAuthFixValidatedOnBoard": true,
+    "correlation": "Latest client remote-activity start timestamp and owner-tagged provider/GMS events; no token or account values published."
+  },
+  "oauthSelection": {
+    "schema": "2",
+    "mode": "600",
+    "originalSignerSha256": "012de45837d20561255a02bbc22334c1f681d01b366fe31bef418baf535903ef",
+    "legacySignerPresent": true,
+    "accountHashSyntaxValid": true,
+    "revocationEpochPresent": true,
+    "scopes": [
+      "email",
+      "https://www.googleapis.com/auth/user.birthday.read",
+      "openid",
+      "profile"
+    ],
+    "accountNameStored": false,
+    "tokenStored": false
+  },
+  "recovery": {
+    "olderChoiceSkippedAccountChooser": true,
+    "noSelectionDenialObserved": true,
+    "providerTokenIssuedInDeniedAttempt": false,
+    "uncertifiedPageObservedAfterLocalDenial": true,
+    "gmsPreferenceFile": "shared_prefs/common.selected_account_prefs.xml",
+    "removedKeys": [
+      "selected_account_type:wp.wattpad",
+      "wp.wattpad",
+      "x-client-auth:wp.wattpad"
+    ],
+    "removedEntryCount": 3,
+    "otherEntriesPreserved": 9,
+    "privateBackupVerified": true,
+    "gmsUiOnlyRestartRestoredChooser": false,
+    "allGmsProcessesAndClientRestartedBeforeSuccessfulRetry": true,
+    "automaticMigrationImplemented": false
+  },
+  "startup": {
+    "unchangedRetryReachedOnboarding": true,
+    "survivingRetrySignalSample": {
+      "blockedThreadCount": 282,
+      "unblockedThreads": [
+        "OS_DfxWatchdog"
+      ],
+      "disposition": "default"
+    },
+    "failingWriteLocalized": false,
+    "nativeSignalFixValidated": false,
+    "verifiedRestartExitSignals": [
+      13,
+      13
+    ]
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsPreserved": true,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true
+  },
+  "appAccountSessionValidated": false,
+  "libraryOrReadingValidated": false,
+  "expiredTokenRenewalValidated": false,
+  "fullApplicationAcceptance": false,
+  "productionPerAppIsolationValidated": false,
+  "oauthSelectionRestartValidation": {
+    "clientProcessRestarted": true,
+    "reachedLogin": false,
+    "exitSignal": 13,
+    "oauthReuseObserved": false,
+    "result": "Blocked by a separate native startup exit before authentication; record presence alone is not a restart pass."
+  }
+}

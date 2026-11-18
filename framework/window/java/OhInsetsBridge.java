@@ -10,16 +10,88 @@ import android.view.InsetsState;
 import android.view.View;
 import android.view.ViewRootImpl;
 import android.view.WindowInsets;
+import android.view.WindowManagerGlobal;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.WeakHashMap;
 
-/** Server-owned IME insets, scoped to the window receiving the OH callback. */
+/** OpenHarmony system insets in Android display coordinates, scoped to their window. */
 public final class OhInsetsBridge {
     private static final WeakHashMap<IBinder, InsetsState> STATES = new WeakHashMap<>();
     private static final WeakHashMap<IBinder, Rect> OCCUPIED = new WeakHashMap<>();
     private static final WeakHashMap<IBinder, Boolean> RETIRED = new WeakHashMap<>();
+    private static final int STATUS_BAR = InsetsSource.createId(null, 0, WindowInsets.Type.statusBars());
+    private static volatile boolean statusBarQueryAvailable = true;
+    private static native int[] nativeStatusBarFrame(int session);
+
     private OhInsetsBridge() {}
+
+    // SceneBoard returns the avoid area in this window's local coordinates.
+    public static boolean updateStatusBar(IWindow window, int session, int left, int top) {
+        if (!statusBarQueryAvailable || session <= 0 || window == null) return false;
+        int[] bounds;
+        try {
+            bounds = nativeStatusBarFrame(session);
+        } catch (UnsatisfiedLinkError olderBridge) {
+            statusBarQueryAvailable = false;
+            return false;
+        }
+        if (bounds == null) return false;
+        int[] size = WindowSessionAdapter.getDefaultDisplaySize();
+        Rect display = new Rect(0, 0, size[0], size[1]);
+        Rect bar = new Rect(bounds[0], bounds[1], bounds[2], bounds[3]);
+        bar.offset(left, top);
+        if (!bar.intersect(display)) bar.setEmpty();
+        IBinder key = window.asBinder();
+        synchronized (STATES) {
+            if (RETIRED.containsKey(key)) return false;
+            InsetsState state = STATES.get(key);
+            if (state == null) {
+                state = new InsetsState();
+                STATES.put(key, state);
+            }
+            InsetsSource prior = state.peekSource(STATUS_BAR);
+            if (prior != null && prior.getFrame().equals(bar)
+                    && state.getDisplayFrame().equals(display)) return false;
+            state.setDisplayFrame(display);
+            state.getOrCreateSource(STATUS_BAR, WindowInsets.Type.statusBars())
+                    .setFrame(bar).setVisible(!bar.isEmpty());
+            return true;
+        }
+    }
+
+    public static void systemAreaChanged(Object target, int type) {
+        if (type == 0) refreshSystemArea(target);
+    }
+
+    public static void refreshSystemArea(Object target) {
+        if (!(target instanceof IWindow)) return;
+        IWindow window = (IWindow) target;
+        new Handler(Looper.getMainLooper()).post(() -> {
+            View view = WindowManagerGlobal.getInstance().getWindowView(window.asBinder());
+            if (view == null || view.getViewRootImpl() == null) return;
+            int session = InputEventBridge.getInstance().getSessionId(window.asBinder());
+            int[] origin = new int[2];
+            view.getLocationOnScreen(origin);
+            updateStatusBar(window, session, origin[0], origin[1]);
+            ViewRootImpl root = view.getViewRootImpl();
+            InsetsState current = root.getInsetsController().getState();
+            InsetsState next = new InsetsState(current, true);
+            synchronized (STATES) { copyStatusBar(window.asBinder(), next); }
+            if (next.equals(current)) return;
+            root.getInsetsController().onStateChanged(next);
+            view.requestApplyInsets();
+        });
+    }
+
+    private static void copyStatusBar(IBinder key, InsetsState destination) {
+        InsetsState saved = STATES.get(key);
+        InsetsSource bar = saved == null ? null : saved.peekSource(STATUS_BAR);
+        if (bar != null) {
+            destination.setDisplayFrame(saved.getDisplayFrame());
+            destination.addSource(new InsetsSource(bar));
+        }
+    }
 
     public static void copyForWindow(IWindow window, InsetsState destination) {
         if (destination == null) return;
@@ -97,6 +169,7 @@ public final class OhInsetsBridge {
                         state.getOrCreateSource(InsetsSource.ID_IME, WindowInsets.Type.ime())
                                 .setFrame(frame).setVisible(!area.isEmpty());
                         synchronized (STATES) {
+                            copyStatusBar(targetWindow.asBinder(), state);
                             STATES.put(targetWindow.asBinder(), new InsetsState(state, true));
                             OCCUPIED.put(targetWindow.asBinder(), area);
                         }

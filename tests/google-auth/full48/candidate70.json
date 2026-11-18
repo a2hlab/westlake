@@ -1,0 +1,108 @@
+{
+  "candidate": 70,
+  "finalBuild": "70b",
+  "phase": "Pinned public APK descriptors repair Gmail loading across GMS host security contexts",
+  "baseCommit": "bbdd7a1e51982f0aaa3baac2d2bf68921e45a3a7",
+  "implementation": {
+    "activation": [
+      "WESTLAKE_PLAY_CODE_SPAWNER",
+      "WESTLAKE_PLAY_CODE_APK_SHA256"
+    ],
+    "defaultOff": true,
+    "source": "Existing root-spawner WHOIS proof for connected socket peer PID",
+    "baseApkHashPinned": true,
+    "descriptorsReadOnlyRegularAndBounded": true,
+    "codePathsOnly": true,
+    "privateGmsDataRemapped": false,
+    "nativeLibraryDirectoryRemapped": false,
+    "descriptorLifetime": "Client process lifetime; reconnect requires the same file identities",
+    "terminalVerificationFailureCachedUntilRestart": true,
+    "baseHashReadsPreserveSharedFileOffset": true,
+    "versionOrCertificationOverride": false
+  },
+  "build": {
+    "javaSources": 140,
+    "javaClasses": 293,
+    "javaCompilationPassed": true,
+    "runtimePackagingPassed": true,
+    "bootImageBuildPassed": true,
+    "nativeBuildPassed": true,
+    "adapterSha256": "199244cd3014c3a9fe8171838a9ec54e949be649a8a7f0d550198b2a0d44faee",
+    "nativeSha256": "8e5d7304fc4aa46db3c1c4deba45dfcd69b9839eeac5762e27095492a0280a5d",
+    "separateStandalonePreloadRun": false
+  },
+  "board": {
+    "baseline": {
+      "actualGmailUid": 20010060,
+      "originalGmsApkOpenErrno": 13,
+      "zipProviderCreated": false
+    },
+    "initialPositive": {
+      "rootVerifiedApks": 9,
+      "successfullyLoadedBaseAndConfigurationApks": 3,
+      "gmsAppComponentFactoryFailureMarkers": 0,
+      "dynamiteLoaderFailureMarkers": 0,
+      "cronetInstalltimeApkMapped": true,
+      "providerInstallerReportedGmsCoreOpenSSLInstalled": true
+    },
+    "initialWrongPin": {
+      "refused": true,
+      "pinRefusalMarkers": 25,
+      "verifiedCodeSets": 0,
+      "assetLoads": 0,
+      "finding": "Repeated hash work led to a cached terminal rejection in final build"
+    },
+    "initialRestoredPin": {
+      "rootVerifiedApks": 9,
+      "successfullyLoadedBaseAndConfigurationApks": 3
+    },
+    "finalPositive": {
+      "rootVerifiedApks": 9,
+      "successfullyLoadedBaseAndConfigurationApks": 3,
+      "gmsOwnedRegularDescriptors": 17
+    },
+    "finalWrongPin": {
+      "pinRefusalMarkersInitial": 1,
+      "pinRefusalMarkersLater": 1,
+      "verifiedCodeSets": 0,
+      "assetLoads": 0,
+      "gmsOwnedRegularDescriptors": 0,
+      "uncaughtMarkers": 0,
+      "fatalSignalMarkers": 0
+    },
+    "finalRestoredPin": {
+      "rootVerifiedApks": 9,
+      "successfullyLoadedBaseAndConfigurationApks": 3,
+      "pinRefusalMarkers": 0,
+      "uncaughtMarkers": 0,
+      "fatalSignalMarkers": 0
+    }
+  },
+  "limitations": [
+    "Gmail still shows Account not synced; no mailbox/backend or full app pass.",
+    "Gmail requires GMS version250200000, but real installed GMS version is244034029.",
+    "Some GMS service status9 responses remain; process-global service attribution is approximate.",
+    "The base hash is explicitly pinned; splits come from the trusted root-spawner code set and are not individually configured hash pins.",
+    "Production installation/update integrity, general reconnect cases, native-library path mapping and full isolation remain unvalidated.",
+    "Successful Cronet APK mapping and a security-provider installation marker are not proofs of network or cryptographic acceptance."
+  ],
+  "sourceSha256": {
+    "framework/activity/java/RemoteApkCode.java": "373fd1fee522ab0dacdeda2cb95c519f2e89fb1572e7a318d5a0f06d46fa41cf",
+    "framework/activity/java/PlayServicesChannel.java": "5028128276115150a084b70674184e30d383eb85e21b48d06259af5c684e5fcb",
+    "framework/android-runtime/src/android_content_res_ApkAssets_aosp.cpp": "f9ce64437a9f1d26f211ef2df6492b1f67e95e61efc0f2ec051dc477a1bfc387"
+  },
+  "privacy": "Fixed metadata, artifact hashes and public code identifiers only; no raw logs, account identities, tokens or captures.",
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerAccountStoreByteIdentical": true,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true
+  },
+  "fullApplicationPassed": false
+}

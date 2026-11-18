@@ -110,6 +110,9 @@ public final class PlayServicesChannel {
     private static final int READ_DELEGATED_AUTH = 24;
     private static final int START_PENDING_ACTIVITY = 25;
     private static final int START_CREATOR_ACTIVITY = 26;
+    private static final int READ_ASYNC_AUTH = 27;
+    /** Native account consent uses a distinct transaction; older providers must fail closed. */
+    private static final int DELEGATED_NATIVE_AUTH = 28;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -149,6 +152,11 @@ public final class PlayServicesChannel {
         SocketBinder binder;
         volatile String remoteRoot;
         volatile String remoteRealRoot;
+        // Kept until client process exit: cached LoadedApk instances can outlive a channel.
+        volatile RemoteApkCode code;
+        // Launcher pins cannot be repaired in this running client. Fail closed once
+        // instead of rehashing a large APK on every subsequent package query.
+        boolean codeRejected;
         /** The uid the host gave this app's channel (0 from a host that doesn't say). */
         volatile int uid;
 
@@ -521,20 +529,25 @@ public final class PlayServicesChannel {
 
     private static ApplicationInfo localize(Channel c, ApplicationInfo info) {
         if (info == null) return null;
-        info.sourceDir = localPath(c, info.sourceDir);
-        info.publicSourceDir = localPath(c, info.publicSourceDir);
+        RemoteApkCode code = "com.google.android.gms".equals(info.packageName) ? c.code : null;
+        info.sourceDir = codePath(c, code, info.sourceDir);
+        info.publicSourceDir = codePath(c, code, info.publicSourceDir);
         info.nativeLibraryDir = localPath(c, info.nativeLibraryDir);
         info.nativeLibraryRootDir = localPath(c, info.nativeLibraryRootDir);
         info.secondaryNativeLibraryDir = localPath(c, info.secondaryNativeLibraryDir);
-        info.scanSourceDir = localPath(c, info.scanSourceDir);
-        info.scanPublicSourceDir = localPath(c, info.scanPublicSourceDir);
+        info.scanSourceDir = codePath(c, code, info.scanSourceDir);
+        info.scanPublicSourceDir = codePath(c, code, info.scanPublicSourceDir);
         if (info.splitSourceDirs != null) {
-            for (int i = 0; i < info.splitSourceDirs.length; i++) info.splitSourceDirs[i] = localPath(c, info.splitSourceDirs[i]);
+            for (int i = 0; i < info.splitSourceDirs.length; i++) info.splitSourceDirs[i] = codePath(c, code, info.splitSourceDirs[i]);
         }
         if (info.splitPublicSourceDirs != null) {
-            for (int i = 0; i < info.splitPublicSourceDirs.length; i++) info.splitPublicSourceDirs[i] = localPath(c, info.splitPublicSourceDirs[i]);
+            for (int i = 0; i < info.splitPublicSourceDirs.length; i++) info.splitPublicSourceDirs[i] = codePath(c, code, info.splitPublicSourceDirs[i]);
         }
         return info;
+    }
+
+    private static String codePath(Channel c, RemoteApkCode code, String path) {
+        return code == null ? localPath(c, path) : code.path(path, c.remoteRoot, c.remoteRealRoot);
     }
 
     private static PackageInfo localize(Channel c, PackageInfo info) {
@@ -639,9 +652,18 @@ public final class PlayServicesChannel {
         String name = c.socket();
         if (name == null) return null;
         synchronized (CLIENT_LOCK) {
+            if (c.codeRejected) return null;
             if (c.binder != null && c.binder.isAlive()) return c.binder.getRemoteRoot();
             try {
                 int fd = SocketBinder.connect(name);
+                if (c == SERVICES && System.getenv("WESTLAKE_PLAY_CODE_SPAWNER") != null) {
+                    try { verifyRemoteCode(c, fd); }
+                    catch (IOException | RuntimeException e) {
+                        if (e instanceof SecurityException) c.codeRejected = true;
+                        android.os.ParcelFileDescriptor.adoptFd(fd).close();
+                        throw e;
+                    }
+                }
                 if (c == AUTH) {
                     try { verifyAuthProvider(fd); }
                     catch (IOException | RuntimeException e) {
@@ -668,6 +690,21 @@ public final class PlayServicesChannel {
                 System.err.println(TAG + "cannot reach " + name + ": " + e);
                 return null;
             }
+        }
+    }
+
+    /** Public APKs only. Neither host data directories nor native-library paths are exposed here. */
+    private static void verifyRemoteCode(Channel c, int fd) throws IOException {
+        RemoteApkCode verified = RemoteApkCode.open(System.getenv("WESTLAKE_PLAY_CODE_SPAWNER"),
+                System.getenv("WESTLAKE_PLAY_CODE_APK_SHA256"), SocketBinder.peerPid(fd));
+        if (c.code == null) {
+            c.code = verified;
+            System.err.println("[WL-PLAY-CODE] host_verified=true apk_count=" + verified.size());
+        } else {
+            try {
+                if (!c.code.sameFiles(verified))
+                    throw new SecurityException("remote APK set changed; client restart required");
+            } finally { verified.close(); }
         }
     }
 
@@ -744,6 +781,81 @@ public final class PlayServicesChannel {
         finally { provider.close(); }
     }
 
+    /** AccountManager clients use the same verified GetToken call as the app's GMS SDK. */
+    public static android.os.Bundle nativeAccountToken(android.accounts.Account account, String scope)
+            throws RemoteException {
+        String own = ActivityThread.currentPackageName();
+        if (!isClient() || adapter.core.GoogleAuthProxy.provider() || "com.google.android.gms".equals(own)
+                || account == null || !"com.google".equals(account.type) || scope == null
+                || scope.isEmpty() || scope.length() > adapter.core.GoogleAuthDelegationPolicy.MAX_KEY_LENGTH)
+            throw new SecurityException("native account client required");
+        Intent intent = new Intent().setComponent(new ComponentName("com.google.android.gms",
+                "com.google.android.gms.auth.GetToken"));
+        List<ResolveInfo> found = RemotePackages.queryServices(intent, null, 0);
+        if (found.isEmpty() || found.get(0).serviceInfo == null
+                || !"com.google.android.gms".equals(found.get(0).serviceInfo.packageName))
+            throw new RemoteException("official auth service not declared");
+        ServiceInfo info = found.get(0).serviceInfo;
+        Channel channel = channelFor(info.packageName);
+        Channel process = remoteProcess(channel, info.packageName, AppProcesses.processOf(info));
+        IBinder remote = root(process == null ? channel : process);
+        if (remote == null) throw new RemoteException("official auth channel unavailable");
+        IBinder service;
+        Parcel bind = Parcel.obtain(), bound = Parcel.obtain();
+        try {
+            bind.writeTypedObject(intent, 0);
+            bind.writeInt(0);
+            if (!remote.transact(BIND, bind, bound, 0)) throw new RemoteException("official auth bind unsupported");
+            bound.readException();
+            service = bound.readStrongBinder();
+        } finally { bind.recycle(); bound.recycle(); }
+        final String descriptor = "com.google.android.auth.IAuthManagerService";
+        if (service == null || !descriptor.equals(service.getInterfaceDescriptor()))
+            throw new RemoteException("official auth service unavailable");
+        Parcel request = Parcel.obtain(), reply = Parcel.obtain();
+        android.os.Bundle response;
+        try {
+            android.os.Bundle extras = new android.os.Bundle();
+            extras.putString("androidPackageName", own);
+            extras.putString("clientPackageName", own);
+            request.writeInterfaceToken(descriptor);
+            request.writeTypedObject(account, 0);
+            request.writeString(scope);
+            request.writeTypedObject(extras, 0);
+            if (!service.transact(5, request, reply, 0)) throw new RemoteException("official token call unsupported");
+            reply.readException();
+            response = reply.readTypedObject(android.os.Bundle.CREATOR);
+        } finally { request.recycle(); reply.recycle(); }
+        if (response == null) throw new RemoteException("official token reply absent");
+        ClassLoader loader = ActivityThread.currentApplication().getClassLoader();
+        response.setClassLoader(loader);
+        String token = response.getString("authtoken");
+        Long expiry = null;
+        if (token == null || token.isEmpty()) {
+            android.os.Bundle details = response.getBundle("tokenDetails");
+            if (details == null) throw new RemoteException("official token not issued");
+            details.setClassLoader(loader);
+            android.os.Parcelable value = details.getParcelable("TokenData");
+            if (value == null || !"com.google.android.gms.auth.TokenData".equals(value.getClass().getName()))
+                throw new RemoteException("official token encoding unsupported");
+            Parcel encoded = Parcel.obtain();
+            try {
+                value.writeToParcel(encoded, 0);
+                adapter.core.GoogleAccountTokenData parsed = adapter.core.GoogleAccountTokenData.parse(encoded.marshall());
+                token = parsed.token;
+                expiry = parsed.expiryMillis;
+            } finally { encoded.recycle(); }
+        }
+        if (expiry != null && expiry <= System.currentTimeMillis())
+            throw new RemoteException("official token expired");
+        android.os.Bundle result = new android.os.Bundle();
+        result.putString(android.accounts.AccountManager.KEY_ACCOUNT_NAME, account.name);
+        result.putString(android.accounts.AccountManager.KEY_ACCOUNT_TYPE, account.type);
+        result.putString(android.accounts.AccountManager.KEY_AUTHTOKEN, token);
+        if (expiry != null) result.putLong("android.accounts.expiry", expiry);
+        return result;
+    }
+
     public static IBinder remoteAuthService() {
         IBinder root = root(AUTH);
         if (root == null) return null;
@@ -765,6 +877,10 @@ public final class PlayServicesChannel {
         if (!adapter.core.GoogleAuthDelegation.enabled() || !"com.google.android.gms".equals(application().getPackageName())) return null;
         // The authenticated app call owns this capability. Do not borrow another process's picker.
         if (GoogleAuthOperations.present()) return GoogleAuthOperations.read(method, account, key);
+        if (GoogleAsyncAuthOperations.enabled()) {
+            android.os.Bundle async = readAsyncAuth(method, account, key);
+            if (async != null && async.getBoolean("handled")) return async.getString("value");
+        }
         String ui = "com.google.android.gms.ui";
         if (AppProcesses.runsHere(ui)) return RemoteActivities.readDelegatedAuth(method, account, key);
         // Cache reads must not start a background UI; the verified activity route starts it.
@@ -779,15 +895,37 @@ public final class PlayServicesChannel {
         } finally { data.recycle(); reply.recycle(); }
     }
 
+    private static android.os.Bundle readAsyncAuth(String method, android.accounts.Account account, String key)
+            throws RemoteException {
+        if (AppProcesses.runsHere("com.google.android.gms")) return GoogleAsyncAuthOperations.read(method, account, key);
+        Channel channel = processChannel(AppProcesses.socketOf("com.google.android.gms"));
+        IBinder target = channel == null ? null : root(channel);
+        if (target == null) throw new RemoteException("original auth operation host unavailable");
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeString(method); data.writeTypedObject(account, 0); data.writeString(key);
+            if (!target.transact(READ_ASYNC_AUTH, data, reply, 0)) throw new RemoteException("async auth route unavailable");
+            reply.readException(); return reply.readBundle(PlayServicesChannel.class.getClassLoader());
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
     static android.os.Bundle delegatedAuth(PackageInfo origin, int pid, String spawner,
             android.accounts.Account account, String key, IBinder witness, String invalidate) throws RemoteException {
+        return delegatedAuth(origin, pid, spawner, account, key, witness, invalidate, null);
+    }
+
+    static android.os.Bundle delegatedAuth(PackageInfo origin, int pid, String spawner,
+            android.accounts.Account account, String key, IBinder witness, String invalidate,
+            String nativeEpoch) throws RemoteException {
         IBinder provider = root(AUTH);
         if (provider == null) throw new RemoteException("auth provider unavailable");
         Parcel data = Parcel.obtain(), reply = Parcel.obtain();
         try {
             data.writeTypedObject(origin, 0); data.writeInt(pid); data.writeString(spawner);
             data.writeTypedObject(account, 0); data.writeString(key); data.writeStrongBinder(witness); data.writeString(invalidate);
-            if (!provider.transact(DELEGATED_AUTH, data, reply, 0)) throw new RemoteException("delegation unavailable");
+            if (nativeEpoch != null) data.writeString(nativeEpoch);
+            if (!provider.transact(nativeEpoch == null ? DELEGATED_AUTH : DELEGATED_NATIVE_AUTH, data, reply, 0))
+                throw new RemoteException("delegation unavailable");
             reply.readException(); return reply.readBundle(PlayServicesChannel.class.getClassLoader());
         } finally { data.recycle(); reply.recycle(); }
     }
@@ -1752,7 +1890,8 @@ public final class PlayServicesChannel {
                 return true;
             }
             if (!mIdentified) throw new SecurityException("channel has not said who it is");
-            if (adapter.core.GoogleAuthProxy.provider() && !mOwnApplication && code != AUTH_PROVIDER && code != DELEGATED_AUTH) {
+            if (adapter.core.GoogleAuthProxy.provider() && !mOwnApplication && code != AUTH_PROVIDER
+                    && code != DELEGATED_AUTH && code != DELEGATED_NATIVE_AUTH) {
                 throw new SecurityException("authentication namespace exposes only its token provider");
             }
             IPackageManager packages = ActivityThread.getPackageManager();
@@ -1810,7 +1949,18 @@ public final class PlayServicesChannel {
                     reply.writeString(RemoteActivities.readDelegatedAuth(method, account, data.readString()));
                     return true;
                 }
-                case DELEGATED_AUTH: {
+                case READ_ASYNC_AUTH: {
+                    if (!mIdentityEnforced || !mOwnApplication || !GoogleAsyncAuthOperations.enabled())
+                        throw new SecurityException("async auth reads require the verified official app");
+                    String method = data.readString();
+                    android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
+                    String key = data.readString();
+                    if (data.dataAvail() != 0) throw new SecurityException("unexpected auth read fields");
+                    reply.writeBundle(GoogleAsyncAuthOperations.read(method, account, key));
+                    return true;
+                }
+                case DELEGATED_AUTH:
+                case DELEGATED_NATIVE_AUTH: {
                     if (!mIdentityEnforced || mVerifiedInfo == null || mVerifiedInfo.signingInfo == null)
                         throw new SecurityException("unverified broker");
                     android.content.pm.Signature[] broker = mVerifiedInfo.signingInfo.getApkContentsSigners();
@@ -1821,6 +1971,10 @@ public final class PlayServicesChannel {
                         int originPid = data.readInt(); String spawner = data.readString();
                         android.accounts.Account account = data.readTypedObject(android.accounts.Account.CREATOR);
                         String key = data.readString(); IBinder witness = data.readStrongBinder(); String invalidate = data.readString();
+                        String nativeEpoch = code == DELEGATED_NATIVE_AUTH ? data.readString() : null;
+                        if (data.dataAvail() != 0 || (flags & IBinder.FLAG_ONEWAY) != 0
+                                || (code == DELEGATED_NATIVE_AUTH && (nativeEpoch == null || invalidate != null)))
+                            throw new SecurityException("invalid delegation fields");
                         if (origin == null || origin.signingInfo == null || origin.signatures == null
                                 || origin.signatures.length != 1 || origin.signingInfo.getApkContentsSigners().length != 1)
                             throw new SecurityException("unverified origin");
@@ -1833,7 +1987,7 @@ public final class PlayServicesChannel {
                             throw new SecurityException("origin signer mismatch");
                         reply.writeBundle(adapter.core.GoogleAuthDelegation.provide(mVerifiedInfo.packageName, broker[0].toByteArray(),
                                 origin.packageName, origin.signingInfo.getApkContentsSigners()[0].toByteArray(),
-                                origin.signatures[0].toByteArray(), account, key, witness, invalidate));
+                                origin.signatures[0].toByteArray(), account, key, witness, invalidate, nativeEpoch));
                         return true;
                     } catch (Exception error) {
                         adapter.core.GoogleAuthDelegation.event("provider_denied=true " + adapter.core.GoogleAuthDelegation.failure(error));

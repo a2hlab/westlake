@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "candidate": 93,
+  "boardDate": "2026-11-17",
+  "app": {
+    "package": "com.spotify.music",
+    "versionName": "9.1.94.1929",
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304"
+  },
+  "dedicatedHost": {
+    "bundle": "org.westlake.apk.com.spotify.music",
+    "uid": 20010067,
+    "hapSha256": "b45012d3710a205c576db6ae427545c543b683a7a8c31490614cbf7c0aecf242",
+    "freshAppData": true,
+    "landingScreen": "Millions of songs / Log in",
+    "googleSignInStarted": true,
+    "chooserAutoForegrounded": false,
+    "chooserForegroundedUsingOpenHarmonyLauncher": true,
+    "officialChooserShowedSpotifyAndAuthorizedTestAccount": true,
+    "existingTestAccountSelected": true,
+    "spotifyActivityResult": {
+      "code": -1,
+      "name": "RESULT_OK",
+      "count": 1
+    },
+    "foregroundHostAfterChooser": "org.westlake.authclienthost",
+    "verifiedServiceReturnRoute": "com.spotify.music:org.westlake.authclienthost",
+    "afterManuallyForegroundingDedicatedHost": {
+      "originalAndroidProcessAlive": true,
+      "windowsOwnedByOriginalAndroidProcess": 0,
+      "readableSpotifyScreen": false
+    },
+    "spotifyAccountSessionVerified": false
+  },
+  "historicalControl": {
+    "evidence": "candidate51-followup.json",
+    "visibleResult": "Create account: date-of-birth form",
+    "accountCreated": false
+  },
+  "publicArtifacts": "No screen captures, raw account data or raw logs.",
+  "sameBuildSharedHostRetest": {
+    "bundle": "org.westlake.authclienthost",
+    "uid": 20010060,
+    "hapSha256": "049c857e15be08318acc2b0473572763aa75c7cbe64ba78f90ae30f936ad0991",
+    "freshAppData": true,
+    "spotifyLoginAndGoogleButtonsSeenAndPressed": true,
+    "googleActivityAutoForegrounded": true,
+    "googleOwnsFocusedWindow": true,
+    "centerOfDisplayCaptureUniformBlack": true,
+    "chooserAccountRowVerified": false,
+    "accountSelected": false,
+    "successfulActivityResultsBeforeBack": 0,
+    "spotifyAccountSessionVerified": false
+  }
+}

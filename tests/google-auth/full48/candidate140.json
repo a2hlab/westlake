@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "candidate": 140,
+  "date": "2026-11-18",
+  "previous": "candidate139.json",
+  "test": "Compare Gmail account enumeration on both interfaces during original app startup",
+  "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "configuration": {
+    "appToAccountProvider": true,
+    "officialPlayListenerToAccountProvider": false,
+    "distinctUidsForGmailAndThreeServices": true,
+    "clientRepliesObservedInsideOriginalGmailProcess": true,
+    "sameRetainedProfile": true
+  },
+  "runs": [
+    {
+      "diagnosticAdapterSha256": "6895e1223cbd484c53b76cfc11b3c0d0bf26a61fa73e237499b7d3f521dd1630",
+      "androidAccountManager": [
+        {
+          "observations": 15,
+          "method": "getAccountsAsUser",
+          "count": 1,
+          "google": 1
+        },
+        {
+          "observations": 42,
+          "method": "getAccountsAsUser",
+          "count": 0,
+          "google": 0
+        }
+      ],
+      "featureCallbacks": [
+        {
+          "observations": 3,
+          "method": "hasFeatures",
+          "requestedFeatures": 1,
+          "accountCount": -1,
+          "featureResult": false
+        },
+        {
+          "observations": 1,
+          "method": "getAccountsByFeatures",
+          "requestedFeatures": 2,
+          "accountCount": 0,
+          "featureResult": false
+        },
+        {
+          "observations": 5,
+          "method": "getAccountsByFeatures",
+          "requestedFeatures": 1,
+          "accountCount": 1,
+          "featureResult": false
+        }
+      ],
+      "officialProviderAcquisitions": 2,
+      "gmailCatalog": [
+        {
+          "timerDelayMs": 0,
+          "availableAccounts": 0,
+          "listEverPublished": true,
+          "publishedAccountCount": 0,
+          "currentAccountPresent": false
+        },
+        {
+          "timerDelayMs": 1500,
+          "availableAccounts": 0,
+          "listEverPublished": true,
+          "publishedAccountCount": 0,
+          "currentAccountPresent": false
+        },
+        {
+          "timerDelayMs": 9000,
+          "availableAccounts": 0,
+          "listEverPublished": true,
+          "publishedAccountCount": 0,
+          "currentAccountPresent": false
+        }
+      ],
+      "releasePrimaryAfterRestoration": true
+    },
+    {
+      "diagnosticAdapterSha256": "dafd483758bf748a23d415a0bd08552cb8c3d16929732aad27413885374697af",
+      "androidAccountManager": [
+        {
+          "observations": 14,
+          "method": "getAccountsAsUser",
+          "count": 1,
+          "google": 1
+        },
+        {
+          "observations": 42,
+          "method": "getAccountsAsUser",
+          "count": 0,
+          "google": 0
+        }
+      ],
+      "featureCallbacks": [
+        {
+          "observations": 3,
+          "method": "hasFeatures",
+          "requestedFeatures": 1,
+          "accountCount": -1,
+          "featureResult": false
+        },
+        {
+          "observations": 1,
+          "method": "getAccountsByFeatures",
+          "requestedFeatures": 2,
+          "accountCount": 0,
+          "featureResult": false
+        },
+        {
+          "observations": 5,
+          "method": "getAccountsByFeatures",
+          "requestedFeatures": 1,
+          "accountCount": 1,
+          "featureResult": false
+        }
+      ],
+      "officialProviderAcquisitions": 2,
+      "gmailCatalog": [
+        {
+          "timerDelayMs": 0,
+          "availableAccounts": 0,
+          "listEverPublished": true,
+          "publishedAccountCount": 0,
+          "currentAccountPresent": false
+        },
+        {
+          "timerDelayMs": 1500,
+          "availableAccounts": 0,
+          "listEverPublished": true,
+          "publishedAccountCount": 0,
+          "currentAccountPresent": false
+        },
+        {
+          "timerDelayMs": 9000,
+          "availableAccounts": 0,
+          "listEverPublished": true,
+          "publishedAccountCount": 0,
+          "currentAccountPresent": false
+        }
+      ],
+      "releasePrimaryAfterRestoration": true,
+      "officialProviderReplies": [
+        {
+          "observations": 3,
+          "google": true,
+          "bundle": true,
+          "accounts": 0,
+          "sdk": true,
+          "catalog": false,
+          "repository": false
+        },
+        {
+          "observations": 4,
+          "google": true,
+          "bundle": true,
+          "accounts": 0,
+          "sdk": true,
+          "catalog": true,
+          "repository": true
+        }
+      ]
+    }
+  ],
+  "signedApkInspection": {
+    "catalogBuilder": "aryn.j",
+    "accountTypeEnumerator": "asaw.b",
+    "googleAccountLookup": "acrb.f",
+    "legacyGoogleSdkMethod": "ackw.k",
+    "observedAuthority": "com.google.android.gms.auth.accounts",
+    "observedOperation": "get_accounts",
+    "returnField": "accounts",
+    "alternateGetAccountsRequestBranchInApk": true,
+    "oldBranchObservedInLiveCalls": true,
+    "interpretation": "Gmail’s account catalog asks its Google SDK for Google accounts. The observed SDK branch reads the official content provider’s reply. An ordinary Android account lookup returning one account is insufficient for this path."
+  },
+  "interpretation": "In the same original Gmail process, Android’s account manager returned one Google account on 14 calls. The official Play services account provider returned an empty array on all 7 observed Google account queries. On 4 of those calls, the live stack included Gmail’s own account-list builder. Gmail’s internal account list had published zero entries in three samples. The Gmail process was connected to microG; the live official Play services listener had no account connector configured. These results locate the empty reply on this board configuration. An otherwise matched run with the official service also connected is still needed to determine the effect of that connection.",
+  "limits": [
+    "The empty official replies were valid typed results. Their cause inside Play services and any Google backend decision are unverified.",
+    "The Android calls had different filters. A zero-length array on another call is not on its own a defect.",
+    "The first run measured account enumeration and the app catalog. Only the second run classified replies from the official provider.",
+    "The account feature result field is meaningful for hasFeatures. For getAccountsByFeatures the returned account count is meaningful.",
+    "Receipt of the newly sent message remains unverified."
+  ],
+  "finalRelease": {
+    "primaryVisible": true,
+    "inboxMatchesExistingReference": true
+  }
+}

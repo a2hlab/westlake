@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "candidate": 63,
+  "phase": "Gmail account-list connection comparison and sync gap",
+  "implementationRevision": "4b15c10d7d6f19b15fa28502cb8d123bb6adb4c5",
+  "package": "com.google.android.gm",
+  "runtimeCandidate": 62,
+  "nativeWatchdogFixCandidate": 54,
+  "newJavaSourceChange": false,
+  "apkProvenance": [
+    {
+      "name": "hk-com.google.android.gm.apk",
+      "sha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "currentCertificateSha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053",
+      "legacyCertificateSha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83",
+      "rotationSignatureVerified": true
+    },
+    {
+      "name": "hk-com.google.android.gm.config.arm64_v8a.apk",
+      "sha256": "865a9db4c03ee65ec0c6df7c1864238f2211d63e417c9c277acdc64e24500119",
+      "currentCertificateSha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053",
+      "legacyCertificateSha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83",
+      "rotationSignatureVerified": true
+    },
+    {
+      "name": "hk-com.google.android.gm.config.en.apk",
+      "sha256": "288310f9dff70c56c08ebbef41d521e0fe419a7964aed3e4c989365da86264ba",
+      "currentCertificateSha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053",
+      "legacyCertificateSha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83",
+      "rotationSignatureVerified": true
+    },
+    {
+      "name": "hk-com.google.android.gm.config.xxhdpi.apk",
+      "sha256": "cb1f81a696653a538a3b2d59fc735294c87f30981573dcc6246f711c42f6a362",
+      "currentCertificateSha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053",
+      "legacyCertificateSha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83",
+      "rotationSignatureVerified": true
+    }
+  ],
+  "baseline": {
+    "welcomeAndSetupRendered": true,
+    "accountListed": false,
+    "compatibilityDialog": "Device not compatible",
+    "accountService": "Empty fallback: neither auth-provider client nor GMS/Store host"
+  },
+  "configurationChange": {
+    "clientEnvironmentKeysAdded": [
+      "WESTLAKE_GOOGLE_AUTH_CONNECT",
+      "WESTLAKE_GOOGLE_AUTH_SPAWNER",
+      "WESTLAKE_GOOGLE_AUTH_APK_SHA256"
+    ],
+    "providerGrantKeysAdded": [
+      "client.com.google.android.gm.sha256"
+    ],
+    "oauthScopesAdded": false,
+    "accountIdPermissionAddedForGmail": false,
+    "runtimeBinariesAndAppDataUnchangedAcrossComparison": true,
+    "gmsAndProviderRestarted": false
+  },
+  "configuredResult": {
+    "accountListed": true,
+    "verifiedProviderAccountQueriesInWindow": 29,
+    "verifiedProviderFeatureQueriesInWindow": 48,
+    "compatibilityDialogPersists": true,
+    "mainAccountScreenRendered": true,
+    "screen": "Account not synced",
+    "syncNowTapped": true,
+    "mailboxObserved": false,
+    "foregroundInterventions": true,
+    "gmailOAuthIssuancesObserved": false,
+    "mailSent": false
+  },
+  "gmsRequestsInCapturedWindow": {
+    "accountIdRequests": 4,
+    "peopleapiReadonlyOAuthRequests": 4,
+    "localScopedAuthRefusals": 4,
+    "serverRejectedIssuedGmailTokenEstablished": false,
+    "accountIdIsNotOAuth": true
+  },
+  "diagnosis": {
+    "compatibilityTextStatus": 9,
+    "specificCausalServiceIsolated": false,
+    "serviceAttributionLimit": "afterService is process-global and approximate during overlapping requests",
+    "contentServiceSource": "framework/appspawn-x/java/com/android/internal/os/AppSpawnXInit.java",
+    "contentServiceSourceSha256": "d0ae6f3c0d0c179e16bf340165e78e1350eab8d010a7b52a35a8c350a1b2c7dc",
+    "sourceMatchesDeployedBuildInput": true,
+    "contentServiceSyncQueries": "false/zero/empty/null defaults",
+    "contentServiceSyncRequests": "no-op",
+    "liveSyncMethodAtTapTraced": false,
+    "staticExtraction": "Relevant status-9 resource methods extracted; full DEX scan terminated before completion"
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerOnlyNewGrantIsGmailSigner": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "gmailAlive": true,
+    "gmsAdapterSha256": "6a27c5c05ab2a019a2648ba5a39e46ffa36e1a4c4b523844d50c5fd017918c5f",
+    "providerAdapterSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "gmailAdapterSha256": "6a27c5c05ab2a019a2648ba5a39e46ffa36e1a4c4b523844d50c5fd017918c5f",
+    "gmailApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a"
+  },
+  "fullApplicationPassed": false,
+  "fullApplicationPassCount": 0,
+  "remaining": [
+    "Required GMS service eligibility and exact callback attribution",
+    "First-party account selection and scoped authorization path",
+    "Actual sync-adapter discovery, execution and lifecycle",
+    "Mailbox sync, refresh and restart",
+    "Full remaining Google/Facebook plan"
+  ],
+  "privacy": "No account identifiers, credentials, tokens, mailbox content, screenshots or raw logs included."
+}

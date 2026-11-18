@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "candidate": 109,
+  "date": "2026-11-17",
+  "scope": "Maps dependency. Request completion and cancellation in the Android location adapter on the OpenHarmony board.",
+  "boardArtTest": {
+    "method": "Two headless ART processes loaded their respective staged adapter and native bridge. An identical process-local test provider supplied synthetic callbacks before start returned, during the first answer, and after cancellation. Hardware and app permissions were not involved.",
+    "entryPoints": "The one-shot test drives the adapter request registry, native start, and handle handoff directly. Listener replacement and removal run through ILocationManager.",
+    "probeJarSha256": "db0940a92ffbdd2f73883c0e295b9a825cafa650d5f73965b1065c9e67d7560d",
+    "testProviderSha256": "930270b04b0fd830e59fc151b98a0e6856d9a1d1688b40e069772776f91628b0",
+    "runnerSha256": "8887221985de0355d5c0b7825f217999ef37123cb19269531b739786741e0d27",
+    "before": {
+      "stage": 118,
+      "verifiedFiles": 469,
+      "adapterJarSha256": "8270fba58a1d7037622a9e13711eadee3655651b73430f36d4528e33159c3fb8",
+      "nativeBridgeSha256": "8523f5815bb8e315b95b25b4a8419dcc06361b1778929c47ace8263a95dea511",
+      "oneShotAnswers": 2,
+      "exitCode": 1
+    },
+    "after": {
+      "stage": 119,
+      "verifiedFiles": 469,
+      "adapterJarSha256": "56ff5e18b69bf5e38cc6898b0308e19339660873c437d0856e9fc67df1e8cf0f",
+      "nativeBridgeSha256": "ab6ecc29b59d21dc3fde332a7b58f481770224589c936b4055bf3ac37e7eb182",
+      "oneShotAnswers": 1,
+      "startedRequests": 2,
+      "stoppedRequests": 2,
+      "callbackAfterCancellationDelivered": false,
+      "remainingRequests": 0,
+      "disabledProviderListenerReplacedAndUnregistered": true,
+      "exitCode": 0
+    }
+  },
+  "nativeAllocationTest": {
+    "method": "Count allocations in the actual bridge source using an in-process LocationKit test provider. Each successful request started and stopped, then the provider issued a late callback. One additional start was rejected.",
+    "controlRevision": "fe407a64411efc304b1dadc9d519bea580440146",
+    "executablesSha256": {
+      "native-before": "16cb44ee49289b27dfc8e7d1510e8d90a1b5e25fd8ae6a66bf69cef37a9f0958",
+      "native-after": "af2c1c9e9bed9d7003a27a486616ffd954ee86819276f406dbe5fc0e39891b99"
+    },
+    "native-before": {
+      "created": 4097,
+      "destroyed": 4097,
+      "stopped": 4096,
+      "retained": 4096
+    },
+    "native-after": {
+      "created": 4097,
+      "destroyed": 4097,
+      "stopped": 4096,
+      "retained": 0
+    }
+  },
+  "physicalProvider": {
+    "boardParameterResult": {
+      "const.location.nlp_service_name": 106,
+      "const.location.nlp_ability_name": 106
+    },
+    "localOpenHarmonyLocationSourceRevision": "726a641804ecc27c4c92eabbecdd071961710071",
+    "sourceObservation": "In this checkout, a disconnected NetworkAbility::RequestRecord returns before requesting a network location if the configured provider bundle is missing. ConnectNlpService also requires its ability name. The board vendor implementation was not rebuilt from this checkout.",
+    "priorOriginalMapsEvidence": "candidate88.json",
+    "priorAcceptedLowPowerRequests": 2,
+    "priorFixesIn48Seconds": 0,
+    "newOriginalMapsFixObserved": false,
+    "phoneOrBoardCoordinatesCollected": false,
+    "deviceLocationPermissionChanged": false
+  },
+  "acceptance": "One-shot delivery, cancellation and native allocation cleanup passed in the controlled tests. A physical fix in the original Maps APK and overall two-path app acceptance remain open."
+}

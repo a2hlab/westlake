@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "package": "com.google.android.apps.docs",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "manifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "apkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+  "observation": {
+    "status": "partial_blocked",
+    "launchRendered": true,
+    "existingTestAccountVisible": true,
+    "accountMenuRendered": true,
+    "homeAndFilesTabsRendered": true,
+    "fileListingAccepted": false,
+    "fileOpenTested": false,
+    "scopedAuthReadDenied": true,
+    "scopedAuthReadDeniedCountInWindow": 8,
+    "explanation": "Drive discovers the existing test account and renders Home, Files and the account menu. Home and Files remain on loading spinners; no file listing or file read is established. Shared GMS diagnostics explicitly record silent_read_denied=true owner=com.google.android.apps.docs eight times in the captured interval. This is a local scoped-auth denial, not proof that Google rejected an issued token. The exact failed session/request condition is not yet isolated. Provider grants were not expanded."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 29,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "exceptionTypes": [
+      "cello.sync.LegacyTaskFailedDueToLocalError",
+      "java.lang.NoSuchFieldException",
+      "java.lang.RuntimeException"
+    ],
+    "requestedServiceIds": [
+      5,
+      16,
+      25,
+      38,
+      40,
+      51,
+      160,
+      215,
+      257,
+      258,
+      270,
+      308,
+      315,
+      343
+    ],
+    "callbackStatusCounts": {
+      "0": 4,
+      "9": 20
+    },
+    "callbackStatusesByApproximateService": {
+      "51": [
+        0
+      ],
+      "257": [
+        0
+      ],
+      "343": [
+        9
+      ],
+      "40": [
+        0
+      ],
+      "16": [
+        9
+      ],
+      "38": [
+        9
+      ],
+      "270": [
+        9
+      ],
+      "25": [
+        0
+      ],
+      "315": [
+        9
+      ],
+      "258": [
+        9
+      ],
+      "308": [
+        9
+      ],
+      "160": [
+        9
+      ],
+      "215": [
+        9
+      ],
+      "5": [
+        9
+      ]
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 0,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "serviceAttribution": "Process-global approximate attribution, not causal proof; status0 is a broker connection only.",
+  "nativeArtifactsRebuilt": false,
+  "fullApplicationAcceptance": false,
+  "rawLogsAndScreenshotsPublic": false
+}

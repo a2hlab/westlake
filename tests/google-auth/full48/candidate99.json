@@ -1,0 +1,119 @@
+{
+  "candidate": 99,
+  "date": "2026-11-17",
+  "app": "com.spotify.music",
+  "accountSetupProvider": "Original Google Play services, fresh profile",
+  "googlePlayStoreConnected": true,
+  "microGConnected": false,
+  "certificationOverride": false,
+  "accountCredentialsSubmitted": false,
+  "inputBridge": {
+    "sourceSha256": "bfaefd9bc99370d57f3aa48a01059651785bcb0cded9a2d0cad92fd49c9c1571",
+    "librarySha256": "2a319bac9318091576dcee7d8d66912e71858ea82c9e17c4308408bc4f0ae9e1",
+    "previousLibrarySha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+    "deployment": "Verified in staged Google and Spotify runtimes",
+    "oldError": "Pressing Back in Google account setup called Activity.onBackPressed on the input worker. FragmentManager threw IllegalStateException while popping the back stack."
+  },
+  "spotifyLoginMenuBack": {
+    "sent": true,
+    "returnedToLanding": true,
+    "androidMainLooperDispatch": [
+      {
+        "action": 0,
+        "onMainLooper": true
+      },
+      {
+        "action": 1,
+        "onMainLooper": true
+      }
+    ]
+  },
+  "googleSetupScreen": {
+    "states": [
+      {
+        "seconds": 4.6,
+        "owner": "gms",
+        "visibleLabels": [],
+        "spotifyActivityResultCodes": []
+      },
+      {
+        "seconds": 50.9,
+        "owner": "gms",
+        "visibleLabels": [
+          "Checking info"
+        ],
+        "spotifyActivityResultCodes": []
+      }
+    ],
+    "backSent": true,
+    "androidMainLooperDispatch": [
+      {
+        "action": 0,
+        "onMainLooper": true
+      },
+      {
+        "action": 1,
+        "onMainLooper": true
+      }
+    ],
+    "oldMainThreadExceptionAfterBack": false,
+    "googleIdentifierFormSeen": false,
+    "spotifySignedIn": false
+  },
+  "network": {
+    "baseline": "The unmodified Google configuration-sync service reported ERR_NAME_NOT_RESOLVED. The board shell reached Google over verified HTTPS.",
+    "librarySelected": [
+      "libcronet.129.0.6614.4.so"
+    ],
+    "byProcess": {
+      "com.google.android.gms.unstable": {
+        "cronetMapped": true,
+        "nativeNetworkShimMapped": true,
+        "resolverTraceLines": 2,
+        "resolverReturnCounts": {
+          "0": 2
+        },
+        "googleDomainResolverReturns": {
+          "0": 2
+        },
+        "namedErrors": {}
+      },
+      "com.google.android.gms.ui": {
+        "cronetMapped": false,
+        "nativeNetworkShimMapped": true,
+        "resolverTraceLines": 0,
+        "resolverReturnCounts": {},
+        "googleDomainResolverReturns": {},
+        "namedErrors": {}
+      },
+      "com.google.android.gms": {
+        "cronetMapped": false,
+        "nativeNetworkShimMapped": true,
+        "resolverTraceLines": 0,
+        "resolverReturnCounts": {},
+        "googleDomainResolverReturns": {},
+        "namedErrors": {}
+      },
+      "com.google.android.gms.persistent": {
+        "cronetMapped": true,
+        "nativeNetworkShimMapped": true,
+        "resolverTraceLines": 6,
+        "resolverReturnCounts": {
+          "0": 6
+        },
+        "googleDomainResolverReturns": {
+          "0": 6
+        },
+        "namedErrors": {}
+      }
+    },
+    "causalLinkToSignIn": "unverified"
+  },
+  "endOfTest": {
+    "systemHomePressed": true,
+    "homeForegroundVerified": true,
+    "spotifyStillRunning": true,
+    "googleStillRunning": true,
+    "googleStillFocused": false
+  }
+}

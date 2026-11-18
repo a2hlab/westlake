@@ -13,7 +13,14 @@ import java.util.List;
 public final class OhImeMetadata {
     private OhImeMetadata() {}
     private static final class Native {
-        static { System.load(System.getenv("WESTLAKE_IME_METADATA_PATH")); }
+        static {
+            String overlay = System.getenv("WESTLAKE_IME_METADATA_PATH");
+            if (overlay == null || overlay.isEmpty()) {
+                System.loadLibrary("oh_adapter_bridge");
+            } else {
+                System.load(overlay);
+            }
+        }
         static void load() {}
     }
     private static native String[] nativeCurrent();

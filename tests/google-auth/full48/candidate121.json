@@ -1,0 +1,237 @@
+{
+  "schema": 1,
+  "candidate": 121,
+  "date": "2026-11-18",
+  "previous": "candidate120.json",
+  "scope": "Retained original Gmail client connected to official Play services and a separate microG account provider. Account lookup, inbox UI, client restart and a refresh gesture were tested.",
+  "providerStartup": {
+    "priorChildFailedBeforeAppCode": true,
+    "failedCall": "HapDomainSetcontext",
+    "firmwareContextFileBytes": 2510,
+    "contextFileBytesInFailedProcessNamespace": 0,
+    "cataloguedRuntimeFilesRestaged": 355,
+    "inputDirectories": [
+      "etc",
+      "fonts"
+    ],
+    "recoveredProviderNamespaceHelperSha256": "30e4b78944defd4874b62671baf89a3d5b71cc7beee7fc31d42031da0450ac23",
+    "oldOverlayDirectoriesKeptForRollback": true,
+    "appAccountDirectoryRetained": true,
+    "firmwareEnforcing": true
+  },
+  "namespaceRegression": {
+    "before": {
+      "sha256": "30e4b78944defd4874b62671baf89a3d5b71cc7beee7fc31d42031da0450ac23",
+      "exitCode": 1,
+      "roundsPassed": []
+    },
+    "after": {
+      "sha256": "482be695cbd645f4cfeaac74e55257623fb356ecb3071ffd941d0ce97940d0ca",
+      "exitCode": 0,
+      "roundsPassed": [
+        1,
+        2,
+        3
+      ]
+    },
+    "firmwarePolicyUnchanged": true,
+    "firmwarePolicySha256": "f1b90823de6f9b357b79bdf18f6985c9f881c3bf86763710e318c19bb5e45a6c",
+    "unmodifiedPreviousTest": true,
+    "cleanInputRunsPassed": 3,
+    "source": "tests/source-namespace/repeated-overlay.sh",
+    "case": "A stale zero-byte placeholder occupied the application-domain mappings path. Independent board fixture launches compare the visible file with the installed firmware and check the other staged assets."
+  },
+  "liveConfiguration": {
+    "stagedBuilds": {
+      "gmail": {
+        "baseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+        "adapterJarSha256": "03db44ec84d3da479b4f87c971a03cca078a3fa556a010eb73a942efa967fdaa",
+        "stagedAdapterBootOatSha256": "f74f0f3da6c885cf92149ec609884bd89682c64fbfb2a4f647580fe6eeb83f61",
+        "normalHapDomain": true,
+        "firmwareMappingsMatchInProcess": true
+      },
+      "microG": {
+        "baseApkSha256": "e5e6cba078bdec812b5450599350e5c1a12c8b7438da5bf77123af170f8c1a35",
+        "adapterJarSha256": "6459072107b0b5fd7ef7264129e51279755d9854c600f29651e593801a233fd3",
+        "stagedAdapterBootOatSha256": "41ac8ae8394551a93751d1f634e0295b9c8066de3a0a2a0438a0a2175035bfea",
+        "normalHapDomain": true,
+        "firmwareMappingsMatchInProcess": true
+      }
+    },
+    "distinctUidsForGmailProviderGmsAndStore": true,
+    "listeners": {
+      "microG": {
+        "listeningEndpointOwnedByExpectedProcess": true,
+        "ordinaryHapDomain": true
+      },
+      "officialGms": {
+        "listeningEndpointOwnedByExpectedProcess": true,
+        "ordinaryHapDomain": true
+      },
+      "store": {
+        "listeningEndpointOwnedByExpectedProcess": true,
+        "ordinaryHapDomain": true
+      }
+    },
+    "officialLauncherVerified": true,
+    "officialBaseApkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+    "officialMainStagedApkVerified": true,
+    "officialAlsoConfiguredForPrivateAccounts": false,
+    "clientSettingsRestored": [
+      "Private account service endpoint",
+      "Expected provider spawner",
+      "Pinned provider APK digest"
+    ],
+    "priorAccountAuthorizationsRetained": true
+  },
+  "firstLaunch": {
+    "samples": [
+      {
+        "secondsFromObservationStart": 6.4,
+        "screen": [
+          "Getting your messages",
+          "Search in mail"
+        ],
+        "providerVerifiedGmail": true,
+        "accountListRepliesSinceProviderLaunch": 13,
+        "providerFeatureChecks": 7,
+        "officialHostVerifiedByGmail": true
+      },
+      {
+        "secondsFromObservationStart": 18.4,
+        "screen": [
+          "Compose",
+          "Dismiss",
+          "Google",
+          "Next",
+          "Primary",
+          "Search in mail"
+        ],
+        "providerVerifiedGmail": true,
+        "accountListRepliesSinceProviderLaunch": 14,
+        "providerFeatureChecks": 7,
+        "officialHostVerifiedByGmail": true
+      },
+      {
+        "secondsFromObservationStart": 36.7,
+        "screen": [
+          "Compose",
+          "Dismiss",
+          "Google",
+          "Next",
+          "Primary",
+          "Search in mail"
+        ],
+        "providerVerifiedGmail": true,
+        "accountListRepliesSinceProviderLaunch": 18,
+        "providerFeatureChecks": 8,
+        "officialHostVerifiedByGmail": true
+      },
+      {
+        "secondsFromObservationStart": 63.3,
+        "screen": [
+          "Compose",
+          "Dismiss",
+          "Google",
+          "Next",
+          "Primary",
+          "Search in mail"
+        ],
+        "providerVerifiedGmail": true,
+        "accountListRepliesSinceProviderLaunch": 19,
+        "providerFeatureChecks": 8,
+        "officialHostVerifiedByGmail": true
+      }
+    ]
+  },
+  "pullToRefresh": {
+    "gestureConsumedByGmail": true,
+    "source": "Gmail app-local drag; UI captures accepted only with the original Gmail process in focus.",
+    "sampleSeconds": [
+      7.7,
+      20.4,
+      40.0,
+      69.8
+    ],
+    "sameVisibleMailListRegionAtEverySample": true,
+    "newLocalSyncRequests": 0,
+    "newLocalSyncStarts": 0,
+    "newLocalSyncCompletions": 0,
+    "newSuccessfulNativeAuthReplyMarkersFromOfficial": 0,
+    "testMessageIndividuallyIdentified": false,
+    "serverReceipt": "unverified"
+  },
+  "accountMenu": {
+    "action": "Selected the avatar in the original Gmail header.",
+    "recognizedLabels": [
+      "Google",
+      "Privacy",
+      "Terms of Service"
+    ],
+    "expectedAccountVisiblyIdentified": false,
+    "accountSelectionCompleted": false
+  },
+  "clientRestart": {
+    "sameUidAndDataDirectory": true,
+    "providerVerifiedNewClientProcess": true,
+    "focusedInboxSampleSeconds": [
+      47.2,
+      71.0
+    ],
+    "officialHostVerifiedByNewClient": true
+  },
+  "limitations": [
+    "The retained Gmail configuration uses its earlier test host. Four distinct role UIDs and enforcing ordinary app domains do not establish production isolation.",
+    "The official service launcher did not connect to the private account provider. This run verified direct Gmail account discovery and the separate official service connection.",
+    "Existing conversations may have come from the retained cache. The visible inbox and verified account list do not establish fresh server delivery.",
+    "The live provider used catalogued inputs with the previous restart-safe helper. The source change was measured with a separate matched before/after board test."
+  ],
+  "dedicatedGmail": {
+    "sameOriginalApkAsRetained": true,
+    "isolationAndRouting": {
+      "baseApksMatch": true,
+      "differentKernelUids": true,
+      "differentAppDataDirectories": true,
+      "dedicatedAppDataOwnedByUidWithMode0700": true,
+      "differentMountNamespaces": true,
+      "sameThreeServiceEndpointsConfigured": true,
+      "privateProviderOwnsListener": true,
+      "dedicatedAccountDataCopiedFromRetained": false,
+      "dedicatedAdapterJarSha256": "03db44ec84d3da479b4f87c971a03cca078a3fa556a010eb73a942efa967fdaa",
+      "dedicatedInputBridgeSha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070"
+    },
+    "providerVerifiedDedicatedClientPid": true,
+    "appIntro": {
+      "screen": "New in Gmail",
+      "action": "Got it",
+      "originalAppOwnedWindow": true
+    },
+    "systemActions": [
+      "Take me to Gmail",
+      "Add an email address",
+      "Google"
+    ],
+    "afterTakeMeToGmail": "The app remained on the page offering to add an email address.",
+    "afterAddAnEmailAddress": "The provider list opened.",
+    "afterSelectingGoogle": "The original app remained on Set up email in three captures.",
+    "existingAppData": "Existing dedicated setup profile; retained Gmail mailbox data was not copied.",
+    "accountServiceEvents": {
+      "localEnrollment": 1,
+      "delegatedEnrollmentUnsupported": 1,
+      "officialVerified": 1,
+      "privateProviderVerified": 1
+    },
+    "accountSelectionCompleted": false,
+    "finding": "Gmail submitted addAccount. The delegated account adapter reported unsupported for that operation. Enrollment did not reach a Google credential screen."
+  },
+  "systemSwipeAfterRestart": {
+    "platformToolAcceptedSwipe": true,
+    "finalSampleSeconds": 34.2,
+    "originalGmailHadPrimaryFocus": true,
+    "newLocalSyncRequests": 0,
+    "newLocalSyncStarts": 0,
+    "newLocalSyncFinishes": 0,
+    "ownedWindowReleaseMarkerDelta": 0,
+    "applicationHandlingIndependentlyVerified": false
+  }
+}

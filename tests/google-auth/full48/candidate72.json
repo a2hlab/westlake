@@ -1,0 +1,134 @@
+{
+  "candidate": 72,
+  "phase": "Fix descriptor-backed native APK ABI classification; application acceptance remains partial",
+  "baseCommit": "15f9678df5e533e3323174798799c0c90a47d14b",
+  "diagnosis": {
+    "firstUntracedRunSignal": 11,
+    "localizedTracedRuns": 2,
+    "localizedSignal": 5,
+    "library": "libcronet.129.0.6614.4.so",
+    "cronetSplitSha256": "f07a59826905c071b902771ba84b87160434ec4960998207bbf997b8d8dafddf",
+    "elfFatalTrapOffset": "0x1875a8",
+    "sysconfGotOffset": "0x56b420",
+    "sysconfImportResolvedToShim": true,
+    "bionicSelector": 96,
+    "muslConfiguredCpuSelector": 83,
+    "oldClassifierTranslatedDescriptorCaller": false,
+    "callerLabelConfirmedByDiagnostic": "/proc/self/fd/N",
+    "firstUntracedSignal11SeparatelyRootCaused": false
+  },
+  "implementation": {
+    "boundedSelfDescriptorLabels": true,
+    "apkMemberSuffixSupported": true,
+    "errnoPreserved": true,
+    "closedInvalidAndNativeLibraryDescriptorsNotClassifiedAsApk": true,
+    "descriptorNumberCache": false,
+    "packageOrTokenAuthorizationChanged": false,
+    "limit": "ABI routing only; code authenticity remains the separate root-spawner and APK-pin protocol"
+  },
+  "hostTests": {
+    "checksPassed": 27,
+    "realDescriptorClosureAndReuseTested": true,
+    "oldClassifierNegativeControl": "Fails first live APK descriptor case; redundant NULL case omitted from old-source control"
+  },
+  "build": {
+    "sourceSha256": {
+      "framework/webview-shim/webview_bionic_shim.c": "72f7bc2d83fde7727c46450f49740324837ff620c4c41e1c2b06aca2ea5740bd",
+      "framework/webview-shim/bionic_apk_path.h": "d7996ecb947dba3d0eeb6739f20440b06261b2c70da83e68274d723893cc801a",
+      "tests/parity/native/bionic_apk_path_test.c": "ad7bbc560d329e097395e706b56dd6dfb6f95f5bc6a7d471ef86b06414c66b93"
+    },
+    "narrowBaselinePort": {
+      "compiled": true,
+      "sha256": "2828b30e4544cb837a636cfa6d7323d9f9250e0fb121bd72de647c7e89a9e127",
+      "bytes": 266712,
+      "base": "Previously verified candidate54b native source; only APK classifier replaced"
+    },
+    "currentRepositoryShim": {
+      "compiled": true,
+      "sha256": "3d6375f177816c403038b026e4656bd75605b9ac5e8ed51c9bac333f9fd4b0a7",
+      "bytes": 271448,
+      "liveFollowupComplete": true
+    },
+    "javaRebuilt": false,
+    "nativeAndroidRuntimeRebuilt": false
+  },
+  "board": {
+    "originalFotmobApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "clientAdapter": 71,
+    "clientNativeAndroidRuntime": 70,
+    "officialGmsAdapter": 71,
+    "providerAdapter": 59,
+    "originalApkRetained": true,
+    "appDataRetained": true,
+    "scopeGrantsChanged": false,
+    "narrowPortLaunches": [
+      {
+        "run": 1,
+        "logSpanSeconds": 328.666,
+        "cronet129Initialized": true,
+        "aliveAtCapture": true,
+        "signedInMenuVisible": true
+      },
+      {
+        "run": 2,
+        "logSpanSeconds": 96.804,
+        "cronet129Initialized": true,
+        "aliveAtCapture": true,
+        "signedInMenuVisible": true
+      }
+    ],
+    "controlledClientRestartPreservedLocalSignedInState": true,
+    "newCredentialsEntered": false,
+    "gmsApkDescriptorsVerified": 9,
+    "gmsAndMicrogRestarted": false,
+    "cloudPreferenceRoundTrip": false,
+    "freshAuthenticatedBackendReplyEstablished": false,
+    "facebookTokenRenewalEstablished": false,
+    "googleDelegationRetested": false,
+    "fullApplicationPassed": false,
+    "currentRepositoryShimRun": {
+      "alive": true,
+      "uid": 20010060,
+      "executableVerified": true,
+      "shimSha256": "3d6375f177816c403038b026e4656bd75605b9ac5e8ed51c9bac333f9fd4b0a7",
+      "mappedShimInodeMatches": true,
+      "shimMappingCount": 4,
+      "cronet129Initialized": true,
+      "logSpanSeconds": 212.009,
+      "newsScreenRendered": true,
+      "fullApplicationPassed": false,
+      "signedInMenuVisible": true,
+      "temporaryBlackDisplayObserved": true,
+      "hostForegroundCommandRestoredDisplay": true,
+      "clientRestartNeededForDisplayRecovery": false
+    }
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": true,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "clientApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408"
+  },
+  "remaining": [
+    "FotMob private cloud-preference round trip and real token expiry/renewal",
+    "FotMob requires GMS 261200000; actual installed version remains 244034029",
+    "Other service status-9 responses remain; numeric attribution is approximate",
+    "Untraced initial signal-11 failure is not independently localized",
+    "General concurrent authentication, long-duration stability and production isolation",
+    "Gmail scoped consent and native selection mediation; mailbox remains unsynced",
+    "Intermittent black display required foregrounding the host; general window routing remains unvalidated"
+  ]
+}

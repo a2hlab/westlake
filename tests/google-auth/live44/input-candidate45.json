@@ -1,0 +1,48 @@
+{
+  "candidate": 45,
+  "sourceRevision": "61209fc78dc0728193167f73a3abb688f2b466a7",
+  "modifiedSource": {
+    "path": "framework/window/java/OHTouchInjector.java",
+    "sha256": "35fe6143d693e746e60355be561d8289252e4ee213e0d33f6115251cc24a1645"
+  },
+  "adapterClasses": {
+    "westlake-unrelocated.classes.jar": {
+      "bytes": 719515,
+      "sha256": "d3f844ea75bceacb520c7ef6b3d3c7fdbb32c20ad2a90445ac980a57a36f4853"
+    }
+  },
+  "runtimeJars": {
+    "adapter-runtime-bcp.classes.jar": {
+      "bytes": 719515,
+      "sha256": "d3f844ea75bceacb520c7ef6b3d3c7fdbb32c20ad2a90445ac980a57a36f4853"
+    },
+    "adapter-runtime-bcp.jar": {
+      "bytes": 388451,
+      "sha256": "965409249b7446490917fa0fff64f21f2fc232008e2f2aac23d6efc43b6c34cb"
+    },
+    "framework.classes.jar": {
+      "bytes": 48623168,
+      "sha256": "428a3410775f7ca450fee2c3f9ac0738260c4b528411fd5e53ac0492c8ea2c61"
+    },
+    "framework.jar": {
+      "bytes": 18119362,
+      "sha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452"
+    }
+  },
+  "preloadPassed": true,
+  "preloadExitCode": 0,
+  "nativeArtifactsReused": true,
+  "liveTextInputValidated": false,
+  "credentialsSubmitted": false,
+  "markerMailboxConsumed": true,
+  "markerVisibleInHtmlField": false,
+  "diagnostics": [
+    "queued:com.android.internal.policy.DecorView",
+    "exception:java.lang.AssertionError"
+  ],
+  "installedWebViewInputThreadContract": {
+    "class": "Po0",
+    "beginBatchEdit": "Calls a(), which compares its handler looper to Looper.myLooper() and throws AssertionError on mismatch",
+    "getHandler": "Returns the same handler used by that assertion"
+  }
+}

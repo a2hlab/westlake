@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "test": "Original Gmail search for the sender-confirmed test message using its date picker",
+  "boardLocalDate": "2026-11-18",
+  "package": "com.google.android.gm",
+  "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "hostUid": 20010060,
+  "retainedAccountProfile": true,
+  "before": {
+    "verifiedOriginalApp": true,
+    "primaryVisible": true,
+    "matchedReferenceListBands": 3,
+    "searchFieldY": 159,
+    "visibleListExactlyMatchesPriorFixedInbox": true,
+    "relativeToPriorInboxMeanAbsoluteError": 0.0
+  },
+  "search": {
+    "scope": "Gmail date filter. Account-wide and server search results remain unverified.",
+    "dateScreenOpened": true,
+    "selectedRangeVisible": {
+      "start": "2026-11-17",
+      "end": "2026-11-18"
+    },
+    "confirmationTapSent": true,
+    "resultScreenObserved": false,
+    "matchingMessageIdentified": false
+  },
+  "resumingHost": [
+    {
+      "action": "before returning",
+      "state": {
+        "live": true,
+        "visibleWindows": 0,
+        "appFocused": false,
+        "countAllWindows": 0
+      },
+      "logCounts": {
+        "fatal": 0,
+        "nativeFatal": 0,
+        "mailboxStart": 0,
+        "mailboxFinish": 0,
+        "removedWindow": 5,
+        "finishActivity": 0
+      }
+    },
+    {
+      "action": "resume +3",
+      "state": {
+        "live": true,
+        "visibleWindows": 0,
+        "appFocused": false,
+        "countAllWindows": 0
+      },
+      "logCounts": {
+        "fatal": 0,
+        "nativeFatal": 0,
+        "mailboxStart": 0,
+        "mailboxFinish": 0,
+        "removedWindow": 5,
+        "finishActivity": 0
+      }
+    },
+    {
+      "action": "resume +12",
+      "state": {
+        "live": true,
+        "visibleWindows": 0,
+        "appFocused": false,
+        "countAllWindows": 0
+      },
+      "logCounts": {
+        "fatal": 0,
+        "nativeFatal": 0,
+        "mailboxStart": 0,
+        "mailboxFinish": 0,
+        "removedWindow": 5,
+        "finishActivity": 0
+      }
+    },
+    {
+      "action": "resume +30",
+      "state": {
+        "live": true,
+        "visibleWindows": 0,
+        "appFocused": false,
+        "countAllWindows": 0
+      },
+      "logCounts": {
+        "fatal": 0,
+        "nativeFatal": 0,
+        "mailboxStart": 0,
+        "mailboxFinish": 0,
+        "removedWindow": 5,
+        "finishActivity": 0
+      }
+    }
+  ],
+  "afterColdRestart": {
+    "verifiedOriginalApp": true,
+    "primaryVisible": true,
+    "matchedReferenceListBands": 3,
+    "searchFieldY": 159,
+    "visibleListExactlyMatchesPriorFixedInbox": true,
+    "relativeToPriorInboxMeanAbsoluteError": 0.0
+  },
+  "interpretation": "The original Gmail app displayed the November 17–18 date range. After a tap on the visible part of the confirmation button, the app remained alive with zero registered windows. Resuming the host through its public ability produced no Gmail window within 30 seconds. A cold restart restored Primary with the same visible message rows as the baseline. The search result and receipt of the test message remain unverified.",
+  "limit": "One run. Registered windows and process liveness came from the board window manager and process table. Zero mailbox-job markers refers only to the observed Gmail process. No screenshot, email metadata or mailbox contents are included."
+}

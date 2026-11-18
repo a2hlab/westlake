@@ -1,0 +1,153 @@
+{
+  "candidate": 78,
+  "phase": "Explicit native account OAuth consent; Gmail token delivery with sync still blocked",
+  "baseCommit": "8d6961bdcc279bffb936fb37501d4804a5b56c77",
+  "implementation": {
+    "optIn": "WESTLAKE_GOOGLE_NATIVE_ACCOUNT_CONSENT=1",
+    "newNativeWireTransaction": 28,
+    "existingChooserWireTransaction": 23,
+    "requiresPinnedBrokerAndIndependentlyVerifiedOrigin": true,
+    "requiresLiveOperationWitness": true,
+    "nativeConsentBinds": [
+      "account SHA-256",
+      "current and legacy APK signer checks",
+      "exact approved scopes",
+      "revocation epoch",
+      "issued time",
+      "expiry"
+    ],
+    "providerConsentCheckedBeforeAndAfterNetwork": true,
+    "returnedScopesBounded": true,
+    "maximumConsentLifetimeHours": 24,
+    "ordinaryOAuthOnly": true,
+    "idTokensAndServerCodesExcludedFromNativeConsent": true,
+    "googleSignInSelectionFabricated": false,
+    "googleServerConsentBypassed": false,
+    "productionConsentUiImplemented": false
+  },
+  "hostTests": {
+    "newNativeConsentChecks": 66,
+    "allAuthorizationNumberedChecks": 241,
+    "boundaryTraceTestPassed": true,
+    "allPassed": true
+  },
+  "build": {
+    "javaSources": 141,
+    "javaClasses": 294,
+    "javaCompilationPassed": true,
+    "runtimePackagingPassed": true,
+    "bootImageJarCount": 9,
+    "bootImageBuildPassed": true,
+    "gmsAndProviderAdapterSha256": "ea46217228d6e0ee101ae836524a6cc74565898aa9db9137ed99d79dd16a4361",
+    "codeFilesReplacedPerServiceHost": 13,
+    "nativeArtifactsRebuilt": false,
+    "standalonePreloadRun": false,
+    "exactHostRollbackRetained": true,
+    "sourceSha256": {
+      "framework/activity/java/GoogleAuthOperations.java": "7f88c7e7d72a4a984734132d52a0e6576919f3879935b7a021f9d28a64a38c1e",
+      "framework/activity/java/PlayServicesChannel.java": "a4bb642de083e1ede2afb96b85ac87d3a86b92cbc1411a555e0ccefbaa13286c",
+      "framework/core/java/GoogleAuthDelegation.java": "4a717d8c028ee3d50a479ff7643d66197a778596bdf6e2c0a22402a8e0be388e",
+      "framework/core/java/GoogleNativeAuthConsent.java": "660b71843c094c4f7b4969d52aecd7254f0e054c8ee6a454698129ea40d03c3c",
+      "tests/google-auth/host/GoogleNativeAuthConsentTest.java": "e9f42ceacdbf9dd8cc2abf76888064cc7f270e68bfb16989c759745afc4a136b",
+      "tests/google-auth/OfficialAuthActivity.java": "3dd83b99ba0da3c2cc257708631d5505f67c1366aab878ff83d60560cecb070c"
+    }
+  },
+  "board": {
+    "gmailOriginalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "gmailAdapter": "70b",
+    "officialGmsAdapter": 78,
+    "providerAdapter": 78,
+    "clientUid": 20010060,
+    "officialGmsUid": 20010061,
+    "providerUid": 20010056,
+    "originalApplicationApksUnchanged": true,
+    "existingAuthorizedAccountReused": true,
+    "userApprovedNativeConsentScopes": 15,
+    "consentControls": {
+      "absent": {
+        "providerNativeConsentAbsent": 4,
+        "providerGmailOAuthTokenEvents": 0,
+        "officialGmailSilentTokenEvents": 0
+      },
+      "approved": {
+        "providerNativeConsentAbsent": 0,
+        "providerGmailOAuthTokenEvents": 2,
+        "officialGmailSilentTokenEvents": 2
+      },
+      "revoked": {
+        "providerNativeConsentAbsent": 4,
+        "providerGmailOAuthTokenEvents": 0,
+        "officialGmailSilentTokenEvents": 0
+      },
+      "restored": {
+        "providerNativeConsentAbsent": 0,
+        "providerGmailOAuthTokenEvents": 3,
+        "officialGmailSilentTokenEvents": 3
+      }
+    },
+    "controlCorrelation": "Board-clock cutoff before each change/launch; unowned denial events are time-window correlation across shared hosts",
+    "tokenBearingClientRepliesObserved": true,
+    "providerForcesRefreshInThisExperiment": true,
+    "onlyNativeFieldsRemovedForRevocation": true,
+    "sameConsentRecordRestoredWithoutExtendingExpiry": true,
+    "googleSignInSessionCreatedForGmail": false,
+    "nativeCrash": {
+      "approvedOldShimLaunchExitedWithSigtrap": true,
+      "library": "libcronet.129.0.6614.4.so",
+      "archiveTrapOffset": "0x2135a8",
+      "matchesPriorDescriptorAbiClassificationTrap": true,
+      "existingCandidate72ShimAppliedToGmail": true,
+      "fixedShimSha256": "3d6375f177816c403038b026e4656bd75605b9ac5e8ed51c9bac333f9fd4b0a7",
+      "cronetInitializesAfterFix": true,
+      "twoLaterApprovedLaunchesAliveWithoutSignalAtCapture": true
+    },
+    "sync": {
+      "syncNowTestedWithConsent": true,
+      "observedNetworkError": "ERR_NAME_NOT_RESOLVED",
+      "failedOperation": "SettingsService:sync /sync/st/s",
+      "requiredServerSettingsUnavailable": true,
+      "accountNotSyncedScreenRemains": true,
+      "mailboxSynced": false
+    },
+    "otherServiceStatus9RepliesRemain": true,
+    "installedGmsVersion": 244034029,
+    "gmailRequiredGmsVersion": 250200000
+  },
+  "foreignBrokerProbe": {
+    "newButton": "delegation-native-provider",
+    "buildPassed": true,
+    "baselineSignerPreserved": true,
+    "originalProbeVariantApkSha256": "82da37a6bc03e39a12ea0b94f7afe538f7db231869b756b089d0c82f0c09c4cf",
+    "liveDenialValidated": false,
+    "failures": [
+      "Physical-display initialization abort before test interaction",
+      "Subsequent experimental launches refused by HapDomainSetcontext before Java initialization"
+    ],
+    "selinuxBypassed": false,
+    "probeSharesProviderUid": true,
+    "uidIsolationEstablished": false,
+    "failedHeadlessExperimentPublishedAsSource": false
+  },
+  "preservation": {
+    "uncertifiedStatus": 3,
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "providerGrantsMatchExplicitNativeGmailConsent": true,
+    "providerAccountStoreByteIdentical": false,
+    "providerAccountCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "gmailAlive": true
+  },
+  "remaining": {
+    "cronetDnsAdaptation": true,
+    "mailboxSync": true,
+    "newForeignBrokerWireTest": true,
+    "chooserFlowRegressionOnBoth78Hosts": true,
+    "nativeConsentEndUserUi": true,
+    "realTokenExpiryTriggerValidation": true,
+    "productionIsolationValidation": true,
+    "fullApplicationPassed": false,
+    "allApplicationsPassed": false
+  }
+}

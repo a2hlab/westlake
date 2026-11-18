@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "candidate": 128,
+  "date": "2026-11-18",
+  "previous": "candidate127.json",
+  "scope": "Spotify Facebook login discovery and cancellation on the board, installed callback declarations, and retained Gmail inbox after the sender confirmed submission.",
+  "spotify": {
+    "originalApkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "version": "9.1.94.1929",
+    "dedicatedHostUid": 20010067,
+    "previousDataRetainedOnColdLaunch": true,
+    "connectedToOfficialPlayServicesAndStore": true,
+    "directMicroGClientConnection": false,
+    "apkQueriesFacebookPackage": true,
+    "originalFacebook": {
+      "version": "584.0.0.51.56",
+      "originalApkSha256": "c5e00114c68e66874d8569acfe98ba55026a865434e303ad928003be2e932c85",
+      "separateHostUid": 20010074,
+      "processAlreadyRunning": true,
+      "componentsInApkManifest": [
+        {
+          "name": "com.facebook.platform.common.provider.PlatformProviderBase",
+          "authority": "com.facebook.katana.provider.PlatformProvider",
+          "exported": true,
+          "enabledByDefault": false
+        },
+        {
+          "name": "com.facebook.katana.ProxyAuth",
+          "authority": null,
+          "exported": true,
+          "enabledByDefault": false
+        }
+      ]
+    },
+    "primaryDocumentOrigin": "https://m.facebook.com",
+    "appOwnedWindow": true,
+    "secondsFromStartOfUiObservationToForm": 56.6,
+    "providerNotFoundLogLinesBeforeSelectingLogin": 1,
+    "providerNotFoundLogLinesAtForm": 3,
+    "nativeFacebookActivityLaunchObserved": false,
+    "credentialsSubmitted": false,
+    "callbackDeclarations": {
+      "originalApk": {
+        "component": "com.facebook.CustomTabActivity",
+        "exported": true,
+        "viewDefaultBrowsable": true,
+        "scheme": "fbconnect",
+        "host": "cct.com.spotify.music"
+      },
+      "installedHost": {
+        "bundle": "org.westlake.apk.com.spotify.music",
+        "manifestAbilities": [
+          {
+            "ability": "EntryAbility",
+            "skills": [
+              {
+                "actions": [
+                  "action.system.home"
+                ],
+                "entities": [
+                  "entity.system.home"
+                ],
+                "declaredUriCount": 0
+              }
+            ]
+          }
+        ]
+      },
+      "oauthCallbackLaunched": false
+    },
+    "systemBack": {
+      "formStillVisibleThroughSeconds": 37.3,
+      "guestDeliveryEstablished": false
+    },
+    "appDirectedBack": {
+      "consumed": true,
+      "guestWindowsBefore": 5,
+      "guestWindowsAfter": 4,
+      "noneFocusedThroughSeconds": 35.0,
+      "activityResultDeliveryObserved": false
+    },
+    "foregroundHostAgain": {
+      "guestWindows": 4,
+      "noneFocusedThroughSeconds": 37.3,
+      "successfulOrCanceledResultMarkerObserved": false
+    },
+    "conclusion": "These controls stop before authentication. They locate separate gaps in provider discovery, OS-facing callback declarations, and guest focus after dismissal. The installed manifest check measures static exposure of this host only. It does not test successful browser delivery or the in-app redirect."
+  },
+  "gmail": {
+    "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "package": "com.google.android.gm",
+    "senderConfirmedSubmission": true,
+    "baseline": "The same portion of the retained Primary message list matched both earlier board captures before input.",
+    "listeners": {
+      "microG": 1,
+      "officialGms": 1,
+      "store": 1
+    },
+    "systemSwipe": {
+      "samples": [
+        {
+          "seconds": 7.1,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "eventsSinceSwipe": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0,
+            "touchRelease": 0
+          }
+        },
+        {
+          "seconds": 19.6,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "eventsSinceSwipe": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0,
+            "touchRelease": 0
+          }
+        },
+        {
+          "seconds": 44.7,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "eventsSinceSwipe": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0,
+            "touchRelease": 0
+          }
+        },
+        {
+          "seconds": 74.7,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "eventsSinceSwipe": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0,
+            "touchRelease": 0
+          }
+        }
+      ],
+      "appTouchReleaseMarkerObserved": false
+    },
+    "appDirectedDrag": {
+      "consumed": true,
+      "samples": [
+        {
+          "seconds": 8.0,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "events": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0
+          }
+        },
+        {
+          "seconds": 30.0,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "events": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0
+          }
+        },
+        {
+          "seconds": 50.0,
+          "primary": true,
+          "matchesPriorRows": true,
+          "matchesLongerBaseline": true,
+          "events": {
+            "syncRequests": 0,
+            "syncStarts": 0,
+            "syncFinishes": 0,
+            "authRequired": 0,
+            "fatal": 0
+          }
+        }
+      ]
+    },
+    "deliveryConfirmed": false,
+    "limitation": "Only the visible Primary rows and local event counters were compared. Delivery to the server, other mailbox categories, and a successful online refresh remain unverified."
+  },
+  "interpretation": "In the original Spotify app the Facebook option reached the real web login form. The client could not resolve Facebook’s native login provider. The installed Spotify host also lacks the URI declaration present in the Android APK. An acknowledged Back closed the dialog and left the four remaining Spotify windows without focus. Facebook authentication and return remain open. In original Gmail, both a system swipe and an app-consumed drag left the visible Primary inbox unchanged, with no new local sync request, start, or finish."
+}

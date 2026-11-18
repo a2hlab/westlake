@@ -1,0 +1,189 @@
+{
+  "candidate": 81,
+  "phase": "Drive native OAuth scope formatting and live foreign-broker denial",
+  "baseCommit": "21b791ef56a8cc194d9b84bb6845066dd605e7f7",
+  "implementation": {
+    "ordinaryOAuthAcceptsOneLeadingAsciiSpace": true,
+    "ordinaryOAuthAcceptsOneTrailingAsciiSpace": true,
+    "originalWireServicePreserved": true,
+    "arbitraryWhitespaceTrimmed": false,
+    "duplicateOrUnapprovedScopesAccepted": false,
+    "serverCodeGrammarRelaxed": false,
+    "maximumKeyLength": 4096
+  },
+  "hostTests": {
+    "tests": [
+      "GOOGLE_AUTH_DELEGATION_POLICY_PASS 64",
+      "GOOGLE_AUTH_SESSIONS_PASS 23",
+      "GOOGLE_AUTH_OAUTH_SESSIONS_PASS 50",
+      "GOOGLE_NATIVE_AUTH_CONSENT_PASS 66",
+      "GOOGLE_IDENTITY_CLAIMS_PASS 17"
+    ],
+    "allPassed": true,
+    "oldParserFailsNewLeadingDelimiterCase": true
+  },
+  "liveUnauthorizedBrokerProbe": {
+    "apkSha256": "82da37a6bc03e39a12ea0b94f7afe538f7db231869b756b089d0c82f0c09c4cf",
+    "clientUid": 20010060,
+    "providerUid": 20010056,
+    "officialGmsUid": 20010061,
+    "nativeTransaction28SecurityExceptionCount": 2,
+    "chooserTransaction23SecurityExceptionCount": 1,
+    "providerBrokerNotGrantedEvents": 3,
+    "grantFileUnchangedDuringProbes": true,
+    "accountViewAndVerifiedGmsPackagePreflightPassed": true,
+    "securityBoundaryReached": true,
+    "unavailableChannelCountedAsDenial": false,
+    "setupNotes": [
+      "Probe APK isolated from leftover Gmail config splits",
+      "Only public probe code changed from mode 600 to 444 so the different-UID verifier can reopen its root-vouched descriptor; APK bytes unchanged"
+    ],
+    "runtimeAtProbe": "candidate80 client, candidate78 provider and official GMS; before parser deployment",
+    "separateProductionAppUidIsolationProven": false
+  },
+  "drive": {
+    "package": "com.google.android.apps.docs",
+    "originalApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "currentSignerSha256": "1d4f2ef662f8d086abe035e9f5c3ad34700baa831f3e7e32edab303effb8f156",
+    "originalApkOrAppDataModified": false,
+    "scopeApproval": "Explicit user approval for exactly eight scopes on the existing test account",
+    "scopes": [
+      "https://www.googleapis.com/auth/espresso",
+      "https://www.googleapis.com/auth/photos.image.readonly",
+      "https://www.googleapis.com/auth/cloud_search.query",
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/workspace_ui",
+      "https://www.googleapis.com/auth/supportcontent",
+      "https://www.googleapis.com/auth/peopleapi.readonly",
+      "https://www.googleapis.com/auth/notifications"
+    ],
+    "consentLifetimeHours": 24,
+    "signerAccountAndEpochBound": true,
+    "otherGrantEntriesPreservedByteForByte": true,
+    "directMicrogClientTokenScopesAdded": false,
+    "nativeTokenOnBothPathsObserved": true,
+    "leadingDelimiterRequestTokenObserved": true,
+    "syntaxDenialAfterFixObserved": false,
+    "applicationTokenDetailRepliesAtCapture": 8,
+    "independentReadOnlyBackend": {
+      "execution": "Independent host-side read-only Drive API check with token issued for original Drive APK; this does not prove application rendering or file open",
+      "tlsCertificateVerification": true,
+      "redirectsAllowed": false,
+      "fileBodiesRequested": false,
+      "uploadsEditsDeletion": false,
+      "fullApplicationPassed": false,
+      "checks": {
+        "approvedNativeDriveToken": {
+          "account": {
+            "httpStatus": 200,
+            "returnedAccountMatchesAuthorizedAccount": true
+          },
+          "fileList": {
+            "httpStatus": 200,
+            "returnedFileCount": 0
+          }
+        },
+        "invalidTokenControl": {
+          "account": {
+            "httpStatus": 401,
+            "returnedAccountMatchesAuthorizedAccount": false,
+            "errorCode": 401,
+            "errorStatus": "UNAUTHENTICATED"
+          },
+          "fileList": {
+            "httpStatus": 401,
+            "errorCode": 401,
+            "errorStatus": "UNAUTHENTICATED"
+          }
+        }
+      }
+    },
+    "applicationFileListPassed": false,
+    "applicationFileOpenPassed": false,
+    "applicationScreenAtCapture": "Cannot refresh",
+    "fileOpeningTestItemAvailable": false,
+    "restartAcceptancePending": false,
+    "periodicRegistrationAndAdapterCompletionObserved": true,
+    "fullApplicationPassed": false,
+    "restartGmsTokenReturned": true,
+    "restartApplicationFileListingPassed": false,
+    "directAccountManagerRequestsFail": true,
+    "directAccountManagerFailure": "Client getAuthToken requests use provider TOKEN operation 2, which requires a separate direct-client grant; no such grant was added. This path is distinct from the working consent-bound official GMS route.",
+    "fileLoadingLog": "DocumentsProviderAuthEr and HttpCallTransport report AccountManager AuthenticatorException; native Cello root fetch cancelled",
+    "nextFix": "Route the client AccountManager API through the verified official GMS native-auth entry, preserving the account/signer/scope/epoch/lifetime policy; do not grant direct bootstrap token access"
+  },
+  "build": {
+    "javaSources": 142,
+    "javaClasses": 296,
+    "adapterJarSha256": "6459072107b0b5fd7ef7264129e51279755d9854c600f29651e593801a233fd3",
+    "frameworkJarSha256": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+    "frameworkSameAsCandidate80b": true,
+    "nativeLibrariesRebuilt": false,
+    "sourceSha256": {
+      "framework/core/java/GoogleAuthDelegationPolicy.java": "c2d2ff62e2f704c906ca873eb311fb4dbc57139a888490e86fdd8d3637f6705f",
+      "tests/google-auth/host/GoogleAuthDelegationPolicyTest.java": "42e9ec69a4057e3892527fa5f24054eafd24bd05b203e69a1fd5f712790a0f40"
+    }
+  },
+  "deployment": {
+    "verifiedCodeReplacements": 116,
+    "runtimeCohorts": 4,
+    "codeFilesPerCohort": 29,
+    "codeOwner": "root",
+    "codeMode": "444",
+    "immutableCodeHardlinkedAcrossTestRuntimes": true,
+    "privateAppDataHardlinked": false,
+    "exactHostRollbackArtifactsRetained": true,
+    "appDataRemoved": false
+  },
+  "preservation": {
+    "uncertifiedStatus": [
+      3
+    ],
+    "certificationOverridePresent": false,
+    "checkinIdentityPreserved": true,
+    "oneApprovedProviderAccountRetained": true,
+    "exactApprovedDriveGrantFileRetained": true,
+    "driveScopeSetExact": true,
+    "driveConsentUnexpired": true,
+    "directClientTokenGrantAbsent": true,
+    "hostsAlive": {
+      "client": true,
+      "official": true,
+      "provider": true
+    },
+    "executableIdentityVerified": {
+      "client": true,
+      "official": true,
+      "provider": true
+    },
+    "originalApkHashesMatch": {
+      "client": true,
+      "official": true,
+      "provider": true
+    },
+    "adapterJarSha256": {
+      "client": "6459072107b0b5fd7ef7264129e51279755d9854c600f29651e593801a233fd3",
+      "official": "6459072107b0b5fd7ef7264129e51279755d9854c600f29651e593801a233fd3",
+      "provider": "6459072107b0b5fd7ef7264129e51279755d9854c600f29651e593801a233fd3"
+    },
+    "clientReport": "full81-drive-delimiter-ready"
+  },
+  "remaining": [
+    "Drive application file listing, file open with an available test item, and token renewal",
+    "Remaining Google and Facebook app flows, overlapping callers and production UID isolation"
+  ],
+  "goalComplete": false,
+  "gmailControl": {
+    "originalGmailApkUnchanged": true,
+    "inboxVisible": true,
+    "tokenBearingReplies": 3,
+    "periodicRestoredCounts": [
+      1
+    ],
+    "periodicUnsupportedExceptionCount": 0,
+    "fatalSignals": 0,
+    "dnsNameFailures": 0,
+    "adapterCandidate": 81,
+    "newMessageDeltaValidated": false
+  }
+}

@@ -1,0 +1,372 @@
+{
+  "schema": 1,
+  "plan": "validation-plan.json",
+  "meaning": {
+    "observed": "Direct evidence for the named operation in the stated profile and build. Guest playback or guest Maps navigation does not establish signed-in behavior.",
+    "partial": "One or more relevant steps ran. The intended result or a necessary control remains unverified.",
+    "open": "The records cited for the app do not demonstrate the named operation."
+  },
+  "providers": {
+    "Google": {
+      "com.mobilefootie.wc2010": {
+        "app": "FotMob",
+        "sources": [
+          "candidate74.json",
+          "candidate75.json",
+          "candidate116.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "observed",
+            "evidence": "The original app reached its signed-in screen from a fresh app profile."
+          },
+          "private_preference_cloud_round_trip": {
+            "status": "observed",
+            "evidence": "The changed favorite was restored after the local favorites cache was cleared. The read endpoint also accepted an invalid-token control, so the read alone does not establish authorization."
+          },
+          "silent_token_renewal": {
+            "status": "observed",
+            "evidence": "A fresh signed ID token reached FotMob after expiry of its saved token."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The signed-in UI and account identifier survived client restart."
+          }
+        }
+      },
+      "com.spotify.music": {
+        "app": "Spotify",
+        "sources": [
+          "candidate51-followup.json",
+          "candidate93.json",
+          "candidate107.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "Google returned a successful activity result on the earlier shared host. Spotify asked for a separate signup. Later official-services-only setup on a dedicated host stayed on Checking info."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "library_load": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "playback": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "silent_token_renewal": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No established Spotify profile was observed after Google sign-in."
+          }
+        }
+      },
+      "wp.wattpad": {
+        "app": "Wattpad",
+        "sources": [
+          "candidate51-followup.json",
+          "candidate62.json",
+          "candidate116.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "The original app received the Google sign-in result and reached Wattpad signup. The fresh dedicated host reached the official Google Checking info screen."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No established Wattpad profile was observed after Google sign-in."
+          },
+          "library_or_reading": {
+            "status": "open",
+            "gap": "No established Wattpad profile was observed after Google sign-in."
+          },
+          "silent_token_renewal": {
+            "status": "partial",
+            "evidence": "Expiry of the local SDK selection led back to signup. Actual Google token expiry and renewal for a Wattpad session remain unverified."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No established Wattpad profile was observed after Google sign-in."
+          }
+        }
+      },
+      "com.google.android.youtube": {
+        "app": "YouTube",
+        "sources": [
+          "candidate106.json",
+          "candidate107.json",
+          "candidate108.json",
+          "candidate115.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "The original app opened its add-account path and returned with no signed-in account."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No signed-in YouTube session was observed."
+          },
+          "video_playback": {
+            "status": "observed",
+            "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open."
+          },
+          "restart_persistence": {
+            "status": "partial",
+            "evidence": "A guest profile played after restart. A signed-in YouTube session has not been observed after restart."
+          }
+        }
+      },
+      "com.google.android.gm": {
+        "app": "Gmail",
+        "sources": [
+          "candidate63.json",
+          "candidate79.json",
+          "candidate80.json",
+          "candidate112.json",
+          "candidate114.json",
+          "candidate115.json",
+          "candidate117.json",
+          "candidate118.json",
+          "candidate119.json",
+          "candidate120.json",
+          "candidate121.json",
+          "candidate122.json",
+          "candidate123.json",
+          "candidate124.json",
+          "candidate126.json",
+          "candidate128.json",
+          "candidate129.json",
+          "candidate130.json",
+          "candidate131.json",
+          "candidate132.json",
+          "candidate133.json",
+          "candidate134.json",
+          "candidate136.json",
+          "candidate137.json",
+          "candidate138.json",
+          "candidate139.json",
+          "candidate140.json",
+          "candidate141.json"
+        ],
+        "checks": {
+          "account_selection": {
+            "status": "partial",
+            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear. With the private account provider connected on the dedicated UID, selecting Google invoked addAccount. The delegated adapter returned unsupported and setup stayed on the provider list. After the window inset repair, a normal tap at the center of the account icon opened the Google panel. The test account was absent from the sampled controls. A later retained-profile test found that Gmail’s internal drawer account was null while the system account provider was serving one-account lists for the Gmail package. In the same Gmail process Android returned one Google account, while the official provider returned zero on all 7 observed queries, including 4 from its catalog builder. In that run only Gmail had the account connector. A separate on-board regression fixture confirmed own-app account enumeration and package isolation checks. It did not complete a Gmail account selection."
+          },
+          "mailbox_sync": {
+            "status": "observed",
+            "evidence": "In the earlier delegated configuration, original Gmail populated its inbox and opened an existing message after enabling sync and restarting."
+          },
+          "refresh": {
+            "status": "partial",
+            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery. The original Gmail sync callback acquired its mailbox provider and returned with the database-error flag already set. In two further failed syncs the Gmail process logged no notification enqueue, remote activity launch, or pending intent send during the job or through the subsequent delayed observation marker. The app trace missed callback return. Fresh delivery and in-app recovery remain open. In a new retained-inbox check, the visible rows matched the prior baseline after a system swipe and a second drag consumed by Gmail. Neither observation window produced a new local sync request, start, or completion. On a further board run, both a system swipe and an app-consumed drag left the visible Primary rows unchanged through 74.7 and 50.0 seconds, respectively. Neither produced a local sync marker. The updated retained client received a genuine system swipe, scrolled its list and displayed the original Gmail refresh arrow. The release retest showed no new local sync request, start, or completion and the inbox rows were unchanged. Four full pulls reached the original Gmail refresh listener and returned. Two short controls took the cancel path. Both network checks in the enhanced build returned a connected network to Gmail on the listener stack. The visible inbox and local sync counters still showed no delivery. With storage above the local scheduler threshold, two pulls still produced no local sync. Re-enabling Sync Gmail started the mailbox adapter and the official authentication interface returned BadAuthentication with a recovery field during the failed job. The recovery intent matched a published Play services activity filter. A query using only public metadata resolved one enabled, exported target from Gmail. During the job, the observer recorded zero copies from the non-null path of Gmail’s recovery-exception accessor. Gmail received a system pull-to-refresh gesture. Across three samples through 44.5 seconds, the visible message list stayed identical. A date-range search lost its window before results appeared. Cold restart restored the same visible inbox rows. Submitting a date range and selecting a recent query each reached the same account lookup failure inside the original APK. After a cold launch, original Gmail showed Primary again. A system swipe reached the app. Through 59.5 seconds the sampled rows matched the existing inbox reference and the app recorded zero mailbox job starts. Gmail’s navigation drawer reported two rows, a header and a divider, when All mail was unavailable."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The earlier configuration retained the account, inbox and automatic-sync preference across a client restart. The dedicated fresh-profile control stopped at setup. After the account provider was restored, it verified a newly restarted original Gmail process and the retained Primary inbox reappeared."
+          }
+        }
+      },
+      "com.google.android.apps.docs": {
+        "app": "Drive",
+        "sources": [
+          "candidate81.json",
+          "candidate82.json",
+          "candidate89.json",
+          "candidate116.json",
+          "candidate125.json",
+          "candidate126.json",
+          "candidate134.json"
+        ],
+        "checks": {
+          "account_selection": {
+            "status": "partial",
+            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice. Fresh dedicated Drive found no account and received authenticator unavailable when it asked to add one, including after connecting to both official services. With the dedicated Drive account connection restored, the provider returned one Android account and the official Play account content provider resolved. Drive still requested add-account and detached its window. The retained profile also failed on the current official-service configuration. Two dedicated cold starts captured 32 get_accounts replies from official Play services. All contained an empty typed account array. Drive requested add-account on each launch."
+          },
+          "file_listing": {
+            "status": "observed",
+            "evidence": "My Drive listed the approved fixture after a process restart. The current account-path retest did not reach the file list."
+          },
+          "file_open": {
+            "status": "observed",
+            "evidence": "The original Drive preview rendered the three expected lines of the 107-byte file. The current account-path retest did not reach the file list."
+          },
+          "token_renewal": {
+            "status": "partial",
+            "evidence": "The restarted process got successful native account replies. The previous token was not shown to have expired."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The same profile listed and opened the fixture after restart. Its contents could have been cached. The current account-path retest did not reach the file list."
+          }
+        }
+      },
+      "com.google.android.apps.maps": {
+        "app": "Maps",
+        "sources": [
+          "candidate83.json",
+          "candidate88.json",
+          "candidate127.json",
+          "candidate135.json"
+        ],
+        "checks": {
+          "startup": {
+            "status": "observed",
+            "evidence": "Original Maps opened in guest mode."
+          },
+          "map_tiles": {
+            "status": "observed",
+            "evidence": "The guest UI displayed labeled map tiles."
+          },
+          "search": {
+            "status": "observed",
+            "evidence": "Guest place search returned a result with the services connected. Signed-in place search remains open."
+          },
+          "real_location": {
+            "status": "partial",
+            "evidence": "OpenHarmony accepted two requests during the temporary permission grant. No real fix was delivered. Permission was restored to Deny. With GNSS disabled, the adapter now reports GPS disabled to Android and withholds explicit GPS requests. Original Maps exercised the change on its dedicated host. Network provider configuration and a physical fix remain open. A board fixture verified provider selection, source filtering and per-provider caches on the rebuilt adapter. Original Maps queried last location with its host permission denied. It received zero physical fixes."
+          },
+          "route_preview": {
+            "status": "observed",
+            "evidence": "The guest directions screen displayed a route preview between specified endpoints."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The retained guest configuration survived restart and repeated the directions flow."
+          }
+        }
+      },
+      "com.ubercab": {
+        "app": "Uber",
+        "sources": [
+          "uber-trip-link89.json",
+          "../live44/batch-results.json",
+          "candidate138.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "On the earlier shared host, Google accepted basic profile and email consent in web sign-in, then Uber displayed “Sorry, we could not find that page”. On the current dedicated host the signed rider app displayed its welcome page. The trip-link window disappeared before a Google tap, and the normal launch displayed the Uber logo before the board returned to Gmail. Rider sign-in remains partial."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No authenticated rider session was observed."
+          },
+          "destination_search": {
+            "status": "open",
+            "gap": "Uber opened onboarding for a link with fixed endpoints. The user did not exercise in-app destination search."
+          },
+          "fare_preview_without_booking": {
+            "status": "open",
+            "gap": "No fare preview was displayed."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No authenticated rider session was available for a restart test."
+          }
+        }
+      }
+    },
+    "Facebook": {
+      "com.mobilefootie.wc2010": {
+        "app": "FotMob",
+        "sources": [
+          "candidate76.json",
+          "candidate116.json",
+          "candidate117.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "observed",
+            "evidence": "Facebook login completed in the original FotMob flow. On the fresh dedicated host the Facebook form appeared. That separate run did not complete authentication. Its SDK form remained visible after Back in Spotify."
+          },
+          "authenticated_return": {
+            "status": "observed",
+            "evidence": "The SDK returned to the original FotMob app. An independent check of the Facebook account endpoint matched the app-saved identity."
+          },
+          "account_session": {
+            "status": "observed",
+            "evidence": "The account menu showed the signed-in session."
+          },
+          "restart_persistence": {
+            "status": "observed",
+            "evidence": "The account and signed-in UI survived process restart."
+          }
+        }
+      },
+      "wp.wattpad": {
+        "app": "Wattpad",
+        "sources": [
+          "../../../docs/google-two-path-live44.md"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "observed",
+            "evidence": "Facebook accepted login and showed its consent screen."
+          },
+          "authenticated_return": {
+            "status": "observed",
+            "evidence": "The Facebook SDK and original Wattpad onboarding activity received a successful result."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed."
+          }
+        }
+      },
+      "com.spotify.music": {
+        "app": "Spotify",
+        "sources": [
+          "candidate97.json",
+          "candidate108.json",
+          "candidate117.json",
+          "candidate120.json",
+          "candidate128.json"
+        ],
+        "checks": {
+          "sign_in": {
+            "status": "partial",
+            "evidence": "Spotify showed the Facebook form and the full main-document origin in its own WebView on the dedicated host. Submission and authenticated return remain open. With the standalone Facebook app already running under another UID, Spotify still displayed the empty form in its own window. The native provider lookup missed twice more before the form appeared. The original APK declares a browser callback and the installed OpenHarmony host advertises only its home ability."
+          },
+          "authenticated_return": {
+            "status": "open",
+            "gap": "No authenticated return to Spotify or established Spotify session was observed. A consumed Back closed the form. Four guest windows remained without focus, and foregrounding the host did not restore a guest window during the observation."
+          },
+          "account_session": {
+            "status": "open",
+            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+          },
+          "restart_persistence": {
+            "status": "open",
+            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+          }
+        }
+      }
+    }
+  },
+  "counts": {
+    "Google": {
+      "observed": 15,
+      "partial": 11,
+      "open": 13
+    },
+    "Facebook": {
+      "observed": 6,
+      "open": 5,
+      "partial": 1
+    }
+  }
+}

@@ -1,0 +1,320 @@
+{
+  "schema": 1,
+  "candidate": 119,
+  "date": "2026-11-18",
+  "previous": "candidate118.json",
+  "runtime": "Official GMS and Store control with the delegated account provider disabled.",
+  "androidReference": "https://github.com/aosp-mirror/platform_frameworks_base/blob/android-14.0.0_r1/services/core/java/com/android/server/accounts/AccountManagerService.java",
+  "originalGmailApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "featureQuery": {
+    "changedAdapterClasses": [
+      "adapter/core/LocalServiceBinders.class"
+    ],
+    "beforeAdapterRuntimeSha256": "004d87edf14dc914df6d0d6c7dd0f8cb0b8bb69adf7aca621c29815e686bc4ee",
+    "afterAdapterRuntimeSha256": "03db44ec84d3da479b4f87c971a03cca078a3fa556a010eb73a942efa967fdaa",
+    "probe": "tests/parity/EmptyAccountLookupProbe.java",
+    "boardProbeDexJarSha256": "5695b831be8a79eae6768ae5fb7f791e2aabb0bed22ce5247cf6ce96eb011a11",
+    "fixture": "Artificial account and account type, no authenticator. No server contacted.",
+    "before": "The public AccountManager.hasFeatures call returned a pending future. The empty service submitted no work. The regression failed on the board (exit 1).",
+    "after": "The public API reports SecurityException at submission. Empty and nonempty feature arrays are both refused for an invisible type. Null account, null response or null features are rejected as invalid. Existing empty list, selection and enrollment cases passed (exit 0)."
+  },
+  "dedicatedGmail": {
+    "before": {
+      "runtime": {
+        "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+        "actualMappedBootOatSha256": "6dcc8d27c50d027cd410f8e18e2c62450793a8c474d8a7ece75ffe0bccde4cbc",
+        "adapterRuntimeSha256": "004d87edf14dc914df6d0d6c7dd0f8cb0b8bb69adf7aca621c29815e686bc4ee",
+        "originalProcessLive": true,
+        "sha256AndMappedBootInodeVerified": true,
+        "markers": {
+          "localFeatureQuery": 1,
+          "localEnrollment": 0,
+          "refusalMessage": 0,
+          "fatal": 0,
+          "supportedDeviceError": 0,
+          "syncRestore": 0
+        }
+      },
+      "app": {
+        "startPage": "providers",
+        "gmsActiveAtStart": true,
+        "actions": [
+          {
+            "input": "system",
+            "observations": [
+              {
+                "seconds": 4.8,
+                "screen": "providers"
+              },
+              {
+                "seconds": 10.6,
+                "screen": "providers"
+              },
+              {
+                "seconds": 19.8,
+                "screen": "providers"
+              }
+            ],
+            "addedFirstSeenAccountMethods": [],
+            "sameLog": true
+          },
+          {
+            "input": "app",
+            "observations": [
+              {
+                "seconds": 5.1,
+                "screen": "providers"
+              },
+              {
+                "seconds": 10.8,
+                "screen": "providers"
+              },
+              {
+                "seconds": 19.8,
+                "screen": "providers"
+              }
+            ],
+            "addedFirstSeenAccountMethods": [],
+            "sameLog": true
+          }
+        ],
+        "accountCallsAtEnd": [
+          "account.getAccountsAsUser",
+          "account.getAccountsByFeatures",
+          "account.hasFeatures",
+          "account.registerAccountListener"
+        ],
+        "aliveAtEnd": true,
+        "gmsActiveAtEnd": true
+      }
+    },
+    "after": {
+      "runtime": {
+        "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+        "actualMappedBootOatSha256": "f74f0f3da6c885cf92149ec609884bd89682c64fbfb2a4f647580fe6eeb83f61",
+        "adapterRuntimeSha256": "03db44ec84d3da479b4f87c971a03cca078a3fa556a010eb73a942efa967fdaa",
+        "originalProcessLive": true,
+        "sha256AndMappedBootInodeVerified": true,
+        "markers": {
+          "localFeatureQuery": 1,
+          "localEnrollment": 1,
+          "refusalMessage": 0,
+          "fatal": 0,
+          "supportedDeviceError": 0,
+          "syncRestore": 0
+        }
+      },
+      "app": {
+        "startPage": "providers",
+        "gmsActiveAtStart": true,
+        "actions": [
+          {
+            "input": "system",
+            "observations": [
+              {
+                "seconds": 5.0,
+                "screen": "providers"
+              },
+              {
+                "seconds": 11.1,
+                "screen": "providers"
+              },
+              {
+                "seconds": 20.1,
+                "screen": "providers"
+              }
+            ],
+            "addedFirstSeenAccountMethods": [
+              "account.addAccount"
+            ],
+            "sameLog": true
+          },
+          {
+            "input": "app",
+            "observations": [
+              {
+                "seconds": 4.9,
+                "screen": "providers"
+              },
+              {
+                "seconds": 11.0,
+                "screen": "providers"
+              },
+              {
+                "seconds": 20.0,
+                "screen": "providers"
+              }
+            ],
+            "addedFirstSeenAccountMethods": [],
+            "sameLog": true
+          }
+        ],
+        "accountCallsAtEnd": [
+          "account.addAccount",
+          "account.getAccountsAsUser",
+          "account.getAccountsByFeatures",
+          "account.hasFeatures",
+          "account.registerAccountListener"
+        ],
+        "aliveAtEnd": true,
+        "gmsActiveAtEnd": true
+      }
+    }
+  },
+  "retainedGmail": {
+    "before": {
+      "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "actualMappedBootOatSha256": "272cb00f6ca3595234e57de2de602e9f202c88cdb30c76c65ccad9471cd79a1f",
+      "adapterRuntimeSha256": "2dc4dd927fa37089f6cb3f48208d6d306e105b603e743fe5744643becd6f5e3a",
+      "originalProcessLive": true,
+      "sha256AndMappedBootInodeVerified": true,
+      "markers": {
+        "localFeatureQuery": 1,
+        "localEnrollment": 0,
+        "refusalMessage": 0,
+        "fatal": 0,
+        "supportedDeviceError": 0,
+        "syncRestore": 1
+      }
+    },
+    "after": {
+      "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "actualMappedBootOatSha256": "f74f0f3da6c885cf92149ec609884bd89682c64fbfb2a4f647580fe6eeb83f61",
+      "adapterRuntimeSha256": "03db44ec84d3da479b4f87c971a03cca078a3fa556a010eb73a942efa967fdaa",
+      "originalProcessLive": true,
+      "sha256AndMappedBootInodeVerified": true,
+      "markers": {
+        "localFeatureQuery": 1,
+        "localEnrollment": 0,
+        "refusalMessage": 0,
+        "fatal": 0,
+        "supportedDeviceError": 0,
+        "syncRestore": 1
+      }
+    },
+    "app": {
+      "version": "full131",
+      "beforeService": true,
+      "before": [
+        "Getting your messages",
+        "Search in mail"
+      ],
+      "samples": [
+        {
+          "seconds": 6.5,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ],
+          "officialService": true
+        },
+        {
+          "seconds": 18.7,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ],
+          "officialService": true
+        },
+        {
+          "seconds": 38.0,
+          "labels": [
+            "Getting your messages",
+            "Search in mail"
+          ],
+          "officialService": true
+        }
+      ],
+      "markerAvailable": false,
+      "startupSamples": [
+        [
+          "Getting your messages",
+          "Search in mail"
+        ]
+      ],
+      "appRefreshDelivered": true,
+      "refreshTrace": {
+        "requests": 0,
+        "starts": 0,
+        "finishes": 0
+      },
+      "foregroundAtEnd": true,
+      "accountMethods": [
+        "account.getAccountsAsUser",
+        "account.getAccountsByFeatures",
+        "account.hasFeatures",
+        "account.registerAccountListener"
+      ]
+    },
+    "persistedPreferencesBeforeRestart": {
+      "automaticSyncEntriesEnabled": 1,
+      "automaticSyncEntriesDisabled": 0,
+      "masterSettingExplicitlyDisabled": false,
+      "serializedPeriodicListPresent": true
+    }
+  },
+  "newMessageSeen": false,
+  "serverReceiptIndependentlyChecked": false,
+  "appSurvey": {
+    "basis": "Only currently live original app main processes with a matching launcher report, parent, UID, verified base APK SHA-256 and local framework log. A missing marker or a missing live process is inconclusive.",
+    "applications": {
+      "com.google.android.apps.docs": [
+        {
+          "originalApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+          "dedicatedHost": true,
+          "hasFeaturesSeen": false,
+          "accountMethodMarkerPresent": true
+        }
+      ],
+      "com.google.android.apps.maps": [],
+      "com.google.android.gm": [
+        {
+          "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+          "dedicatedHost": false,
+          "hasFeaturesSeen": true,
+          "accountMethodMarkerPresent": true
+        },
+        {
+          "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+          "dedicatedHost": true,
+          "hasFeaturesSeen": true,
+          "accountMethodMarkerPresent": true
+        }
+      ],
+      "com.google.android.youtube": [
+        {
+          "originalApkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+          "dedicatedHost": true,
+          "hasFeaturesSeen": false,
+          "accountMethodMarkerPresent": true
+        }
+      ],
+      "com.mobilefootie.wc2010": [
+        {
+          "originalApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+          "dedicatedHost": true,
+          "hasFeaturesSeen": false,
+          "accountMethodMarkerPresent": false
+        }
+      ],
+      "com.spotify.music": [
+        {
+          "originalApkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+          "dedicatedHost": true,
+          "hasFeaturesSeen": false,
+          "accountMethodMarkerPresent": false
+        }
+      ],
+      "com.ubercab": [],
+      "wp.wattpad": [
+        {
+          "originalApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+          "dedicatedHost": true,
+          "hasFeaturesSeen": false,
+          "accountMethodMarkerPresent": false
+        }
+      ]
+    },
+    "unmatchedLiveMainProcesses": 0
+  }
+}

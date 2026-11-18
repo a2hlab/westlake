@@ -1,0 +1,58 @@
+{
+  "aliveAtCapture": true,
+  "requestedServiceIds": [
+    8,
+    14,
+    51,
+    93,
+    116,
+    212,
+    258,
+    270,
+    300
+  ],
+  "callbackStatusCounts": {
+    "0": 2,
+    "9": 16
+  },
+  "callbackStatusesByApproximateService": {
+    "51": [
+      0
+    ],
+    "93": [
+      9
+    ],
+    "300": [
+      9
+    ],
+    "116": [
+      9
+    ],
+    "258": [
+      9
+    ],
+    "14": [
+      9
+    ],
+    "8": [
+      9
+    ],
+    "212": [
+      0
+    ],
+    "270": [
+      9
+    ]
+  },
+  "authMarkers": {
+    "token_details_present=true": 13,
+    "result_received result_code=-1": 1,
+    "result_received result_code=0": 0,
+    "silent_request_denied": 0,
+    "Fatal signal 5": 0,
+    "Fatal signal 6": 0
+  },
+  "serviceAttributionCaveat": "SocketBinder afterService is process-global and approximate for concurrent connections; status 0 is only a broker handshake.",
+  "package": "com.mobilefootie.wc2010",
+  "fullBusinessFlowAccepted": false
+}

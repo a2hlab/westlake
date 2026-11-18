@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "status": "observations_complete_with_gaps",
+  "westlakeRevision": "61209fc78dc0728193167f73a3abb688f2b466a7",
+  "manifestRevision": "d0fe141c6002bba64bb6a2a6be010564742a36dd",
+  "frameworkArtifacts": "../lifecycle41/artifacts43.json",
+  "mergedLauncherUnitTests": 50,
+  "authHostSuites": 7,
+  "windowPolicySuitePassed": true,
+  "preflightFotMob43Alive": false,
+  "preflightFotMob43FatalSignal": "SIGTRAP",
+  "preflightGmsAndProviderAlive": true,
+  "newApplicationSignupAllowed": false,
+  "fullApplicationPasses": 0,
+  "googleTargetsAttempted": 8,
+  "latestClientFrameworkEvidence": "activity-reuse-candidate47.json",
+  "latestClientWestlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "latestManifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "baseRevisionFieldsDescribe": "Initial merged candidate43 preflight, retained as historical provenance",
+  "facebookTargetsLaunched": 3,
+  "facebookAuthenticatedReturns": 2,
+  "facebookFullApplicationPasses": 0,
+  "finalHostPolicyCheck": {
+    "gmsAlive": true,
+    "providerAlive": true,
+    "uncertifiedStatus": 3,
+    "certificationOverridePresent": false
+  }
+}

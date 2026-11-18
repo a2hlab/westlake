@@ -431,6 +431,7 @@ public class WindowCallbackBridge {
         logBridged("UpdateFocusStatus",
                 "-> WindowInputEventReceiver.onFocusEvent(" + focused + ")");
         dispatchWindowFocusChanged(focused);
+        if (focused) OhInsetsBridge.refreshSystemArea(mAndroidWindow);
     }
 
     /**
@@ -471,6 +472,7 @@ public class WindowCallbackBridge {
      */
     public void onUpdateAvoidArea(int avoidAreaType, int left, int top,
                                    int right, int bottom) {
+        OhInsetsBridge.systemAreaChanged(mAndroidWindow, avoidAreaType);
         logBridged("UpdateAvoidArea(type=" + avoidAreaType + ")",
                 "-> IWindow.resized (InsetsState) / insetsControlChanged");
     }

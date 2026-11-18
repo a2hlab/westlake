@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "candidate": 59,
+  "sourceBeforeChange": "d0516f0466d3bef8a1db708a26782bcf4514fea1",
+  "package": "com.google.android.apps.docs",
+  "originalApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+  "diagnosticCandidates": [
+    55,
+    56,
+    57
+  ],
+  "diagnosis": {
+    "accountIdRequestsBeforeFix": 5,
+    "accountIdService": "^^_account_id_^^",
+    "rejectedAsUnsupportedTokenService": true,
+    "driveHadOAuthSelection": false,
+    "driveHadProviderScopeGrant": false
+  },
+  "fix": {
+    "operation": "ACCOUNT_ID",
+    "officialGmsOptIn": "WESTLAKE_GOOGLE_ACCOUNT_ID_METADATA=1",
+    "providerGrant": "client.com.google.android.gms.account_id=true",
+    "requiresClientAndBrokerSignerPins": true,
+    "exactExistingAccountRequired": true,
+    "rechecksGrantAndAccountBeforeReply": true,
+    "addsOAuthScope": false,
+    "grantsOAuthSelection": false,
+    "exposesReusableCredential": false
+  },
+  "build": {
+    "sourceHashes": {
+      "framework/activity/java/GoogleAuthOperations.java": "628bb4fc1e97ed3bd8b074a38ef80cbce97a4c88d9e1ea5efcbf32907baaf6c3",
+      "framework/core/java/GoogleAuthBoundaryTrace.java": "96deee957337911e1fd594234a2cb91a8392db617d14efd873eac242aa979d2e",
+      "framework/core/java/GoogleAuthDelegation.java": "148c8e5c780717389fe3b0a17e7f903fd5edfc62570456c61add195122e1470f",
+      "framework/core/java/GoogleAuthPolicy.java": "68d130ac26814f23317723578ffe79f7b91bb78b47a22f8c4f093315532eb3a2",
+      "framework/core/java/GoogleAuthProxy.java": "e58bd3136aa423a6a8c6d1908226b981780c7beb7a712b0e3f7b4ccabd9c4953"
+    },
+    "adapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "72ed7cb9fda3415551ae26922fb21a6812e8db7ae827086da250a1e34b6fef7f",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "frameworkJarSha256": "0a2b1573150d4aee7040b0126e8a51d7ec2e111ce5188ba05c005d0d31d8f452",
+    "adapterBuildPassed": true,
+    "runtimePackagingPassed": true,
+    "bootBuildPassed": true,
+    "boardPreloadPassed": true,
+    "classInitializationFailures": [],
+    "nativeArtifactsRebuiltForThisCandidate": false,
+    "providerNativeRuntimePreserved": true,
+    "driveNativeSignalFixCandidate": 54
+  },
+  "hostTests": {
+    "brokerMetadataPolicy": 16,
+    "delegationPolicy": 36,
+    "idTokenSessions": 23,
+    "oauthSessions": 44,
+    "diagnosticPrivacy": "pass"
+  },
+  "observed": {
+    "officialGmsAndMicrogRestarted": true,
+    "clientRestarted": true,
+    "accountDataCleared": false,
+    "providerAccountIdReads": 15,
+    "officialGmsSuccessfulAccountIdReads": 15,
+    "driveAccountIdRequests": 3,
+    "correlatedSuccessfulLegacyAuthReplies": 3,
+    "replyAttribution": "Three Drive account-ID requests precede three successful replies; account-ID values are not logged or published. Token-shaped fields in these replies are not OAuth acceptance.",
+    "driveOAuthTokensIssued": 0,
+    "deniedOAuthRequests": {
+      "peopleapi.readonly": 2,
+      "supportcontent": 2,
+      "notifications": 1
+    },
+    "clientOAuthFailure": "BadAuthentication with recovery intents",
+    "visibleResult": "Files view with spinner; no file list observed",
+    "fullApplicationPass": false,
+    "fixedCategoryEventCounts": {
+      "client_account_id=true metadata_present=true": 15,
+      "silent_request_metadata=true owner=com.google.android.apps.docs request_kind=account_id extras_categories=androidPackageName,clientPackageName,service_connection_start_time_millis unknown_extra_count=0": 3,
+      "silent_request_metadata=true owner=com.google.android.apps.docs request_kind=oauth2 scope_categories=supportcontent unknown_scope_count=0 empty_scope_count=0 extras_categories=androidPackageName,clientPackageName,service_connection_start_time_millis unknown_extra_count=0": 2,
+      "silent_read_denied=true owner=com.google.android.apps.docs": 5,
+      "silent_request_metadata=true owner=com.google.android.apps.docs request_kind=oauth2 scope_categories=peopleapi_readonly unknown_scope_count=0 empty_scope_count=0 extras_categories=androidPackageName,clientPackageName,service_connection_start_time_millis unknown_extra_count=0": 2,
+      "silent_request_metadata=true owner=com.google.android.apps.docs request_kind=oauth2 scope_categories=notifications unknown_scope_count=0 empty_scope_count=0 extras_categories=androidPackageName,clientPackageName,service_connection_start_time_millis unknown_extra_count=0": 1,
+      "operation=account_id owner=com.google.android.gms metadata_present=true": 15
+    }
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "onlyProviderGrantAddedIsAccountId": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": false,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true
+  },
+  "limitations": [
+    "No Drive file listing, file opening or renewal acceptance",
+    "Further account permission/recovery and service eligibility work remains",
+    "Provider account-store bytes changed on restart; exact byte preservation is not claimed",
+    "Fresh OAuth renewal after this microG restart has not been validated",
+    "Client host UIDs remain shared; production per-app isolation not validated",
+    "No full application passes; all other required flows remain tracked in validation-plan.json"
+  ]
+}

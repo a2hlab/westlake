@@ -15,6 +15,19 @@ final class RemoteHostWindows {
     static boolean launch(String targetPackage) { return request(targetPackage, "launch"); }
     static void returnTo(String callerPackage) { request(callerPackage, "result"); }
 
+    static boolean isOwnAppSettings(android.content.Intent intent) {
+        if (!android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS.equals(intent.getAction())
+                || intent.getComponent() != null || intent.getPackage() != null || intent.getSelector() != null
+                || System.getenv("WESTLAKE_OWN_SETTINGS_DIR") == null) return false;
+        android.net.Uri data = intent.getData();
+        String own = adapter.packagemanager.SourcePackageRegistry.packageName();
+        return own != null && data != null && ("package:" + own).equals(data.toString());
+    }
+
+    static boolean openOwnAppSettings() {
+        return send(System.getenv("WESTLAKE_OWN_SETTINGS_DIR"), "app-settings", "app-settings");
+    }
+
     private static boolean request(String packageName, String reason) {
         if (!"1".equals(System.getenv("WESTLAKE_REMOTE_HOST_WINDOWS"))) return true;
         if (!"1".equals(System.getenv("ASX_DIRECT_LAUNCH"))) return false;
@@ -29,10 +42,23 @@ final class RemoteHostWindows {
             }
         }
         String directory = System.getenv("WESTLAKE_HOST_CONTROL_DIR");
-        if (directory == null || target == null || !target.matches("org\\.westlake\\.[A-Za-z0-9_]+")) {
+        if (directory == null || !validTarget(target, packageName, reason)) {
             event(reason, "unconfigured");
             return false;
         }
+        return send(directory, target, reason);
+    }
+
+    static boolean validTarget(String target, String packageName, String reason) {
+        if (target == null) return false;
+        if (target.matches("org\\.westlake\\.[A-Za-z0-9_]+")) return true;
+        // A dedicated result route must describe this exact Android caller.
+        // The native service host separately checks who opened its current window.
+        return "result".equals(reason) && target.equals("org.westlake.apk." + packageName)
+                && packageName.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+");
+    }
+
+    private static boolean send(String directory, String target, String reason) {
         // No token, account, Intent or result payload is written here. Each request has
         // its own filename so independent Android processes cannot overwrite one another.
         String id = UUID.randomUUID().toString();

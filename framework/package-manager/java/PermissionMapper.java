@@ -39,7 +39,7 @@ public class PermissionMapper {
         addMapping("android.permission.MANAGE_EXTERNAL_STORAGE",  "ohos.permission.FILE_ACCESS_MANAGER");
 
         // Location
-        addMapping("android.permission.ACCESS_FINE_LOCATION",     "ohos.permission.APPROXIMATELY_LOCATION");
+        addMapping("android.permission.ACCESS_FINE_LOCATION",     "ohos.permission.LOCATION");
         addMapping("android.permission.ACCESS_COARSE_LOCATION",   "ohos.permission.APPROXIMATELY_LOCATION");
         addMapping("android.permission.ACCESS_BACKGROUND_LOCATION", "ohos.permission.LOCATION_IN_BACKGROUND");
 

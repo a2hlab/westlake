@@ -32,12 +32,17 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
         if ("checkUidPermission".equals(method.getName()) && args != null && args.length == 2)
             return trace("am.checkUidPermission", (String) args[0], (Integer) args[1],
                     checkProcessPermission((String) args[0], -1, (Integer) args[1]));
-        // Android 15's Context.checkPermission asks this one. Unhandled, it fell to the stub's int default, 0:
-        // granted, for every permission and uid. Kept until one rule replaces all three answers (see rule).
+        // Context.checkSelfPermission on Android 15 uses this device-specific entry point.
         if ("checkPermissionForDevice".equals(method.getName()) && args != null && args.length == 4
-                && args[2] instanceof Integer) {
-            return trace("am.checkPermissionForDevice", (String) args[0], (Integer) args[2],
-                    PackageManager.PERMISSION_GRANTED);
+                && args[1] instanceof Integer && args[2] instanceof Integer && args[3] instanceof Integer) {
+            String permission = (String) args[0];
+            int uid = (Integer) args[2];
+            int answer = PackageManager.PERMISSION_GRANTED;
+            if (isForegroundLocation(permission)) {
+                answer = (Integer) args[3] == 0 ? checkProcessPermission(permission, (Integer) args[1], uid)
+                        : PackageManager.PERMISSION_DENIED;
+            }
+            return trace("am.checkPermissionForDevice", permission, uid, answer);
         }
         return null;
     }
@@ -50,7 +55,7 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
      * the user's runtime grant, which every Westlake process shares; a platform-signature, internal or foreign
      * signature permission is denied, as for any app Android installs; and so is one no package this process
      * knows defines. Today the activity manager's checkPermission denies every other uid, its
-     * checkPermissionForDevice grants everything, and the package manager answers by request alone: trace()
+     * checkPermissionForDevice generally grants everything except foreground location, and some package queries use declarations: trace()
      * logs where they differ from this.
      */
     static String rule(String permission, int uid) {
@@ -93,11 +98,7 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
         if (!own) return RemotePackages.holdsPermission(pkg, permission);
         try {
             PackageInfo info = manager.getPackageInfo(pkg, PackageManager.GET_PERMISSIONS);
-            if (info.requestedPermissions != null) {
-                for (String requested : info.requestedPermissions) {
-                    if (permission.equals(requested)) return true;
-                }
-            }
+            if (requestsPermission(info, permission)) return true;
             if (info.permissions != null) {
                 for (PermissionInfo defined : info.permissions) {
                     if (defined != null && permission.equals(defined.name)) return true;
@@ -105,6 +106,14 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
             }
         } catch (PackageManager.NameNotFoundException | RuntimeException e) {
             return null;   // not a package this process can read: no answer, rather than "not requested"
+        }
+        return false;
+    }
+
+    private static boolean requestsPermission(PackageInfo info, String permission) {
+        if (info == null || info.requestedPermissions == null) return false;
+        for (String requested : info.requestedPermissions) {
+            if (permission.equals(requested)) return true;
         }
         return false;
     }
@@ -125,7 +134,7 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     /**
      * WESTLAKE_PERMISSION_LEVELS=enforce: phase A of ADR-0004 decision 1. A check gets the rule's answer where the
      * rule reaches one Android gives whatever the user does: normal, signature, not requested, platform or foreign
-     * signature, internal, undefined. A dangerous permission and the notification switch keep today's answer until
+     * signature, internal, undefined. Foreground location reads the live OH grant. Other dangerous permissions and the notification switch keep today's answer until
      * a runtime request reaches OH's dialog; so does a check the rule cannot answer ("unknown"). Unset, checks are
      * only traced.
      */
@@ -153,7 +162,8 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
     }
 
     static int trace(String api, String permission, int uid, int today) {
-        Integer phaseA = ENFORCE && permission != null ? enforced(permission, uid) : null;
+        Integer phaseA = ENFORCE && permission != null && !isForegroundLocation(permission)
+                ? enforced(permission, uid) : null;
         int answer = phaseA != null ? phaseA : today;
         if (permission != null && TRACED.add(api + " " + permission + " " + uid)) {
             Throwable caller = new Throwable();   // where the check came from, printed where the rule differs
@@ -210,8 +220,35 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
         if (permission == null || uid != android.os.Process.myUid()
                 || (pid != -1 && pid != android.os.Process.myPid())) return PackageManager.PERMISSION_DENIED;
         if (POST_NOTIFICATIONS.equals(permission)) return postNotifications();
+        if (isForegroundLocation(permission)) {
+            // The native helper checks this process's HAP. It cannot attest a different process's grant.
+            try {
+                if (!Native.granted(PermissionMapper.mapToOH(permission))) return PackageManager.PERMISSION_DENIED;
+                Boolean requested = SourcePackageRegistry.requestsPermission(permission);
+                if (requested == null) {
+                    Application app = ActivityThread.currentApplication();
+                    if (app == null) return PackageManager.PERMISSION_DENIED;
+                    requested = requestsPermission(app.getPackageManager().getPackageInfo(
+                            app.getPackageName(), PackageManager.GET_PERMISSIONS), permission);
+                }
+                return requested ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+            } catch (PackageManager.NameNotFoundException | RuntimeException | LinkageError unavailable) {
+                // A missing HAP permission helper or package manager supplies no grant.
+            }
+            return PackageManager.PERMISSION_DENIED;
+        }
         return Native.granted(PermissionMapper.mapToOH(permission))
                 ? PackageManager.PERMISSION_GRANTED : PackageManager.PERMISSION_DENIED;
+    }
+
+    public static boolean isForegroundLocation(String permission) {
+        return android.Manifest.permission.ACCESS_COARSE_LOCATION.equals(permission)
+                || android.Manifest.permission.ACCESS_FINE_LOCATION.equals(permission);
+    }
+
+    static int checkPackageLocation(String pkg, String permission, int user) {
+        return isOwn(pkg, user) ? checkProcessPermission(permission, -1, android.os.Process.myUid())
+                : PackageManager.PERMISSION_DENIED;
     }
 
     private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";
@@ -301,6 +338,10 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
 
     @Override
     public int checkPermission(java.lang.String packageName, java.lang.String permissionName, java.lang.String persistentDeviceId, int userId) throws android.os.RemoteException {
+        if (isForegroundLocation(permissionName)) {
+            return android.companion.virtual.VirtualDeviceManager.PERSISTENT_DEVICE_ID_DEFAULT.equals(persistentDeviceId)
+                    ? checkPackageLocation(packageName, permissionName, userId) : PackageManager.PERMISSION_DENIED;
+        }
         // Android answers for any package and never throws here: another package, which this
         // process cannot see installed, holds nothing (Messenger's Firebase checked one and died on
         // the SecurityException).
@@ -315,6 +356,10 @@ public final class PermissionManagerAdapter extends IPermissionManager.Stub {
 
     @Override
     public int checkUidPermission(int uid, java.lang.String permissionName, int deviceId) throws android.os.RemoteException {
+        if (isForegroundLocation(permissionName)) {
+            return trace("pm.checkUidPermission", permissionName, uid, deviceId == 0
+                    ? checkProcessPermission(permissionName, -1, uid) : PackageManager.PERMISSION_DENIED);
+        }
         String remote = RemotePackages.packageForUid(uid);
         if (remote != null) {
             return trace("pm.checkUidPermission", permissionName, uid, RemotePackages.holdsPermission(remote, permissionName)

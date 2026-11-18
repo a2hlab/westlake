@@ -27,6 +27,7 @@
 #include <thread>
 #include <atomic>
 #include <ctime>
+#include <deque>
 #include <new>
 #include <string>
 
@@ -46,14 +47,19 @@ static std::atomic<int> g_rootIndex{-1};
 void wl_set_root_index(int idx) { g_rootIndex.store(idx); }
 
 #define LOG_TAG "OH_InputBridge"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+static bool wl_private_input_logs() {
+    const char* value = std::getenv("WESTLAKE_GOOGLE_PRIVATE_LOGS");
+    return value && std::strcmp(value, "1") == 0;
+}
+#define LOGI(...) do { if (!wl_private_input_logs()) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__); } while (0)
+#define LOGD(...) do { if (!wl_private_input_logs()) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__); } while (0)
+#define LOGE(...) do { if (!wl_private_input_logs()) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__); } while (0)
 
 // Source-device probes preserve stderr as a content-addressed artifact.  Keep
 // view-tree diagnostics in Android logging for interactive use and mirror them
 // to stderr only when the source harness requests durable evidence.
 static void wl_view_log(int priority, const char* format, ...) {
+    if (wl_private_input_logs()) return;
     va_list args;
     va_start(args, format);
     va_list androidArgs;
@@ -545,47 +551,55 @@ static void wl_destroy_finished_direct_launch_activities(JNIEnv* env) {
     }
 }
 
-// ============================================================
-// dispatchKeyViaViewRoot — direct in-process key dispatch
-// ============================================================
-// The deployed runtime 16e08711 renders noice but its InputChannel consumer
-// (android_view_InputEventReceiver.cpp) DROPS type=KEY messages (the KEY case
-// is a "not yet dispatched" stub), so writeKeyEvent's bytes are read and
-// thrown away. Rather than rebuild that runtime (its source is gone; the only
-// rebuildable runtime regresses noice's init), we dispatch the key ourselves
-// from the bridge, which runs in-process with JNI access:
-//   1. build android.view.KeyEvent (10-arg ctor; KeyEvent natives are
-//      registered in 16e08711 via register_android_view_KeyEvent),
-//   2. find the focused ViewRootImpl's mInputEventReceiver via
-//      WindowManagerGlobal.mRoots reflection,
-//   3. hand it to adapter.window.InputEventBridge.dispatchOnMainThread — the
-//      SAME helper the MOTION path uses — which posts onto the main looper and
-//      calls receiver.dispatchInputEvent(seq, event) → ViewRootImpl input
-//      stages → View.dispatchKeyEvent (focus nav / BACK / etc.).
-// ============================================================
-int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
-                                              int64_t downTimeNs,
-                                              int64_t eventTimeNs,
-                                              int32_t metaState) {
-    if (!jvm_) { LOGE("dispatchKeyViaViewRoot: no JavaVM"); return -1; }
-    JNIEnv* env = nullptr;
-    bool needDetach = false;
-    if (jvm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
-        JavaVMAttachArgs args{JNI_VERSION_1_6, "oh-key-dispatch", nullptr};
-        if (jvm_->AttachCurrentThread(&env, &args) != JNI_OK) {
-            LOGE("dispatchKeyViaViewRoot: AttachCurrentThread failed");
-            return -1;
-        }
-        needDetach = true;
-    }
+// The Android UI callbacks for a key, including Back, run on the application's
+// main looper. Keep one FIFO for both hardware and injected keys so a key-up
+// cannot overtake its key-down when both arrive before the next poll.
+struct QueuedKey {
+    int32_t action;
+    int32_t code;
+    int64_t downTime;
+    int64_t eventTime;
+    int32_t metaState;
+    int32_t fallbackSession;
+};
+
+static std::mutex keyQueueMutex;
+static std::deque<QueuedKey> keyQueue;
+
+static jlong wl_main_queue_ptr(JNIEnv* env) {
+    jclass looperCls = env->FindClass("android/os/Looper");
+    jmethodID getMain = looperCls ? env->GetStaticMethodID(
+        looperCls, "getMainLooper", "()Landroid/os/Looper;") : nullptr;
+    jobject mainLooper = getMain
+        ? env->CallStaticObjectMethod(looperCls, getMain) : nullptr;
+    if (env->ExceptionCheck()) { env->ExceptionClear(); mainLooper = nullptr; }
+    jmethodID getQueue = (looperCls && mainLooper) ? env->GetMethodID(
+        looperCls, "getQueue", "()Landroid/os/MessageQueue;") : nullptr;
+    jobject queue = getQueue ? env->CallObjectMethod(mainLooper, getQueue) : nullptr;
+    if (env->ExceptionCheck()) { env->ExceptionClear(); queue = nullptr; }
+    jclass queueCls = queue ? env->GetObjectClass(queue) : nullptr;
+    jfieldID ptrField = queueCls ? env->GetFieldID(queueCls, "mPtr", "J") : nullptr;
+    if (env->ExceptionCheck()) { env->ExceptionClear(); ptrField = nullptr; }
+    const jlong ptr = (queue && ptrField) ? env->GetLongField(queue, ptrField) : 0;
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (queueCls) env->DeleteLocalRef(queueCls);
+    if (queue) env->DeleteLocalRef(queue);
+    if (mainLooper) env->DeleteLocalRef(mainLooper);
+    if (looperCls) env->DeleteLocalRef(looperCls);
+    return ptr;
+}
+
+static int32_t dispatchKeyOnMain(JNIEnv* env, const QueuedKey& key) {
+    const int32_t action = key.action;
+    const int32_t keyCode = key.code;
+    const int64_t downTimeNs = key.downTime;
+    const int64_t eventTimeNs = key.eventTime;
+    const int32_t metaState = key.metaState;
     auto fail = [&](const char* why) -> int32_t {
-        wl_report_exception(env, "dispatchKeyViaViewRoot");   // §414: ExceptionDescribe is a no-op here
+        wl_report_exception(env, "dispatchKeyViaViewRoot");
         LOGE("dispatchKeyViaViewRoot: %s", why);
-        if (needDetach) jvm_->DetachCurrentThread();
         return -1;
     };
-
-    wl_ensure_looper(env);   // §414: key handlers animate too (same trap as §411)
     // --- 1. KeyEvent(downMs, evtMs, action, code, repeat, meta, devId, scan, flags, source) ---
     jclass keCls = env->FindClass("android/view/KeyEvent");
     if (!keCls || env->ExceptionCheck()) return fail("FindClass KeyEvent");
@@ -664,17 +678,17 @@ int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
                 //     dispatchKeyViaViewRoot: ... DecorView.dispatchKeyEvent handled=0
                 // while the touch that focused that very field had correctly gone to root[1].
                 if (receiver)  env->DeleteLocalRef(receiver);
-                if (vriMatch)  env->DeleteGlobalRef(vriMatch);
-                if (decorView) env->DeleteGlobalRef(decorView);
+                if (vriMatch)  env->DeleteLocalRef(vriMatch);
+                if (decorView) env->DeleteLocalRef(decorView);
                 receiver  = recv ? env->NewLocalRef(recv) : nullptr;
-                vriMatch  = env->NewGlobalRef(vri);
-                decorView = env->NewGlobalRef(view);
+                vriMatch  = env->NewLocalRef(vri);
+                decorView = env->NewLocalRef(view);
                 chosenRootK = (int)i;
                 chosenPriorityK = priority;
             } else if (!vriFallback) {
                 if (recv && !fallbackRecv) fallbackRecv = env->NewLocalRef(recv);
-                vriFallback = env->NewGlobalRef(vri);
-                fallbackView = env->NewGlobalRef(view);
+                vriFallback = env->NewLocalRef(vri);
+                fallbackView = env->NewLocalRef(view);
                 fallbackIdxK = (int)i;
             }
         }
@@ -718,9 +732,8 @@ int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
                     wl_destroy_finished_direct_launch_activities(env);
                 }
                 env->DeleteLocalRef(keyEvent);
-                if (decorView) env->DeleteGlobalRef(decorView);   // §406b
-                if (vriMatch)  env->DeleteGlobalRef(vriMatch);
-                if (needDetach) jvm_->DetachCurrentThread();
+                if (decorView) env->DeleteLocalRef(decorView);   // §406b
+                if (vriMatch)  env->DeleteLocalRef(vriMatch);
                 return 0;
             }
 
@@ -777,9 +790,8 @@ int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
                             if (window != nullptr) env->DeleteLocalRef(window);
                             if (decorCls != nullptr) env->DeleteLocalRef(decorCls);
                             env->DeleteLocalRef(keyEvent);
-                            if (decorView) env->DeleteGlobalRef(decorView);
-                            if (vriMatch) env->DeleteGlobalRef(vriMatch);
-                            if (needDetach) jvm_->DetachCurrentThread();
+                            if (decorView) env->DeleteLocalRef(decorView);
+                            if (vriMatch) env->DeleteLocalRef(vriMatch);
                             return 0;
                         }
                     }
@@ -809,7 +821,6 @@ int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
                 LOGI("dispatchKeyViaViewRoot: action=%d keyCode=%d -> enqueueInputEvent OK",
                      action, keyCode);
                 env->DeleteLocalRef(keyEvent);
-                if (needDetach) jvm_->DetachCurrentThread();
                 return 0;
             }
         }
@@ -830,7 +841,69 @@ int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
     LOGI("dispatchKeyViaViewRoot: action=%d keyCode=%d seq=%d -> ViewRootImpl OK",
          action, keyCode, seq);
     env->DeleteLocalRef(keyEvent);
-    if (needDetach) jvm_->DetachCurrentThread();
+    return 0;
+}
+
+static void drainMainKeys(void* data) {
+    JavaVM* vm = static_cast<JavaVM*>(data);
+    JNIEnv* env = nullptr;
+    vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    std::deque<QueuedKey> batch;
+    {
+        std::lock_guard<std::mutex> lock(keyQueueMutex);
+        keyQueue.swap(batch);
+    }
+    for (const QueuedKey& key : batch) {
+        int32_t result = -1;
+        if (env != nullptr && env->PushLocalFrame(64) == JNI_OK) {
+            if (key.code == 4 && std::getenv("WESTLAKE_INPUT_DIAGNOSTICS")) {
+                jclass looper = env->FindClass("android/os/Looper");
+                jmethodID getMain = looper ? env->GetStaticMethodID(looper,
+                        "getMainLooper", "()Landroid/os/Looper;") : nullptr;
+                jobject main = getMain ? env->CallStaticObjectMethod(looper, getMain) : nullptr;
+                jmethodID current = main ? env->GetMethodID(looper, "isCurrentThread", "()Z") : nullptr;
+                const bool onMain = current && env->CallBooleanMethod(main, current);
+                wl_report_exception(env, "Back looper diagnostic");
+                std::fprintf(stderr, "[WL-INPUT] back action=%d onMainLooper=%d\n",
+                        key.action, onMain ? 1 : 0);
+            }
+            result = dispatchKeyOnMain(env, key);
+            wl_report_exception(env, "dispatchKeyOnMain");
+            env->PopLocalFrame(nullptr);
+        } else if (env != nullptr) {
+            wl_report_exception(env, "dispatchKeyOnMain local frame");
+        }
+        if (result != 0 && key.fallbackSession >= 0) {
+            OHInputBridge::getInstance().injectKeyEvent(key.fallbackSession, key.action,
+                    key.code, key.downTime, key.eventTime);
+        }
+    }
+}
+
+int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
+                                              int64_t downTimeNs, int64_t eventTimeNs,
+                                              int32_t metaState) {
+    return dispatchKeyViaViewRoot(action, keyCode, downTimeNs, eventTimeNs, metaState, -1);
+}
+
+int32_t OHInputBridge::dispatchKeyViaViewRoot(int32_t action, int32_t keyCode,
+                                              int64_t downTimeNs, int64_t eventTimeNs,
+                                              int32_t metaState, int32_t fallbackSession) {
+    if (!jvm_) return -1;
+    JNIEnv* env = nullptr;
+    const bool attach = jvm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK;
+    if (attach && jvm_->AttachCurrentThread(&env, nullptr) != JNI_OK) return -1;
+    const jlong ptr = wl_main_queue_ptr(env);
+    if (attach) jvm_->DetachCurrentThread();
+    if (ptr == 0) return -1;
+
+    std::lock_guard<std::mutex> lock(keyQueueMutex);
+    keyQueue.push_back({action, keyCode, downTimeNs, eventTimeNs, metaState, fallbackSession});
+    if (keyQueue.size() == 1 && wl_MessageQueue_post(
+            reinterpret_cast<void*>(static_cast<uintptr_t>(ptr)), drainMainKeys, jvm_) != 0) {
+        keyQueue.pop_back();
+        return -1;
+    }
     return 0;
 }
 
@@ -1002,8 +1075,8 @@ int32_t OHInputBridge::dispatchCharactersViaViewRoot(const char* utf8) {
     if (commitM != nullptr && decorView != nullptr) {
         env->CallStaticVoidMethod(injectorCls, commitM, decorView, jchars);
         if (!env->ExceptionCheck()) {
-            LOGI("dispatchCharactersViaViewRoot: \"%s\" -> focused TextView main-thread commit posted (%s helper)",
-                 utf8, helperKind);
+            LOGI("dispatchCharactersViaViewRoot: focused TextView main-thread commit posted (%s helper)",
+                 helperKind);
             env->DeleteGlobalRef(decorView);
             env->DeleteLocalRef(keyEvent);
             if (needDetach) jvm_->DetachCurrentThread();
@@ -1022,7 +1095,7 @@ int32_t OHInputBridge::dispatchCharactersViaViewRoot(const char* utf8) {
     jint seq = s_txtSeq.fetch_add(1);
     env->CallStaticVoidMethod(iebCls, domt, receiver, seq, keyEvent);
     if (env->ExceptionCheck()) return fail("dispatchOnMainThread call");
-    LOGI("dispatchCharactersViaViewRoot: \"%s\" seq=%d -> ViewRootImpl OK", utf8, seq);
+    LOGI("dispatchCharactersViaViewRoot: seq=%d -> ViewRootImpl OK", seq);
     env->DeleteLocalRef(keyEvent);
     if (needDetach) jvm_->DetachCurrentThread();
     return 0;
@@ -3777,22 +3850,7 @@ static void wl_run_click_from_main_mq(void* opaque) {
 // barrier on the standalone OH runtime.
 static bool wl_post_click_to_main_mq(JNIEnv* env, JavaVM* jvm,
                                      jobject decorView, jfloat x, jfloat y) {
-    jclass looperCls = env->FindClass("android/os/Looper");
-    jmethodID getMain = looperCls ? env->GetStaticMethodID(
-        looperCls, "getMainLooper", "()Landroid/os/Looper;") : nullptr;
-    jobject mainLooper = getMain
-        ? env->CallStaticObjectMethod(looperCls, getMain) : nullptr;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); mainLooper = nullptr; }
-    jmethodID getQueue = (looperCls && mainLooper) ? env->GetMethodID(
-        looperCls, "getQueue", "()Landroid/os/MessageQueue;") : nullptr;
-    jobject queue = getQueue ? env->CallObjectMethod(mainLooper, getQueue) : nullptr;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); queue = nullptr; }
-    jclass queueCls = queue ? env->GetObjectClass(queue) : nullptr;
-    jfieldID ptrField = queueCls ? env->GetFieldID(queueCls, "mPtr", "J") : nullptr;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); ptrField = nullptr; }
-    const jlong ptr = (queue && ptrField) ? env->GetLongField(queue, ptrField) : 0;
-    if (env->ExceptionCheck()) env->ExceptionClear();
-
+    const jlong ptr = wl_main_queue_ptr(env);
     bool posted = false;
     jobject viewGlobal = (ptr != 0) ? env->NewGlobalRef(decorView) : nullptr;
     WlMainClickTask* task = viewGlobal ? new (std::nothrow) WlMainClickTask{
@@ -3808,10 +3866,6 @@ static bool wl_post_click_to_main_mq(JNIEnv* env, JavaVM* jvm,
     LOGI("[WESTLAKE-TOUCHFD-787] post mainQueue=%p x=%.1f y=%.1f posted=%d",
          reinterpret_cast<void*>(static_cast<uintptr_t>(ptr)),
          (double)x, (double)y, posted ? 1 : 0);
-    if (queueCls) env->DeleteLocalRef(queueCls);
-    if (queue) env->DeleteLocalRef(queue);
-    if (mainLooper) env->DeleteLocalRef(mainLooper);
-    if (looperCls) env->DeleteLocalRef(looperCls);
     return posted;
 }
 
@@ -3819,22 +3873,7 @@ static bool wl_post_motion_to_main_mq(JNIEnv* env, JavaVM* jvm,
                                       jobject decorView, jint action,
                                       jfloat x, jfloat y,
                                       jlong downTimeMs, jlong eventTimeMs) {
-    jclass looperCls = env->FindClass("android/os/Looper");
-    jmethodID getMain = looperCls ? env->GetStaticMethodID(
-        looperCls, "getMainLooper", "()Landroid/os/Looper;") : nullptr;
-    jobject mainLooper = getMain
-        ? env->CallStaticObjectMethod(looperCls, getMain) : nullptr;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); mainLooper = nullptr; }
-    jmethodID getQueue = (looperCls && mainLooper) ? env->GetMethodID(
-        looperCls, "getQueue", "()Landroid/os/MessageQueue;") : nullptr;
-    jobject queue = getQueue ? env->CallObjectMethod(mainLooper, getQueue) : nullptr;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); queue = nullptr; }
-    jclass queueCls = queue ? env->GetObjectClass(queue) : nullptr;
-    jfieldID ptrField = queueCls ? env->GetFieldID(queueCls, "mPtr", "J") : nullptr;
-    if (env->ExceptionCheck()) { env->ExceptionClear(); ptrField = nullptr; }
-    const jlong ptr = (queue && ptrField) ? env->GetLongField(queue, ptrField) : 0;
-    if (env->ExceptionCheck()) env->ExceptionClear();
-
+    const jlong ptr = wl_main_queue_ptr(env);
     bool posted = false;
     jobject viewGlobal = (ptr != 0) ? env->NewGlobalRef(decorView) : nullptr;
     WlMainMotionTask* task = viewGlobal ? new (std::nothrow) WlMainMotionTask{
@@ -3850,10 +3889,6 @@ static bool wl_post_motion_to_main_mq(JNIEnv* env, JavaVM* jvm,
     LOGI("[WESTLAKE-TOUCHFD-788] post mainQueue=%p action=%d x=%.1f y=%.1f posted=%d",
          reinterpret_cast<void*>(static_cast<uintptr_t>(ptr)), (int)action,
          (double)x, (double)y, posted ? 1 : 0);
-    if (queueCls) env->DeleteLocalRef(queueCls);
-    if (queue) env->DeleteLocalRef(queue);
-    if (mainLooper) env->DeleteLocalRef(mainLooper);
-    if (looperCls) env->DeleteLocalRef(looperCls);
     return posted;
 }
 
@@ -4834,7 +4869,7 @@ public:
         // to the InputChannel write if direct dispatch can't find a receiver
         // (e.g. on a runtime whose consumer DOES handle KEY).
         int32_t rc = OHInputBridge::getInstance().dispatchKeyViaViewRoot(
-            androidAction, androidKey, downTimeNs, eventTimeNs);
+            androidAction, androidKey, downTimeNs, eventTimeNs, 0, sessionId);
         if (rc != 0) {
             OHInputBridge::getInstance().injectKeyEvent(sessionId, androidAction,
                                                         androidKey, downTimeNs, eventTimeNs);
@@ -5322,7 +5357,12 @@ void OHInputBridge::startTextControlChannel() {
     bool expected = false;
     if (!started.compare_exchange_strong(expected, true)) return;
     std::thread([this]() {
-        const char* path = "/data/local/tmp/noice_text";
+        // Credential entry must target exactly one process. Other hosted apps
+        // may share /data/local/tmp even when their private app-data is mounted
+        // separately. Keep the legacy mailbox only for ordinary diagnostics.
+        char privatePath[96];
+        snprintf(privatePath, sizeof(privatePath), "/data/local/tmp/noice_text.%d", getpid());
+        const char* path = wl_private_input_logs() ? privatePath : "/data/local/tmp/noice_text";
         auto tapKey = [this](int32_t code, int32_t meta) {
             int64_t t = (int64_t)0;  // downTime/eventTime relative; 0 is accepted
             dispatchKeyViaViewRoot(0 /*ACTION_DOWN*/, code, t, t, meta);
@@ -5362,7 +5402,7 @@ void OHInputBridge::startTextControlChannel() {
             // Plain text: commit through the focused TextView on Android's main
             // thread (KeyCharacterMap-independent). Falls back to per-key
             // dispatch only if the focused-text path reports failure.
-            LOGI("textControlChannel: type \"%s\" (%zu chars)", buf, n);
+            LOGI("textControlChannel: text input received");
             // §556: PER-KEY IS NOW THE DEFAULT. The string path builds one ACTION_MULTIPLE
             // KeyEvent carrying the characters — deprecated in API 29, and this runtime's
             // TextView/Editor never commits it. It nonetheless returned 0 and logged

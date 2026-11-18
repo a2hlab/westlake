@@ -391,7 +391,6 @@ static void map_put_config(JNIEnv* env, jobject map, OH_AVFormat* format)
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
 }
 
-/* An OH format as the Map that MediaFormat is built from. Keys are MediaFormat's own. */
 /*
  * A track's profile in Android's numbering (MediaCodecInfo.CodecProfileLevel), from OH's (OH_AACProfile,
  * OH_AVCProfile, OH_HEVCProfile), which numbers the same profiles differently: AAC LC is 0 to OH and 2
@@ -400,7 +399,7 @@ static void map_put_config(JNIEnv* env, jobject map, OH_AVFormat* format)
  * offers profile 0. Returns -1 for a profile without an Android number, which leaves the key out, as
  * Android's own extractors do when they do not know it.
  */
-static int android_profile(const char* mime, int32_t oh)
+int wl_android_codec_profile(const char* mime, int32_t oh)
 {
     if (mime == NULL) return -1;
     if (strcmp(mime, "audio/mp4a-latm") == 0) {
@@ -438,6 +437,7 @@ static int android_profile(const char* mime, int32_t oh)
     return -1;
 }
 
+/* An OH format as the Map that MediaFormat is built from. Keys are MediaFormat's own. */
 static jobject format_map(JNIEnv* env, OH_AVFormat* format, int is_track)
 {
     jobject map = (*env)->NewObject(env, g_hash_map, g_hash_map_init);
@@ -470,9 +470,10 @@ static jobject format_map(JNIEnv* env, OH_AVFormat* format, int is_track)
         map_put_int(env, map, "rotation-degrees", (jint) number);
     if (ohx.keyMaxInput != NULL && ohx.formatGetInt(format, *ohx.keyMaxInput, &number))
         map_put_int(env, map, "max-input-size", (jint) number);
-    if (ohx.keyProfile != NULL && ohx.formatGetInt(format, *ohx.keyProfile, &number)
-            && android_profile(mime, number) >= 0)
-        map_put_int(env, map, "profile", (jint) android_profile(mime, number));
+    if (ohx.keyProfile != NULL && ohx.formatGetInt(format, *ohx.keyProfile, &number)) {
+        const int profile = wl_android_codec_profile(mime, number);
+        if (profile >= 0) map_put_int(env, map, "profile", (jint) profile);
+    }
     if (ohx.keyFrameRate != NULL) {
         if (ohx.formatGetDouble != NULL && ohx.formatGetDouble(format, *ohx.keyFrameRate, &real))
             map_put_float(env, map, "frame-rate", (jfloat) real);

@@ -19,6 +19,7 @@
  * one that is missing does not load at all.
  */
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -397,9 +398,34 @@ EXPORT media_status_t AMediaFormat_copy(AMediaFormat* to, AMediaFormat* from) {
 typedef struct AMediaCodec AMediaCodec;
 typedef struct AMediaCrypto AMediaCrypto;
 
-EXPORT AMediaCodec* AMediaCodec_createCodecByName(const char* name) { (void)name; return NULL; }
-EXPORT AMediaCodec* AMediaCodec_createDecoderByType(const char* mime) { (void)mime; return NULL; }
-EXPORT AMediaCodec* AMediaCodec_createEncoderByType(const char* mime) { (void)mime; return NULL; }
+/* A playback test can distinguish these NDK calls from the Java MediaCodec
+ * bridge. Log only the operation and outcome, once per operation per process. */
+static AMediaCodec* unavailable_codec(const char* operation, atomic_flag* reported) {
+    const char* trace = getenv("WESTLAKE_MEDIA_CODEC_TRACE");
+    if (trace && strcmp(trace, "1") == 0 &&
+        !atomic_flag_test_and_set_explicit(reported, memory_order_relaxed)) {
+        fprintf(stderr, "[WL-NDK-MEDIA] %s unavailable\n", operation);
+    }
+    return NULL;
+}
+
+EXPORT AMediaCodec* AMediaCodec_createCodecByName(const char* name) {
+    static atomic_flag reported = ATOMIC_FLAG_INIT;
+    (void)name;
+    return unavailable_codec("create-by-name", &reported);
+}
+
+EXPORT AMediaCodec* AMediaCodec_createDecoderByType(const char* mime) {
+    static atomic_flag reported = ATOMIC_FLAG_INIT;
+    (void)mime;
+    return unavailable_codec("create-decoder-by-type", &reported);
+}
+
+EXPORT AMediaCodec* AMediaCodec_createEncoderByType(const char* mime) {
+    static atomic_flag reported = ATOMIC_FLAG_INIT;
+    (void)mime;
+    return unavailable_codec("create-encoder-by-type", &reported);
+}
 EXPORT media_status_t AMediaCodec_delete(AMediaCodec* codec) { (void)codec; return AMEDIA_OK; }
 
 EXPORT media_status_t AMediaCodec_configure(AMediaCodec* codec, const AMediaFormat* format, void* surface,
@@ -484,18 +510,18 @@ typedef void (*AMediaCodecOnFrameRendered)(AMediaCodec* codec, void* userdata, i
                                            int64_t systemNano);
 
 EXPORT AMediaCodec* AMediaCodec_createCodecByNameForClient(const char* name, pid_t pid, uid_t uid) {
-    (void)name; (void)pid; (void)uid;
-    return NULL;
+    (void)pid; (void)uid;
+    return AMediaCodec_createCodecByName(name);
 }
 
 EXPORT AMediaCodec* AMediaCodec_createDecoderByTypeForClient(const char* mime, pid_t pid, uid_t uid) {
-    (void)mime; (void)pid; (void)uid;
-    return NULL;
+    (void)pid; (void)uid;
+    return AMediaCodec_createDecoderByType(mime);
 }
 
 EXPORT AMediaCodec* AMediaCodec_createEncoderByTypeForClient(const char* mime, pid_t pid, uid_t uid) {
-    (void)mime; (void)pid; (void)uid;
-    return NULL;
+    (void)pid; (void)uid;
+    return AMediaCodec_createEncoderByType(mime);
 }
 
 EXPORT media_status_t AMediaCodec_setOutputSurface(AMediaCodec* codec, ANativeWindow* surface) {

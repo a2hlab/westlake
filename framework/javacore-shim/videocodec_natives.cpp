@@ -48,6 +48,7 @@
  * codec without the feature.
  */
 #include <jni.h>
+#include "hevc/codec_api.h"
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -67,6 +68,8 @@
 #include <utility>
 #include <vector>
 
+extern "C" int wl_android_codec_profile(const char* mime, int32_t profile);
+
 namespace {
 
 void vlog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -85,46 +88,17 @@ void vlog(const char* fmt, ...)
 
 /* ---- OH's codec API, opened at the first codec of each kind -------------------------------- */
 
-struct OH_AVCodec;
-struct OH_AVFormat;
-struct OH_AVBuffer;
-struct OH_AVCapability;
-struct OHNativeWindow;
-struct OH_AVCodecBufferAttr { int64_t pts; int32_t size; int32_t offset; uint32_t flags; };
-struct OH_AVRange { int32_t minVal; int32_t maxVal; };
-typedef void (*OnError)(OH_AVCodec*, int32_t, void*);
-typedef void (*OnStreamChanged)(OH_AVCodec*, OH_AVFormat*, void*);
-typedef void (*OnBuffer)(OH_AVCodec*, uint32_t, OH_AVBuffer*, void*);
-struct OH_AVCodecCallback { OnError onError; OnStreamChanged onStreamChanged; OnBuffer onNeedInputBuffer;
-                            OnBuffer onNewOutputBuffer; };
-
 enum { OH_FLAG_EOS = 1 << 0, OH_FLAG_SYNC = 1 << 1, OH_FLAG_CODEC_DATA = 1 << 3 };
-enum { OH_PIXEL_NV12 = 2 };
+enum { OH_PIXEL_NV12 = 2, OH_PIXEL_NV21 = 3 };
 enum { OH_SAMPLE_S16LE = 1 };   /* OH_BitsPerSample */
 
-/* The entry points OH's video decoder (OH_VideoDecoder_*) and audio codec (OH_AudioCodec_*) both
- * have, with the same arguments; a codec calls through its own kind's. */
-struct CodecApi {
-    OH_AVCodec* (*createByName)(const char*);
-    int (*destroy)(OH_AVCodec*);
-    int (*registerCallback)(OH_AVCodec*, OH_AVCodecCallback, void*);
-    int (*configure)(OH_AVCodec*, OH_AVFormat*);
-    int (*prepare)(OH_AVCodec*);
-    int (*start)(OH_AVCodec*);
-    int (*stop)(OH_AVCodec*);
-    int (*flush)(OH_AVCodec*);
-    OH_AVFormat* (*outputDescription)(OH_AVCodec*);
-    int (*pushInput)(OH_AVCodec*, uint32_t);
-    int (*freeOutput)(OH_AVCodec*, uint32_t);
-};
-
 /* The video decoder (its CodecApi part) and what both kinds share: buffers, formats, capabilities. */
-struct Oh : CodecApi {
+struct Oh : VideoCodecApi {
     int loaded = 0;          /* the video decoder */
     int coreLoaded = 0;      /* the shared part */
     OH_AVCodec* (*create)(const char*);
-    int (*setSurface)(OH_AVCodec*, OHNativeWindow*);
-    int (*renderOutput)(OH_AVCodec*, uint32_t);
+    int (*reset)(OH_AVCodec*);
+    int32_t (*setWindowScaling)(OHNativeWindow*, int32_t);
     uint8_t* (*bufferAddr)(OH_AVBuffer*);
     int32_t (*bufferCapacity)(OH_AVBuffer*);
     int (*bufferGetAttr)(OH_AVBuffer*, OH_AVCodecBufferAttr*);
@@ -138,12 +112,15 @@ struct Oh : CodecApi {
     OH_AVCapability* (*capabilityByCategory)(const char*, bool, int);
     const char* (*capabilityName)(OH_AVCapability*);
     int (*capabilityProfiles)(OH_AVCapability*, const int32_t**, uint32_t*);
+    int (*capabilityPixelFormats)(OH_AVCapability*, const int32_t**, uint32_t*);
+    int (*levelsForProfile)(OH_AVCapability*, int32_t, const int32_t**, uint32_t*);
     int (*widthRange)(OH_AVCapability*, OH_AVRange*);
     int (*heightRange)(OH_AVCapability*, OH_AVRange*);
     const char* const* keyWidth;
     const char* const* keyHeight;
     const char* const* keyPixelFormat;
     const char* const* keyStride;
+    const char* const* keyMaxVideoInputSize;
     const char* const* keyCodecConfig;
     const char* const* keyProfile;
     const char* const* keySliceHeight;
@@ -193,12 +170,15 @@ bool loadCoreLocked()
     SYM(capabilityByCategory, base, "OH_AVCodec_GetCapabilityByCategory");
     SYM(capabilityName, base, "OH_AVCapability_GetName");
     SYM(capabilityProfiles, base, "OH_AVCapability_GetSupportedProfiles");
+    SYM(capabilityPixelFormats, base, "OH_AVCapability_GetVideoSupportedPixelFormats");
+    SYM(levelsForProfile, base, "OH_AVCapability_GetSupportedLevelsForProfile");
     SYM(widthRange, base, "OH_AVCapability_GetVideoWidthRange");
     SYM(heightRange, base, "OH_AVCapability_GetVideoHeightRange");
     SYM(keyWidth, base, "OH_MD_KEY_WIDTH");
     SYM(keyHeight, base, "OH_MD_KEY_HEIGHT");
     SYM(keyPixelFormat, base, "OH_MD_KEY_PIXEL_FORMAT");
     SYM(keyStride, base, "OH_MD_KEY_VIDEO_STRIDE");
+    SYM(keyMaxVideoInputSize, base, "OH_MD_KEY_MAX_INPUT_SIZE");
     SYM(keyCodecConfig, base, "OH_MD_KEY_CODEC_CONFIG");
     SYM(keyProfile, base, "OH_MD_KEY_PROFILE");
     SYM(keySliceHeight, base, "OH_MD_KEY_VIDEO_SLICE_HEIGHT");
@@ -228,18 +208,24 @@ bool loadOh()
     SYM(destroy, vdec, "OH_VideoDecoder_Destroy");
     SYM(registerCallback, vdec, "OH_VideoDecoder_RegisterCallback");
     SYM(setSurface, vdec, "OH_VideoDecoder_SetSurface");
+    void* nativeWindow = dlopen("libnative_window.so", RTLD_NOW);
+    if (nativeWindow != nullptr) {
+        SYM(setWindowScaling, nativeWindow, "OH_NativeWindow_NativeWindowSetScalingModeV2");
+    }
     SYM(configure, vdec, "OH_VideoDecoder_Configure");
     SYM(prepare, vdec, "OH_VideoDecoder_Prepare");
     SYM(start, vdec, "OH_VideoDecoder_Start");
     SYM(stop, vdec, "OH_VideoDecoder_Stop");
+    SYM(reset, vdec, "OH_VideoDecoder_Reset");
     SYM(flush, vdec, "OH_VideoDecoder_Flush");
     SYM(outputDescription, vdec, "OH_VideoDecoder_GetOutputDescription");
     SYM(pushInput, vdec, "OH_VideoDecoder_PushInputBuffer");
     SYM(renderOutput, vdec, "OH_VideoDecoder_RenderOutputBuffer");
+    SYM(renderAtTime, vdec, "OH_VideoDecoder_RenderOutputBufferAtTime");
     SYM(freeOutput, vdec, "OH_VideoDecoder_FreeOutputBuffer");
 #undef SYM
     if (!oh.create || !oh.destroy || !oh.registerCallback || !oh.configure || !oh.prepare || !oh.start
-            || !oh.stop || !oh.flush || !oh.pushInput || !oh.freeOutput || !oh.keyWidth
+            || !oh.stop || !oh.reset || !oh.flush || !oh.pushInput || !oh.freeOutput || !oh.keyWidth
             || !oh.keyHeight || !oh.keyPixelFormat) {
         vlog("[WL-VIDEOCODEC] OH video decoder is missing a required entry point");
         return false;
@@ -302,11 +288,12 @@ bool loadAudio()
 struct Offered {
     const char* mime;
     const char* name;           /* MediaCodecList's name for it */
-    int profile, level;         /* a CodecProfileLevel the capabilities are derived from */
+    std::vector<std::pair<int, int>> videoProfileLevels;  /* Android profile and maximum level */
     int minWidth, maxWidth, minHeight, maxHeight;
     /* OH's software decoder for the type, when it has one: the board's hardware decoder refuses
      * frames below its minimum (176x144), which small clips and thumbnails are. */
     std::string software;
+    bool softwareSurfaceNv21 = false;
     int swMinWidth, swMaxWidth, swMinHeight, swMaxHeight;
     std::vector<int32_t> profiles, swProfiles;   /* OH profiles each decoder reports */
     /* An audio decoder: OH's own name for the type (OH_AVCODEC_MIMETYPE_AUDIO_*), which it is
@@ -318,8 +305,6 @@ struct Offered {
     int maxChannels;
 };
 
-/* Android's own profile and level constants (MediaCodecInfo.CodecProfileLevel): High@5.1 for AVC,
- * Main@Main-tier 5.1 for HEVC, the levels a 1080p and 4K stream need. */
 std::vector<Offered> g_offered;
 bool g_offeredDone = false;
 std::mutex g_offeredLock;
@@ -340,17 +325,45 @@ std::string profileList(const std::vector<int32_t>& profiles)
     return out.empty() ? "?" : out;
 }
 
+void readVideoLevels(OH_AVCapability* capability, Offered& offered)
+{
+    if (!oh.levelsForProfile) return;
+    const bool avc = strcmp(offered.mime, "video/avc") == 0;
+    for (int32_t profile : offered.profiles) {
+        const int androidProfile = wl_android_codec_profile(offered.mime, profile);
+        if (androidProfile < 0) continue;
+        const int32_t* levels = nullptr;
+        uint32_t count = 0;
+        if (oh.levelsForProfile(capability, profile, &levels, &count) != 0 || !levels) continue;
+        int maxLevel = -1;
+        for (uint32_t i = 0; i < count; ++i) {
+            /* OH enumerates AVC levels 1 through 6.2 as 0..19 and HEVC levels as 0..12. */
+            if (levels[i] >= 0 && levels[i] <= (avc ? 19 : 12)) maxLevel = std::max(maxLevel, levels[i]);
+        }
+        if (maxLevel >= 0) {
+            /* Android uses one bit per AVC level and two per HEVC level (main, high tier).
+             * OH reports no tier here, so only advertise the main tier. */
+            const int androidLevel = 1 << (avc ? maxLevel : 2 * maxLevel);
+            offered.videoProfileLevels.emplace_back(androidProfile, androidLevel);
+        }
+    }
+}
+
+const VideoCodecApi* bundledHevc();
+
 void findVideo()
 {
-    static const Offered kCandidates[] = {
-        { "video/avc", "OH.video.avc.decoder", 8, 0x8000, 0, 0, 0, 0, "", 0, 0, 0, 0, {}, {}, false, "", {}, {}, 0 },
-        { "video/hevc", "OH.video.hevc.decoder", 1, 0x10000, 0, 0, 0, 0, "", 0, 0, 0, 0, {}, {}, false, "", {}, {}, 0 },
+    static const struct { const char* mime; const char* name; } kCandidates[] = {
+        { "video/avc", "OH.video.avc.decoder" },
+        { "video/hevc", "OH.video.hevc.decoder" },
     };
     if (!loadOh() || oh.capability == nullptr) return;
-    for (const Offered& candidate : kCandidates) {
+    for (const auto& candidate : kCandidates) {
         OH_AVCapability* capability = oh.capability(candidate.mime, false);
         if (capability == nullptr) continue;
-        Offered offered = candidate;
+        Offered offered{};
+        offered.mime = candidate.mime;
+        offered.name = candidate.name;
         OH_AVRange width{0, 0}, height{0, 0};
         if (oh.widthRange != nullptr && oh.widthRange(capability, &width) == 0) {
             offered.minWidth = width.minVal; offered.maxWidth = width.maxVal;
@@ -365,6 +378,16 @@ void findVideo()
         const char* swName = sw != nullptr && oh.capabilityName != nullptr ? oh.capabilityName(sw) : nullptr;
         if (swName != nullptr && (hardware == nullptr || strcmp(swName, hardware) != 0)) {
             offered.software = swName;
+            // This OH AVC provider's default swaps U and V in composited output.
+            // NV21 presents both chroma channels correctly on the board.
+            if (offered.software == "OH.Media.Codec.Decoder.Video.AVC" && oh.capabilityPixelFormats) {
+                const int32_t* formats = nullptr;
+                uint32_t count = 0;
+                if (oh.capabilityPixelFormats(sw, &formats, &count) == 0 && formats) {
+                    offered.softwareSurfaceNv21 =
+                            std::find(formats, formats + count, OH_PIXEL_NV21) != formats + count;
+                }
+            }
             OH_AVRange w{0, 0}, h{0, 0};
             if (oh.widthRange != nullptr && oh.widthRange(sw, &w) == 0) {
                 offered.swMinWidth = w.minVal; offered.swMaxWidth = w.maxVal;
@@ -374,6 +397,11 @@ void findVideo()
             }
         }
         offered.profiles = profilesOf(capability);
+        readVideoLevels(capability, offered);
+        if (strcmp(candidate.mime, "video/hevc") == 0 && bundledHevc() &&
+            std::find(offered.profiles.begin(), offered.profiles.end(), 0) == offered.profiles.end()) {
+            offered.videoProfileLevels.emplace_back(1, 1 << 6); // HEVCProfileMain, main tier level 3
+        }
         offered.swProfiles = sw != nullptr ? profilesOf(sw) : std::vector<int32_t>();
         g_offered.push_back(offered);
         vlog("[WL-VIDEOCODEC] %s profiles: hardware %s; software %s", candidate.mime,
@@ -477,8 +505,28 @@ enum { COLOR_YUV420_SEMIPLANAR = 21, COLOR_YUV420_FLEXIBLE = 0x7F420888, COLOR_S
 /* MediaCodecInfo's attribute for a software codec, and AudioFormat.ENCODING_PCM_16BIT. */
 enum { FLAG_IS_SOFTWARE_ONLY = 1 << 2, ENCODING_PCM_16BIT = 2 };
 
+const VideoCodecApi* bundledHevc()
+{
+    static const VideoCodecApi* api = []() -> const VideoCodecApi* {
+        Dl_info source{};
+        if (!dladdr(reinterpret_cast<void*>(&bundledHevc), &source) || !source.dli_fname) return nullptr;
+        std::string path(source.dli_fname);
+        const auto slash = path.find_last_of('/');
+        if (slash == std::string::npos) return nullptr;
+        path.replace(slash + 1, std::string::npos, "libwl_hevc.so");
+        void* lib = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (lib == nullptr) return nullptr;
+        auto get = reinterpret_cast<const VideoCodecApi* (*)()>(dlsym(lib, "wl_hevc_decoder_v1"));
+        if (get != nullptr) return get();
+        dlclose(lib);
+        return nullptr;
+    }();
+    return api;
+}
+
 struct Codec {
     const CodecApi* api = nullptr;               /* OH's entry points for its kind: &oh or &oha */
+    const VideoCodecApi* video = &oh;
     bool audio = false;
     OH_AVCodec* codec = nullptr;
     std::string name, mime;
@@ -488,14 +536,18 @@ struct Codec {
     struct Output { uint32_t index; OH_AVCodecBufferAttr attr; };
     std::deque<Output> outputs;
     std::map<uint32_t, OH_AVBuffer*> inputBuffers, outputBuffers;
-    std::map<uint32_t, OH_AVCodecBufferAttr> outputData;   /* audio: where each output's PCM lies */
+    std::map<uint32_t, OH_AVCodecBufferAttr> outputData;   /* valid payload of each buffer */
     std::vector<uint8_t> codecData;              /* csd-0 then csd-1, submitted first (video) */
     bool codecDataSent = false;
     int inputsLogged = 0;                        /* the first inputs are logged, as evidence */
     void* window = nullptr;                      /* ANativeWindow from the Surface, released at the end */
+    OHNativeWindow* outputWindow = nullptr;      /* held by window */
+    int32_t scalingMode = 1;                     /* Android's default VIDEO_SCALING_MODE_SCALE_TO_FIT */
+    std::mutex windowMu;
     bool surface = false;
     bool software = false;                       /* OH's software decoder replaced the hardware one */
-    bool err = false;
+    int32_t errorCode = 0;                       /* first terminal OH error since configure/reset */
+    bool discardBuffers = false;              /* suppress delivery across the native flush barrier */
     bool running = false;                       /* OH started, and not stopped since */
     bool formatPending = true;                   /* sync mode: FORMAT_CHANGED before the first output */
     int32_t width = 0, height = 0, stride = 0, sliceHeight = 0;
@@ -506,7 +558,6 @@ struct Codec {
     bool configured = false;                     /* OH took a configuration since it was created or reset */
     int outputsLogged = 0;
     jobject javaCodec = nullptr;                 /* async mode */
-    jobject callback = nullptr;
     bool asyncFormatSent = false;
 };
 
@@ -518,9 +569,11 @@ std::set<Codec*> g_codecs;
 jfieldID g_context;
 jfieldID g_infoOffset, g_infoSize, g_infoPts, g_infoFlags;
 JavaVM* g_vm;
-jclass g_hashMap, g_integer, g_infoClass, g_formatClass, g_string;
-jmethodID g_hashMapInit, g_hashMapPut, g_integerValueOf, g_infoInit, g_infoSet, g_formatFromMap;
-jmethodID g_cbInput, g_cbOutput, g_cbFormat;
+jclass g_hashMap, g_integer, g_infoClass, g_string;
+jmethodID g_hashMapInit, g_hashMapPut, g_integerValueOf, g_infoInit, g_infoSet;
+enum CallbackEvent { INPUT_AVAILABLE = 1, OUTPUT_AVAILABLE = 2, CODEC_ERROR = 3, FORMAT_CHANGE = 4 };
+jclass g_codecException;
+jmethodID g_codecExceptionInit, g_postCodecEvent;
 jmethodID g_bufferOrder, g_bufferLimit, g_bufferPosition;
 jobject g_nativeOrder;
 
@@ -623,16 +676,11 @@ void readOutputDescription(Codec* v, OH_AVFormat* format)
         v->sliceHeight = value;
 }
 
-void fireAsyncFormat(JNIEnv* env, Codec* v)
+/* MediaCodec queues these messages on the Handler selected by setCallback. */
+void postCodecEvent(JNIEnv* env, jobject codec, CallbackEvent event, jint index, jobject payload)
 {
-    if (v->asyncFormatSent || g_cbFormat == nullptr || g_formatFromMap == nullptr) return;
-    v->asyncFormatSent = true;
-    jobject map = outputFormat(env, v);
-    jobject format = map != nullptr ? env->NewObject(g_formatClass, g_formatFromMap, map) : nullptr;
-    if (format != nullptr) env->CallVoidMethod(v->callback, g_cbFormat, v->javaCodec, format);
+    env->CallVoidMethod(codec, g_postCodecEvent, 1 /* EVENT_CALLBACK */, event, index, payload);
     if (env->ExceptionCheck()) env->ExceptionClear();
-    if (format != nullptr) env->DeleteLocalRef(format);
-    if (map != nullptr) env->DeleteLocalRef(map);
 }
 
 /* The first bytes of an input, for the log of what a player feeds the decoder first. */
@@ -667,12 +715,60 @@ bool submitCodecData(Codec* v, uint32_t index, OH_AVBuffer* buffer)
     return v->api->pushInput(v->codec, index) == 0;
 }
 
+jthrowable codecException(JNIEnv* env, int32_t ohError)
+{
+    // MediaCodec exposes public codes for insufficient resources and a reclaimed codec.
+    // For other failures keep the platform's reason in the detail message.
+    int32_t code = INT32_MIN; // android::UNKNOWN_ERROR
+    if (ohError == 1) code = 1100; // AV_ERR_NO_MEMORY
+    if (ohError == 7) code = 1101; // AV_ERR_SERVICE_DIED
+    char detail[80];
+    snprintf(detail, sizeof(detail), "OpenHarmony decoder error %d", ohError);
+    jstring message = env->NewStringUTF(detail);
+    if (message == nullptr) return nullptr;
+    auto exception = static_cast<jthrowable>(env->NewObject(g_codecException, g_codecExceptionInit,
+                                                            code, 0 /* fatal */, message));
+    env->DeleteLocalRef(message);
+    return exception;
+}
+
+/* Caller holds the codec mutex. Both dequeue operations must expose a terminal failure
+ * even when an input index or a format change had already been queued. */
+bool throwPendingCodecError(JNIEnv* env, const Codec* v)
+{
+    if (v->errorCode == 0) return false;
+    jthrowable exception = codecException(env, v->errorCode);
+    if (exception != nullptr) env->Throw(exception);
+    return true;
+}
+
 void onError(OH_AVCodec*, int32_t error, void* user)
 {
     Codec* v = static_cast<Codec*>(user);
-    { std::lock_guard<std::mutex> l(v->mu); v->err = true; }
+    if (error == 0) return;
+    JNIEnv* env = nullptr;
+    jobject codec = nullptr;
+    {
+        std::lock_guard<std::mutex> l(v->mu);
+        if (v->errorCode != 0) return;
+        v->errorCode = error;
+        if (v->javaCodec != nullptr) {
+            env = attachedEnv();
+            if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
+        }
+    }
     v->cv.notify_all();
     vlog("%s OH decoder error %d (%s)", logTag(v), error, v->mime.c_str());
+    if (codec != nullptr) {
+        jthrowable exception = codecException(env, error);
+        if (exception != nullptr) {
+            // Let MediaCodec dispatch on the Handler supplied to setCallback.
+            postCodecEvent(env, codec, CODEC_ERROR, 0, exception);
+            env->DeleteLocalRef(exception);
+        }
+        env->DeleteLocalRef(codec);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
 }
 
 void onStreamChanged(OH_AVCodec*, OH_AVFormat* format, void* user)
@@ -694,19 +790,24 @@ void onStreamChanged(OH_AVCodec*, OH_AVFormat* format, void* user)
 void onNeedInput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
 {
     Codec* v = static_cast<Codec*>(user);
-    bool forApp;
+    JNIEnv* env = nullptr;
+    jobject codec = nullptr;
     {
-        std::lock_guard<std::mutex> l(v->mu);
-        forApp = !submitCodecData(v, index, buffer);
-        if (forApp) { v->inputs.push_back(index); v->inputBuffers[index] = buffer; }
+        std::lock_guard<std::mutex> lock(v->mu);
+        if (v->discardBuffers || v->errorCode != 0 || submitCodecData(v, index, buffer)) return;
+        v->inputBuffers[index] = buffer;
+        if (v->javaCodec != nullptr) {
+            env = attachedEnv();
+            if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
+        } else {
+            v->inputs.push_back(index);
+        }
     }
-    if (!forApp) return;
-    v->cv.notify_all();
-    if (v->callback != nullptr && g_cbInput != nullptr) {
-        JNIEnv* env = attachedEnv();
-        if (env == nullptr) return;
-        env->CallVoidMethod(v->callback, g_cbInput, v->javaCodec, (jint) index);
-        if (env->ExceptionCheck()) env->ExceptionClear();
+    if (codec != nullptr) {
+        postCodecEvent(env, codec, INPUT_AVAILABLE, (jint) index, nullptr);
+        env->DeleteLocalRef(codec);
+    } else {
+        v->cv.notify_all();
     }
 }
 
@@ -714,9 +815,13 @@ void onNewOutput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
 {
     Codec* v = static_cast<Codec*>(user);
     OH_AVCodecBufferAttr attr{0, 0, 0, 0};
+    JNIEnv* env = nullptr;
+    jobject codec = nullptr;
+    jobject format = nullptr;
     if (buffer != nullptr) oh.bufferGetAttr(buffer, &attr);
     {
         std::lock_guard<std::mutex> l(v->mu);
+        if (v->discardBuffers || v->errorCode != 0) return;
         /* Rendered to a window, OH's frame carries no bytes for the app, so its size is 0; Android
          * reports the frame's size there, and players take a size-0 output for an empty one (or
          * the end of the stream) and drop it without rendering. */
@@ -724,28 +829,40 @@ void onNewOutput(OH_AVCodec*, uint32_t index, OH_AVBuffer* buffer, void* user)
             int32_t w = v->stride > 0 ? v->stride : v->width, h = v->sliceHeight > 0 ? v->sliceHeight : v->height;
             attr.size = w > 0 && h > 0 ? w * h * 3 / 2 : 1;
         }
-        v->outputs.push_back({index, attr});
+        if (v->javaCodec != nullptr) {
+            env = attachedEnv();
+            if (env != nullptr) codec = env->NewLocalRef(v->javaCodec);
+            if (codec != nullptr && !v->asyncFormatSent) {
+                format = outputFormat(env, v);
+                v->asyncFormatSent = format != nullptr;
+            }
+        } else {
+            v->outputs.push_back({index, attr});
+        }
         v->outputBuffers[index] = buffer;
-        if (v->audio) v->outputData[index] = attr;
+        v->outputData[index] = attr;
     }
     if (v->audio && v->outputsLogged < 3) {
         v->outputsLogged++;
         vlog("[WL-AUDIOCODEC] output %u: %d bytes at %d, pts %lld, flags %#x", index, attr.size, attr.offset,
              (long long) attr.pts, attr.flags);
     }
-    v->cv.notify_all();
-    if (v->callback != nullptr && g_cbOutput != nullptr) {
-        JNIEnv* env = attachedEnv();
-        if (env == nullptr) return;
-        fireAsyncFormat(env, v);
+    if (codec != nullptr) {
+        if (format != nullptr) {
+            postCodecEvent(env, codec, FORMAT_CHANGE, 0, format);
+            env->DeleteLocalRef(format);
+        }
         jobject info = env->NewObject(g_infoClass, g_infoInit);
         if (info != nullptr) {
             jint flags = ((attr.flags & OH_FLAG_EOS) ? MC_FLAG_EOS : 0) | ((attr.flags & OH_FLAG_SYNC) ? MC_FLAG_SYNC : 0);
             env->CallVoidMethod(info, g_infoSet, attr.offset, attr.size, (jlong) attr.pts, flags);
-            env->CallVoidMethod(v->callback, g_cbOutput, v->javaCodec, (jint) index, info);
+            postCodecEvent(env, codec, OUTPUT_AVAILABLE, (jint) index, info);
             env->DeleteLocalRef(info);
         }
+        env->DeleteLocalRef(codec);
         if (env->ExceptionCheck()) env->ExceptionClear();
+    } else {
+        v->cv.notify_all();
     }
 }
 
@@ -842,10 +959,14 @@ void wSetup(JNIEnv* env, jobject thiz, jstring jname, jboolean nameIsType, jbool
 
 /* The hardware decoder refused the format (a size below its minimum): replace it with OH's
  * software decoder for the type, before anything else has been attached to the codec. */
-int configureSoftware(Codec* v, OH_AVFormat* format)
+int configureSoftware(Codec* v, OH_AVFormat* format, bool surfaceOutput)
 {
     const Offered* offered = offeredByMime(v->mime.c_str());
-    if (offered == nullptr || offered->software.empty() || v->software) return -1;
+    if (offered == nullptr || offered->software.empty() || v->video != &oh) return -1;
+    if (surfaceOutput && offered->softwareSurfaceNv21) {
+        oh.formatSetInt(format, *oh.keyPixelFormat, OH_PIXEL_NV21);
+    }
+    if (v->software) return oh.configure(v->codec, format);
     OH_AVCodec* codec = oh.createByName(offered->software.c_str());
     if (codec == nullptr) return -1;
     OH_AVCodecCallback callbacks{onError, onStreamChanged, onNeedInput, onNewOutput};
@@ -854,9 +975,42 @@ int configureSoftware(Codec* v, OH_AVFormat* format)
     vlog("[WL-VIDEOCODEC] hardware refused %dx%d (or its profile); %s -> %d", v->width, v->height,
          offered->software.c_str(), rc);
     if (rc != 0) { oh.destroy(codec); return rc; }
-    oh.destroy(v->codec);
+    v->api->destroy(v->codec);
+    v->video = &oh;
+    v->api = &oh;
     v->codec = codec;
     v->software = true;
+    return 0;
+}
+
+// HEVC profile_tier_level begins after the two-byte SPS NAL header and the
+// first SPS syntax byte. Android may provide only Annex B codec-specific data.
+bool hevcMain(const Codec* v, int androidProfile)
+{
+    if (v->mime != "video/hevc") return false;
+    const auto& data = v->codecData;
+    if (data.size() >= 23 && data[0] == 1) return (data[1] & 31) == 1; // HEVCDecoderConfigurationRecord
+    for (size_t i = 0; i + 6 < data.size(); ++i) {
+        if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 1 && ((data[i+3] >> 1) & 63) == 33)
+            return (data[i+6] & 31) == 1;
+    }
+    return androidProfile == 1; // HEVCProfileMain
+}
+
+int configureBundledHevc(Codec* v, OH_AVFormat* format, const VideoCodecApi* api)
+{
+    if (v->video == api) return api->configure(v->codec, format);
+    OH_AVCodec* replacement = api->createByName(nullptr);
+    if (!replacement) return -1;
+    api->registerCallback(replacement, {onError, onStreamChanged, onNeedInput, onNewOutput}, v);
+    int rc = api->configure(replacement, format);
+    if (rc != 0) { api->destroy(replacement); return rc; }
+    v->api->destroy(v->codec);
+    v->codec = replacement;
+    v->api = api;
+    v->video = api;
+    v->software = true;
+    vlog("[WL-VIDEOCODEC] selected software HEVC Main decoder");
     return 0;
 }
 
@@ -1053,6 +1207,43 @@ void releaseWindow(void* anw)
     if (release != nullptr) release(anw);
 }
 
+/* Android MediaCodec modes 1 and 2 match OH SCALE_TO_WINDOW_V2 and SCALE_CROP_V2.
+ * The app controls the destination rectangle through its SurfaceView. */
+void applyVideoScaling(Codec* v)
+{
+    if (v->outputWindow == nullptr) return;
+    int rc = oh.setWindowScaling != nullptr ? oh.setWindowScaling(v->outputWindow, v->scalingMode) : -1;
+    vlog("[WL-VIDEOCODEC] window scaling mode=%d -> %d", v->scalingMode, rc);
+}
+
+int attachOutputWindow(JNIEnv* env, Codec* v, jobject surface)
+{
+    void* window = nullptr;
+    auto* target = static_cast<OHNativeWindow*>(ohWindowOf(env, surface, &window));
+    std::lock_guard<std::mutex> lock(v->windowMu);
+    int rc = target != nullptr ? v->video->setSurface(v->codec, target) : -1;
+    if (rc != 0) {
+        releaseWindow(window);
+        return rc;
+    }
+    releaseWindow(v->window);
+    v->window = window;
+    v->outputWindow = target;
+    v->surface = true;
+    applyVideoScaling(v);
+    return 0;
+}
+
+void clearOutputWindow(Codec* v)
+{
+    std::lock_guard<std::mutex> lock(v->windowMu);
+    releaseWindow(v->window);
+    v->window = nullptr;
+    v->outputWindow = nullptr;
+    v->surface = false;
+    v->scalingMode = 1;
+}
+
 /* ---- audio: the AAC self-test, configure and reset ---------------------------------------- */
 
 void clearQueues(Codec* v);
@@ -1190,7 +1381,7 @@ void resetAudio(Codec* v)
     clearQueues(v);
     {
         std::lock_guard<std::mutex> l(v->mu);
-        v->err = false;
+        v->errorCode = 0;
         v->formatPending = true;
         v->asyncFormatSent = false;
     }
@@ -1288,6 +1479,7 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
         if (b_configure != nullptr) b_configure(env, thiz, keys, values, surface, crypto, descrambler, flags);
         return;
     }
+    { std::lock_guard<std::mutex> lock(v->mu); v->errorCode = 0; }
     if (v->audio) {
         configureAudio(env, v, keys, values, crypto);
         return;
@@ -1296,6 +1488,7 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
     jmethodID intValue = integer != nullptr ? env->GetMethodID(integer, "intValue", "()I") : nullptr;
     jclass buffer = env->FindClass("java/nio/ByteBuffer");
     std::vector<uint8_t> csd0, csd1, csd2;
+    int androidProfile = -1, maxInputSize = 0;
     int n = keys != nullptr ? env->GetArrayLength(keys) : 0;
     for (int i = 0; i < n; i++) {
         jstring key = (jstring) env->GetObjectArrayElement(keys, i);
@@ -1306,6 +1499,8 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
                 int iv = env->CallIntMethod(value, intValue);
                 if (strcmp(k, "width") == 0) v->width = iv;
                 else if (strcmp(k, "height") == 0) v->height = iv;
+                else if (strcmp(k, "profile") == 0) androidProfile = iv;
+                else if (strcmp(k, "max-input-size") == 0) maxInputSize = iv;
             } else if (buffer != nullptr && env->IsInstanceOf(value, buffer)) {
                 if (strcmp(k, "csd-0") == 0) appendBytes(env, value, csd0);
                 else if (strcmp(k, "csd-1") == 0) appendBytes(env, value, csd1);
@@ -1343,26 +1538,37 @@ void wConfigure(JNIEnv* env, jobject thiz, jobjectArray keys, jobjectArray value
     const Offered* offered = offeredByMime(v->mime.c_str());
     bool unlisted = profile >= 0 && offered != nullptr && !offered->profiles.empty()
             && std::find(offered->profiles.begin(), offered->profiles.end(), profile) == offered->profiles.end();
-    int rc = unlisted || !hardwareDecodes(v->mime, profile) ? -1 : oh.configure(v->codec, format);
-    if (rc != 0) rc = configureSoftware(v, format);
+    const VideoCodecApi* fallback = hevcMain(v, androidProfile) ? bundledHevc() : nullptr;
+    bool missingMain = fallback && offered && !offered->profiles.empty() &&
+        std::find(offered->profiles.begin(), offered->profiles.end(), 0) == offered->profiles.end();
+    if (maxInputSize > 0 && oh.keyMaxVideoInputSize) oh.formatSetInt(format, *oh.keyMaxVideoInputSize, maxInputSize);
+    if (v->video != &oh && !missingMain) {
+        OH_AVCodec* primary = oh.create(v->mime.c_str());
+        if (!primary) { oh.formatDestroy(format); throwState(env, "could not allocate the platform decoder"); return; }
+        oh.registerCallback(primary, {onError, onStreamChanged, onNeedInput, onNewOutput}, v);
+        v->api->destroy(v->codec);
+        v->codec = primary;
+        v->api = &oh;
+        v->video = &oh;
+        v->software = false;
+    }
+    bool platformSoftware = v->software && v->video == &oh;
+    int rc = platformSoftware || unlisted || missingMain || !hardwareDecodes(v->mime, profile)
+            ? -1 : v->api->configure(v->codec, format);
+    if (rc != 0) rc = configureSoftware(v, format, surface != nullptr);
+    if (rc != 0 && fallback) rc = configureBundledHevc(v, format, fallback);
     oh.formatDestroy(format);
     /* OH takes the output window after Configure and before Prepare. */
-    if (rc == 0 && surface != nullptr && oh.setSurface != nullptr) {
-        void* window = nullptr;
-        void* ohWindow = ohWindowOf(env, surface, &window);
-        if (ohWindow != nullptr && oh.setSurface(v->codec, static_cast<OHNativeWindow*>(ohWindow)) == 0) {
-            v->window = window;
-            v->surface = true;
-        } else {
+    if (rc == 0 && surface != nullptr && v->video->setSurface != nullptr) {
+        rc = attachOutputWindow(env, v, surface);
+        if (rc != 0) {
             /* Without a window OH would decode to buffers in its own default format, which the
              * player configured for a Surface cannot read; refuse, as a codec that cannot attach
              * its output does. */
-            vlog("[WL-VIDEOCODEC] no OH window behind the Surface (anw=%p oh=%p)", window, ohWindow);
-            releaseWindow(window);
-            rc = -1;
+            vlog("[WL-VIDEOCODEC] could not attach the output Surface: %d", rc);
         }
     }
-    int prepared = rc == 0 ? oh.prepare(v->codec) : -1;
+    int prepared = rc == 0 ? v->api->prepare(v->codec) : -1;
     vlog("[WL-VIDEOCODEC] configure %s %dx%d profile %d surface=%d csd=%zu -> %d/%d", v->mime.c_str(), v->width,
          v->height, profile, v->surface, v->codecData.size(), rc, prepared);
     if (rc != 0 || prepared != 0) throwState(env, "configure failed");
@@ -1374,6 +1580,7 @@ void wStart(JNIEnv* env, jobject thiz)
     if (v == nullptr) { if (b_start != nullptr) b_start(env, thiz); return; }
     /* After a flush OH is already running again (see wFlush); Android's start() there resumes. */
     if (v->running) return;
+    { std::lock_guard<std::mutex> lock(v->mu); v->discardBuffers = false; }
     int rc = v->api->start(v->codec);
     vlog("%s start -> %d", logTag(v), rc);
     if (rc != 0) throwState(env, "start failed");
@@ -1390,10 +1597,34 @@ void clearQueues(Codec* v)
     v->outputData.clear();
 }
 
+// Android stop() and reset() both allow a fresh configure(). OH Stop keeps its
+// configuration for Start, while OH Reset returns the platform codec to Configure.
+void resetVideo(JNIEnv* env, Codec* v)
+{
+    {
+        std::lock_guard<std::mutex> lock(v->mu);
+        v->discardBuffers = true;
+    }
+    int rc = v->video == &oh ? oh.reset(v->codec) : v->api->stop(v->codec);
+    if (rc != 0) {
+        throwState(env, "video decoder reset failed");
+        return;
+    }
+    v->running = false;
+    clearOutputWindow(v);
+    clearQueues(v);
+    std::lock_guard<std::mutex> lock(v->mu);
+    v->errorCode = 0;
+    v->codecDataSent = false;
+    v->formatPending = true;
+    v->asyncFormatSent = false;
+}
+
 void wStop(JNIEnv* env, jobject thiz)
 {
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) { if (b_stop != nullptr) b_stop(env, thiz); return; }
+    if (!v->audio) { resetVideo(env, v); return; }
     v->api->stop(v->codec);
     v->running = false;
     clearQueues(v);
@@ -1403,22 +1634,21 @@ void wFlush(JNIEnv* env, jobject thiz)
 {
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) { if (b_flush != nullptr) b_flush(env, thiz); return; }
-    /* OH stops handing out buffers on flush and asks again after start, as Android's codec does
-     * after a flush in synchronous mode; the queues are emptied first so no stale index survives. */
-    clearQueues(v);
-    v->api->flush(v->codec);
-    { std::lock_guard<std::mutex> l(v->mu); v->codecDataSent = false; }
-    if (v->audio) {
-        /* An index OH handed out while it flushed is stale too. And in callback mode Android's
-         * codec offers no buffer after a flush until the app's start(): ExoPlayer clears its own
-         * queues first and then starts the codec, so a buffer offered before that would be lost. */
-        clearQueues(v);
-        if (v->callback != nullptr) {
-            v->running = false;
-            return;
-        }
+    {
+        std::lock_guard<std::mutex> lock(v->mu);
+        v->discardBuffers = true;
     }
-    v->running = v->api->start(v->codec) == 0;
+    if (v->api->flush(v->codec) != 0) { throwState(env, "decoder flush failed"); return; }
+    clearQueues(v);
+    v->running = false;
+    {
+        std::lock_guard<std::mutex> lock(v->mu);
+        v->codecDataSent = false;
+        v->formatPending = true;
+        v->asyncFormatSent = false;
+        if (v->javaCodec != nullptr) return; // callback mode resumes on the application's start()
+    }
+    wStart(env, thiz);
 }
 
 void destroy(JNIEnv* env, jobject thiz, Codec* v)
@@ -1426,13 +1656,8 @@ void destroy(JNIEnv* env, jobject thiz, Codec* v)
     { std::lock_guard<std::mutex> l(g_registry); g_codecs.erase(v); }
     v->api->stop(v->codec);
     v->api->destroy(v->codec);
-    if (v->window != nullptr) {
-        typedef void (*Release)(void*);
-        Release release = (Release) dlsym(RTLD_DEFAULT, "ANativeWindow_release");
-        if (release != nullptr) release(v->window);
-    }
+    if (!v->audio) clearOutputWindow(v);
     if (v->javaCodec != nullptr) env->DeleteGlobalRef(v->javaCodec);
-    if (v->callback != nullptr) env->DeleteGlobalRef(v->callback);
     env->SetLongField(thiz, g_context, 0);
     delete v;
 }
@@ -1445,9 +1670,7 @@ void wReset(JNIEnv* env, jobject thiz)
         resetAudio(v);
         return;
     }
-    oh.stop(v->codec);
-    v->running = false;
-    clearQueues(v);
+    resetVideo(env, v);
 }
 
 void wRelease(JNIEnv* env, jobject thiz)
@@ -1469,11 +1692,16 @@ jint wDequeueInput(JNIEnv* env, jobject thiz, jlong timeoutUs)
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) return b_dequeueInput != nullptr ? b_dequeueInput(env, thiz, timeoutUs) : MC_TRY_AGAIN;
     std::unique_lock<std::mutex> l(v->mu);
-    auto ready = [&] { return !v->inputs.empty() || v->err; };
+    if (v->javaCodec != nullptr) {
+        throwState(env, "dequeue is unavailable in asynchronous mode");
+        return MC_TRY_AGAIN;
+    }
+    auto ready = [&] { return !v->inputs.empty() || v->errorCode != 0; };
     if (!ready() && timeoutUs != 0) {
         if (timeoutUs < 0) v->cv.wait(l, ready);
         else v->cv.wait_for(l, std::chrono::microseconds(timeoutUs), ready);
     }
+    if (throwPendingCodecError(env, v)) return MC_TRY_AGAIN;
     if (v->inputs.empty()) return MC_TRY_AGAIN;
     uint32_t index = v->inputs.front();
     v->inputs.pop_front();
@@ -1527,13 +1755,27 @@ void wQueueInput(JNIEnv* env, jobject thiz, jint index, jint offset, jint size, 
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) { if (b_queueInput != nullptr) b_queueInput(env, thiz, index, offset, size, pts, flags); return; }
     OH_AVBuffer* buffer = nullptr;
+    bool asynchronous;
     {
         std::lock_guard<std::mutex> l(v->mu);
+        asynchronous = v->javaCodec != nullptr;
+        // An input notification already posted to the Handler may run before its terminal
+        // error notification. Let that Handler finish dispatching the pending events.
+        if (asynchronous && v->errorCode != 0) return;
+        if (throwPendingCodecError(env, v)) return;
         auto it = v->inputBuffers.find((uint32_t) index);
         if (it != v->inputBuffers.end()) { buffer = it->second; v->inputBuffers.erase(it); }
     }
     if (buffer == nullptr) { throwState(env, "no such input buffer"); return; }
-    uint32_t ohFlags = ((flags & MC_FLAG_EOS) ? OH_FLAG_EOS : 0) | ((flags & MC_FLAG_CODEC_CONFIG) ? OH_FLAG_CODEC_DATA : 0);
+    int capacity = oh.bufferCapacity(buffer);
+    if (offset < 0 || size < 0 || offset > capacity || size > capacity - offset) {
+        std::lock_guard<std::mutex> lock(v->mu);
+        v->inputBuffers[(uint32_t) index] = buffer;
+        jclass illegal = env->FindClass("java/lang/IllegalArgumentException");
+        if (illegal) env->ThrowNew(illegal, "input range exceeds the codec buffer");
+        return;
+    }
+    uint32_t ohFlags = ((flags & MC_FLAG_SYNC) ? OH_FLAG_SYNC : 0) | ((flags & MC_FLAG_EOS) ? OH_FLAG_EOS : 0) | ((flags & MC_FLAG_CODEC_CONFIG) ? OH_FLAG_CODEC_DATA : 0);
     OH_AVCodecBufferAttr attr{pts, size, offset, ohFlags};
     if (v->inputsLogged < 3) {
         v->inputsLogged++;
@@ -1541,8 +1783,10 @@ void wQueueInput(JNIEnv* env, jobject thiz, jint index, jint offset, jint size, 
         vlog("%s input %d: %d bytes at %d, flags %#x, pts %lld: %s", logTag(v), index, size, offset, flags,
              (long long) pts, headBytes(data != nullptr ? data + offset : nullptr, size).c_str());
     }
-    oh.bufferSetAttr(buffer, &attr);
-    v->api->pushInput(v->codec, (uint32_t) index);
+    int rc = oh.bufferSetAttr(buffer, &attr);
+    if (!rc) rc = v->api->pushInput(v->codec, (uint32_t) index);
+    if (rc && asynchronous) onError(v->codec, rc, v);
+    else if (rc) throwState(env, "could not submit decoder input");
 }
 
 jint wDequeueOutput(JNIEnv* env, jobject thiz, jobject info, jlong timeoutUs)
@@ -1550,11 +1794,16 @@ jint wDequeueOutput(JNIEnv* env, jobject thiz, jobject info, jlong timeoutUs)
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) return b_dequeueOutput != nullptr ? b_dequeueOutput(env, thiz, info, timeoutUs) : MC_TRY_AGAIN;
     std::unique_lock<std::mutex> l(v->mu);
-    auto ready = [&] { return !v->outputs.empty() || v->err; };
+    if (v->javaCodec != nullptr) {
+        throwState(env, "dequeue is unavailable in asynchronous mode");
+        return MC_TRY_AGAIN;
+    }
+    auto ready = [&] { return !v->outputs.empty() || v->errorCode != 0; };
     if (!ready() && timeoutUs != 0) {
         if (timeoutUs < 0) v->cv.wait(l, ready);
         else v->cv.wait_for(l, std::chrono::microseconds(timeoutUs), ready);
     }
+    if (throwPendingCodecError(env, v)) return MC_TRY_AGAIN;
     if (v->outputs.empty()) return MC_TRY_AGAIN;
     /* The format a frame comes in is announced before the frame, as Android's codec does. */
     if (v->formatPending) {
@@ -1586,8 +1835,14 @@ void wReleaseOutput(JNIEnv* env, jobject thiz, jint index, jboolean render, jboo
         v->outputBuffers.erase((uint32_t) index);
         v->outputData.erase((uint32_t) index);
     }
-    if (render && v->surface && oh.renderOutput != nullptr) oh.renderOutput(v->codec, (uint32_t) index);
-    else v->api->freeOutput(v->codec, (uint32_t) index);
+    int rc;
+    if (render && v->surface && updatePts && v->video->renderAtTime)
+        rc = v->video->renderAtTime(v->codec, (uint32_t) index, time);
+    else if (render && v->surface && v->video->renderOutput)
+        rc = v->video->renderOutput(v->codec, (uint32_t) index);
+    else
+        rc = v->api->freeOutput(v->codec, (uint32_t) index);
+    if (rc != 0) throwState(env, "decoder could not release the output buffer");
 }
 
 jobject wOutputFormat(JNIEnv* env, jobject thiz, jint index)
@@ -1634,20 +1889,9 @@ void wSetCallback(JNIEnv* env, jobject thiz, jobject callback)
 {
     Codec* v = codecOf(env, thiz);
     if (v == nullptr) { if (b_setCallback != nullptr) b_setCallback(env, thiz, callback); return; }
-    if (g_vm == nullptr) env->GetJavaVM(&g_vm);
-    if (callback != nullptr && g_cbInput == nullptr) {
-        jclass c = env->GetObjectClass(callback);
-        g_cbInput = env->GetMethodID(c, "onInputBufferAvailable", "(Landroid/media/MediaCodec;I)V");
-        g_cbOutput = env->GetMethodID(c, "onOutputBufferAvailable",
-                                      "(Landroid/media/MediaCodec;ILandroid/media/MediaCodec$BufferInfo;)V");
-        g_cbFormat = env->GetMethodID(c, "onOutputFormatChanged",
-                                      "(Landroid/media/MediaCodec;Landroid/media/MediaFormat;)V");
-        if (env->ExceptionCheck()) env->ExceptionClear();
-    }
+    std::lock_guard<std::mutex> lock(v->mu);
     if (v->javaCodec != nullptr) env->DeleteGlobalRef(v->javaCodec);
-    if (v->callback != nullptr) env->DeleteGlobalRef(v->callback);
-    v->javaCodec = env->NewGlobalRef(thiz);
-    v->callback = callback != nullptr ? env->NewGlobalRef(callback) : nullptr;
+    v->javaCodec = callback != nullptr ? env->NewGlobalRef(thiz) : nullptr;
 }
 
 /* ---- MediaCodecList: the bridge's entries, then the video and audio decoders ---------------- */
@@ -1793,12 +2037,17 @@ jobject lCapabilities(JNIEnv* env, jclass c, jint index, jstring type)
         env->ExceptionClear();
         return nullptr;
     }
-    jobject level = env->NewObject(levelClass, levelInit);
-    jobjectArray levels = env->NewObjectArray(1, levelClass, nullptr);
-    if (level == nullptr || levels == nullptr) { env->ExceptionClear(); return nullptr; }
-    env->SetIntField(level, profileField, offered->profile);
-    env->SetIntField(level, levelField, offered->level);
-    env->SetObjectArrayElement(levels, 0, level);
+    jobjectArray levels = env->NewObjectArray(offered->videoProfileLevels.size(), levelClass, nullptr);
+    if (!levels) return nullptr;
+    for (size_t i = 0; i < offered->videoProfileLevels.size(); ++i) {
+        jobject level = env->NewObject(levelClass, levelInit);
+        if (!level) return nullptr;
+        env->SetIntField(level, profileField, offered->videoProfileLevels[i].first);
+        env->SetIntField(level, levelField, offered->videoProfileLevels[i].second);
+        env->SetObjectArrayElement(levels, i, level);
+        env->DeleteLocalRef(level);
+        if (env->ExceptionCheck()) return nullptr;
+    }
     const jint kColors[] = {COLOR_YUV420_FLEXIBLE, COLOR_YUV420_SEMIPLANAR, COLOR_SURFACE};
     jintArray colors = env->NewIntArray(3);
     if (colors != nullptr) env->SetIntArrayRegion(colors, 0, 3, kColors);
@@ -1837,29 +2086,35 @@ jobject lCapabilities(JNIEnv* env, jclass c, jint index, jstring type)
 void wSetSurface(JNIEnv* env, jobject thiz, jobject surface)
 {
     Codec* v = codecOf(env, thiz);
-    if (v == nullptr || !v->surface || oh.setSurface == nullptr) {
+    if (v == nullptr || !v->surface || v->video->setSurface == nullptr) {
         throwState(env, "the codec was not configured for a Surface");
         return;
     }
-    void* window = nullptr;
-    void* ohWindow = ohWindowOf(env, surface, &window);
-    int rc = ohWindow != nullptr ? oh.setSurface(v->codec, static_cast<OHNativeWindow*>(ohWindow)) : -1;
-    vlog("[WL-VIDEOCODEC] setSurface anw=%p oh=%p -> %d", window, ohWindow, rc);
+    int rc = attachOutputWindow(env, v, surface);
+    vlog("[WL-VIDEOCODEC] setSurface -> %d", rc);
     if (rc != 0) {
-        releaseWindow(window);
         jclass illegal = env->FindClass("java/lang/IllegalArgumentException");
         if (illegal != nullptr) env->ThrowNew(illegal, "the Surface cannot take the codec's output");
-        return;
     }
-    releaseWindow(v->window);
-    v->window = window;
 }
 
-/*
- * MediaCodec.setVideoScalingMode, which the bridge never registered (ExoPlayer calls it on every
- * video codec): OH scales the decoded frame to its window itself, so the mode has nothing to set.
- */
-void wSetVideoScalingMode(JNIEnv*, jobject, jint) {}
+void wSetVideoScalingMode(JNIEnv* env, jobject thiz, jint mode)
+{
+    if (g_context == nullptr || env->GetLongField(thiz, g_context) == 0) {
+        throwState(env, "the codec has been released");
+        return;
+    }
+    if (mode != 1 && mode != 2) {
+        jclass illegal = env->FindClass("java/lang/IllegalArgumentException");
+        if (illegal != nullptr) env->ThrowNew(illegal, "unrecognized video scaling mode");
+        return;
+    }
+    Codec* v = codecOf(env, thiz);
+    if (v == nullptr || v->audio) return;
+    std::lock_guard<std::mutex> lock(v->windowMu);
+    v->scalingMode = mode;
+    applyVideoScaling(v);
+}
 
 /* Returns how many natives were wrapped; 0 leaves both classes as the bridge registered them. */
 /*
@@ -1909,13 +2164,13 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     jclass codec = env->FindClass("android/media/MediaCodec");
     jclass list = env->FindClass("android/media/MediaCodecList");
     jclass info = env->FindClass("android/media/MediaCodec$BufferInfo");
-    jclass format = env->FindClass("android/media/MediaFormat");
+    jclass exception = env->FindClass("android/media/MediaCodec$CodecException");
     jclass map = env->FindClass("java/util/HashMap");
     jclass integer = env->FindClass("java/lang/Integer");
     jclass string = env->FindClass("java/lang/String");
     jclass byteBuffer = env->FindClass("java/nio/ByteBuffer");
     jclass byteOrder = env->FindClass("java/nio/ByteOrder");
-    if (codec == nullptr || list == nullptr || info == nullptr || format == nullptr || map == nullptr
+    if (codec == nullptr || list == nullptr || info == nullptr || exception == nullptr || map == nullptr
             || integer == nullptr || string == nullptr || byteBuffer == nullptr || byteOrder == nullptr) {
         env->ExceptionClear();
         return 0;
@@ -1927,10 +2182,11 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     g_infoPts = env->GetFieldID(info, "presentationTimeUs", "J");
     g_infoFlags = env->GetFieldID(info, "flags", "I");
     g_infoClass = (jclass) env->NewGlobalRef(info);
+    g_codecException = (jclass) env->NewGlobalRef(exception);
+    g_codecExceptionInit = env->GetMethodID(exception, "<init>", "(IILjava/lang/String;)V");
+    g_postCodecEvent = env->GetMethodID(codec, "postEventFromNative", "(IIILjava/lang/Object;)V");
     g_infoInit = env->GetMethodID(info, "<init>", "()V");
     g_infoSet = env->GetMethodID(info, "set", "(IIJI)V");
-    g_formatClass = (jclass) env->NewGlobalRef(format);
-    g_formatFromMap = env->GetMethodID(format, "<init>", "(Ljava/util/Map;)V");
     g_hashMap = (jclass) env->NewGlobalRef(map);
     g_hashMapInit = env->GetMethodID(map, "<init>", "()V");
     g_hashMapPut = env->GetMethodID(map, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
@@ -1945,7 +2201,8 @@ extern "C" int wl_register_video_codec(JNIEnv* env)
     jobject order = nativeOrder != nullptr ? env->CallStaticObjectMethod(byteOrder, nativeOrder) : nullptr;
     if (order != nullptr) g_nativeOrder = env->NewGlobalRef(order);
     if (env->ExceptionCheck()) env->ExceptionClear();
-    if (g_context == nullptr || g_infoOffset == nullptr || g_infoInit == nullptr || g_formatFromMap == nullptr
+    if (g_context == nullptr || g_codecException == nullptr || g_codecExceptionInit == nullptr
+            || g_postCodecEvent == nullptr || g_infoOffset == nullptr || g_infoInit == nullptr
             || g_hashMapInit == nullptr || g_integerValueOf == nullptr || g_nativeOrder == nullptr) {
         vlog("[WL-VIDEOCODEC] framework classes incomplete; video and audio decoding not offered");
         return 0;

@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "package": "com.google.android.youtube",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "manifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+  "observation": {
+    "status": "failed",
+    "launchRendered": true,
+    "googleSignInAttempted": true,
+    "interactiveGoogleResultOk": false,
+    "remoteGoogleResultCanceled": true,
+    "accountSessionAccepted": false,
+    "videoPlaybackTested": false,
+    "explanation": "YouTube renders its home screen, then shows There was a problem signing in to your account. Tapping Sign In sends a remote GMS activity request which returns RESULT_CANCELED; the following display is black. Startup broker status9 is observed across several services, with status0 for services51/40. No successful account session, token reply or playback established. First staging attempt ran out of space before app launch; retry after cache cleanup is the live observation."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 25,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "exceptionTypes": [
+      "java.lang.NoSuchFieldException",
+      "java.lang.RuntimeException"
+    ],
+    "requestedServiceIds": [
+      16,
+      19,
+      23,
+      38,
+      40,
+      51,
+      93,
+      113,
+      116,
+      160,
+      161,
+      270,
+      343
+    ],
+    "callbackStatusCounts": {
+      "0": 2,
+      "9": 15
+    },
+    "callbackStatusesByApproximateService": {
+      "116": [
+        9
+      ],
+      "270": [
+        9
+      ],
+      "51": [
+        0
+      ],
+      "160": [
+        9
+      ],
+      "343": [
+        9
+      ],
+      "161": [
+        9
+      ],
+      "93": [
+        9
+      ],
+      "40": [
+        0
+      ],
+      "16": [
+        9
+      ],
+      "38": [
+        9
+      ],
+      "19": [
+        9
+      ],
+      "113": [
+        9
+      ],
+      "23": [
+        9
+      ]
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 1,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "serviceAttribution": "Process-global approximate attribution, not causal proof; status0 is a broker connection only.",
+  "nativeArtifactsRebuilt": false,
+  "fullApplicationAcceptance": false,
+  "rawLogsAndScreenshotsPublic": false
+}

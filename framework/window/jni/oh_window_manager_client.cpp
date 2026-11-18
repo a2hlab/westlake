@@ -24,6 +24,9 @@
  *   OH: wms/window_scene/session/host/include/zidl/session_interface.h
  */
 #include "oh_window_manager_client.h"
+#include "session/host/include/zidl/session_ipc_interface_code.h"
+#include "session_manager/include/zidl/scene_session_manager_interface.h"
+#include <limits>
 #include <window.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -83,6 +86,8 @@ void oh_wm_set_ime_active(int active) { g_imeActive.store(active != 0); }
 struct NativeWindow;
 typedef struct NativeWindow OHNativeWindow;
 extern "C" OHNativeWindow* CreateNativeWindowFromSurface(void* pSurface);
+// Some builds omit the ability-owned input consumer.
+extern "C" void oh_owned_input_forget_window(int32_t session) __attribute__((weak));
 // 2026-05-12 G2.14aw probe A.1: read producer uniqueId from OHNativeWindow.
 // Defined in libnative_window.so; signature stable per
 // graphic_surface/interfaces/inner_api/surface/external_window.h:674.
@@ -859,6 +864,25 @@ static void wl_icu_init_once() {
         fprintf(stderr, "[WESTLAKE-ICU] u_setDataDirectory symbol not found\n");
     }
     fflush(stderr);
+}
+
+// Subscribe only the direct session created by this client. SceneBoard checks
+// ownership when registering and delivers changes through its ISessionStage.
+static void setSystemAreaListener(const OHOS::sptr<OHOS::IRemoteObject>& manager,
+                                  int32_t session, bool enabled) {
+    if (!manager) return;
+    using Interface = OHOS::Rosen::ISceneSessionManager;
+    OHOS::MessageParcel data, reply;
+    OHOS::MessageOption option(OHOS::MessageOption::TF_SYNC);
+    if (!data.WriteInterfaceToken(Interface::GetDescriptor()) ||
+            !data.WriteInt32(session) || !data.WriteBool(enabled)) return;
+    const auto request = Interface::SceneSessionManagerMessage::TRANS_ID_UPDATE_AVOIDAREA_LISTENER;
+    int32_t status = -1;
+    const auto error = manager->SendRequest(static_cast<uint32_t>(request), data, reply, option);
+    const bool accepted = error == 0 && reply.ReadInt32(status) && status == 0;
+    if (!accepted) {
+        LOGW("SceneBoard avoid-area listener failed, transport=%{public}d status=%{public}d", error, status);
+    }
 }
 
 OHWindowSession OHWindowManagerClient::createSession(
@@ -1925,6 +1949,7 @@ OHWindowSession OHWindowManagerClient::createSession(
                     // the tap side-channel cannot drive the UI — every window here is ours anyway.
                     g_fgMainSession.store(persistentId);
                 }
+                setSystemAreaListener(sceneProxy_, persistentId, true);
                 // WESTLAKE §387: CPU-FILL PROBE — bypass hwui/EGL/GPU entirely.
                 // State of play: RS mounts our node correctly, acquires our buffers and calls
                 // RSUniRenderEngine::DrawSurfaceNodeWithParams on them (verified by hitrace in BOTH
@@ -2313,6 +2338,7 @@ int OHWindowManagerClient::notifyDrawingCompleted(int32_t sessionId) {
 }
 
 void OHWindowManagerClient::destroySession(int32_t sessionId) {
+    if (oh_owned_input_forget_window) oh_owned_input_forget_window(sessionId);
     OH_BR_IPC_SCOPE("WMClient.destroySession", "session=%{public}d", sessionId);
 
     OHOS::sptr<OHOS::Rosen::ISession> sessionProxy;
@@ -2374,6 +2400,7 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
     // Both handlers read (bool isFromClient, string identityToken). Failures are logged and fall
     // through to the legacy path rather than being fatal.
     if (sessionRemote != nullptr) {
+        setSystemAreaListener(sceneProxy_, sessionId, false);
         auto sendSessionCall = [&](uint32_t code, const char* what) {
             OHOS::MessageParcel data;
             OHOS::MessageParcel reply;
@@ -3254,4 +3281,48 @@ void* OHWindowManagerClient::getOhNativeWindow(int32_t sessionId) {
     return aospAnw;
 }
 
+// Direct SceneBoard sessions have their own ISession remote. The public NDK
+// window ID lookup uses Rosen's Window cache, which does not own these windows.
+bool OHWindowManagerClient::readStatusBarFrame(int32_t sessionId, jint bounds[4]) {
+    OHOS::sptr<OHOS::IRemoteObject> remote;
+    {
+        std::lock_guard<std::recursive_mutex> lock(sessionMutex_);
+        auto entry = sessions_.find(sessionId);
+        if (entry == sessions_.end()) return false;
+        remote = entry->second.sessionRemote;
+    }
+    if (!remote) return false;
+    OHOS::MessageParcel data, reply;
+    OHOS::MessageOption option(OHOS::MessageOption::TF_SYNC);
+    const auto type = OHOS::Rosen::AvoidAreaType::TYPE_SYSTEM;
+    if (!data.WriteInterfaceToken(u"OHOS.ISession") || !data.WriteUint32(static_cast<uint32_t>(type))
+            || !data.WriteInt32(0) || !data.WriteInt32(0)  // default window rectangle
+            || !data.WriteInt32(0) || !data.WriteInt32(0)
+            || !data.WriteInt32(OHOS::Rosen::API_VERSION_INVALID)) return false;
+    const auto request = OHOS::Rosen::SessionInterfaceCode::TRANS_ID_GET_AVOID_AREA;
+    if (remote->SendRequest(static_cast<uint32_t>(request), data, reply, option) != 0) return false;
+    OHOS::sptr<OHOS::Rosen::AvoidArea> area = reply.ReadParcelable<OHOS::Rosen::AvoidArea>();
+    if (!area) return false;
+    const auto& rect = area->topRect_;
+    const int64_t right = static_cast<int64_t>(rect.posX_) + rect.width_;
+    const int64_t bottom = static_cast<int64_t>(rect.posY_) + rect.height_;
+    if (right > std::numeric_limits<jint>::max() || bottom > std::numeric_limits<jint>::max())
+        return false;
+    bounds[0] = rect.posX_;
+    bounds[1] = rect.posY_;
+    bounds[2] = static_cast<jint>(right);
+    bounds[3] = static_cast<jint>(bottom);
+    return true;
+}
+
 }  // namespace oh_adapter
+
+extern "C" JNIEXPORT jintArray JNICALL Java_adapter_window_OhInsetsBridge_nativeStatusBarFrame(
+        JNIEnv* env, jclass, jint session) {
+    jint bounds[4];
+    if (!oh_adapter::OHWindowManagerClient::getInstance().readStatusBarFrame(session, bounds))
+        return nullptr;
+    jintArray result = env->NewIntArray(4);
+    if (result) env->SetIntArrayRegion(result, 0, 4, bounds);
+    return result;
+}

@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "candidate": 67,
+  "phase": "Repair native MotionEvent transforms after tracing a missing Gmail click",
+  "implementationBaseRevision": "821bcd50457c6b45e4af07a9a1dcbe73650ab4a6",
+  "sourceSha256": {
+    "framework/android-runtime/include/input/Input.h": "774e2f648fd598027a6aedb30566ea42d952e24f786a60bf11c61ef7d0308cc1",
+    "framework/android-runtime/src/android_input_Input_aosp.cpp": "027deb9eccf84f1fbdd5ea98bcba79882db0f69d2ff995b0bda545ee8340da73",
+    "framework/android-runtime/src/android_view_MotionEvent_aosp.cpp": "d4f5c32b1d5c16a170ee95b387058c73aeccb8286cc92642930c4d5d707e5545",
+    "framework/window/java/InputQueueTrace.java": "1883bb1d64d528089ac75a0e5e67f205257b873c461f033b2d2c5e776c521a0b",
+    "framework/window/java/OHTouchInjector.java": "4558ced4458fcdb90f3a1b701f2f9b0b2cb3566c69ca983cff58d995f9cb9e71",
+    "tests/parity/native/input_transform_test.cpp": "062c3bda2fe877d31f99139b2cf4fec4ae1f8c5033382ac14770efd04f410965",
+    "tests/parity/native/README-input-transform.md": "bdbb9a9ef19f47d349ba3d074fba68e66f0927cbf26c57c6a25d228b14a2707f"
+  },
+  "package": "com.google.android.gm",
+  "newAuthGrants": false,
+  "diagnosis": {
+    "baselineNativeSha256": "12506b24d30f51fd0e8e0678ad2184512e2ca9c42f6f74fba199d79c9edec6f1",
+    "deployedTransformInstructions": "Both transform and applyTransform were one AArch64 ret instruction",
+    "manualButtonEnabledAndClickable": true,
+    "manualButtonHasListener": true,
+    "parentViewHasNonIdentityMatrix": true,
+    "baselineTouchHandledByDrawerLayout": true,
+    "baselineClickAndSyncListenerObserved": false,
+    "baselineTraceRecords": 32038,
+    "baselineTraceOverflow": "false",
+    "baselineTraceSha256": "556e6de00e76f09ca2365585e7622aaaa2fe6604d275b49a6edb3dbed430f2f4",
+    "baselineQueueEmptyAfterSyncTap": true,
+    "dialogQueuedClickDrains": true
+  },
+  "change": {
+    "native": "Compose local coordinate transforms while preserving raw samples; implement applyTransform and transformed JNI pointer-coordinate reads; preserve normalized pressure/size during scaling",
+    "diagnostics": "Default-off private input queue snapshots, structural hit candidates and opt-in ART method trace; no app listener or authentication result substitution",
+    "nativeLayoutConsumersRebuilt": 2,
+    "retainedNativeInputsHashVerified": true
+  },
+  "build": {
+    "javaPassed": true,
+    "sources": 139,
+    "classes": 291,
+    "nativePassed": true,
+    "hostChecksPassed": 40,
+    "baselineHostControl": "FAIL translated X: 10 != 110",
+    "baselineHostControlExitCode": 1,
+    "runtimePackagingPassed": true,
+    "bootBuildPassed": true,
+    "preloadPassed": true,
+    "classInitializationFailures": [],
+    "cacheFilesReused": 458,
+    "reportSha256": {
+      "java": "7d90bd6ce4efd5fae9181d7a64bf7caf50fd60f9ecab451f7c5e7d7c61e5edc6",
+      "runtime": "278c7d7f6ff6cfe6886ca175aedf65f21b90ffece58b62ef3096964602964ec0",
+      "boot": "031dabe3ea043b50cdd8707e0d3babb3071b3cad878ee69f835923e60aa1098d",
+      "native": "355f9bc2f3d43566d9ad0e221649692f45e9f0e50b8c13866e2d1115dbf4078a",
+      "composition": "137c0fa0e378eb9339c29218d1f4dc31f1a17d61251f2b7d748a4141f8bb8522",
+      "preload": "8065354814d11d5bf938439f0c33f65c89f75784f8f819e9b4f0b58efe1f5269"
+    },
+    "adapterSha256": "6fe9e564c5b5805ea348b5c6a0a921432221642c659014192d34d06ea3b5d57d",
+    "nativeSha256": "9512b4fbdf7563434896e2e2e28f8169f4a133ddf687ae786058a91a06567a7b"
+  },
+  "board": {
+    "fixedTraceRecords": 1155870,
+    "fixedTraceOverflow": "false",
+    "fixedTraceSha256": "b45b01b01fb9dae80f48b949b6faeeb8c3fd50e9eb9ab87ee751b4adb7d41c8a",
+    "fixedTraceElapsedUsec": "17080162",
+    "methodTraceCaveat": "Requests stop after three seconds but scheduling and trace shutdown delayed completion; the recorded duration is about 17 seconds. Timing is perturbed and is not performance evidence.",
+    "selectedMethodEntries": {
+      "android.view.View$PerformClick.run": 1,
+      "com.google.android.material.button.MaterialButton.performClick": 1,
+      "android.view.View.performClick": 1,
+      "pai.onClick": 1,
+      "oly.j": 1,
+      "hma.U": 1
+    },
+    "accountComponentEntryObserved": "okv.c / okv.m",
+    "syncCallbackBodyObserved": false,
+    "untracedRepeatQueuesPerformClickThenDrains": true,
+    "newContentServiceSyncRequestObserved": false,
+    "syncAdapterExecutionObserved": false,
+    "mailboxObserved": false,
+    "mailSent": false,
+    "uncaughtExceptionMarkers": 0,
+    "repeatUncaughtExceptionMarkers": 0,
+    "afterClickAuthProxyOrDelegationEvents": 0,
+    "afterClickAuthWindowCaveat": "Absence of these diagnostic events is not proof of no network traffic or no authentication activity."
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": true,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "6a27c5c05ab2a019a2648ba5a39e46ffa36e1a4c4b523844d50c5fd017918c5f",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "6fe9e564c5b5805ea348b5c6a0a921432221642c659014192d34d06ea3b5d57d",
+    "clientApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a"
+  },
+  "fullApplicationPassed": false,
+  "fullApplicationPassCount": 0,
+  "remaining": [
+    "transformed nativeAddBatch still handles incoming coordinates with translation offsets only",
+    "surface rotation reporting remains unknown",
+    "MotionEvent Parcel I/O remains unimplemented",
+    "Resolve Gmail account-component future and service eligibility",
+    "Validate subsequent OAuth authorization and mailbox sync",
+    "Execute full remaining Google/Facebook plan"
+  ],
+  "privacy": "Only reviewed structural metadata, public method names, hashes and counts are published. Raw method traces, APK disassembly, logs, screenshots, account identifiers, credentials and tokens remain private."
+}

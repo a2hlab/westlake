@@ -181,7 +181,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
                 try {
                     bridgeStartActivityWithStack(started, startFlags, from, request);
                 } catch (Throwable t) {
-                    System.err.println("[ATMA] deferred startActivity failed: " + t);
+                    System.err.println("[ATMA] deferred startActivity failed: " + t.getClass().getSimpleName());
                 }
             });
             return ActivityManager.START_SUCCESS;
@@ -212,6 +212,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      * native start, which puts the text on the clipboard instead.
      */
     private int startOutside(Intent intent, int flags, IBinder resultTo, ActivityResults.Request request) {
+        if (RemoteHostWindows.isOwnAppSettings(intent)) {
+            return RemoteHostWindows.openOwnAppSettings() ? ActivityManager.START_SUCCESS : ActivityManager.START_ABORTED;
+        }
         if (Intent.ACTION_CHOOSER.equals(intent.getAction())) return startChooser(intent, flags, resultTo, request);
         if (!adapter.packagemanager.PackageManagerAdapter.ohHandles(intent) && !sharesText(intent)) {
             if (alwaysOnAndroid(intent)) {
@@ -220,19 +223,19 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
                 // threw. Nothing opens and no result comes back, as while the user is still on that
                 // screen. A RESULT_CANCELED at once would bring a resumed caller through onPause and
                 // onResume, and an app that asks again in onResume would ask without end.
-                Log.i(TAG, "startActivity: an Android screen this device does not have, nothing opens: " + intent);
+                Log.i(TAG, "startActivity: Android system screen unavailable");
                 return ActivityManager.START_SUCCESS;
             }
             if (WebLinkDialog.opensWebLink(intent) && WebLinkDialog.show(intent.getData(), resultTo)) {
-                Log.i(TAG, "startActivity: a web link, opened in the app as no browser handles it: " + intent);
+                Log.i(TAG, "startActivity: opened web link in the app");
                 return ActivityManager.START_SUCCESS;
             }
-            Log.i(TAG, "startActivity: nothing handles " + intent);
+            Log.i(TAG, "startActivity: no matching activity");
             return notFound(intent);
         }
         int result = bridgeStartActivityWithStack(intent, flags, resultTo, request);
         if (result != 0) {
-            Log.i(TAG, "startActivity: OH did not start " + intent + " (" + result + ")");
+            Log.i(TAG, "startActivity: OH start failed with code " + result);
             return notFound(intent);
         }
         return ActivityManager.START_SUCCESS;
@@ -247,9 +250,9 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         Intent target = chooser.getParcelableExtra(Intent.EXTRA_INTENT, Intent.class);
         if (target != null && (adapter.packagemanager.PackageManagerAdapter.ohHandles(target) || sharesText(target))) {
             int result = bridgeStartActivityWithStack(chooser, flags, resultTo, request);
-            if (result != 0) Log.i(TAG, "startActivity: OH did not start the chooser's " + target + " (" + result + ")");
+            if (result != 0) Log.i(TAG, "startActivity: OH chooser start failed with code " + result);
         } else {
-            Log.i(TAG, "startActivity: nothing handles the chooser's " + target);
+            Log.i(TAG, "startActivity: no matching chooser activity");
         }
         return ActivityManager.START_SUCCESS;
     }
@@ -339,7 +342,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         String name = info.targetActivity != null ? info.targetActivity : info.name;
         Intent resolved = new Intent(intent);
         resolved.setComponent(new ComponentName(info.packageName, name));
-        Log.i(TAG, "startActivity: " + intent + " resolves to the app's own " + name);
+        Log.i(TAG, "startActivity: resolved app activity " + name);
         return resolved;
     }
 
@@ -1218,7 +1221,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
      * while OH native apps remain unaffected.
      *
      * @param intent the Android Intent
-     * @param flags  Intent flags (FLAG_ACTIVITY_NEW_TASK, CLEAR_TOP, etc.)
+     * @param flags  Binder start flags; activity launch flags are read from the Intent
      * @return result code
      */
     private int bridgeStartActivityWithStack(Intent intent, int flags, IBinder resultTo,
@@ -1227,6 +1230,12 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             Log.w(TAG, "bridgeStartActivityWithStack called with null Intent");
             return 0;
         }
+
+        // Binder start flags are not Intent launch flags. Resolve direct-task reuse before
+        // enqueuing a fresh launch, preserving the existing activity and its result destination.
+        if ((flags & ActivityManager.START_FLAG_ONLY_IF_NEEDED) == 0
+                && LocalActivityLaunch.reuse(intent, request)) return ActivityManager.START_SUCCESS;
+        flags = intent.getFlags();
 
         IntentWantConverter.WantParams want = IntentWantConverter.intentToWant(intent);
         String bundleName = want.bundleName;
@@ -1333,7 +1342,7 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         // AbilitySchedulerBridge receives the ScheduleNewIntent call from OH
         // and forwards it to IApplicationThread.scheduleNewIntent().
         // Here we trigger it by notifying the OH side.
-        Log.i(TAG, "deliverOnNewIntent: " + abilityName + " intent=" + intent);
+        Log.i(TAG, "deliverOnNewIntent: " + abilityName);
         // The actual delivery is handled by OH AbilityManagerService when
         // StartAbilityInMission detects the target is already on top with
         // the SINGLE_TOP flag in the Want. We set the flag in the Want params.

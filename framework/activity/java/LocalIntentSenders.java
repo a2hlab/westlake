@@ -105,6 +105,8 @@ public final class LocalIntentSenders {
      */
     static final int SEND_TRANSACTION = 0x574c53;
     static final int PREPARE_ACTIVITY_TRANSACTION = adapter.core.SocketBinder.SAME_APP_ACTIVITY_INTENT;
+    private static final String PREPARATION_REQUIRES_SAME_APP =
+            "activity sender preparation requires a verified process of the same app";
 
     /** A sender's binder: it leads back to its record for as long as a PendingIntent holds it. */
     private static final class SenderBinder extends Binder {
@@ -119,7 +121,7 @@ public final class LocalIntentSenders {
             if (code == PREPARE_ACTIVITY_TRANSACTION) {
                 data.enforceInterface(SENDER_DESCRIPTOR);
                 if (!RemoteActivities.enabled() || !adapter.core.SocketBinder.isCallingSameApp())
-                    throw new SecurityException("activity sender preparation requires a verified process of the same app");
+                    throw new SecurityException(PREPARATION_REQUIRES_SAME_APP);
                 Intent fillIn = data.readTypedObject(Intent.CREATOR);
                 int mask = data.readInt(), values = data.readInt();
                 Intent prepared = prepareActivity(record, fillIn, mask, values);
@@ -366,7 +368,18 @@ public final class LocalIntentSenders {
             if (intent != null) intent.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
             return intent;
         } catch (RemoteException | RuntimeException error) {
-            RemoteActivities.event("pending_activity_rejected type=" + error.getClass().getSimpleName());
+            String reason = "";
+            if (error instanceof SecurityException) {
+                // Peers can return arbitrary exception text. Log only fixed local classifications.
+                if (adapter.core.SocketBinder.FOREIGN_ACTIVITY_INTENT_HOP.equals(error.getMessage())) {
+                    reason = " reason=forwarding_peer_not_verified_same_app";
+                } else if (PREPARATION_REQUIRES_SAME_APP.equals(error.getMessage())) {
+                    reason = " reason=creator_rejected_preparation";
+                } else {
+                    reason = " reason=other_security_exception";
+                }
+            }
+            RemoteActivities.event("pending_activity_rejected type=" + error.getClass().getSimpleName() + reason);
             return null;
         } finally { data.recycle(); reply.recycle(); }
     }

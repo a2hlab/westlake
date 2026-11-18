@@ -1,0 +1,50 @@
+[
+  {
+    "package": "com.mobilefootie.wc2010",
+    "apkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "signerSha256": "99eb36651caf7752dc34770ee1afbf5b5f4e07a906243904104eb5acc9ffbaf4"
+  },
+  {
+    "package": "com.spotify.music",
+    "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "signerSha256": "6505b181933344f93893d586e399b94616183f04349cb572a9e81a3335e28ffd"
+  },
+  {
+    "package": "wp.wattpad",
+    "apkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+    "signerSha256": "012de45837d20561255a02bbc22334c1f681d01b366fe31bef418baf535903ef"
+  },
+  {
+    "package": "com.google.android.youtube",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "signerSha256": "5aad2bee6db95d17e05a08d7d1e64c10a1511879154483916b6ae6c7fd9cb0c6"
+  },
+  {
+    "package": "com.google.android.gm",
+    "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "signerSha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053"
+  },
+  {
+    "package": "com.google.android.apps.maps",
+    "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+    "signerSha256": "7ce83c1b71f3d572fed04c8d40c5cb10ff75e6d87d9df6fbd53f0468c2905053"
+  },
+  {
+    "package": "com.ubercab",
+    "apkSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+    "signerSha256": "4003231ab42feb8d955e62fdfaa4fad59567054b9c6bbc3d950299ddfc268392"
+  },
+  {
+    "package": "com.google.android.apps.docs",
+    "versionName": "2.26.457.0.all.alldpi",
+    "versionCode": 214733669,
+    "sha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "legacySignerSha256": "f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83",
+    "currentSignerSha256": "1d4f2ef662f8d086abe035e9f5c3ad34700baa831f3e7e32edab303effb8f156",
+    "rotationSignatureVerified": true,
+    "allSplitSignaturesVerified": true,
+    "signerPrimarySource": "https://drive.google.com/.well-known/assetlinks.json",
+    "downloadSource": "APKPure via apkeep",
+    "launchActivity": "com.google.android.apps.docs.app.NewMainProxyActivity"
+  }
+]

@@ -1,0 +1,121 @@
+{
+  "schema": 1,
+  "candidate": 138,
+  "date": "2026-11-18",
+  "previous": "candidate137.json",
+  "gmail": {
+    "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+    "releaseFramework": true,
+    "serviceListenersWithDistinctAppUids": [
+      "microG",
+      "officialGms",
+      "store"
+    ],
+    "retainedPrimaryMatchedExistingReferenceOnOpen": true,
+    "timedPull": [
+      {
+        "seconds": 7.3,
+        "visiblePrimary": true,
+        "sameAsBefore": true,
+        "sameAsReference": true,
+        "deltas": {
+          "inputRelease": 1,
+          "syncRequested": 0,
+          "syncStarted": 0,
+          "syncFinished": 0,
+          "fatal": 0
+        }
+      },
+      {
+        "seconds": 24.7,
+        "visiblePrimary": true,
+        "sameAsBefore": true,
+        "sameAsReference": true,
+        "deltas": {
+          "inputRelease": 1,
+          "syncRequested": 0,
+          "syncStarted": 0,
+          "syncFinished": 0,
+          "fatal": 0
+        }
+      },
+      {
+        "seconds": 59.5,
+        "visiblePrimary": true,
+        "sameAsBefore": true,
+        "sameAsReference": true,
+        "deltas": {
+          "inputRelease": 1,
+          "syncRequested": 0,
+          "syncStarted": 0,
+          "syncFinished": 0,
+          "fatal": 0
+        }
+      }
+    ],
+    "additionalMailboxView": {
+      "folder": "All mail",
+      "samples": [
+        {
+          "secondsSinceFirstSettledSample": 3.8,
+          "drawerInteriorSingleColorFraction": 1.0,
+          "allMailControlRecognized": false
+        },
+        {
+          "secondsSinceFirstSettledSample": 18.8,
+          "drawerInteriorSingleColorFraction": 1.0,
+          "allMailControlRecognized": false
+        },
+        {
+          "secondsSinceFirstSettledSample": 42.2,
+          "drawerInteriorSingleColorFraction": 1.0,
+          "allMailControlRecognized": false
+        }
+      ],
+      "returnedPrimary": true,
+      "sameRowsAfterDismissal": true,
+      "finding": "Opening the Gmail navigation drawer displayed an empty panel below the title. The All mail control was unavailable in the sampled view. Dismissing the drawer restored Primary.",
+      "measurement": "Fraction of the interior crop occupied by its most common pixel color. The 683 by 1505 pixel region excludes the drawer header and edges."
+    },
+    "senderConfirmedMailIdentified": false
+  },
+  "uber": {
+    "releaseInstallation": {
+      "package": "com.ubercab",
+      "baseSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+      "splitsChecked": 28,
+      "nativeHostUid": 20010063,
+      "normalHap": true,
+      "distinctActiveServiceUids": 3,
+      "identityEnforcement": true,
+      "upgradedReleaseBinaries": 20,
+      "runtimeAdapter": "0a574e1b6b85dff4b087191a6f6921c66ac9ba272210917afec745537c7c3ccb",
+      "windowBridge": "0215db8c1a4a48dbb2568d816c7689a6db7b951fecb89ae95effb5a24743ff95",
+      "nativeHostSha256": "d0c433786ee1e0ded614a7dfe16152be1c7840447ff208c3a56874d4664d158f"
+    },
+    "priorSharedHostWebOAuth": {
+      "source": "../live44/batch-results.json",
+      "testAccountCredentialsAccepted": true,
+      "basicConsentAccepted": true,
+      "uberPageNotFoundAfterConsent": true,
+      "nativeGmsAuthEstablished": false,
+      "riderSessionObserved": false
+    },
+    "dedicatedHost": {
+      "retainedProfile": true,
+      "tripLinkWelcomeAppeared": true,
+      "googleCaptionReadInCroppedScreenshot": true,
+      "googleButtonTappedOnTripLink": false,
+      "registeredWindowsAtEndOfTripLink": 0,
+      "originalProcessAliveAtEndOfTripLink": true,
+      "ordinaryLauncherLogoObserved": true,
+      "riderSessionObserved": false,
+      "bookingAttempted": false
+    }
+  },
+  "interpretation": "After a cold launch, original Gmail showed Primary again. A system swipe reached the app. Through 59.5 seconds the sampled rows matched the existing inbox reference and the app recorded zero mailbox job starts. On the earlier shared host, Google accepted basic profile and email consent in web sign-in, then Uber displayed “Sorry, we could not find that page”. On the current dedicated host the signed rider app displayed its welcome page. The trip-link window disappeared before a Google tap, and the normal launch displayed the Uber logo before the board returned to Gmail. Rider sign-in remains partial.",
+  "limits": [
+    "This records visible mail and sync events in the original Gmail app. Server-side receipt was not tested.",
+    "The earlier Uber web flow and the two dedicated-host launches were separate runs. The cause of the earlier web error is unknown."
+  ]
+}

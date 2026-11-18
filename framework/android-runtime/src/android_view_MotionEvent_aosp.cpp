@@ -16,8 +16,8 @@
 //     HelloWorld doesn't cross-process MotionEvent
 //   - nativeAxisToString / nativeAxisFromString return null/-1 — labels
 //     are stubbed in InputEventLookup
-//   - nativeTransform / nativeApplyTransform are no-ops — Phase 2 will wire
-//     real matrix composition
+//   - view transforms are implemented by the private MotionEvent; native batching
+//     still converts incoming coordinates using translation offsets only
 //
 // PHASE 2 EXTENSION POINTS: same as Input.h header comment.
 // ============================================================================
@@ -452,7 +452,15 @@ static void nativeGetPointerCoords(JNIEnv* env, jclass /*clazz*/, jlong nativePt
     const PointerCoords* pc = (historyPos == HISTORY_CURRENT)
                                   ? event->getRawPointerCoords(pointerIndex)
                                   : event->getHistoricalRawPointerCoords(pointerIndex, historyPos);
-    if (pc) pointerCoordsFromNative(env, pc, outObj);
+    if (pc) {
+        PointerCoords transformed = *pc;
+        const size_t history = historyPos == HISTORY_CURRENT ? event->getHistorySize() : historyPos;
+        for (int axis : {AMOTION_EVENT_AXIS_X, AMOTION_EVENT_AXIS_Y,
+                AMOTION_EVENT_AXIS_RELATIVE_X, AMOTION_EVENT_AXIS_RELATIVE_Y,
+                AMOTION_EVENT_AXIS_ORIENTATION})
+            transformed.setAxisValue(axis, event->getHistoricalAxisValue(axis, pointerIndex, history));
+        pointerCoordsFromNative(env, &transformed, outObj);
+    }
 }
 
 // --- @FastNative / @CriticalNative getters & setters ---

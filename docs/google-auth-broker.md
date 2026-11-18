@@ -67,7 +67,8 @@ board, change Google's server decisions, or remove other service restrictions.
 | `WESTLAKE_CHANNEL_IDENTITY=enforce`, `WESTLAKE_GOOGLE_PRIVATE_LOGS=1` | Required by the provider and by delegation |
 | `WESTLAKE_REMOTE_ACTIVITIES=1` | The interactive sign-in UI runs in Play services' declared process |
 | `WESTLAKE_GOOGLE_IDENTITY_CLAIMS=1` | Adapt the supported interactive identity claim request; see the continuation report |
-| `WESTLAKE_GOOGLE_SILENT_AUTH=1` | Authorize the supported synchronous ID-token request using a persisted, revocable app/account/audience selection |
+| `WESTLAKE_GOOGLE_SILENT_AUTH=1` | Authorize supported synchronous ID-token and OAuth requests using a persisted, revocable app/account/scope or audience selection |
+| `WESTLAKE_GOOGLE_ASYNC_SIGNIN=1` | Experimental legacy OAuth `silentSignIn` mediation across official-GMS workers; requires silent auth and its existing guards |
 | `WESTLAKE_GOOGLE_IDENTITY_SERVICE_COMPAT=1` | On pinned GMS 244034029, add identity services 212 and 213 to its local uncertified-service exceptions before main-process application bind |
 | `WESTLAKE_GOOGLE_POLICY_TRACE=1` | With private logs, trace fixed policy categories and service-callback stacks; callback tracing also requires Play tracing |
 
@@ -83,6 +84,23 @@ a newer Google value is preserved. Carry the journal with the package data acros
 GMS versions or unreadable/malformed configuration with this feature active withhold application bind.
 A later live Google flag refresh can replace the startup adaptation; this is a pinned experiment,
 not an update-resilient compatibility guarantee. Token authorization and provider grants are unchanged.
+
+The asynchronous switch is also off by default. A verified original-app request to
+the pinned `ISignInService` transaction 101 records its callback, requested scopes,
+optional account, signer and saved-selection epoch. Official GMS's worker processes
+can request an OAuth token only while a matching request remains live, for at most
+100 seconds. Callback completion, caller death, timeout and a changed epoch deny
+further reads. The provider independently checks its scope grant and the request's
+liveness before and after the HTTP exchange. The adapter does not replace Google's
+callback status or account payload.
+
+This experiment matches pending requests by verified owner, signer, account and
+requested scopes; it does not propagate a unique operation identifier through every
+GMS executor. More than one eligible match is refused. It relies on the pinned
+official GMS implementation for its internal request routing. ID-token, server-code,
+hosted-domain and extension variants are unsupported by this asynchronous route.
+The live Wattpad SDK-expiry observations and remaining isolation/lifecycle gaps are
+recorded in [the full validation report](google-two-path-full-validation.md).
 
 ## Limits
 

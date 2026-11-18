@@ -211,6 +211,18 @@ public final class RemoteActivities {
         return false;
     }
 
+    /** A package-specific query can use a selection made by its own live account picker. */
+    public static boolean hasSelectedAccountForCaller(Account account, String packageName) {
+        synchronized (INCOMING) {
+            for (Incoming request : INCOMING) {
+                if (!request.done.get() && request.caller.getPackageName().equals(packageName)
+                        && (SocketBinder.callingPeer() == null || SocketBinder.isCallingPeer(request.callback))
+                        && GoogleAuthProxy.selectedInteractiveAccount(account, packageName)) return true;
+            }
+            return false;
+        }
+    }
+
     /** Only same-app channel callers reach this entry, or the official UI's own AccountManager. */
     static String readDelegatedAuth(String method, Account account, String input) {
         if (!GoogleAuthDelegation.enabled()) return null;
@@ -360,14 +372,27 @@ public final class RemoteActivities {
                 synchronized (INCOMING) { INCOMING.remove(this); }
                 synchronized (tokens) {
                     if (result == Activity.RESULT_OK && notify && GoogleAuthOperations.enabled()
-                            && "com.google.android.gms".equals(targetPackage)
-                            && "com.google.android.gms.auth.api.credentials.assistedsignin.ui.GoogleSignInActivity".equals(targetActivity)
+                            && (adapter.core.GoogleAuthSessions.selectionActivity(targetPackage, targetActivity, false)
+                                || adapter.core.GoogleAuthSessions.selectionActivity(targetPackage, targetActivity, true))
                             && SystemClock.elapsedRealtime() < authDeadline && callback.isBinderAlive()) {
+                        java.util.Map<Account, List<String>> oauth = new java.util.HashMap<>();
                         for (Issued issued : tokens.values()) try {
                             GoogleAuthDelegationPolicy request = GoogleAuthDelegationPolicy.parse(issued.providerKey);
-                            if (request.clientId != null && !request.serverCode && issued.result.getString("token") != null
-                                    && GoogleAuthProxy.selectedInteractiveAccount(issued.account, caller.getPackageName()))
+                            if (issued.result.getString("token") == null
+                                    || !GoogleAuthProxy.selectedInteractiveAccount(issued.account, caller.getPackageName())) continue;
+                            if (request.clientId != null && !request.serverCode
+                                    && adapter.core.GoogleAuthSessions.selectionActivity(targetPackage, targetActivity, false))
                                 GoogleAuthOperations.remember(origin, issued.account, issued.providerKey, authEpoch);
+                            else if (request.clientId == null
+                                    && adapter.core.GoogleAuthSessions.selectionActivity(targetPackage, targetActivity, true)) {
+                                adapter.core.GoogleAuthSessions.requireReusable(request);
+                                oauth.computeIfAbsent(issued.account, ignored -> new ArrayList<>()).add(issued.providerKey);
+                            }
+                        } catch (Exception error) {
+                            GoogleAuthDelegation.event("session_grant_denied=true " + GoogleAuthDelegation.failure(error));
+                        }
+                        for (java.util.Map.Entry<Account, List<String>> entry : oauth.entrySet()) try {
+                            GoogleAuthOperations.rememberOAuth(origin, entry.getKey(), entry.getValue(), authEpoch);
                         } catch (Exception error) {
                             GoogleAuthDelegation.event("session_grant_denied=true " + GoogleAuthDelegation.failure(error));
                         }

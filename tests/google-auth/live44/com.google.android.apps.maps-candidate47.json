@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "package": "com.google.android.apps.maps",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "manifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "apkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+  "observation": {
+    "status": "blocked_startup",
+    "processAlive": true,
+    "usableScreenRendered": false,
+    "googleSignInAttempted": false,
+    "mapTilesTested": false,
+    "searchTested": false,
+    "locationTested": false,
+    "navigationTested": false,
+    "explanation": "Maps remains alive with a black window and no relayout marker in the observed startup interval. An ART SIGQUIT dump shows the UI looper waiting in FutureTask.get through obfuscated Maps startup code. GMS service40 returns status0; no authentication rejection was established. The unresolved future dependency prevents account, map search and navigation validation. GNSS is disabled in this authentication configuration, and the runtime also reports that OH has not granted host location."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 0,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "exceptionTypes": [
+      "java.lang.NoSuchFieldException",
+      "java.lang.RuntimeException"
+    ],
+    "requestedServiceIds": [
+      40
+    ],
+    "callbackStatusCounts": {
+      "0": 1
+    },
+    "callbackStatusesByApproximateService": {
+      "40": [
+        0
+      ]
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 0,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "serviceAttribution": "Process-global approximate attribution, not causal proof; status0 is a broker connection only.",
+  "nativeArtifactsRebuilt": false,
+  "fullApplicationAcceptance": false,
+  "rawLogsAndScreenshotsPublic": false,
+  "startupThreadDump": {
+    "method": "SIGQUIT with ART Signal Catcher verified present; exact client identity checked",
+    "processSurvived": true,
+    "mainLooperStack": [
+      "jdk.internal.misc.Unsafe.park",
+      "java.util.concurrent.locks.LockSupport.park",
+      "java.util.concurrent.FutureTask.awaitDone",
+      "java.util.concurrent.FutureTask.get",
+      "a.q",
+      "bzyn.I",
+      "akjk.e",
+      "bcof.b",
+      "azsk.g",
+      "apee.e",
+      "ay.run",
+      "android.os.Looper.loop",
+      "android.app.ActivityThread.main"
+    ],
+    "underlyingDependencyIdentified": false,
+    "permanentDeadlockProven": false
+  }
+}

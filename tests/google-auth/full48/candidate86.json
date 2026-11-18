@@ -1,0 +1,235 @@
+{
+  "candidate": 86,
+  "baseline": "e82c0e6cae5d9c2767a7e8ffe5aee2e2e062a7e7",
+  "phase": "Open the existing Drive file in the original APK and compare YouTube with offline decoding on the same board",
+  "drive": {
+    "originalApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "fixture": {
+      "name": "Westlake-Drive-validation.txt",
+      "bytes": 107,
+      "sha256": "bb1aaa517e9c48bea77f4102e386e2968b3c087b87873689c6c87c647600f4aa",
+      "previousDriveApiReadHttpStatus": 200,
+      "savedReadBackMatchesApprovedText": true,
+      "filesUploadedThisRetest": 0
+    },
+    "openMethod": "Choose the original Drive APK for the existing file’s HTTPS link",
+    "activityEntered": "com.google.android.apps.docs.common.openurl.DriveOpenUrlActivityAlias",
+    "entries": 1,
+    "screenAtSeconds": 88,
+    "appAlive": true,
+    "screen": "System bars over a black client surface. Neither the file name nor its contents appeared.",
+    "clientLogSample": {
+      "ageSeconds": 87,
+      "client": {
+        "client_account_token_request=true": 23,
+        "client_account_token_failed=true": 23,
+        "client_account_token=true": 0,
+        "BadAuthentication": 23
+      }
+    },
+    "accountScopeChanges": 0,
+    "previouslyIdentifiedExtraReturnedScope": "drive.labels.readonly",
+    "causeOfEachFailedCallbackKnown": false,
+    "originalAppFileOpenPassed": false
+  },
+  "offlineMediaControl": {
+    "package": "org.westlake.probe.media",
+    "harnessRevision": "d4c61012b4a71a46c12ed79ac9f4477f70d8400d",
+    "manifestRevision": "270452cf18c38016f5be2b49795795f8948f3132",
+    "manifestLockKey": "media-contracts-probe",
+    "rebuiltApkSha256": "b21b68df30f38d36d3f35def2e885f2e158844ce8a41aa5ce2d6f92bcf8f14c9",
+    "inputs": "Bundled one-second MP4 files, 160x120 H.264 with AAC and 320x240 H.264. The probe stops frame tests after three frames.",
+    "baselineChecksPassed": 9,
+    "matchedChecksPassed": 9,
+    "matchedProcessFileSha256": {
+      "fw/adapter-runtime-bcp.jar": "80d27bb763d40e15cba2f803c321a4e65c0a88bd887ad860ecee0bfe1bdc81b5",
+      "fw/framework.jar": "558dfeda56f96821c8139a2120dcb3971b62d76458beaff23a36423b989325fc",
+      "libwl_missing_natives.so": "44e11a5f518c3811bce63058a9af2bfe5bc65de8616ee3f41a834b40000115d7",
+      "liboh_adapter_bridge.so": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+      "libmedia_jni.so": "f394360144069bf6bd08d702f4bdadcd8a77883cf0854c1608bb6eba56c366d9",
+      "libmediandk.so": "028c673cdea2a44004eeaedf1ed77efe031c5e6e77be4e786eb4fd2eca676628",
+      "boot/boot-framework.art": "ff1d7caa5cb57d61edaf4cfdcbfb90a2293adc3f73629c5f923d595ca41f477a"
+    },
+    "checks": {
+      "jni:android.media.MediaMetadataRetriever": {
+        "result": "PASS",
+        "detail": "duration=1000ms mime=video/mp4 frame=160x120"
+      },
+      "jni:android.media.MediaExtractor": {
+        "result": "PASS",
+        "detail": "tracks=2 (video/avc,audio/mp4a-latm) firstSample=3107B"
+      },
+      "jni:android.media.MediaCodec": {
+        "result": "PASS",
+        "detail": "decoder=OH.video.avc.decoder configured and started, input buffer 0"
+      },
+      "media:decode-file": {
+        "result": "PASS",
+        "detail": "decoder=OH.video.avc.decoder frames=3"
+      },
+      "media:decode-hw": {
+        "result": "PASS",
+        "detail": "decoder=OH.video.avc.decoder frames=3"
+      },
+      "media:decode-surface": {
+        "result": "PASS",
+        "detail": "decoder=OH.video.avc.decoder frames=3 frameAvailable"
+      },
+      "jni:android.media.ImageReader": {
+        "result": "PASS",
+        "detail": "decoder=OH.video.avc.decoder frames=3 image 320x240 planes=3 yStride=320 uvPixelStride=2 meanY=125"
+      },
+      "jni:android.media.AudioTrack": {
+        "result": "PASS",
+        "detail": "minBuffer=9600B wrote=9600 samples"
+      },
+      "media:decode-audio": {
+        "result": "PASS",
+        "detail": "decoder=OH.audio.aac.decoder pcm=100352 48000 Hz 1 ch"
+      }
+    },
+    "adapterEvents": {
+      "VIDEOCODEC": {
+        "offeredFormats": [
+          "video/avc",
+          "video/hevc"
+        ],
+        "capabilityQueries": 2,
+        "configureCalls": 5,
+        "startMarkers": 5,
+        "streamFormatCallbacks": 4
+      },
+      "AUDIOCODEC": {
+        "offeredFormats": [
+          "audio/3gpp",
+          "audio/amr-wb",
+          "audio/flac",
+          "audio/mp4a-latm",
+          "audio/vorbis"
+        ],
+        "capabilityQueries": 5,
+        "configureCalls": 1,
+        "startMarkers": 1,
+        "streamFormatCallbacks": 0
+      }
+    },
+    "audioTrackInput": "silence",
+    "speakerAudibilityTested": false
+  },
+  "originalYouTube": {
+    "version": "21.43.523",
+    "apkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+    "priorPlayerRetry": {
+      "title": "Me at the zoo",
+      "attemptsReportingPlayerError": 2,
+      "mainProcessAdapterEvents": {
+        "VIDEOCODEC": {
+          "offeredFormats": [
+            "video/avc",
+            "video/hevc"
+          ],
+          "capabilityQueries": 2,
+          "configureCalls": 0,
+          "startMarkers": 0,
+          "streamFormatCallbacks": 0
+        },
+        "AUDIOCODEC": {
+          "offeredFormats": [
+            "audio/3gpp",
+            "audio/amr-wb",
+            "audio/flac",
+            "audio/mp4a-latm",
+            "audio/vorbis"
+          ],
+          "capabilityQueries": 5,
+          "configureCalls": 0,
+          "startMarkers": 0,
+          "streamFormatCallbacks": 0
+        }
+      },
+      "countsSpanBothAttempts": true
+    },
+    "secondPublicLink": {
+      "title": "Big Buck Bunny",
+      "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+      "verifiedUriDeliveries": [
+        {
+          "activity": "UrlActivity",
+          "action": "android.intent.action.VIEW",
+          "matchesPublicVideo": true,
+          "noIntentData": false,
+          "extrasCount": 0
+        },
+        {
+          "activity": "InternalMainActivity",
+          "action": "android.intent.action.VIEW",
+          "matchesPublicVideo": true,
+          "noIntentData": false,
+          "extrasCount": 3
+        },
+        {
+          "activity": "InternalMainActivity",
+          "action": "android.intent.action.VIEW",
+          "matchesPublicVideo": true,
+          "noIntentData": false,
+          "extrasCount": 3
+        }
+      ],
+      "signInErrorShown": true,
+      "searchQuery": "Big Buck Bunny",
+      "finalSearchScreen": "The connection to the server timed out",
+      "processAgeAtFinalCaptureSeconds": 340,
+      "watchPageObserved": false,
+      "playerStarted": false
+    },
+    "platformDecoderSelectionKnown": false,
+    "audioOrMovingVideoObserved": false,
+    "limitations": "The APK also includes private codecs. The main-process adapter events do not establish which codec, stream or backend step caused the player error."
+  },
+  "openHarmonyDecoderQuery": {
+    "byMime": {
+      "video/avc": {
+        "default": "OMX.sprd.h264.decoder",
+        "hardware": "OMX.sprd.h264.decoder",
+        "software": "OH.Media.Codec.Decoder.Video.AVC"
+      },
+      "video/hevc": {
+        "default": "OMX.sprd.hevc.decoder",
+        "hardware": "OMX.sprd.hevc.decoder",
+        "software": "-"
+      },
+      "video/x-vnd.on2.vp8": {
+        "default": "-",
+        "hardware": "-",
+        "software": "-"
+      },
+      "video/x-vnd.on2.vp9": {
+        "default": "-",
+        "hardware": "-",
+        "software": "-"
+      },
+      "video/av01": {
+        "default": "-",
+        "hardware": "-",
+        "software": "-"
+      },
+      "audio/mp4a-latm": {
+        "default": "OH.Media.Codec.Decoder.Audio.AAC",
+        "hardware": "-",
+        "software": "OH.Media.Codec.Decoder.Audio.AAC"
+      },
+      "audio/opus": {
+        "default": "-",
+        "hardware": "-",
+        "software": "-"
+      },
+      "audio/vorbis": {
+        "default": "OH.Media.Codec.Decoder.Audio.Vorbis",
+        "hardware": "-",
+        "software": "OH.Media.Codec.Decoder.Audio.Vorbis"
+      }
+    },
+    "scope": "Native registry response to these literal MIME strings on this board. A dash means no decoder returned for that query."
+  },
+  "goalComplete": false
+}

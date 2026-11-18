@@ -1,0 +1,101 @@
+{
+  "candidate": 73,
+  "phase": "Live favorite synchronization and restoration in a retained FotMob Facebook session",
+  "baseCommit": "98bd7a572c9c43550c05ab4e76039aa09c97ac6d",
+  "newImplementationChange": false,
+  "rebuiltArtifacts": false,
+  "app": {
+    "package": "com.mobilefootie.wc2010",
+    "originalApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+    "originalApkModified": false,
+    "loginProvider": "facebook",
+    "freshLoginPerformedInThisCandidate": false,
+    "loginAndAuthenticatedReturnBaseline": "candidate47",
+    "savedSdkTokenPresentAndLocallyUnexpired": true,
+    "storedAccountIdMatchesSdkAccountId": true
+  },
+  "artifacts": {
+    "clientJavaAdapter": 71,
+    "nativeAndroidRuntime": 70,
+    "officialGmsJavaAdapter": 71,
+    "microgJavaAdapter": 59,
+    "nativeShimSha256": "3d6375f177816c403038b026e4656bd75605b9ac5e8ed51c9bac333f9fd4b0a7"
+  },
+  "outgoingSync": {
+    "beforeRemoteTeamCount": 1,
+    "originalAppFollowButtonUsed": true,
+    "afterRemoteTeamCount": 2,
+    "addedTeamMatchesSelectedTeam": true,
+    "hostSentDatasetWrites": false,
+    "serverReadsWereIndependentHostDiagnostics": true
+  },
+  "readControl": {
+    "correctDatasetKeyDerivedFromOriginalApk": true,
+    "realTokenHttpStatus": 200,
+    "invalidTokenHttpStatus": 200,
+    "bodiesIdentical": true,
+    "credentialAcceptanceProvenByGetResponse": false,
+    "scope": "Only the authorized test account dataset was queried; no other account was probed"
+  },
+  "restoration": {
+    "clientStoppedBeforeReset": true,
+    "originalFavoriteFilesAndCacheBackedUp": true,
+    "removedLocalFiles": [
+      "FAVORITE_TEAMS_JSON",
+      "FAVORITE_TEAMS_ORDER_JSON",
+      "SYNC_FILE_ETAG_PER_TYPE_SYNC_TYPE_TEAM"
+    ],
+    "incomingDatasetFileAbsentBeforeRestart": true,
+    "applicationCacheRecreatedEmpty": true,
+    "protectedLoginFileCount": 4,
+    "protectedLoginFilesUnchangedByReset": true,
+    "protectedLoginFilesUnchangedAfterRestart": false,
+    "freshClientProcess": true,
+    "incomingDatasetBytes": 134,
+    "incomingDatasetByteIdenticalToIndependentServerRead": true,
+    "restoredFavoriteCount": 2,
+    "originalAppDisplaysBothRestoredFavorites": true,
+    "cloudRoundTripPassed": true,
+    "newCredentialsEntered": false,
+    "unchangedSdkPreferenceFileCountAfterRestart": 3,
+    "onlyChangedPreferenceKeyAfterRestart": "app_launch_count",
+    "preRestartPreferenceHashReproducedByDecrementingLaunchCount": true,
+    "loginFieldsUnchangedAfterRestart": true
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": true,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "clientApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408"
+  },
+  "limitations": {
+    "freshFacebookLoginOnThisExactBuild": false,
+    "facebookServerTokenExpiryOrRenewal": false,
+    "googleTokenDelegationRetested": false,
+    "googleFavoriteCloudRoundTripRetested": false,
+    "generalWindowRoutingPassed": false,
+    "fullApplicationPassed": false,
+    "allPlannedApplicationsPassed": false
+  },
+  "remaining": [
+    "Retest FotMob Google cloud preferences and renewal on the repaired runtime",
+    "Fresh Facebook login on the exact current build and token-expiry behavior",
+    "Other Google and Facebook applications from the validation plan",
+    "Intermittent black display and popup/input routing",
+    "Production isolation and concurrent callers",
+    "Temporary favorite markers retained for continued validation; cleanup remains pending"
+  ]
+}

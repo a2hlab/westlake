@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "package": "com.spotify.music",
+  "track": "facebook",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "apkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+  "observation": {
+    "status": "blocked_startup",
+    "launchAttempted": true,
+    "webLoginRendered": false,
+    "credentialsSubmitted": false,
+    "authenticatedReturn": false,
+    "fullApplicationAcceptance": false,
+    "explanation": "Candidate47 Facebook follow-up remains at a black screen before reaching the Spotify login UI. Process survives; no relayout or GMS request marker in the captured interval. ART dump places the UI looper in obfuscated Spotify startup code. This follow-up did not reach Facebook; it does not overturn the separately observed candidate43 Google service91 refusal. Underlying startup wait remains unresolved."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 8,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 0,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "uiThreadJavaFrames": [
+    "p.pqw.f",
+    "p.nto0.run",
+    "android.os.Handler.handleCallback",
+    "android.os.Handler.dispatchMessage",
+    "android.os.Looper.loopOnce",
+    "android.os.Looper.loop",
+    "android.app.ActivityThread.main"
+  ],
+  "rawLogsAndScreenshotsPublic": false
+}

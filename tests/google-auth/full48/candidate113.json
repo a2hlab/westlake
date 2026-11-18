@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "candidate": 113,
+  "date": "2026-11-17",
+  "change": "Snapshot the enrollment options, feature list and Binder caller identity on the transaction thread before binding the authenticator.",
+  "boardFixture": {
+    "source": "tests/parity/AccountEnrollmentDispatchProbe.java",
+    "probeJarSha256": "9415bc4631bce3d23ed70b2561bb07cf5d49e48112d31a003b0897bb8b3468d0",
+    "accountType": "org.westlake.test.account",
+    "accountProvidersContacted": false,
+    "entryPoints": [
+      "IAccountManager.addAccount",
+      "IAccountManager.addAccountAsUser"
+    ],
+    "inProcess": {
+      "inputChangedBetweenRequestAndBindCompletion": true,
+      "before": "Original marker or features were lost. Exit 1.",
+      "after": "Both methods delivered the submitted values and process identity. Exit 0."
+    },
+    "crossProcess": {
+      "distinctLinuxUids": true,
+      "expectedPid": "Peer PID from the Unix socket, matched to the test child launched by the harness.",
+      "expectedUid": "Effective UID from the kernel for that peer PID.",
+      "before": "The enrollment options did not match the verified client identity. The server assertion failed on the first enrollment.",
+      "after": "Both enrollment methods delivered the client UID and PID. Both callbacks reached the client. Client and server exited 0."
+    }
+  },
+  "build": {
+    "previousBoardAdapterDexSha256": "2dc4dd927fa37089f6cb3f48208d6d306e105b603e743fe5744643becd6f5e3a",
+    "updatedBoardAdapterDexSha256": "369e25814ff1663bba63c3ca6cd4f3d5e39d2ef90e9128cd0f35da4a6194ac9c",
+    "updatedPreloadFilesVerified": 469
+  },
+  "originalAppRetest": {
+    "configuration": "Official Play services and Play Store with the existing app data, enforced peer checks and no delegated account provider.",
+    "baseApkSha256": {
+      "com.google.android.gms": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+      "com.android.vending": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272"
+    },
+    "updatedServiceFrameworkFiles": 13,
+    "oldFrameworkRollbackVerified": true,
+    "attempts": [
+      {
+        "store": "Retained process after restarting Play services",
+        "visibleEntry": "Blue Sign in button on the original Store welcome screen",
+        "result": "Store exited with a dead account-service connection."
+      },
+      {
+        "store": "Fresh process of the same original Store, after restarting the official service",
+        "visibleEntry": "Blue Sign in button on the original Store welcome screen",
+        "result": "Store exited. Its exception included DeadObjectException during IAccountManager.addAccount."
+      }
+    ],
+    "serviceCrash": {
+      "observedInOldAndUpdatedFramework": true,
+      "originalProcess": "com.google.android.gms",
+      "message": "lateinit property droidGuardHandle has not been initialized",
+      "source": "AndroidRuntime fatal exception in the Google service background worker."
+    },
+    "interpretation": "The logs establish a local service crash. They do not establish its underlying cause or a Google backend registration or certification verdict. The cold-start attempts did not reach the previously recorded Google activity redirect.",
+    "credentialEntryObserved": false,
+    "signInCompleted": false
+  },
+  "mail": {
+    "lastVerifiedAt": "2026-11-17T22:54:37-08:00",
+    "focusedApp": "com.google.android.gm",
+    "screen": "Set up email",
+    "testMessageObserved": false,
+    "serverDeliveryVerified": false
+  }
+}

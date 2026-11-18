@@ -1,0 +1,99 @@
+{
+  "candidate": 71,
+  "phase": "Bounded parsing of Gmail native OAuth scope requests; authorization remains denied",
+  "baseCommit": "e11776f4bd11c0d5010a8b05b46cd8f9dd5d3b0c",
+  "implementation": {
+    "completeKeyMaxCharacters": 4096,
+    "oldSilentServiceMaxCharacters": 512,
+    "newSilentServiceMaxCharacters": 4096,
+    "combinedKeyBoundStillEnforced": true,
+    "ordinaryOAuthSingleTrailingAsciiSpaceAccepted": true,
+    "providerServiceStringPreserved": true,
+    "leadingRepeatedAndNonAsciiWhitespaceRejected": true,
+    "duplicateScopesRejected": true,
+    "serverCodeTrailingWhitespaceStillRejected": true,
+    "authorizationOrGrantAdded": false,
+    "boundaryDiagnosticsUseFixedPublicScopeCategories": true
+  },
+  "originalGmailLiteral": {
+    "scopeCount": 14,
+    "serviceCharacters": 646,
+    "trailingAsciiSpaces": 1
+  },
+  "hostTests": {
+    "policyChecks": 16,
+    "delegationPolicyChecks": 50,
+    "idTokenSessionChecks": 23,
+    "oauthSessionChecks": 50,
+    "identityClaimsChecks": 17,
+    "asyncLeaseChecks": 19,
+    "boundaryTraceTestPassed": true,
+    "allPassed": true,
+    "oldSourceNegativeControl": "Fails at new trailing-delimiter case with scope syntax"
+  },
+  "build": {
+    "javaSources": 140,
+    "javaClasses": 293,
+    "javaCompilationPassed": true,
+    "runtimePackagingPassed": true,
+    "bootImageBuildPassed": true,
+    "adapterSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "sourceSha256": {
+      "framework/activity/java/GoogleAuthOperations.java": "6994453fef521d13a6226bf8eedc42e429bffb2789da2d49464899092cd834d8",
+      "framework/core/java/GoogleAuthDelegationPolicy.java": "f475ed39099594619a27332304b3087e0a4ad46b1e2826a482acc6628a85d659",
+      "framework/core/java/GoogleAuthBoundaryTrace.java": "48a7ff6307235a5a11ea58f342dd01dbec9c17729ed4fea393ee4f3a8de2f9a4"
+    },
+    "nativeRebuilt": false,
+    "standalonePreloadRun": false
+  },
+  "board": {
+    "officialGmsAdapter": 71,
+    "providerAdapter": 59,
+    "gmailAdapter": "70b",
+    "gmailNativeRuntime": 70,
+    "originalApksRetained": true,
+    "officialGmsAndGmailRestarted": true,
+    "microgRestarted": false,
+    "startupOAuthRequestsAcceptedIntoMediation": 3,
+    "startupOAuthReadsDenied": 3,
+    "startupKnownScopeCategoriesInLongRequest": 14,
+    "startupUnknownScopesInLongRequest": 0,
+    "startupEmptyScopeSegmentsInLongRequest": 1,
+    "afterSyncTap": {
+      "longOAuthRequestsAcceptedIntoMediation": 1,
+      "oauthReadsDenied": 1,
+      "oauthTokensIssued": 0,
+      "cutoffBasis": "Board clock whole second before isolated input; shared-host time correlation, not exclusive causality"
+    },
+    "gmsCodeApksVerified": 9,
+    "gmsBaseAndConfigurationApkLoads": 3,
+    "mailboxSynced": false,
+    "fullApplicationPassed": false
+  },
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerGrantMatchesConfiguredHash": true,
+    "providerAccountStoreByteIdentical": true,
+    "providerAccountCount": 1,
+    "providerNumericAccountIdCount": 1,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true,
+    "officialGmsAdapterJarSha256": "4b6b21a428cd4a115a2562fc7f3ef92635680f655bfe684952e9b84250abfec5",
+    "providerAdapterJarSha256": "c90333fe1a68ecfbe4205d8ab6336b667c625d31170305bc7be5daf2216a1b5e",
+    "clientAdapterJarSha256": "199244cd3014c3a9fe8171838a9ec54e949be649a8a7f0d550198b2a0d44faee",
+    "clientApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a"
+  },
+  "remaining": [
+    "Gmail OAuth scope approval is pending; no Gmail OAuth or account-ID grant added",
+    "Native account selection and scoped consent must be supported without inventing a successful Google Sign-In session",
+    "Gmail requires GMS 250200000; actual installed version remains 244034029",
+    "Unadapted service status-9 responses remain; shared-host numeric attribution is approximate",
+    "No full application acceptance, server-token expiry or production isolation established"
+  ]
+}

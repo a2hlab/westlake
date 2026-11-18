@@ -1,0 +1,155 @@
+{
+  "schema": 1,
+  "candidate": 123,
+  "date": "2026-11-18",
+  "previous": "candidate122.json",
+  "scope": "Locate where the retained original Gmail app produces its gmail-ls database error during an ordinary sync-settings operation.",
+  "baseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "productionFrameworkJarSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+  "adapterJarSha256": "a8ace2b26d13be67b452359f40da225a2580569079b36521dd04565d112b8fa9",
+  "firstObservation": {
+    "frameworkJarSha256": "06025aff4fd8dab4516f7dac657606ddcfe9b5932d6921707618ec13270c3c64",
+    "bootFrameworkOatSha256": "91ca032a5c24c15c1df19cfaf68904bbc934ba54d3bf3b7e101f755987cb4538",
+    "frameworkPreloadPassed": true,
+    "resultAtDispatchBoundary": {
+      "providerAcquired": 1,
+      "providerMissing": 0,
+      "securityDuringApp": 0,
+      "securityDuringAcquire": 0,
+      "returnedFromAppWithError": 1,
+      "returnedFromAppWithoutError": 0,
+      "databaseResult": 1,
+      "adapterCompletion": 1,
+      "resultSuccess": 0
+    },
+    "originalUiEnablePersisted": true,
+    "schedulerEventDelta": {
+      "requests": 1,
+      "starts": 1,
+      "finishes": 1,
+      "authError": 0,
+      "ioError": 0,
+      "timeouts": 0,
+      "officialAuthRequest": 0,
+      "officialAuthReply": 0
+    },
+    "productionFilesRestoredAndVerified": 10,
+    "primaryVisibleAfterRestoration": true,
+    "visibleRowsMatchedPretestInbox": true,
+    "listenersAfterRestoration": {
+      "microG": 1,
+      "officialGms": 1,
+      "store": 1
+    }
+  },
+  "apkInspection": {
+    "baseDexFiles": 10,
+    "configurationSplitsWithDex": 0,
+    "directBytecodeWritesToSyncResultDatabaseError": 4,
+    "oneWriterCatches": "android.database.SQLException",
+    "declaredProvider": "com.google.android.gm.provider.MailProvider",
+    "syncAdapterService": "com.google.android.gm.provider.MailSyncAdapterService"
+  },
+  "interpretation": "The framework acquired the declared mailbox provider. Gmail’s own onPerformSync returned with databaseError already set. The framework did not convert a missing provider or a caught SecurityException into this result.",
+  "limits": [
+    "The provider handle does not establish a successful SQL operation or backend request.",
+    "Opening the retained inbox does not demonstrate delivery of the sender-confirmed message.",
+    "A code path found in the APK is identified as executed only when a live observation supports that conclusion.",
+    "The previous zero count for the opt-in official account request event was collected with that diagnostic disabled and cannot establish absence of an authentication call."
+  ],
+  "secondObservation": {
+    "frameworkJarSha256": "045fce5d08436df6eb04017770e0bf3d064fd2f94f12e22dc1cd6505c31c5603",
+    "bootFrameworkOatSha256": "b9b35d8ec7871ac6929ded916562359b9121f0e14948b1df0ed7a71aea412a33",
+    "frameworkPreloadPassed": true,
+    "resultAtDispatchBoundary": {
+      "providerAcquired": 1,
+      "providerMissing": 0,
+      "securityDuringApp": 0,
+      "securityDuringAcquire": 0,
+      "returnedFromAppWithError": 1,
+      "returnedFromAppWithoutError": 0,
+      "databaseResult": 1,
+      "adapterCompletion": 1,
+      "resultSuccess": 0
+    },
+    "originalUiEnablePersisted": true,
+    "schedulerEventDelta": {
+      "requests": 1,
+      "starts": 1,
+      "finishes": 1,
+      "authError": 0,
+      "ioError": 0,
+      "timeouts": 0,
+      "officialAuthRequest": 0,
+      "officialAuthReply": 0
+    },
+    "productionFilesRestoredAndVerified": 10,
+    "primaryVisibleAfterRestoration": true,
+    "visibleRowsMatchedPretestInbox": true,
+    "listenersAfterRestoration": {
+      "microG": 1,
+      "officialGms": 1,
+      "store": 1
+    }
+  },
+  "methodObservation": {
+    "formatVersion": 3,
+    "methodEvents": 830948,
+    "bufferOverflow": false,
+    "originalSyncDelegateEntered": true,
+    "recoverableAuthExceptionConstructionsOnWorker": 1,
+    "clientOperationFromApk": "getTokenWithDetails",
+    "recoveryIntentRequiredAtObservedFactory": true,
+    "specificDatabaseErrorWriterEstablished": false,
+    "exceptionShownToUserEstablished": false,
+    "documentation": "A second run traced Android method entries during the original Gmail callback. Gmail entered its main sync delegate. During that interval, a worker reached the Google Auth client’s recovery-exception factory through getTokenWithDetails. The APK calls this factory only on a branch with a recovery Intent. The trace did not identify which field write produced the final database flag or prove that the recovery UI was displayed."
+  },
+  "releaseFrameworkAuthObservation": {
+    "stockFramework": true,
+    "releaseFrameworkJarSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+    "clientConfiguration": {
+      "serviceListenerCounts": {
+        "microG": 1,
+        "officialGms": 1,
+        "store": 1
+      },
+      "fourRoleUids": true,
+      "clientConnectsPrivateAccountProvider": true,
+      "clientConnectsOfficialPlayServices": true,
+      "clientConnectsPlayStore": true,
+      "tokenFingerprintEnabled": false
+    },
+    "operation": "IAuthManagerService.getTokenWithDetails client path",
+    "recordedInterfaceTransaction": 5,
+    "officialRepliesBetweenMailboxJobStartAndCompletion": {
+      "replyCount": 1,
+      "categories": {
+        "statusBadAuthentication": 1,
+        "withRecovery": 1
+      }
+    },
+    "wholeSettingsProcessAsSeparateWindow": {
+      "replyCount": 8,
+      "categories": {
+        "statusBadAuthentication": 8,
+        "withRecovery": 6,
+        "withoutRecovery": 2
+      }
+    },
+    "observedFinalSyncFlag": "X1b1",
+    "genericAuthCounterIncrement": 0,
+    "syncRequests": 1,
+    "syncStarts": 1,
+    "syncCompletions": 1,
+    "successfulJobs": 0,
+    "timedOutJobs": 0,
+    "fingerprintCollectionEnabled": false,
+    "additionalConsentRequestedOrGrantedByTest": false,
+    "originalLauncherConfigurationRestored": true,
+    "automaticSyncEnabledAtEnd": true,
+    "finalInboxRowsMatchedPretestBaseline": true,
+    "visibleRecoveryControls": [],
+    "knownRecoveryLabelsChecked": 10,
+    "documentation": "On a third run, the release framework recorded one official authentication reply between the start and completion of the mailbox job. Its status was `BadAuthentication` and it carried a recovery Intent. The app reported the database flag again. The status alone does not identify the reason for rejection, and it does not establish whether Google rejected the device or the account. The earlier zero count for account-token requests came from a separately gated diagnostic and cannot rule out this direct call. On returning to Gmail, a foreground screenshot of Primary showed none of the ten recovery labels checked. The recovery flow has not been completed."
+  }
+}

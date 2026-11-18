@@ -1,0 +1,98 @@
+{
+  "candidate": 69,
+  "phase": "Diagnose GMS APK asset access in the actual Gmail process",
+  "baseCommit": "8e13f8a302297cab88de62489002a1308ebc24e4",
+  "nativeSha256": "00f7ad974f667623cc722e6f45c89f3f39a712ab51d7f78cf6be1b089fe40348",
+  "diagnostic": {
+    "defaultOff": true,
+    "requiredFlags": [
+      "WESTLAKE_ASSET_DIAGNOSTICS=1",
+      "WESTLAKE_GOOGLE_PRIVATE_LOGS=1"
+    ],
+    "pathSelection": "Only APKs below WESTLAKE_ASSET_DIAGNOSTIC_PREFIX",
+    "maximumSamples": 32,
+    "payload": "Fixed numeric open/ZIP/load metadata; no paths or raw file bytes",
+    "loaderBehaviorChanged": false
+  },
+  "validation": {
+    "nativeBuildPassed": true,
+    "gmailAlive": true,
+    "uncaughtMarkers": 0,
+    "nativeFatalSignalMarkers": 0,
+    "startupSamples": [
+      {
+        "format": 0,
+        "flags": 0,
+        "loaded": 0,
+        "zip_provider": 0,
+        "uid": 20010060,
+        "open_errno": 13,
+        "regular": 0,
+        "bytes": -1,
+        "read_errno": 0,
+        "zip_magic": 0
+      },
+      {
+        "format": 0,
+        "flags": 0,
+        "loaded": 0,
+        "zip_provider": 0,
+        "uid": 20010060,
+        "open_errno": 13,
+        "regular": 0,
+        "bytes": -1,
+        "read_errno": 0,
+        "zip_magic": 0
+      },
+      {
+        "format": 0,
+        "flags": 0,
+        "loaded": 0,
+        "zip_provider": 0,
+        "uid": 20010060,
+        "open_errno": 13,
+        "regular": 0,
+        "bytes": -1,
+        "read_errno": 0,
+        "zip_magic": 0
+      },
+      {
+        "format": 0,
+        "flags": 0,
+        "loaded": 0,
+        "zip_provider": 0,
+        "uid": 20010060,
+        "open_errno": 13,
+        "regular": 0,
+        "bytes": -1,
+        "read_errno": 0,
+        "zip_magic": 0
+      }
+    ],
+    "uidOnlyControlOutsideAppSecurityContextOpenedOriginalApk": true,
+    "uidOnlyControlInClientMountNamespaceOpenedOriginalApk": true,
+    "actualClientNativeOpenErrno": 13,
+    "actualClientZipProviderCreated": false,
+    "fullApplicationPassed": false
+  },
+  "finding": "The actual Gmail process gets EACCES opening the remote GMS package files before ZIP provider creation. A UID-only external control can open the same original base APK, including in the client mount namespace. The failure is context-dependent; a specific SELinux rule is not established.",
+  "next": "Use root-spawner-verified read-only APK descriptors for remote package code; preserve GMS private data. Then address the separate official-GMS version requirement and revalidate authentication routing.",
+  "limitations": [
+    "No package-code access fix deployed in this candidate",
+    "No GMS version override or update",
+    "No Gmail mailbox or full app acceptance",
+    "No Google registration rejection established by this file-open failure"
+  ],
+  "preservation": {
+    "policyStatus": [
+      "3"
+    ],
+    "certificationOverridePresent": false,
+    "identityPreserved": true,
+    "providerGrantsUnchangedSinceGmailAccountView": true,
+    "providerAccountStoreByteIdentical": true,
+    "officialGmsAlive": true,
+    "microgAlive": true,
+    "clientAlive": true
+  }
+}

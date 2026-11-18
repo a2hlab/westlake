@@ -1,0 +1,157 @@
+{
+  "schema": 1,
+  "candidate": 120,
+  "date": "2026-11-18",
+  "previous": "candidate119.json",
+  "gmail": {
+    "package": "com.google.android.gm",
+    "configuration": {
+      "clientOriginalApk": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "retainedLauncherVerified": true,
+      "officialConnectionConfigured": true,
+      "officialMainLive": true,
+      "delegatedAccountConnectionConfigured": false,
+      "previousClientLauncherVerified": true,
+      "previousProviderLauncherVerified": true,
+      "previousAccountConnectionConfigured": true,
+      "oldAuthEndpointInKernelSocketTable": false,
+      "oldEndpointMatchesRecordedService": true,
+      "oldProviderUidHasGoogleProcess": false
+    },
+    "before": [
+      "Getting your messages",
+      "Search in mail"
+    ],
+    "refreshGestureDeliveredToApp": true,
+    "focusedSamplesAfterGesture": [
+      {
+        "seconds": 6.3,
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ],
+        "officialService": true
+      },
+      {
+        "seconds": 18.1,
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ],
+        "officialService": true
+      },
+      {
+        "seconds": 38.5,
+        "labels": [
+          "Getting your messages",
+          "Search in mail"
+        ],
+        "officialService": true
+      }
+    ],
+    "newLocalSyncEventsDuringObservation": {
+      "requests": 0,
+      "starts": 0,
+      "finishes": 0
+    },
+    "testMessageVisible": false,
+    "serverReceipt": "unverified",
+    "interpretation": "The retained client had official services configured. The previously configured account provider was absent. The test measured the client loading screen and local dispatcher. Receipt with both services active remains open."
+  },
+  "spotifyFacebook": {
+    "spotifyApkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+    "spotifyVersion": "9.1.94.1929",
+    "installedFacebook": {
+      "package": "com.facebook.katana",
+      "version": "584.0.0.51.56",
+      "baseSha256": "c5e00114c68e66874d8569acfe98ba55026a865434e303ad928003be2e932c85",
+      "splits": {
+        "config.xxhdpi.apk": "0aed5175cb84fab3cb63c29ca5101258b831ded9cb1a460340a8873d42293275"
+      },
+      "apkSignaturesVerified": true,
+      "dedicatedHostSha256": "39d2c57eef42912035d11ad4163ff2304a73e9def575a493f07562ee206d5cdf",
+      "sharesSpotifyUid": false,
+      "firstLaunchScreen": "Meta terms and privacy policy"
+    },
+    "facebookWasRunningDuringSpotifyTest": true,
+    "observations": [
+      {
+        "secondsAfterFacebookSelection": 35.1,
+        "foregroundOwner": "Spotify",
+        "displayedOrigin": "https://m.facebook.com",
+        "emptyEmailAndPasswordForm": true
+      },
+      {
+        "secondsAfterFacebookSelection": 38.6,
+        "foregroundOwner": "Spotify",
+        "displayedOrigin": "https://m.facebook.com",
+        "emptyEmailAndPasswordForm": true
+      }
+    ],
+    "credentialsSubmitted": false,
+    "authenticatedReturnObserved": false,
+    "causeOfFallback": "unverified",
+    "spotifyBridgeSha256": "2a319bac9318091576dcee7d8d66912e71858ea82c9e17c4308408bc4f0ae9e1"
+  },
+  "openHarmonyWebLink": {
+    "testAction": "ohos.want.action.viewData",
+    "method": "A headless board ART process called ActivityTaskManagerAdapter.nativeStartAbility with an empty bundle and ability, the reserved HTTPS URI, and no caller token. The receiver counted exact matches and WindowManager supplied foreground ownership. A separate native OS start served as the positive control.",
+    "uri": "https://westlake-ui-check.invalid/open",
+    "receiverHapSha256": "122cf36be6368b7516c5d76b1c784c6fae2fc1c58e9af37667e86f934e860b26",
+    "receiverRequestedPermissions": [],
+    "oldBridgeSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+    "fixedBridgeSha256": "d7ec7e0eac1a00e527fb308ccc44803b7c2ec14f6611b3b67601db00a21e3b15",
+    "osControl": {
+      "dispatchResult": "success",
+      "samples": [
+        {
+          "seconds": 1.6,
+          "received": 1,
+          "ownsForeground": true
+        }
+      ]
+    },
+    "before": {
+      "dispatchResult": 0,
+      "samples": [
+        {
+          "seconds": 1.9,
+          "received": 0,
+          "ownsForeground": false
+        },
+        {
+          "seconds": 4.6,
+          "received": 0,
+          "ownsForeground": false
+        },
+        {
+          "seconds": 8.6,
+          "received": 0,
+          "ownsForeground": false
+        }
+      ]
+    },
+    "after": {
+      "dispatchResult": 0,
+      "samples": [
+        {
+          "seconds": 1.6,
+          "received": 1,
+          "ownsForeground": true
+        }
+      ]
+    },
+    "testHandlerRemoved": true,
+    "afterRemoval": {
+      "installedBundlesChecked": 73,
+      "declaredSkillsChecked": 56,
+      "skillsDeclaringHttpOrHttps": 0
+    },
+    "scope": "The receiver was foregrounded through the repaired native dispatcher. Ordinary APK caller permissions, a real external browser login and an authenticated Facebook return are separate tests."
+  },
+  "coverage": {
+    "observed": 21,
+    "partial": 12,
+    "open": 18
+  }
+}

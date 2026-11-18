@@ -1,0 +1,314 @@
+{
+  "schema": 1,
+  "candidate": 131,
+  "date": "2026-11-18",
+  "previous": "candidate130.json",
+  "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "nativeInputBridgeSha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070",
+  "build": {
+    "source": "framework/activity/java/LocalJobs.java",
+    "localJobsSourceSha256": "718ee0183cfcd57ffde29a00fb3fcfa7c4555251235c890d610aa90cfe79a044",
+    "boardAdapterJarSha256": "a8ace2b26d13be67b452359f40da225a2580569079b36521dd04565d112b8fa9",
+    "deploymentAndBuildInputsMatched": true
+  },
+  "setup": {
+    "sameOriginalInboxProcessAcrossStorageComparison": true,
+    "sameRetainedAccountProfile": true,
+    "temporaryFrameworkInstalled": false,
+    "ordinaryAppDomainAndEnforcingSELinux": true,
+    "listenerCountsAfterTest": {
+      "microG": 1,
+      "officialGms": 1,
+      "store": 1
+    },
+    "storageMeasuredFromAppDataFilesystem": true,
+    "sourceJobStorageLowThresholdBytes": 524288000,
+    "thresholdAppliesToJobsRequestingStorageNotLow": true,
+    "cacheCopiesEvicted": 2,
+    "transferCacheBytesFreed": 515342508,
+    "hostOriginalsVerified": true
+  },
+  "inboxWindows": {
+    "low": {
+      "availableBytesBefore": 322146304,
+      "availableBytesAfter": 321740800,
+      "seconds": 62.3,
+      "sameVisiblePrimaryRowsAsBaseline": true,
+      "localEvents": {
+        "syncRequest": 0,
+        "syncStart": 0,
+        "syncFinish": 0,
+        "releaseForwarded": 1,
+        "appTokenRequest": 0,
+        "fatal": 0,
+        "scheduledJobs": 0,
+        "workAdded": 0,
+        "finishedJobs": 0,
+        "startedJobs": 0
+      },
+      "accountProvider": {
+        "lists": 2,
+        "token": 0
+      }
+    },
+    "high-idle": {
+      "availableBytesBefore": 837320704,
+      "availableBytesAfter": 837140480,
+      "seconds": 26.7,
+      "sameVisiblePrimaryRowsAsBaseline": true,
+      "localEvents": {
+        "syncRequest": 0,
+        "syncStart": 0,
+        "syncFinish": 0,
+        "releaseForwarded": 0,
+        "appTokenRequest": 0,
+        "fatal": 0,
+        "scheduledJobs": 0,
+        "workAdded": 0,
+        "finishedJobs": 0,
+        "startedJobs": 0
+      },
+      "accountProvider": {
+        "lists": 1,
+        "token": 0
+      }
+    },
+    "high-first": {
+      "availableBytesBefore": 837103616,
+      "availableBytesAfter": 836706304,
+      "seconds": 61.7,
+      "sameVisiblePrimaryRowsAsBaseline": true,
+      "localEvents": {
+        "syncRequest": 0,
+        "syncStart": 0,
+        "syncFinish": 0,
+        "releaseForwarded": 1,
+        "appTokenRequest": 0,
+        "fatal": 0,
+        "scheduledJobs": 0,
+        "workAdded": 0,
+        "finishedJobs": 0,
+        "startedJobs": 0
+      },
+      "accountProvider": {
+        "lists": 2,
+        "token": 0
+      }
+    },
+    "high-second": {
+      "availableBytesBefore": 836665344,
+      "availableBytesAfter": 836284416,
+      "seconds": 62.1,
+      "sameVisiblePrimaryRowsAsBaseline": true,
+      "localEvents": {
+        "syncRequest": 0,
+        "syncStart": 0,
+        "syncFinish": 0,
+        "releaseForwarded": 1,
+        "appTokenRequest": 0,
+        "fatal": 0,
+        "scheduledJobs": 0,
+        "workAdded": 0,
+        "finishedJobs": 0,
+        "startedJobs": 0
+      },
+      "accountProvider": {
+        "lists": 2,
+        "token": 0
+      }
+    }
+  },
+  "explicitSyncFromOriginalSettings": {
+    "source": "The original Gmail account settings switch was turned off, confirmed in its dialog, and turned back on. Only the existing return-status diagnostic was enabled for this run.",
+    "availableBytesBeforeEnabling": 836255744,
+    "availableBytesAfterJob": 836055040,
+    "jobCounts": {
+      "requests": 1,
+      "starts": 1,
+      "finishes": 1,
+      "cancelled": 0,
+      "timeouts": 0,
+      "initializationUnresolved": 0,
+      "success": 0,
+      "authError": 0,
+      "ioError": 0,
+      "startsInitializing": 0,
+      "changedAuto": 1,
+      "changedSyncable": 0,
+      "officialAuthRequest": 0,
+      "officialAuthReply": 0,
+      "fatal": 0
+    },
+    "officialAuthRepliesDuringMailboxJob": {
+      "replyCount": 1,
+      "categories": {
+        "statusBadAuthentication": 1,
+        "withRecovery": 1
+      }
+    },
+    "observedSamples": [
+      {
+        "sampleSeconds": 1.8,
+        "gmailOwnedFocus": true,
+        "settingsControlsVisible": true,
+        "matchingRecoveryControls": [],
+        "availableBytes": 836190208
+      },
+      {
+        "sampleSeconds": 10.2,
+        "gmailOwnedFocus": true,
+        "settingsControlsVisible": true,
+        "matchingRecoveryControls": [],
+        "availableBytes": 836136960
+      },
+      {
+        "sampleSeconds": 17.6,
+        "gmailOwnedFocus": true,
+        "settingsControlsVisible": true,
+        "matchingRecoveryControls": [],
+        "availableBytes": 836091904
+      }
+    ],
+    "restoredInbox": [
+      {
+        "primary": true,
+        "listMatchesPriorBaseline": true
+      },
+      {
+        "primary": true,
+        "listMatchesPriorBaseline": true
+      }
+    ],
+    "normalAutomaticSyncRestored": true,
+    "recoveryControlsInRestoredInbox": [],
+    "legacyDiagnosticMeaning": "The old label recorded whether the reply bundle had the recovery key. Its value was not checked in this run."
+  },
+  "interpretation": "Increasing free space from 307 MiB to 798 MiB did not change the outcome of pulling to refresh in the same original Gmail process. The visible inbox stayed unchanged and no local mailbox sync began. Re-enabling Sync Gmail in the original settings started the adapter in two runs. Both jobs failed after the official authentication interface returned BadAuthentication. The second run confirmed that the reply contained a non-null Android recovery Intent. Neither job window recorded a remote activity launch or a pending-intent send. New mail delivery remains unverified.",
+  "limits": [
+    "A zero local counter does not exclude a direct network client or other asynchronous work. The ordinary inbox run had no official reply diagnostic enabled.",
+    "The storage result describes these pulls. The local scheduler logged no new job in the measured windows. Existing jobs or unmonitored app work can follow different paths.",
+    "The authentication status does not identify why the service rejected the request. Periodic screen samples cannot rule out a transient prompt.",
+    "Neither visible list comparisons nor the sender confirmation identify the test message at the mail server."
+  ],
+  "typedRecoveryRepeat": {
+    "matchedAdapterSourceInputCount": 144,
+    "onlyChangedAdapterSource": "framework/core/java/SocketBinder.java",
+    "boardAdapterJarSha256": "c4eb2a5d25e052523ee3512ff4b26693cc44ffc3e8b0cf8e40a335e24d441570",
+    "preloadVerifiedFiles": 469,
+    "inputBridgePreserved": true,
+    "diagnosticFixtureApkBuilt": true,
+    "diagnosticFixtureApkSha256": "d0ae069f9ae3401b4d12402bd616ce8898f0e911b1ab7855c2fa9cc090c8a07a",
+    "diagnosticFixtureDeployed": false,
+    "boundaryClassifierHostTest": "passed",
+    "publicSettingsUsed": true,
+    "availableBytesBeforeEnabling": 772308992,
+    "availableBytesAfterJob": 772157440,
+    "officialAuthRepliesDuringMailboxJob": {
+      "replyCount": 1,
+      "categories": {
+        "statusBadAuthentication": 1,
+        "recoveryKeyPresent": 1,
+        "withRecovery": 1
+      }
+    },
+    "examinedRecoveryIntentContents": false,
+    "launchedRecoveryIntent": false,
+    "jobCounts": {
+      "requests": 1,
+      "starts": 1,
+      "finishes": 1,
+      "cancelled": 0,
+      "timeouts": 0,
+      "initializationUnresolved": 0,
+      "success": 0,
+      "authError": 0,
+      "ioError": 0,
+      "startsInitializing": 0,
+      "changedAuto": 1,
+      "changedSyncable": 0,
+      "officialAuthRequest": 0,
+      "officialAuthReply": 0,
+      "fatal": 0
+    },
+    "settingsScreensAroundSync": [
+      {
+        "seconds": 1.5,
+        "ownedFocus": true,
+        "settingsControls": true,
+        "matchingRecoveryLabels": []
+      },
+      {
+        "seconds": 8.0,
+        "ownedFocus": true,
+        "settingsControls": true,
+        "matchingRecoveryLabels": []
+      },
+      {
+        "seconds": 17.6,
+        "ownedFocus": true,
+        "settingsControls": true,
+        "matchingRecoveryLabels": []
+      }
+    ],
+    "inboxAfterRollback": {
+      "originalInbox": [
+        {
+          "primary": true,
+          "listMatchesPriorBaseline": true
+        },
+        {
+          "primary": true,
+          "listMatchesPriorBaseline": true
+        }
+      ],
+      "autoSync": true,
+      "listeners": {
+        "microG": 1,
+        "officialGms": 1,
+        "store": 1
+      },
+      "verifiedPackage": true
+    },
+    "recoveryLabelsInRestoredInbox": [],
+    "releasedDiagnosticStage": true
+  },
+  "syncLogWindows": {
+    "originalDiagnostic": {
+      "duringJob": {
+        "start": 1,
+        "auth": 1,
+        "finish": 1
+      },
+      "afterJob": {},
+      "wholeProcess": {
+        "nativeNotifyBinding": 1,
+        "auth": 9,
+        "start": 1,
+        "finish": 1
+      },
+      "jobDurationMs": 1339,
+      "authReplyMsAfterStart": [
+        1230
+      ]
+    },
+    "typedRecoveryDiagnostic": {
+      "duringJob": {
+        "start": 1,
+        "auth": 1,
+        "finish": 1
+      },
+      "afterJob": {},
+      "wholeProcess": {
+        "nativeNotifyBinding": 1,
+        "auth": 8,
+        "start": 1,
+        "finish": 1
+      },
+      "jobDurationMs": 4673,
+      "authReplyMsAfterStart": [
+        4445
+      ]
+    },
+    "limits": "Notification API logging is first-use within a process. Screen captures sample the period surrounding the job and can miss a transient prompt."
+  }
+}

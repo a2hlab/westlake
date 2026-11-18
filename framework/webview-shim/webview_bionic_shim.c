@@ -38,6 +38,8 @@
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include <time.h>
+#include "hicollie_signal_mask.h"
+#include "bionic_apk_path.h"
 
 static int caller_is_webview(void *return_address, const char **caller_path)
 {
@@ -70,16 +72,6 @@ static int in_app_library_dir(const char *path)
  * reached musl untranslated; musl answered -1, and Chromium's NumberOfProcessors() hit NOTREACHED,
  * fatal in Cronet 129, so the module took AllTrails and Magic Tiles down with it.
  */
-static int in_apk(const char *path)
-{
-    const char *apk = strstr(path, ".apk");
-    while (apk != NULL) {
-        if (apk[4] == '\0' || apk[4] == '!' || apk[4] == '/') return 1;
-        apk = strstr(apk + 4, ".apk");
-    }
-    return 0;
-}
-
 /* Code built against bionic: the WebView DSO and the app's own packaged libraries. */
 /*
  * An Android-built (bionic ABI) caller: the WebView, a library the app packages
@@ -172,7 +164,8 @@ const char *wl_progname(void)
  *
  * WebView ELF imports are redirected to equal-length wl_* names at deployment
  * time, so these converters are scoped to the Android WebView boundary.
- * Native OH and ART signal handling is untouched.
+ * These ABI converters leave native OH and ART callers untranslated. The
+ * separate hicollie adapter below preserves ART's inherited watchdog mask.
  */
 struct westlake_webview_bionic_sigaction {
     int32_t flags;
@@ -397,6 +390,8 @@ int pthread_sigmask(int how, const sigset_t *set, sigset_t *old_set)
     if (real_pthread_sigmask == NULL) {
         return ENOSYS;
     }
+    sigset_t adapted;
+    set = westlake_hicollie_signal_mask(how, set, &adapted, __builtin_return_address(0));
     return real_pthread_sigmask(how, set, old_set);
 }
 

@@ -1,0 +1,206 @@
+{
+  "schema": 1,
+  "candidate": 92,
+  "scope": "Provision dedicated native HAP identities for the eight original APKs in the validation plan.",
+  "tooling": {
+    "westlakeSourceRevision": "c7399f3ab67ff5a2e68c31e40f1533aea80dfbce",
+    "manifestRevision": "cf5a43d0dc0fdcc32757303c5cee2fb8b8948d1c",
+    "developmentSigned": true
+  },
+  "newHostsInstalled": 6,
+  "previouslyInstalled": 2,
+  "uniqueHostUids": 8,
+  "newAndroidAppsLaunched": 0,
+  "previousDriveValidationStillInSharedUid": 20010060,
+  "previousDriveProcessAlive": true,
+  "originalApkFilesCopiedIntoNewHosts": 0,
+  "hosts": {
+    "com.google.android.youtube": {
+      "hostBundle": "org.westlake.apk.com.google.android.youtube",
+      "hapSha256": "f4c8bec81e9ef561ede4ff7c392581336f123dec6ade2d062bc28599edba4063",
+      "sourcePayloadVerified": true,
+      "developmentSigned": true,
+      "expectedAndroidBaseApkSha256": "4410cf3e9a37db09e8bd0fcc2176d047284ce95192598e9118a5249194c1b84c",
+      "declaredPermissions": [
+        "ohos.permission.INTERNET",
+        "ohos.permission.GET_NETWORK_INFO",
+        "ohos.permission.MICROPHONE",
+        "ohos.permission.APPROXIMATELY_LOCATION",
+        "ohos.permission.LOCATION"
+      ],
+      "uid": 20010064,
+      "installedHapMatches": true,
+      "alreadyInstalled": false,
+      "processesInNewUidAfterInstall": 0,
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "com.google.android.apps.docs": {
+      "hostBundle": "org.westlake.apk.com.google.android.apps.docs",
+      "hapSha256": "6cc8741bd428a037ece1ca29254917134b03ae2537ddaca7bbbcf7bd87ff2cf2",
+      "sourcePayloadVerified": true,
+      "developmentSigned": true,
+      "expectedAndroidBaseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+      "declaredPermissions": [
+        "ohos.permission.INTERNET",
+        "ohos.permission.GET_NETWORK_INFO",
+        "ohos.permission.MICROPHONE",
+        "ohos.permission.APPROXIMATELY_LOCATION",
+        "ohos.permission.LOCATION"
+      ],
+      "uid": 20010065,
+      "installedHapMatches": true,
+      "alreadyInstalled": false,
+      "processesInNewUidAfterInstall": 0,
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "com.google.android.gm": {
+      "hostBundle": "org.westlake.apk.com.google.android.gm",
+      "hapSha256": "8e6db896d1ef62943f4fe8ec4a18cb9193000cc2dd623482e32ec77e75fa6013",
+      "sourcePayloadVerified": true,
+      "developmentSigned": true,
+      "expectedAndroidBaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "declaredPermissions": [
+        "ohos.permission.INTERNET",
+        "ohos.permission.GET_NETWORK_INFO",
+        "ohos.permission.MICROPHONE",
+        "ohos.permission.APPROXIMATELY_LOCATION",
+        "ohos.permission.LOCATION"
+      ],
+      "uid": 20010066,
+      "installedHapMatches": true,
+      "alreadyInstalled": false,
+      "processesInNewUidAfterInstall": 0,
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "com.spotify.music": {
+      "hostBundle": "org.westlake.apk.com.spotify.music",
+      "hapSha256": "b45012d3710a205c576db6ae427545c543b683a7a8c31490614cbf7c0aecf242",
+      "sourcePayloadVerified": true,
+      "developmentSigned": true,
+      "expectedAndroidBaseApkSha256": "a0a6fbe6b87249bd3de88f16b342cce233f94513d41a0f6f2a06558ba51a9304",
+      "declaredPermissions": [
+        "ohos.permission.INTERNET",
+        "ohos.permission.GET_NETWORK_INFO",
+        "ohos.permission.MICROPHONE",
+        "ohos.permission.APPROXIMATELY_LOCATION",
+        "ohos.permission.LOCATION"
+      ],
+      "uid": 20010067,
+      "installedHapMatches": true,
+      "alreadyInstalled": false,
+      "processesInNewUidAfterInstall": 0,
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "wp.wattpad": {
+      "hostBundle": "org.westlake.apk.wp.wattpad",
+      "hapSha256": "aff906c1dac7434c40ffb0520aaaefc87ee5ddb130b3253ce30d3d2f1e914bcb",
+      "sourcePayloadVerified": true,
+      "developmentSigned": true,
+      "expectedAndroidBaseApkSha256": "da13d74d1dc75be990f3b2adf9ec587d81f2e4058b2d349617490359de261372",
+      "declaredPermissions": [
+        "ohos.permission.INTERNET",
+        "ohos.permission.GET_NETWORK_INFO",
+        "ohos.permission.MICROPHONE",
+        "ohos.permission.APPROXIMATELY_LOCATION",
+        "ohos.permission.LOCATION"
+      ],
+      "uid": 20010068,
+      "installedHapMatches": true,
+      "alreadyInstalled": false,
+      "processesInNewUidAfterInstall": 0,
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "com.mobilefootie.wc2010": {
+      "hostBundle": "org.westlake.apk.com.mobilefootie.wc2010",
+      "hapSha256": "880d0ce4f620609d3a7839aef5bc4b74986b04056d879b2305440ab5df4c839b",
+      "sourcePayloadVerified": true,
+      "developmentSigned": true,
+      "expectedAndroidBaseApkSha256": "903b7b78ade92233a251af9300f5859f8773e441ebb78cb32dcb5ff532799408",
+      "declaredPermissions": [
+        "ohos.permission.INTERNET",
+        "ohos.permission.GET_NETWORK_INFO",
+        "ohos.permission.MICROPHONE",
+        "ohos.permission.APPROXIMATELY_LOCATION",
+        "ohos.permission.LOCATION"
+      ],
+      "uid": 20010069,
+      "installedHapMatches": true,
+      "alreadyInstalled": false,
+      "processesInNewUidAfterInstall": 0,
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "com.google.android.apps.maps": {
+      "hostBundle": "org.westlake.apk.com.google.android.apps.maps",
+      "uid": 20010062,
+      "hapSha256": "bd521baac20f7b6c3b4b36fdaa74c93e91840b329e9f3762648adb2e53587b63",
+      "sourcePayloadVerified": true,
+      "alreadyInstalled": true,
+      "expectedAndroidBaseApkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      },
+      "installedHapMatches": true
+    },
+    "com.ubercab": {
+      "hostBundle": "org.westlake.apk.com.ubercab",
+      "uid": 20010063,
+      "hapSha256": "d0c433786ee1e0ded614a7dfe16152be1c7840447ff208c3a56874d4664d158f",
+      "sourcePayloadVerified": true,
+      "alreadyInstalled": true,
+      "expectedAndroidBaseApkSha256": "7aaac6bc6ebd01c8e233a9bea0db1d37b005dfa1b7d8e89100f2dab997846b38",
+      "permissionGrantStatus": {
+        "INTERNET": 0,
+        "GET_NETWORK_INFO": 0,
+        "MICROPHONE": -1,
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      },
+      "installedHapMatches": true
+    }
+  },
+  "limits": [
+    "Fresh HAP identities and native permission state were verified. Startup, user accounts, application data and filtering in the six new hosts await original-APK runs.",
+    "The package hash pins identify the intended original APK. Only the native host artifacts were installed in this test."
+  ],
+  "goalComplete": false
+}

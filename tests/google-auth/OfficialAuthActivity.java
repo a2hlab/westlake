@@ -35,7 +35,7 @@ public final class OfficialAuthActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
-        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package", "delegation-ui", "delegation-provider", "silent-ungranted", "silent-spoof"}) {
+        for (String mode : new String[] {"sdk", "binder", "control", "spoof-package", "delegation-ui", "delegation-provider", "silent-ungranted", "silent-spoof", "delegation-native-provider"}) {
             Button button = new Button(this); button.setText("Official GMS token: " + mode);
             button.setOnClickListener(v -> run(mode)); layout.addView(button);
         }
@@ -89,7 +89,8 @@ public final class OfficialAuthActivity extends Activity {
 
     /** Adversarial wire requests keep the probe's real, independently verified APK identity. */
     private JSONObject delegationDenied(Account account, String mode) throws Exception {
-        boolean provider = mode.equals("delegation-provider");
+        boolean nativeProvider = mode.equals("delegation-native-provider");
+        boolean provider = mode.equals("delegation-provider") || nativeProvider;
         Class<?> channel = Class.forName("adapter.activity.PlayServicesChannel");
         java.lang.reflect.Field field = channel.getDeclaredField(provider ? "AUTH" : "SERVICES");
         field.setAccessible(true);
@@ -106,7 +107,7 @@ public final class OfficialAuthActivity extends Activity {
                 data.writeString("com.spotify.music:d6a6dced4a85f24204bf9505ccc1fce114cadb32:oauth2:email");
             }
             // The foreign broker must be refused before any delegated payload can be read.
-            boolean handled = root.transact(provider ? 23 : 24, data, reply, 0);
+            boolean handled = root.transact(nativeProvider ? 28 : provider ? 23 : 24, data, reply, 0);
             if (!handled) return result.put("outcome", "transaction_unsupported");
             reply.readException();
             return result.put("outcome", "unexpected_acceptance");
@@ -185,7 +186,8 @@ public final class OfficialAuthActivity extends Activity {
                         || (details != null && details.getParcelable("TokenData") != null);
                 return result.put("outcome", present ? "token_received" : "token_not_returned")
                         .put("tokenPresent", present).put("errorCode", safeError(response.getString("Error")))
-                        .put("recoveryIntentPresent", response.containsKey("userRecoveryIntent"));
+                        .put("recoveryIntentKeyPresent", response.containsKey("userRecoveryIntent"))
+                        .put("recoveryIntentPresent", response.getParcelable("userRecoveryIntent") instanceof Intent);
             } finally { data.recycle(); reply.recycle(); }
         } catch (Exception error) {
             return failure(error).put("entry", "IAuthManagerService.getTokenWithAccount")

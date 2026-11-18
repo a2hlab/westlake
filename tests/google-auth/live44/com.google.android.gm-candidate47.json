@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "package": "com.google.android.gm",
+  "candidate": 47,
+  "westlakeRevision": "9a2691c71430a9cdb06aac3eeaf1cdfff0341a31",
+  "manifestRevision": "8c35c88d7d1f35fb6e3818edcaf4c6763a7ea0cf",
+  "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "observation": {
+    "status": "failed",
+    "launchRendered": true,
+    "googleSignInAttempted": true,
+    "accountChooserReached": false,
+    "accountSessionAccepted": false,
+    "mailboxSyncTested": false,
+    "explanation": "Gmail renders welcome and email setup. It repeatedly displays Device not compatible / Google Play services unsupported. Refresh list shows no accounts; selecting Add an email address then Google does not reach a Google account chooser. No mailbox session or sync established.",
+    "sourceGap": "LocalServiceBinders.accountService returns a no-account stub for this ordinary app configuration. The client has PLAY_SERVICES_CONNECT but no GOOGLE_AUTH_CONNECT, PLAY_SERVICES_SERVE or PLAY_STORE_SERVE. This is an additional integration gap; the observed compatibility message has not been causally isolated."
+  },
+  "diagnostics": {
+    "aliveAtCapture": true,
+    "markerCounts": {
+      "relayout": 77,
+      "bind": 2,
+      "activity": 0,
+      "fatal": 0,
+      "physicalDisplayAbort": 0
+    },
+    "exceptionTypes": [
+      "java.lang.NoSuchFieldException",
+      "java.lang.RuntimeException"
+    ],
+    "requestedServiceIds": [
+      5,
+      16,
+      25,
+      29,
+      38,
+      40,
+      51,
+      153,
+      160,
+      215,
+      257,
+      270,
+      315,
+      343
+    ],
+    "callbackStatusCounts": {
+      "0": 4,
+      "9": 15
+    },
+    "callbackStatusesByApproximateService": {
+      "51": [
+        0
+      ],
+      "257": [
+        0
+      ],
+      "160": [
+        9
+      ],
+      "38": [
+        9
+      ],
+      "343": [
+        9
+      ],
+      "153": [
+        9
+      ],
+      "40": [
+        0
+      ],
+      "215": [
+        9
+      ],
+      "270": [
+        9
+      ],
+      "25": [
+        0
+      ],
+      "16": [
+        9
+      ],
+      "315": [
+        9
+      ],
+      "5": [
+        9
+      ],
+      "29": [
+        9
+      ]
+    },
+    "authMarkers": {
+      "token_details_present=true": 0,
+      "result_received result_code=-1": 0,
+      "result_received result_code=0": 0,
+      "silent_request_denied": 0,
+      "Fatal signal 5": 0,
+      "Fatal signal 6": 0
+    },
+    "hostsAlive": {
+      "google-restricted-official44b": true,
+      "google-auth-delegation-microg11": true
+    }
+  },
+  "serviceAttribution": "Process-global approximate attribution, not causal proof; status0 is a broker connection only.",
+  "nativeArtifactsRebuilt": false,
+  "fullApplicationAcceptance": false,
+  "rawLogsAndScreenshotsPublic": false
+}

@@ -48,7 +48,7 @@ public final class GoogleIdentityServiceConfig {
             if (enabled) {
                 String adapted = GoogleIdentityServicePolicy.adapt(GoogleIdentityServicePolicy.KEY, (String) current);
                 if (adapted == null || !java.util.Arrays.asList(adapted.split(",")).containsAll(
-                        java.util.Arrays.asList("212", "213")))
+                        GoogleIdentityServicePolicy.REQUIRED))
                     throw new SecurityException("unsupported flag value");
                 if (!Objects.equals(current, adapted)) {
                     // Preserve the original across a compatibility update. A new Google value
@@ -63,7 +63,8 @@ public final class GoogleIdentityServiceConfig {
                     values.put(GoogleIdentityServicePolicy.KEY, adapted);
                     write(file, path, values);
                 }
-                System.err.println("[WL-GOOGLE-POLICY] identity_service_compat=true services=212,213 store=phenotype");
+                System.err.println("[WL-GOOGLE-POLICY] identity_service_compat=true services="
+                        + String.join(",", GoogleIdentityServicePolicy.REQUIRED) + " store=phenotype");
             } else {
                 if (saved.isEmpty()) throw new SecurityException("empty config journal");
                 // A later Google update owns its new value; do not overwrite it with the older snapshot.

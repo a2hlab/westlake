@@ -89,18 +89,16 @@ public:
                             int64_t downTime, int64_t eventTime);
 
     /**
-     * Dispatch a key DIRECTLY into the focused window's ViewRootImpl, bypassing
-     * the InputChannel consumer (whose KEY case is a stub on the deployed
-     * runtime 16e08711). Builds an android.view.KeyEvent via JNI, locates the
-     * focused ViewRootImpl's mInputEventReceiver through WindowManagerGlobal
-     * reflection, and posts it on the main looper via
-     * adapter.window.InputEventBridge.dispatchOnMainThread (the same helper the
-     * MOTION path uses). Returns 0 on success, negative on failure (caller may
-     * fall back to injectKeyEvent's InputChannel write).
+     * Queue a key for the focused Android window on the main looper. Returns
+     * zero if queued. Hardware input retains its session for the InputChannel
+     * fallback if the window disappears before delivery.
      */
     int32_t dispatchKeyViaViewRoot(int32_t action, int32_t androidKeyCode,
                                    int64_t downTime, int64_t eventTime,
                                    int32_t metaState = 0);
+    int32_t dispatchKeyViaViewRoot(int32_t action, int32_t androidKeyCode,
+                                   int64_t downTime, int64_t eventTime,
+                                   int32_t metaState, int32_t fallbackSession);
 
     /**
      * Commit a UTF-8 text string into the focused editable view via a single

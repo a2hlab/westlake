@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "candidate": 111,
+  "date": "2026-11-17",
+  "package": "com.google.android.gm",
+  "mode": "Original Gmail on its retained, shared client host. Official Google Play services and Play Store. No delegated account provider configured in these controls.",
+  "packageVerification": [
+    {
+      "apkSha256": "1159bb46cad6f4afd7f4a570b1a5674f1285a12e573dbe6501ed4b059fd902d1",
+      "label": "com.google.android.gms",
+      "channelIdentityEnforced": true
+    },
+    {
+      "apkSha256": "99e272eb43df794fb96c5c60ca5dfc0b7b96b16465e120b00eda374c559ea272",
+      "label": "com.android.vending",
+      "channelIdentityEnforced": true
+    },
+    {
+      "apkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+      "label": "com.google.android.gm",
+      "channelIdentityEnforced": true
+    }
+  ],
+  "launcher": {
+    "manifestCommit": "832d87bb8e7caa4abc311f0a535c2f47f3dad7cf",
+    "hostUnitTestsPassed": 55,
+    "baseline": {
+      "reportedAddressWasNotTheActualListener": true,
+      "introductionRefusals": 175,
+      "connectedEvents": 0,
+      "serviceInvalidEvents": 6,
+      "observedScreen": "Please use a supported device"
+    },
+    "corrected": {
+      "tracesSampled": 6,
+      "focusedCaptures": 6,
+      "secondsBetweenFirstAndLastFocusedCapture": 47.2,
+      "focusedScreens": [
+        "Getting your messages",
+        "Search in mail"
+      ],
+      "connectedLogEvents": {
+        "playServices": 2,
+        "playStore": 1
+      },
+      "identityRefusals": 0,
+      "serviceInvalidEvents": 0,
+      "fatalExceptionEvents": 0,
+      "syncCompletionEvents": 0
+    },
+    "serviceSideChecks": {
+      "gms": {
+        "realClientPidMatched": true,
+        "matchedApkFiles": 4,
+        "comparedApkFiles": 4,
+        "signerMatched": true
+      },
+      "store": {
+        "realClientPidMatched": true,
+        "matchedApkFiles": 4,
+        "comparedApkFiles": 4,
+        "signerMatched": true
+      }
+    },
+    "sameRetainedApkRuntimeAndServiceVersion": true,
+    "gesture": "A swipe was consumed by the app test input. Two focused captures showed Getting your messages. The lock screen subsequently took focus. A fresh Gmail-owned capture after waking showed the same loading screen."
+  },
+  "archiveAudit": {
+    "criterion": "Saved original-app run.sh and device-report.json exist, with the command listener and report socket agreeing. Count the advertised client addresses inconsistent with that listener. This checks launch artifacts only.",
+    "applications": {
+      "YouTube": {
+        "inspectableReports": 27,
+        "mismatches": 0
+      },
+      "Spotify": {
+        "inspectableReports": 12,
+        "mismatches": 0
+      },
+      "Gmail": {
+        "inspectableReports": 55,
+        "mismatches": 3
+      },
+      "Wattpad": {
+        "inspectableReports": 36,
+        "mismatches": 0
+      },
+      "Drive": {
+        "inspectableReports": 23,
+        "mismatches": 0
+      },
+      "FotMob": {
+        "inspectableReports": 22,
+        "mismatches": 0
+      },
+      "Maps": {
+        "inspectableReports": 21,
+        "mismatches": 0
+      },
+      "Uber": {
+        "inspectableReports": 1,
+        "mismatches": 0
+      }
+    },
+    "mismatchedReports": [
+      "full120-gmail-official",
+      "full120-gmail-retained",
+      "full120-gmail-updated"
+    ]
+  },
+  "emptyAccountLookup": {
+    "currentOfficialOnlyClientRoute": "The plain account service is used in this configuration. Gmail invoked getAccountsAsUser and getAccountsByFeatures. The latter previously returned without completing its response. The board probe used a synthetic account type.",
+    "baseline": {
+      "stage": 120,
+      "devicePreloadFiles": 469,
+      "adapterJarSha256": "a2c1956c7981e98009756b1aaead584507d9e96fbb3d894c675b89d5ecbbedd3"
+    },
+    "candidate": {
+      "stage": 121,
+      "devicePreloadFiles": 469,
+      "adapterJarSha256": "2dc4dd927fa37089f6cb3f48208d6d306e105b603e743fe5744643becd6f5e3a"
+    },
+    "identicalProbeDexSha256": "837c6c3ade29e4135ffddf59830a2fe6c33883eb5ff430eef0aa6f7fd973d0ab",
+    "baselineFails": "missing list callback",
+    "candidatePasses": [
+      "list returns one callback with an empty Account array",
+      "selection returns one callback with an empty Bundle",
+      "both work with and without requested features",
+      "a null account type is rejected without delivering a callback"
+    ],
+    "originalApp": {
+      "changedRuntimeFilesVerified": 9,
+      "mappedRebuiltBootImageInodeMatches": true,
+      "observation": {
+        "tracesSampled": 6,
+        "focusedCaptures": 5,
+        "secondsBetweenFirstAndLastFocusedCapture": 37.8,
+        "focusedScreens": [
+          "Getting your messages",
+          "Search in mail"
+        ],
+        "connectedLogEvents": {
+          "playServices": 2,
+          "playStore": 1
+        },
+        "identityRefusals": 0,
+        "serviceInvalidEvents": 0,
+        "fatalExceptionEvents": 0,
+        "syncCompletionEvents": 0
+      },
+      "serviceSideChecks": {
+        "gms": {
+          "realClientPidMatched": true,
+          "matchedApkFiles": 4,
+          "comparedApkFiles": 4,
+          "signerMatched": true
+        },
+        "store": {
+          "realClientPidMatched": true,
+          "matchedApkFiles": 4,
+          "comparedApkFiles": 4,
+          "signerMatched": true
+        }
+      }
+    }
+  },
+  "additionalInspectedPlayServices": [
+    {
+      "versionCode": 242835044,
+      "minSdk": 35,
+      "source": "https://github.com/MindTheGapps/15.0.0-arm64/releases/tag/MindTheGapps-15.0.0-arm64-20260915_032013"
+    },
+    {
+      "versionCode": 253830035,
+      "minSdk": 35,
+      "source": "https://github.com/MindTheGapps/16.0.0-arm64/releases/tag/MindTheGapps-16.0.0-arm64-20261023_034858"
+    }
+  ],
+  "acceptance": {
+    "gmailPassedLocalProcessIdentityChecks": true,
+    "emptyAccountAsyncCallbackPassedOnBoard": true,
+    "mailboxPopulatedInThisControl": false,
+    "newTestMessageObserved": false,
+    "serverReceiptIndependentlyChecked": false,
+    "completedIncrementalRefresh": false,
+    "productionIsolationValidated": false
+  }
+}

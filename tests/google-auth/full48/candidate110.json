@@ -1,0 +1,99 @@
+{
+  "schema": 1,
+  "candidate": 110,
+  "followUp": "candidate111.json identifies a stale client spawner address in the three retained launchers. The official processes were alive, but none of the 175 attempted client introductions in the rebuilt-runtime sample succeeded. See the corrected launch before interpreting SERVICE_INVALID.",
+  "date": "2026-11-17",
+  "package": "com.google.android.gm",
+  "originalBaseApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "earlierPullToRefresh": {
+    "images": "Original Gmail board inbox captures immediately before and after the recorded gesture.",
+    "width": 1200,
+    "height": 1920,
+    "diffThresholdPerChannel": 16,
+    "listComparisonCrop": [
+      0,
+      160,
+      1190,
+      1650
+    ],
+    "differentPixelsAboveThresholdWithinCrop": 0,
+    "maxAbsoluteChannelDifferenceWithinCrop": 12,
+    "visibleListChanged": false,
+    "fullClientTracesWithMatchingArchivedPrefix": 5,
+    "newMessageOrCompletedIncrementalRefreshVerified": false
+  },
+  "originalApkStaticCalls": {
+    "notifyChange": {
+      "directInvokeInstructions": 37,
+      "distinctCallingClasses": 22
+    },
+    "registerContentObserver": {
+      "directInvokeInstructions": 17,
+      "distinctCallingClasses": 16
+    },
+    "unregisterContentObserver": {
+      "directInvokeInstructions": 14,
+      "distinctCallingClasses": 12
+    }
+  },
+  "observerBridge": {
+    "implementation": "Enable in-process provider notifications for app-owned sync clients. Match Android authority and path segments, keep sender flags and group changed URIs by observer. Enforce the current Android user for app-owned sync.",
+    "assessment": "A dependency of local UI invalidation. Static call sites do not identify which notification path Gmail uses for a particular inbox refresh.",
+    "test": "LocalContentObserverProbe via AppSpawnXInit and Android ContentResolver.getContentService() on headless ART on the physical board. Only local synthetic content URIs were used.",
+    "identicalProbeDexSha256": "7b39534ad76feda699c697d3b83763829a79d69f6407a9a051a1d35bf80b720f",
+    "baseline": {
+      "stage": 119,
+      "verifiedFiles": 469,
+      "adapterJarSha256": "56ff5e18b69bf5e38cc6898b0308e19339660873c437d0856e9fc67df1e8cf0f",
+      "localSyncObserverCallbacksForOneMatchingNotification": 0,
+      "existingPlayHostSelfFlagsAndUnregisterPassed": true
+    },
+    "rebuilt": {
+      "stage": 120,
+      "verifiedFiles": 469,
+      "adapterJarSha256": "a2c1956c7981e98009756b1aaead584507d9e96fbb3d894c675b89d5ecbbedd3",
+      "matchingNotifyDelivers": true,
+      "multipleUrisGrouped": true,
+      "ancestorAndDescendantFlagsPassed": true,
+      "queryDoesNotChangeObservedPath": true,
+      "otherAuthorityAndSiblingPrefixIgnored": true,
+      "localSyncForeignUserRefused": true,
+      "selfDeliveryAndUnregisterPassed": true,
+      "existingPlayHostChecksPassed": true,
+      "ordinaryProcessWithoutOptInRemainsDisabled": true
+    }
+  },
+  "retest": {
+    "retainedOriginalClientData": true,
+    "hostUid": 20010060,
+    "usesEarlierSharedClientHost": true,
+    "staleServiceEndpoints": "Original APK displayed Please use a supported device.",
+    "activeOfficialPlayServicesAndPlayStore": "Verified live official service processes and configured the retained Gmail launcher to use them. The same warning appeared. This control did not configure the earlier delegated account provider.",
+    "rebuiltRuntime": "Installed and verified 21 runtime files in the retained Gmail client. The app process mapped its rebuilt adapter boot image, bound the original application and restored one periodic registration. Gmail again displayed Please use a supported device. Its sampled client trace contained SERVICE_INVALID.",
+    "dismissal": {
+      "systemUiClicks": "Three OpenHarmony UI test clicks on the visible OK button left the dialog visible.",
+      "appWindowTap": "One touch through the existing window test input reached Gmail. The dialog window disappeared. Foregrounding the native client host focused its window, with no remaining Gmail-owned window listed.",
+      "gmailProcessStillAlive": true,
+      "fatalExceptionCountInSample": 0,
+      "inboxVisibleAfterDismissal": false
+    },
+    "newTestMailObservedInApp": false,
+    "receivedByServerIndependentlyVerified": false,
+    "mailSentByAgent": false,
+    "certificationOverrideAdded": false
+  },
+  "playServicesVersionCheck": {
+    "earlierClientTrace": "candidate77.json",
+    "requestedVersionCode": 250200000,
+    "installedVersionCode": 244034029,
+    "runtimeSdk": 34,
+    "inspectedPackages": [
+      {"source": "GrapheneOS Apps", "versionCode": 263234035, "minSdk": 35},
+      {"source": "MindTheGapps Android 14 arm64", "versionCode": 232518044, "minSdk": 31},
+      {"source": "LiteGapps Android 14 arm64", "versionCode": 240616039, "minSdk": 31}
+    ],
+    "method": "Read package metadata with aapt and verified APK signatures with apksigner on the host. None of these three APKs met both requirements. No replacement was installed.",
+    "causality": "The earlier version mismatch is confirmed. This test does not establish the cause of SERVICE_INVALID."
+  },
+  "acceptance": "Process-local content observers pass their board regression. Gmail live incremental receipt remains open."
+}

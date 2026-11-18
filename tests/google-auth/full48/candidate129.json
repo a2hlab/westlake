@@ -1,0 +1,323 @@
+{
+  "schema": 1,
+  "candidate": 129,
+  "date": "2026-11-18",
+  "previous": {
+    "mappedBridgeSha256": "00cc19ac0b31fc7f1b067754ce321d903104d9b107c0d57bfa51e7aaca60e923",
+    "osInputClientListed": true,
+    "windowListedByWindowAndInputManagers": true,
+    "successfulOwnedInputSubscriptionMarkers": 0,
+    "inputForwarderProcessCount": 0,
+    "normalSystemSwipes": {
+      "pullAtTop": {
+        "samplesSeconds": [
+          2.8,
+          6.7,
+          20.5,
+          40.7
+        ],
+        "visibleRowsMatchStartingInbox": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "releasesForwarded": 0,
+        "syncRequestStartFinish": [
+          0,
+          0,
+          0
+        ]
+      },
+      "scrollUp": {
+        "samplesSeconds": [
+          3.0,
+          6.9
+        ],
+        "visibleRowsMatchStartingInbox": [
+          true,
+          true
+        ],
+        "releasesForwarded": 0,
+        "syncRequestStartFinish": [
+          0,
+          0,
+          0
+        ]
+      },
+      "scrollBack": {
+        "samplesSeconds": [
+          3.0,
+          6.9
+        ],
+        "visibleRowsMatchStartingInbox": [
+          true,
+          true
+        ],
+        "releasesForwarded": 0,
+        "syncRequestStartFinish": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "scope": "Deliver normal OpenHarmony system swipes to the original Gmail app in the same retained inbox and check incremental mail sync.",
+  "originalApkSha256": "223474be9b00f69ae4c293bcc9be6e0e865d5e05f0110db1ed589d7f2bf8a94a",
+  "testProfile": {
+    "guestUid": 20010060,
+    "sameSavedProfileAndLauncher": true,
+    "profileDirectoryMode": "0755",
+    "guestDomain": "normal_hap",
+    "listenersAtBothChecks": {
+      "microG": 1,
+      "officialGms": 1,
+      "store": 1
+    },
+    "sameNativeConsumerAs": "candidate118.json",
+    "coldGmailRestartBetweenBinaries": true,
+    "scopedToThisGmailRuntime": true,
+    "rollbackBinaryRetainedOnBoard": true
+  },
+  "updated": {
+    "mappedBridgeSha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070",
+    "osInputClientListed": true,
+    "windowListedByWindowAndInputManagers": true,
+    "ownedInputSubscriptionReturnCodes": [
+      0
+    ],
+    "inputForwarderProcessCount": 0,
+    "normalSystemSwipes": {
+      "pullAtTop": {
+        "samplesSeconds": [
+          3.1,
+          7.5,
+          20.9,
+          40.9
+        ],
+        "visibleRowsMatchStartingInbox": [
+          true,
+          true,
+          true,
+          true
+        ],
+        "releasesForwarded": 1,
+        "syncRequestStartFinish": [
+          0,
+          0,
+          0
+        ]
+      },
+      "scrollUp": {
+        "samplesSeconds": [
+          3.2,
+          7.1
+        ],
+        "visibleRowsMatchStartingInbox": [
+          false,
+          false
+        ],
+        "releasesForwarded": 1,
+        "syncRequestStartFinish": [
+          0,
+          0,
+          0
+        ]
+      },
+      "scrollBack": {
+        "samplesSeconds": [
+          3.3,
+          7.1
+        ],
+        "visibleRowsMatchStartingInbox": [
+          true,
+          true
+        ],
+        "releasesForwarded": 1,
+        "syncRequestStartFinish": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "slowPull": {
+    "screensDuringAndAfterSystemInput": [
+      {
+        "secondsAfterStart": 0.85,
+        "greenPixels": 0,
+        "verticalCenterPx": null
+      },
+      {
+        "secondsAfterStart": 1.8,
+        "greenPixels": 0,
+        "verticalCenterPx": null
+      },
+      {
+        "secondsAfterStart": 2.76,
+        "greenPixels": 759,
+        "verticalCenterPx": 291
+      },
+      {
+        "secondsAfterStart": 3.69,
+        "greenPixels": 764,
+        "verticalCenterPx": 354
+      },
+      {
+        "secondsAfterStart": 4.63,
+        "greenPixels": 781,
+        "verticalCenterPx": 377
+      },
+      {
+        "secondsAfterStart": 5.72,
+        "greenPixels": 770,
+        "verticalCenterPx": 379
+      },
+      {
+        "secondsAfterStart": 7.23,
+        "greenPixels": 770,
+        "verticalCenterPx": 379
+      },
+      {
+        "secondsAfterStart": 9.38,
+        "greenPixels": 770,
+        "verticalCenterPx": 379
+      }
+    ],
+    "visualObservation": "A green refresh arrow on a white circle moved downward in the original Gmail window. It disappeared in the later capture. The visible mail rows matched their starting positions after release.",
+    "releaseForwarded": true,
+    "newLocalSyncRequestStartFinish": [
+      0,
+      0,
+      0
+    ]
+  },
+  "untracedRepeatAfterAnotherRestart": {
+    "traceOptionRemoved": true,
+    "seconds": 69.0,
+    "latestVisibleRowsUnchanged": true,
+    "appEventDeltas": {
+      "clientRequestedToken": 0,
+      "officialReturnedTokenMarker": 0,
+      "recoverableAuth": 0,
+      "swipeReachedRefreshControl": 1,
+      "swipeReachedThreadList": 1,
+      "helperHandled": 128,
+      "helperFailure": 0,
+      "nativeRelease": 1,
+      "requests": 0,
+      "starts": 0,
+      "finishes": 0,
+      "fatal": 0
+    },
+    "accountProviderEventDeltas": {
+      "accountList": 2,
+      "features": 0,
+      "tokenOperation": 0
+    },
+    "verifiedMappedInputBridgeSha256": "6213fa9419c5b6b1278909a506d04512df6dc9d81123266df615ad69f6f4e070"
+  },
+  "methodTraceAttempt": {
+    "secondsObservedOpen": 191.52,
+    "usableBytes": 0,
+    "cleanup": true,
+    "boundary": "The diagnostic run yielded no usable method trace before the release launcher was restored. The exact listener or subsequent app decision is unresolved."
+  },
+  "mailDeliveryVerified": false,
+  "interpretation": "The retained original Gmail now receives normal system swipes. With the previously validated input bridge installed in this runtime, the inbox scrolls and returns to its starting rows. A downward swipe reaches Gmail’s pull-to-refresh layout and displays its refresh arrow. The visible mail rows remain unchanged, and no new local sync request, start, or completion appears. Delivery of the sender-confirmed test message remains open.",
+  "idleAndPullControl": {
+    "idle": {
+      "samples": [
+        {
+          "seconds": 6.7,
+          "deltas": {
+            "accountList": 0,
+            "features": 0,
+            "tokenOperation": 0,
+            "localRequests": 0,
+            "localStarts": 0,
+            "localFinishes": 0,
+            "officialTokenRequests": 0,
+            "releaseForwarded": 0
+          }
+        },
+        {
+          "seconds": 19.6,
+          "deltas": {
+            "accountList": 1,
+            "features": 0,
+            "tokenOperation": 0,
+            "localRequests": 0,
+            "localStarts": 0,
+            "localFinishes": 0,
+            "officialTokenRequests": 0,
+            "releaseForwarded": 0
+          }
+        },
+        {
+          "seconds": 41.6,
+          "deltas": {
+            "accountList": 1,
+            "features": 0,
+            "tokenOperation": 0,
+            "localRequests": 0,
+            "localStarts": 0,
+            "localFinishes": 0,
+            "officialTokenRequests": 0,
+            "releaseForwarded": 0
+          }
+        }
+      ],
+      "rowsAtEndMatchBaseline": true,
+      "primaryAtEnd": true
+    },
+    "pull": {
+      "samples": [
+        {
+          "seconds": 6.5,
+          "deltas": {
+            "accountList": 1,
+            "features": 0,
+            "tokenOperation": 0,
+            "localRequests": 0,
+            "localStarts": 0,
+            "localFinishes": 0,
+            "officialTokenRequests": 0,
+            "releaseForwarded": 1
+          }
+        },
+        {
+          "seconds": 19.4,
+          "deltas": {
+            "accountList": 1,
+            "features": 0,
+            "tokenOperation": 0,
+            "localRequests": 0,
+            "localStarts": 0,
+            "localFinishes": 0,
+            "officialTokenRequests": 0,
+            "releaseForwarded": 1
+          }
+        },
+        {
+          "seconds": 41.4,
+          "deltas": {
+            "accountList": 2,
+            "features": 0,
+            "tokenOperation": 0,
+            "localRequests": 0,
+            "localStarts": 0,
+            "localFinishes": 0,
+            "officialTokenRequests": 0,
+            "releaseForwarded": 1
+          }
+        }
+      ],
+      "rowsAtEndMatchBaseline": true,
+      "primaryAtEnd": true
+    }
+  },
+  "accountQueryInterpretation": "After restarting Gmail and pulling down, microG logged two account-list operations for Gmail in 69 seconds. In two further 40-second control periods, it logged one while idle and two after another pull. None of the three periods recorded a Gmail token request to the observed account services."
+}

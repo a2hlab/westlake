@@ -1,5 +1,69 @@
 # Official Google authentication probe
 
+The active [full application validation](../../docs/google-two-path-full-validation.md)
+tracks the remaining Google and Facebook flows from the live batch. Candidates
+48 and 51 add legacy sign-in service 91 and its internal service 44 dependency.
+Spotify and Wattpad now receive successful Google activity returns. Spotify stops
+at separate signup. Candidate 52 also delivers Wattpad's subsequent OAuth access
+token; Wattpad reaches its separate signup form. This required manual recovery
+from an older saved Google account choice. Wattpad subsequently reuses that
+authorization after restarting GMS and the client. Candidate 54 preserves ART's
+inherited signal blocks in the native OpenHarmony watchdog after tracing a
+SIGPIPE startup exit there. Its controlled board test and live startup/auth check
+pass. Neither app has a validated application account session or full application
+pass. See the linked validation report for the exact evidence boundaries.
+Historical results below retain their original build boundaries.
+
+Candidate 72 fixes native ABI classification for GMS libraries loaded through
+verified APK descriptors. FotMob initializes Cronet 129 and retains its local
+Facebook signed-in menu after a client restart. Cloud synchronization and token
+renewal were unproven in that candidate. See [candidate72.json](full48/candidate72.json).
+Candidate 73 now observes an in-app favorite change reaching FotMob's server,
+then restores both favorites after clearing their local files and app cache
+while retaining the Facebook login. The dataset GET also succeeds with an
+invalid token, so its status alone does not prove credential validation.
+Google delegation and token renewal are not retested by this Facebook flow.
+See [candidate73.json](full48/candidate73.json).
+
+Candidate 74 validates FotMob's Google cloud favorite round trip and silent
+replacement-token delivery after its saved login token expired. A client-side
+reply fingerprint matches a fresh, unexpired ID token verified with Google's
+signing keys. The app restores both cloud favorites after local cache removal.
+The provider account store changes during renewal; certification stays 3,
+check-in identity and grants stay unchanged. This is feature validation, not a
+full application or production-isolation pass. See [candidate74.json](full48/candidate74.json).
+Candidate 75 adds fresh FotMob Google app sign-in through the official chooser,
+verification of the token saved by the app, and another successful client
+restart. Existing Google account authorization is reused; no new microG account
+registration or separate app signup is performed. See [candidate75.json](full48/candidate75.json).
+Candidate 76 completes fresh Facebook login and restart on the same repaired
+runtime. A read-only Facebook Graph identity check accepts the original app's
+new token and returns the matching account; an invalid-token control is rejected
+before and after restart. This independently validates that endpoint's token
+acceptance, while Facebook renewal and full application acceptance remain open.
+See [candidate76.json](full48/candidate76.json).
+
+Candidate 71 fixes bounded parsing of Gmail's native 14-scope OAuth request.
+The board now accepts the request into mediation while continuing to deny
+ungranted token access. No Gmail OAuth grant or mailbox acceptance is claimed;
+see [candidate71.json](full48/candidate71.json) and the full validation report.
+Candidate 77 applies the operator-approved Gmail provider scopes and fixes the
+Contacts-client status-9 dialog by adding People (5) and Feedback (29) to the
+existing opt-in service eligibility policy. Two fresh Gmail processes reach
+IPeopleService and display no incompatible-device dialog. Native account-scoped
+token access and mailbox sync remain unvalidated; certification stays 3.
+See [candidate77.json](full48/candidate77.json).
+
+Candidate 59 separately grants the verified official GMS broker access to the
+existing account's Google ID. Drive receives account-ID replies after the GMS
+and microG restart, while its OAuth requests remain denied and its file list
+does not load. This metadata result is not an OAuth or application acceptance
+pass. See [candidate59.json](full48/candidate59.json) for the exact boundaries.
+The [Wattpad follow-up](full48/candidate59-followup.json) after this provider
+restart still returns sign-in-required before token issuance, including after
+manual cached-choice recovery. The earlier Wattpad successes are historical
+results, not current full-stack restart acceptance.
+
 This probe tests the official GMS token implementation and a separate direct
 microG positive control. It does not fake a result or claim full OAuth login.
 See [board findings](https://github.com/a2hlab/westlake/blob/027c5b923efa0306e0f3db69d7156b041f3e711c/docs/google-official-auth-validation.md) and
@@ -22,15 +86,17 @@ uses the same build 11 and adds an authorized FotMob sign-in attempt. Its
 `service-retest11/` evidence keeps Google connection results separate from
 visible app behavior and full feature acceptance.
 
-The current source includes eight buttons. The `spoof-package` button calls the official
+The current source includes nine buttons. The `spoof-package` button calls the official
 token Binder with `com.spotify.music` in both package options while retaining
 the probe's actual APK, signer and verified channel identity. This is a negative
 identity test, not a Spotify login or a delegated token grant. The manifest
-input key for this source is `google-official-auth-probe-v5`; earlier build
+input key for the earlier eight-button artifact is `google-official-auth-probe-v5`;
+that pinned artifact is not changed by the candidate-78 test build. Earlier build
 records below retain their original v1/v2 identities.
 
-The `delegation-ui` and `delegation-provider` buttons attempt the new wire
-operations while retaining the probe's real APK identity. Both must return
+The `delegation-ui`, `delegation-provider` and `delegation-native-provider`
+buttons attempt wire operations 24, 23 and 28 while retaining the probe's real
+APK identity. Each must return
 `SecurityException`; a missing channel or unsupported transaction is not a pass.
 These are denial tests, not delegated positive controls. Actual Spotify supplied
 the positive interactive flow. Build 11 returned `RESULT_OK` and reached its
@@ -170,6 +236,14 @@ run. Enable `WESTLAKE_GOOGLE_SIGNIN_DIAGNOSTICS=1` together with private logs
 in a rebuilt adapter to reproduce the value-free activity diagnostics; this
 flag does not implement activity/result transport or change authentication.
 
+The current adapter also traces numeric legacy `ISignInCallbacks` (transaction
+101) and modern `IBeginSignInCallback` (transaction 1) statuses under that flag,
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1` and `WESTLAKE_PLAY_TRACE=1`. It records only
+status and account/result presence, skips account payloads, and restores the
+incoming Parcel position. Malformed replies produce an unreadable marker.
+These statuses describe the sign-in operation; a successful service-broker
+connection alone does not establish sign-in success.
+
 ## Silent-token diagnosis, build 27
 
 [`refresh-diagnosis27/fotmob-policy1.json`](refresh-diagnosis27/fotmob-policy1.json)
@@ -258,17 +332,148 @@ The broker's policies and file handling are plain Java. From the repository root
 ```sh
 out=$(mktemp -d)
 javac -d $out/policy framework/core/java/GoogleAuthPolicy.java tests/google-auth/host/GoogleAuthPolicyTest.java
-java -cp $out/policy adapter.core.GoogleAuthPolicyTest                         # GOOGLE_AUTH_POLICY_PASS 8
+java -cp $out/policy adapter.core.GoogleAuthPolicyTest                         # GOOGLE_AUTH_POLICY_PASS 16
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java tests/google-auth/host/GoogleAuthDelegationPolicyTest.java
-java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 36
+java -cp $out/delegation adapter.core.GoogleAuthDelegationPolicyTest           # ..._PASS 64
 javac -d $out/delegation framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleIdentityClaims.java tests/google-auth/host/GoogleIdentityClaimsTest.java
 java -cp $out/delegation adapter.core.GoogleIdentityClaimsTest                 # ..._PASS 17
+javac -d $out/account-token framework/core/java/GoogleAccountTokenData.java tests/google-auth/host/GoogleAccountTokenDataTest.java
+java -cp $out/account-token adapter.core.GoogleAccountTokenDataTest           # GOOGLE_ACCOUNT_TOKEN_DATA_PASS 107
 javac -d $out/trace framework/core/java/GoogleAuthBoundaryTrace.java tests/google-auth/host/GoogleAuthBoundaryTraceTest.java
 java -cp $out/trace GoogleAuthBoundaryTraceTest                                # ..._TEST_PASS
 javac -d $out/sessions framework/core/java/PrivateFiles.java framework/core/java/GoogleAuthDelegationPolicy.java framework/core/java/GoogleAuthSessions.java tests/google-auth/host/GoogleAuthSessionsTest.java
 java -cp $out/sessions adapter.core.GoogleAuthSessionsTest                     # GOOGLE_AUTH_SESSIONS_PASS 23
+javac -cp $out/sessions -d $out/sessions tests/google-auth/host/GoogleAuthOAuthSessionsTest.java
+java -cp $out/sessions adapter.core.GoogleAuthOAuthSessionsTest                # GOOGLE_AUTH_OAUTH_SESSIONS_PASS 50
 javac -d $out/identity-services framework/core/java/GoogleIdentityServicePolicy.java tests/google-auth/host/GoogleIdentityServicePolicyTest.java
-java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 15
+java -cp $out/identity-services adapter.core.GoogleIdentityServicePolicyTest   # GOOGLE_IDENTITY_SERVICE_POLICY_PASS 20
+javac -d $out/signin-trace framework/core/java/GoogleSignInDiagnostics.java tests/google-auth/host/GoogleSignInDiagnosticsTest.java
+java -cp $out/signin-trace adapter.core.GoogleSignInDiagnosticsTest            # GOOGLE_SIGNIN_DIAGNOSTICS_PASS 14
+javac -d $out/signin-options framework/core/java/GoogleSignInOptionsReader.java tests/google-auth/host/GoogleSignInOptionsReaderTest.java
+java -cp $out/signin-options adapter.core.GoogleSignInOptionsReaderTest        # GOOGLE_SIGNIN_OPTIONS_PASS 21
+javac -cp $out/sessions -d $out/sessions framework/core/java/GoogleAsyncAuthLease.java tests/google-auth/host/GoogleAsyncAuthLeaseTest.java
+java -cp $out/sessions adapter.core.GoogleAsyncAuthLeaseTest                   # GOOGLE_ASYNC_AUTH_LEASE_PASS 19
+javac -d $out/sync framework/core/java/SyncDispatchState.java tests/google-auth/host/SyncDispatchStateTest.java
+java -cp $out/sync adapter.core.SyncDispatchStateTest                         # SYNC_DISPATCH_STATE_PASS 14
 javac -d $out/files framework/core/java/PrivateFiles.java tests/google-auth/host/PrivateFilesTest.java
 java -cp $out/files adapter.core.PrivateFilesTest                              # PRIVATE_FILES_PASS 6
 ```
+
+## App-owned sync dispatcher, candidate 64
+
+`WESTLAKE_LOCAL_SYNC=1` enables one-off sync execution in the client process.
+It is off by default. The dispatcher discovers the client's declared
+`android.content.SyncAdapter` services, reads their metadata, binds the selected
+service through the existing service manager and invokes `ISyncAdapter.startSync`.
+The account must remain visible to that client. Existing token authorization
+still applies independently; enabling sync adds no account or OAuth grants.
+
+Initialization and actual sync use separate callback tickets. The host test above
+covers duplicate, stale, foreign and concurrent callback tickets, cancellation,
+and closure. It does not exercise Android binding, device cancellation or Google
+backend acceptance. A successful adapter callback alone is insufficient to pass
+the Gmail mailbox test.
+
+This is a process-local dispatcher for immediate requests. It persists the
+client's sync settings, limits the queue, serializes work for each service and
+tracks real callbacks, failures and cancellation. Periodic and delayed scheduling,
+durable jobs, retry/backoff, system-wide cross-process state, and destruction of
+services retained by the existing binding cache remain unimplemented. Cancellation
+has a deadline but cannot forcibly stop app code that ignores it. Keep the feature
+opt-in until those lifecycle and scheduling gaps are addressed.
+
+## Private input diagnostics, candidate 65
+
+In the client, set `WESTLAKE_INPUT_DIAGNOSTICS=1` together with
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1` to trace at most 128 input dispatches and 16
+window roots per dispatch. `[WL-INPUT]` covers both the receiver bridge and
+`OHTouchInjector`, which the deployed native `i` command prefers despite its
+receiver-tap label. The trace records main-thread delivery, handled/unhandled
+results, exception types/stack frames and structural window state. It omits
+entered text, key codes, coordinates, titles, view text and exception messages.
+
+A handled touch is not a completed click listener or an accepted backend action.
+Keep the trace disabled for ordinary use; the candidate-65 record separates
+input delivery from the still-unvalidated Gmail click and sync work.
+
+Candidate 67 adds `WESTLAKE_INPUT_QUEUE_TRACE=1` to sample at most eight releases,
+with up to 32 queued messages per snapshot and bounded structural hit candidates.
+It reads message target/callback classes, not payloads. Optionally set
+`WESTLAKE_INPUT_METHOD_TRACE_PRESS=2` or `WESTLAKE_INPUT_METHOD_TRACE_RELEASE=2`
+to instrument the selected press or release once per process. The ART trace uses
+a private application directory and requests a stop after three seconds; actual
+shutdown can be delayed and execution timing is perturbed. Keep the raw trace
+private and do not treat it as a performance measurement.
+
+This exposed empty native `MotionEvent` transforms beneath Gmail's translated
+content view. The fixed native implementation passes 40 host checks and board
+preload. The same sync tap now runs the real button listener and internal sync
+entry; mailbox sync remains incomplete. See [candidate67.json](full48/candidate67.json)
+and the [native input test instructions](../parity/native/README-input-transform.md).
+
+Candidate 68 adds an opt-in native Android log capture for local debugging:
+`WESTLAKE_GOOGLE_PRIVATE_LOGS=1` plus `WESTLAKE_ANDROID_LOG_CAPTURE_DIR` naming
+a pre-created app-owned 0700 directory. It writes only `android.log` (0600),
+refuses shared/symlink/hardlink sinks, caps the file at 8 MiB and drops contended
+writes. Treat the raw file as credential-bearing test data; do not commit it.
+Without this opt-in, private-mode Android logging stays muted.
+
+Host verification:
+
+```sh
+c++ -std=c++17 -pthread -Wall -Wextra -Werror \
+  -I framework/android-runtime/include \
+  tests/parity/native/private_log_capture_test.cpp -o /tmp/private-log-test
+/tmp/private-log-test
+```
+
+See [candidate68.json](full48/candidate68.json) for the Gmail loading/version
+failures found with this capture; it is not a full Gmail pass.
+
+Candidate 70 adds optional verified public GMS APK descriptors. The client
+launcher sets `WESTLAKE_PLAY_CODE_SPAWNER` to the official GMS root spawner and
+`WESTLAKE_PLAY_CODE_APK_SHA256` to that installation's verified base APK hash.
+These pins are separate from the microG authentication-provider pins. The
+connected socket peer must be vouched for by the selected root spawner. Only
+public APK paths are mapped; private GMS data and native-library paths retain
+their existing boundaries. A code verification failure is cached until client
+restart, and a changed code set on reconnect also requires a client restart.
+
+The board's positive/wrong-hash/restored-pin controls and remaining Gmail/GMS
+version gaps are recorded in [candidate70.json](full48/candidate70.json).
+
+Descriptor-backed native-library ABI classification is covered by:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -I framework/webview-shim \
+  tests/parity/native/bionic_apk_path_test.c -o /tmp/bionic-apk-path-test
+/tmp/bionic-apk-path-test
+```
+
+This test uses real `/proc/self/fd` links, including closure and descriptor reuse.
+It checks ABI routing only; package-code trust remains the separate verified
+descriptor protocol.
+
+Candidate 78 adds explicit operator consent for native account OAuth, separate
+from saved Google Sign-In selections. Its policy test is
+`tests/google-auth/host/GoogleNativeAuthConsentTest.java` (66 checks). The real
+Gmail absent-consent / approved / withdrawn controls and remaining Cronet DNS
+failure are recorded in the [full validation report](../../docs/google-two-path-full-validation.md#candidate-78-explicit-native-account-consent-and-gmail-token-delivery).
+Token delivery is an intermediate result; mailbox sync and production consent UI
+remain incomplete.
+
+Candidate 79 repairs the native networking selector for APK-descriptor callers.
+Its real resolver/release test passes 24 checks on host and OH; the old source
+fails the APK layout case. Gmail's DNS lookups succeed and independent read-only
+Gmail API controls accept its native OAuth token (200) and reject an invalid
+one (401). After enabling Sync Gmail through the app's settings, its inbox
+loads after restart and an existing message body renders. Sustained sync,
+incremental refresh and periodic scheduling remain incomplete. See
+[candidate79.json](full48/candidate79.json).
+
+Candidate 80 adds persisted app-owned periodic sync and an opt-in same-process
+source adaptation for the standard Android adapter. The local fixture completes
+normal and periodic sync callbacks and passes 22 device checks across restart;
+26 timing, 14 dispatch-state and 28 source-guard checks pass on the host. Gmail's
+daily registration succeeds on the new framework. Stopped-app wake and multiple
+elapsed cycles remain open. See [candidate80.json](full48/candidate80.json).

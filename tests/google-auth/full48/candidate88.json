@@ -1,0 +1,178 @@
+{
+  "schema": 1,
+  "candidate": 88,
+  "phase": "Open app details from the original Maps APK under a dedicated OpenHarmony test host.",
+  "manifestRevision": "cf5a43d0dc0fdcc32757303c5cee2fb8b8948d1c",
+  "maps": {
+    "package": "com.google.android.apps.maps",
+    "version": "26.43.00.1002020710",
+    "originalApkSha256": "9ad0d0d3fbb34e1bc9e99c26d454a702c511dab6cb74fc98e2917d4c553f95ec",
+    "host": "org.westlake.apk.com.google.android.apps.maps",
+    "signedDevelopmentHostSha256": "bd521baac20f7b6c3b4b36fdaa74c93e91840b329e9f3762648adb2e53587b63",
+    "adapterRuntimeBcpSha256MeasuredInMaps": "cf393eee1f78b640552b6f2f21c286d78a0281a48ae748231294b2192f836dd4",
+    "frameworkPreloadFiles": 468,
+    "gnssRequestsEnabled": false
+  },
+  "concurrentLinuxUids": {
+    "originalMaps": 20010062,
+    "originalDrive": 20010060,
+    "officialPlayServices": 20010061,
+    "microGProvider": 20010056
+  },
+  "uidCheck": "Real, effective, saved and filesystem UIDs agreed for each process. The Maps runtime data root, APK data and host control directory were owned by the Maps UID with mode 0700.",
+  "firstConnectedCleanLaunch": {
+    "outcome": "Black screen during observation before rendering",
+    "mainThread": "Maps startup future",
+    "workerWaits": [
+      "account ID future",
+      "remote service connection"
+    ],
+    "backendRefusalEstablished": false,
+    "sampledGmsConnectionStatuses": [
+      0
+    ]
+  },
+  "guestOnboarding": "Temporarily removed only the Maps Play services and Play Store connections. The app showed onboarding and offered a settings link. Returned to Maps, dismissed the install dialog and selected Skip. Maps drew tiles with network access. Both connections were restored for the following two restarts.",
+  "appInitiatedRuns": [
+    {
+      "phase": "first guest onboarding",
+      "playServiceAndStoreConnectionsConfigured": false,
+      "officialPlayCodeVerifiedInClient": false,
+      "originalMapsControl": "Go to settings",
+      "nativeHandoffAccepted": true,
+      "systemPageTitle": "Westlake Maps test host",
+      "visibleAccessRows": [
+        "Notifications",
+        "Network"
+      ],
+      "androidForegroundLocationChecks": {
+        "ACCESS_COARSE_LOCATION": "denied",
+        "ACCESS_FINE_LOCATION": "denied"
+      },
+      "firstOhLocationFix": false,
+      "sampledGmsConnectionStatuses": []
+    },
+    {
+      "phase": "first connected restart after Skip",
+      "playServiceAndStoreConnectionsConfigured": true,
+      "officialPlayCodeVerifiedInClient": true,
+      "originalMapsControl": "Go to settings",
+      "nativeHandoffAccepted": true,
+      "systemPageTitle": "Westlake Maps test host",
+      "visibleAccessRows": [
+        "Notifications",
+        "Network"
+      ],
+      "androidForegroundLocationChecks": {
+        "ACCESS_COARSE_LOCATION": "denied",
+        "ACCESS_FINE_LOCATION": "denied"
+      },
+      "firstOhLocationFix": false,
+      "sampledGmsConnectionStatuses": [
+        0,
+        9
+      ]
+    },
+    {
+      "phase": "second connected restart after Skip",
+      "playServiceAndStoreConnectionsConfigured": true,
+      "officialPlayCodeVerifiedInClient": true,
+      "originalMapsControl": "Go to settings",
+      "nativeHandoffAccepted": true,
+      "systemPageTitle": "Westlake Maps test host",
+      "visibleAccessRows": [
+        "Notifications",
+        "Network"
+      ],
+      "androidForegroundLocationChecks": {
+        "ACCESS_COARSE_LOCATION": "denied",
+        "ACCESS_FINE_LOCATION": "denied"
+      },
+      "firstOhLocationFix": false,
+      "sampledGmsConnectionStatuses": [
+        0,
+        9
+      ]
+    }
+  ],
+  "separateSystemControls": {
+    "shellAppDetails": "Opened the same named HAP page independently before the app retest.",
+    "permissionManagerPath": [
+      "Settings",
+      "Privacy and security",
+      "Permission manager",
+      "Location",
+      "Westlake Maps test host"
+    ],
+    "visibleChoices": [
+      "Ask each time",
+      "Allow only while in use",
+      "Deny"
+    ],
+    "selectionWhenInspected": "Deny",
+    "accuracySelectorVisibleWhenDenied": false
+  },
+  "limits": [
+    "No location grant or physical fix in these runs.",
+    "Cold startup with connected services and clean data did not reach the map during observation.",
+    "GMS code verification and tile rendering do not establish Google account or backend acceptance.",
+    "Separate host UIDs and private directory modes were observed. Cross-UID file access and production lifecycle isolation were not tested.",
+    "Automatic return to Maps from native Settings was not verified.",
+    "Full app validation remains open."
+  ],
+  "callbackEvidence": "Distinct numeric status values in sampled inbound IGmsCallbacks log entries for each Maps process. Status 0 denotes a successful service connection and 9 denotes SERVICE_INVALID. These are local connection replies. The trace does not establish which policy caused a refusal or whether Google accepted sign-in.",
+  "subsequentWhileInUseTest": {
+    "selection": "Allow only while in use on the dedicated host. The precise-location switch stayed off.",
+    "hostGrants": {
+      "before": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      },
+      "whileInUse": {
+        "APPROXIMATELY_LOCATION": 0,
+        "LOCATION": -1
+      },
+      "restored": {
+        "APPROXIMATELY_LOCATION": -1,
+        "LOCATION": -1
+      }
+    },
+    "sharedClientHostGrantsAtAllThreeChecks": {
+      "APPROXIMATELY_LOCATION": -1,
+      "LOCATION": -1
+    },
+    "mapsRestartDuringGrant": {
+      "androidCoarse": "granted",
+      "androidFine": "denied",
+      "nativeLowPowerRequestsAccepted": 2,
+      "nativePowerScene": "0x602",
+      "secondsObservedAfterStartAtLeast": 48,
+      "firstLocationFixesObserved": 0,
+      "gnssEnabled": false
+    },
+    "restoration": {
+      "nativeSelection": "Deny",
+      "androidCoarseAfterRestart": "denied",
+      "androidFineAfterRestart": "denied",
+      "withheldRequestsAfterRestart": 2,
+      "nativeRequestsStartedAfterRestart": 0
+    },
+    "networkLocationDiagnostic": {
+      "boardLibrary": "liblbsservice_network.z.so",
+      "providerParameterQueries": [
+        "const.location.nlp_service_name",
+        "const.location.nlp_ability_name"
+      ],
+      "keysPresentInBoardLibrary": true,
+      "readResult": "Both provider parameters returned 106 (parameter not found).",
+      "causeOfMissingFixEstablished": false,
+      "boardSystemLog": "NetworkAbility::RequestRecord logged “get service name failed!” between the approximate-grant launch and the post-revocation launch. The system event does not identify the Maps caller."
+    },
+    "acceptance": {
+      "perHostApproximateGrantAndRevocationVerified": true,
+      "approximateLocationDeliveryVerified": false,
+      "preciseLocationTested": false,
+      "productionIsolationVerified": false
+    }
+  }
+}

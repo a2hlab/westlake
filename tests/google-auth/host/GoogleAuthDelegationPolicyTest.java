@@ -24,6 +24,17 @@ public final class GoogleAuthDelegationPolicyTest {
         POLICY.setProperty(grant + "client_id", CLIENT);
         POLICY.setProperty("delegation.broker.sha256", "c".repeat(64));
         allow(PREFIX + "oauth2:openid email profile");
+        allow(PREFIX + "oauth2:openid email profile ");
+        allow(PREFIX + "oauth2: email");
+        allow(PREFIX + "oauth2: openid email profile ");
+        GoogleAuthDelegationPolicy leading = GoogleAuthDelegationPolicy.parse(PREFIX + "oauth2: email profile");
+        if (!leading.service.equals("oauth2: email profile") || !leading.scopes.equals(java.util.Set.of("email", "profile")))
+            throw new AssertionError("leading delimiter changed service or scope set");
+        passed++;
+        GoogleAuthDelegationPolicy trailing = GoogleAuthDelegationPolicy.parse(PREFIX + "oauth2:email ");
+        if (!trailing.service.equals("oauth2:email ") || !trailing.scopes.equals(java.util.Set.of("email")))
+            throw new AssertionError("service or scope set changed");
+        passed++;
         allow(PREFIX + "oauth2:server:client_id:" + CLIENT + ":api_scope:openid email?include_email=1&include_profile=0");
         allow(PREFIX + "audience:server:client_id:" + CLIENT);
         allow(PREFIX + "oauth2:https://www.googleapis.com/auth/userinfo.email");
@@ -36,6 +47,15 @@ public final class GoogleAuthDelegationPolicyTest {
         for (String key : new String[] {
                 "hub:" + PREFIX + "oauth2:email", PREFIX + "ac2dm", PREFIX + "oauth2:",
                 PREFIX + "oauth2:email email", PREFIX + "oauth2:email  profile", PREFIX + "oauth2:email\nprofile",
+                PREFIX + "oauth2:email  ", PREFIX + "oauth2:  email", PREFIX + "oauth2: ",
+                PREFIX + "oauth2:  ", PREFIX + "oauth2: email  ", PREFIX + "oauth2: email  profile",
+                PREFIX + "oauth2: email email", PREFIX + "oauth2: email drive",
+                PREFIX + "oauth2:\temail", PREFIX + "oauth2:\nemail", PREFIX + "oauth2:\remail",
+                PREFIX + "oauth2:\u00a0email", PREFIX + "oauth2: email\t",
+                PREFIX + "oauth2:server:client_id:" + CLIENT + ":api_scope: email",
+                PREFIX + "oauth2:email\t", PREFIX + "oauth2:email\r", PREFIX + "oauth2:email\u00a0",
+                PREFIX + "oauth2:email drive ",
+                PREFIX + "oauth2:server:client_id:" + CLIENT + ":api_scope:email ",
                 PREFIX + "oauth2:email drive", PREFIX + "oauth2:server:client_id:wrong.apps.googleusercontent.com:api_scope:email",
                 PREFIX + "audience:server:client_id:wrong.apps.googleusercontent.com",
                 PREFIX + "oauth2:server:client_id:" + CLIENT, PREFIX + "oauth2:email?delegatee_user_id=1",
@@ -52,6 +72,16 @@ public final class GoogleAuthDelegationPolicyTest {
         POLICY.setProperty(grant + "scopes", "openid");
         denyKey(PREFIX + "oauth2:openid?include_email=1");
         denyKey(PREFIX + "oauth2:openid?include_profile=1");
+        // The same bounded parser handles Gmail-sized requests; size acceptance is not a grant.
+        String wideScope = "https://scope.example.invalid/" + "x".repeat(600);
+        String wideService = "oauth2:" + wideScope + " ";
+        denyKey(PREFIX + wideService);
+        POLICY.setProperty(grant + "scopes", wideScope);
+        allow(PREFIX + wideService);
+        String limitScope = "x".repeat(GoogleAuthDelegationPolicy.MAX_KEY_LENGTH - PREFIX.length() - 7);
+        POLICY.setProperty(grant + "scopes", limitScope);
+        allow(PREFIX + "oauth2:" + limitScope);
+        denyKey(PREFIX + "oauth2:" + limitScope + " ");
         POLICY.remove(grant + "sha256");
         denyKey(PREFIX + "oauth2:email");
         System.out.println("GOOGLE_AUTH_DELEGATION_POLICY_PASS " + passed);

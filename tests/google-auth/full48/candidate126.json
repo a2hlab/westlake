@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "candidate": 126,
+  "date": "2026-11-18",
+  "previous": "candidate125.json",
+  "scope": "Original Drive on the dedicated host and original Gmail on the retained host. The board used the existing account and grants.",
+  "drive": {
+    "package": "com.google.android.apps.docs",
+    "baseApkSha256": "852c43fd8b3c6dc3f5269c813209f193c970f511c5e99b268f0a79ed85e8f5bd",
+    "hostUid": 20010065,
+    "productionFrameworkSha256": "625f7c163f28b06e16e62b1ec7041c91af9190bf34d91a60e950be400db5c45b",
+    "observationFrameworkSha256": "b408a3512b3e64be103e563ee75ea14f82f9c6c60533afa9ec663429a2fd1e1b",
+    "adapterSha256": "889a0875f234ceebb362cfcf1220d5ba157a34edd6ee48812265878b9c03a279",
+    "officialAuthority": "com.google.android.gms.auth.accounts",
+    "method": "get_accounts",
+    "officialProcess": "com.google.android.gms.persistent",
+    "observation": "The framework in the original client classified a copy of the provider reply using the typed Account array accessor used by the APK on SDK 34. Each call returned the original bundle or propagated the original exception. The observer recorded outcome categories only. Counts were verified again after each client exited.",
+    "runs": [
+      {
+        "run": "first",
+        "calls": 16,
+        "emptyTypedAccountArray": 16,
+        "otherOutcomes": 0,
+        "originalDrivePeerVerifiedByMicroG": true,
+        "resolvedOfficialAccountProvider": true,
+        "requestedAddAccount": true,
+        "windowDetached": true
+      },
+      {
+        "run": "repeat",
+        "calls": 16,
+        "emptyTypedAccountArray": 16,
+        "otherOutcomes": 0,
+        "originalDrivePeerVerifiedByMicroG": true,
+        "resolvedOfficialAccountProvider": true,
+        "requestedAddAccount": true,
+        "windowDetached": true
+      }
+    ],
+    "officialAccountConfiguration": {
+      "officialPersistentChildrenChecked": 4,
+      "sameAccountDirectory": true,
+      "localWestlakeAccountsFileAbsent": true,
+      "accountConnectorConfigured": false,
+      "legacyDelegationConfigured": false
+    },
+    "restored": {
+      "replacedFilesVerified": 10,
+      "normalLauncher": true,
+      "normalProcess": true,
+      "listeners": 3
+    },
+    "releasedStagedFiles": 469,
+    "limitations": "The absence of the Westlake local account file describes this profile. The provider may filter the visible set. Neither the reason for the empty array nor a backend decision was observed."
+  },
+  "gmail": {
+    "originalAppInForeground": true,
+    "systemSwipe": {
+      "initialVisibleRowsMatchedEarlierBaseline": true,
+      "samplesSeconds": [
+        6.9,
+        19.2,
+        49.6
+      ],
+      "visibleRowsUnchangedAllSamples": true,
+      "newSyncRequestsStartsOrCompletions": 0,
+      "forwardedTouchReleaseMarkerCount": 0
+    },
+    "appInputControl": {
+      "gestureConsumedByOriginalGmail": true,
+      "samples": [
+        {
+          "seconds": 8.2,
+          "visibleRowsMatchPreGesture": true,
+          "syncEventDelta": {
+            "requests": 0,
+            "starts": 0,
+            "finishes": 0
+          }
+        },
+        {
+          "seconds": 29.3,
+          "visibleRowsMatchPreGesture": true,
+          "syncEventDelta": {
+            "requests": 0,
+            "starts": 0,
+            "finishes": 0
+          }
+        }
+      ]
+    },
+    "comparison": "The same Primary message-list region was compared across captures. The control confirmed the client consumed a separate downward drag. The mailbox on the server was not queried.",
+    "testMessageReceiptVerified": false
+  },
+  "interpretation": "Original Drive received a valid empty account array on all 32 calls to the official Play services account provider across two cold launches. The earlier Android account lookup through microG returned one account. On both new launches Drive requested an additional account and its window detached. The official process has no private account connector in this configuration. The test locates the difference visible to Drive. Its cause inside Play services and Google server acceptance remain open. Original Gmail showed the same visible Primary rows after a system swipe and after a second drag consumed by the app. Fresh mail delivery remains open."
+}

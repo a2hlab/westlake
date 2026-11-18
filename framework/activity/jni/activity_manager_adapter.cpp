@@ -69,7 +69,6 @@ jint nativeStartAbility_impl(JNIEnv* env, jclass,
     LOGI("nativeStartAbility: bundle=%s, ability=%s, action=%s, callerOhToken=0x%llx",
          want.bundleName.c_str(), want.abilityName.c_str(), want.action.c_str(),
          static_cast<unsigned long long>(callerOhTokenAddr));
-    LOGI("[FIX-AUDIO] startAbility params=%s uri=%s", want.parametersJson.c_str(), want.uri.c_str());
 
     // [FIX-AUDIO 2026-06-30] In-app Android Services (e.g. noice SoundPlaybackService,
     // action=playSound) are not OHOS abilities — run them in-process so onStartCommand

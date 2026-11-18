@@ -11,13 +11,14 @@ import java.util.Set;
 
 /** Pinned GMS cache-key syntax is input, never proof of the originating caller. */
 public final class GoogleAuthDelegationPolicy {
+    public static final int MAX_KEY_LENGTH = 4096;
     public final String owner, signer, service, clientId;
     public final boolean serverCode;
     public final Map<String, String> options;
     public final Set<String> scopes;
 
     private GoogleAuthDelegationPolicy(String key) {
-        if (key == null || key.length() > 4096) throw new SecurityException("key size");
+        if (key == null || key.length() > MAX_KEY_LENGTH) throw new SecurityException("key size");
         String[] identity = key.split(":", 3);
         if (identity.length != 3 || !identity[0].matches("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
                 || !identity[1].matches("[0-9a-fA-F]{40}")) throw new SecurityException("key identity");
@@ -49,12 +50,18 @@ public final class GoogleAuthDelegationPolicy {
             clientId = service.substring(26); scopeList = "";
         } else if (service.startsWith("oauth2:")) {
             clientId = null; scopeList = service.substring(7);
+            // Original Drive requests start with one ASCII space; Gmail appends one.
+            // Accept one delimiter at either edge for set comparison, preserving the
+            // exact service sent to the provider. Repeated/interior empty scopes and
+            // other whitespace remain invalid; server-code syntax is unchanged.
+            if (scopeList.startsWith(" ")) scopeList = scopeList.substring(1);
+            if (scopeList.endsWith(" ")) scopeList = scopeList.substring(0, scopeList.length() - 1);
         } else throw new SecurityException("unsupported service");
         if (clientId != null && !clientId.matches("[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com"))
             throw new SecurityException("client id syntax");
         scopes = new HashSet<>();
         if (!scopeList.isEmpty()) for (String scope : scopeList.split(" ", -1)) {
-            if (scope.isEmpty() || !scopes.add(scope)) throw new SecurityException("scope syntax");
+            if (!scope.matches("[\\x21-\\x7e]+") || !scopes.add(scope)) throw new SecurityException("scope syntax");
         }
         if ((clientId == null || serverCode) && scopes.isEmpty()) throw new SecurityException("empty scopes");
     }

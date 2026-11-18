@@ -632,9 +632,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // GLSurfaceView (1200x1152 at the top of a 1200x1920 window) won it in 3 of 5 launches, and
     // hwui aborted ("drawRenderNode called on a context with no surface!"); when hwui won, the
     // emulator's screen was missing. So a smaller SurfaceView elsewhere gets one too where it sits
-    // below its window, Android's default: there its window only shows through hwui's hole, so the
-    // cost of a window at 0,0 is that what shows through is offset by the SurfaceView's position
-    // (and an inline video further down shows nothing), never a race. Telegram X's SurfaceView
+    // below its window, Android's default. Its content shows through hwui's hole. The sub-window
+    // starts at 0,0 and must include the view's offset as well as its visible extent. Telegram X's SurfaceView
     // (1200x933 at 0,54) shared its window and aborted so in about half its launches. One on top
     // of its window elsewhere still shares it: a window of its own at 0,0 would cover the views
     // at the top of the screen.
@@ -672,9 +671,11 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             android.view.ViewRootImpl owner = surfaceView instanceof android.view.View
                     ? ((android.view.View) surfaceView).getViewRootImpl() : null;
             SurfaceViewWindow window = new SurfaceViewWindow(owner);
+            int sessionWidth = Math.max(width, Math.min(windowWidth, at[0] + width));
+            int sessionHeight = Math.max(height, Math.min(windowHeight, at[1] + height));
             int[] info = nativeCreateSession(window, currentPackageName(),
                     currentActivityName(), "entry", "SurfaceView:" + name,
-                    WindowManager.LayoutParams.TYPE_APPLICATION, 0, width, height, ohTokenAddr);
+                    WindowManager.LayoutParams.TYPE_APPLICATION, 0, sessionWidth, sessionHeight, ohTokenAddr);
             if (info == null || info.length < 6 || info[0] <= 0) {
                 System.err.println("[OH_WSA] SurfaceView '" + name + "' got no OH session: "
                         + (info == null || info.length < 6 ? "malformed" : "wsErr=" + info[5]));
@@ -708,7 +709,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             }
             System.err.println("[OH_WSA] SurfaceView '" + name + "' " + width + "x" + height
                     + " at " + at[0] + "," + at[1] + " -> own sessionId=" + sessionId + ", " + placed
-                    + (belowElsewhere ? ", shown at 0,0 (OH places no sub-window)" : ""));
+                    + ", session " + sessionWidth + "x" + sessionHeight);
             return sessionId;
         } catch (Throwable t) {
             System.err.println("[OH_WSA] SurfaceView '" + name + "' own session failed: " + t);
@@ -1231,6 +1232,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // Update surface size if dimensions changed
         nativeUpdateSurfaceSize(sessionId, width, height);
         final Rect placed = placeWindow(window, windowAttrs, width, height);
+        OhInsetsBridge.updateStatusBar(window, sessionId, placed.left, placed.top);
         setDimOwnerVisible(window.asBinder(), viewVisibility == android.view.View.VISIBLE);
 
         // Populate output frames

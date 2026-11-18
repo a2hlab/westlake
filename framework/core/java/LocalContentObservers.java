@@ -1,30 +1,47 @@
 package adapter.core;
 
+import android.content.ContentResolver;
 import android.database.IContentObserver;
 import android.net.Uri;
 import android.os.RemoteException;
+import android.os.UserHandle;
 import android.util.Log;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/**
- * ContentService's observers, within one process. The shared Play services process needs them: it
- * caches Gservices values until told they changed, so an Android ID read as 0 before check-in stayed 0.
- * Other processes keep the plain answers until this has had a regression pass, since delivering
- * changes alters what every app that observes a provider does.
- */
+/** Content provider observers for changes originating in the same process. */
 public final class LocalContentObservers {
     private static final String TAG = "WL_Observers";
+    private static final boolean PLAY_HOST = System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null;
 
     private static final class Registration {
         final Uri uri;
         final boolean descendants;
         final IContentObserver observer;
+        final int user;
 
-        Registration(Uri uri, boolean descendants, IContentObserver observer) {
+        Registration(Uri uri, boolean descendants, IContentObserver observer, int user) {
             this.uri = uri;
             this.descendants = descendants;
             this.observer = observer;
+            this.user = user;
+        }
+
+        boolean matches(Uri changed, int flags) {
+            if (changed == null || uri.getAuthority() == null || !uri.getAuthority().equals(changed.getAuthority())) {
+                return false;
+            }
+            List<String> observed = uri.getPathSegments();
+            List<String> path = changed.getPathSegments();
+            for (int i = 0; i < Math.min(observed.size(), path.size()); i++) {
+                if (!observed.get(i).equals(path.get(i))) return false;
+            }
+            if (observed.size() < path.size()) return descendants;
+            return !descendants || (flags & ContentResolver.NOTIFY_SKIP_NOTIFY_FOR_DESCENDANTS) == 0;
         }
     }
 
@@ -32,13 +49,23 @@ public final class LocalContentObservers {
 
     private LocalContentObservers() {}
 
-    /** Whether this process uses these rather than the plain answers. */
     public static boolean active() {
-        return System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null;
+        return PLAY_HOST || "1".equals(System.getenv("WESTLAKE_LOCAL_SYNC"));
     }
 
-    public static void register(Uri uri, boolean descendants, IContentObserver observer) {
-        if (uri != null && observer != null) sRegistrations.add(new Registration(uri, descendants, observer));
+    private static int resolveUser(int requested) {
+        int current = UserHandle.myUserId();
+        if (requested == current || requested == UserHandle.USER_CURRENT || requested == UserHandle.USER_CURRENT_OR_SELF) {
+            return current;
+        }
+        // Play hosts also have local observers for multiple users. App-owned sync is single-user.
+        if (PLAY_HOST && (requested >= 0 || requested == UserHandle.USER_ALL)) return requested;
+        throw new SecurityException("content observers belong to the current user");
+    }
+
+    public static void register(Uri uri, boolean descendants, IContentObserver observer, int user) {
+        int target = resolveUser(user);
+        if (uri != null && observer != null) sRegistrations.add(new Registration(uri, descendants, observer, target));
     }
 
     public static void unregister(IContentObserver observer) {
@@ -46,30 +73,25 @@ public final class LocalContentObservers {
         sRegistrations.removeIf(r -> r.observer.asBinder() == observer.asBinder());
     }
 
-    /**
-     * As ObserverNode.collectObservers: an observer hears of a change to its own URI or below it if it
-     * asked for descendants, and of a change at any URI above it.
-     */
     public static void notifyChange(Uri[] uris, IContentObserver origin, boolean originWantsSelf, int flags, int user) {
+        int target = resolveUser(user);
         if (uris == null) return;
+        Map<IContentObserver, List<Uri>> deliveries = new LinkedHashMap<>();
         for (Uri uri : uris) {
-            for (Registration registration : sRegistrations) {
-                if (!matches(registration, uri)) continue;
-                boolean own = origin != null && registration.observer.asBinder() == origin.asBinder();
-                if (own && !originWantsSelf) continue;
-                try {
-                    registration.observer.onChangeEtc(own, new Uri[] {uri}, flags, user);
-                } catch (RemoteException | RuntimeException e) {
-                    Log.w(TAG, "observer failed: " + e.getClass().getName());
-                }
+            for (Registration r : sRegistrations) {
+                if (r.user != target && r.user != UserHandle.USER_ALL && target != UserHandle.USER_ALL) continue;
+                if (!originWantsSelf && origin != null && r.observer.asBinder() == origin.asBinder()) continue;
+                if (r.matches(uri, flags)) deliveries.computeIfAbsent(r.observer, k -> new ArrayList<>()).add(uri);
             }
         }
-    }
-
-    private static boolean matches(Registration registration, Uri changed) {
-        String observed = registration.uri.toString();
-        String uri = changed.toString();
-        return uri.equals(observed) || observed.startsWith(uri + "/")
-                || (registration.descendants && uri.startsWith(observed + "/"));
+        for (Map.Entry<IContentObserver, List<Uri>> entry : deliveries.entrySet()) {
+            IContentObserver observer = entry.getKey();
+            boolean own = origin != null && observer.asBinder() == origin.asBinder();
+            try {
+                observer.onChangeEtc(own, entry.getValue().toArray(new Uri[0]), flags, target);
+            } catch (RemoteException | RuntimeException e) {
+                Log.w(TAG, "observer failed: " + e.getClass().getName());
+            }
+        }
     }
 }

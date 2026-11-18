@@ -1,9 +1,13 @@
 package adapter.core;
 
+import android.accounts.Account;
+import android.accounts.AccountManager;
+import android.accounts.IAccountManagerResponse;
 import android.content.ClipData;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.os.Binder;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.IInterface;
 
@@ -244,11 +248,37 @@ public final class LocalServiceBinders {
     private static IBinder accountService() throws ClassNotFoundException {
         if (GoogleAuthProxy.client()) return new AccountManagerStub();
         if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
+        IBinder empty = proxy("account", "android.accounts.IAccountManager", (method, args) -> {
+            if ("hasFeatures".equals(method)) {
+                if (args[1] == null) throw new IllegalArgumentException("account is null");
+                if (args[0] == null) throw new IllegalArgumentException("response is null");
+                if (args[2] == null) throw new IllegalArgumentException("features is null");
+                // This service has no visible authenticator types. Android checks type access
+                // before starting a feature query, even when the requested feature list is empty.
+                throw new SecurityException("Account type is not visible to the caller");
+            }
+            if ("getAccountsByFeatures".equals(method) || "getAccountByTypeAndFeatures".equals(method)) {
+                IAccountManagerResponse response = (IAccountManagerResponse) args[0];
+                if (response == null) throw new IllegalArgumentException("response is null");
+                if (args[1] == null) throw new IllegalArgumentException("accountType is null");
+                Bundle result = new Bundle();
+                if ("getAccountsByFeatures".equals(method)) {
+                    result.putParcelableArray(AccountManager.KEY_ACCOUNTS, new Account[0]);
+                }
+                LocalAccounts.reply(response, result);
+                return null;
+            }
+            // addAccount completes through its response, even when there is no authenticator to bind.
+            if ("addAccount".equals(method) || "addAccountAsUser".equals(method)) {
+                LocalAccounts.authenticatorUnavailable((android.accounts.IAccountManagerResponse) args[0]);
+                return null;
+            }
+            return DEFAULT;
+        });
         if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
-            IBinder remote = playServicesHostService("account");
-            if (remote != null) return remote;
+            return StoreAccountService.create(() -> playServicesHostService("account"), empty);
         }
-        return proxy("account", "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+        return empty;
     }
 
     /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */

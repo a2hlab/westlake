@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "status": "observations_complete_with_gaps",
+  "sourceRevisions": {
+    "westlake": "61209fc78dc0728193167f73a3abb688f2b466a7",
+    "manifest": "d0fe141c6002bba64bb6a2a6be010564742a36dd"
+  },
+  "deviceCertification": "uncertified_status=3; no override",
+  "identityExceptionsAdded": [
+    212,
+    213
+  ],
+  "providerGrantsExpanded": false,
+  "googleTests": [
+    {
+      "package": "com.mobilefootie.wc2010",
+      "name": "FotMob",
+      "status": "partial",
+      "interactiveGoogleResultOk": true,
+      "silentTokenRepliesObserved": true,
+      "privatePreferenceWritten": true,
+      "cloudPreferenceRoundTripProven": false,
+      "explanation": "Fresh app data login returned RESULT_OK and tokenDetails; onboarding showed default team selection instead of the written favorite. Backend round trip remains unproven; late prior SIGTRAP also unresolved."
+    },
+    {
+      "package": "com.spotify.music",
+      "name": "Spotify",
+      "status": "failed",
+      "googleSignInAttempted": true,
+      "accountChooserReached": false,
+      "explanation": "Google sign-in UI handoff accepted; legacy sign-in service 91 returned status 9, RESULT_CANCELED, app displays Something went wrong. Current identity exceptions cover 212/213 only."
+    },
+    {
+      "package": "wp.wattpad",
+      "name": "Wattpad",
+      "status": "failed",
+      "googleSignInAttempted": true,
+      "explanation": "Google login displays Play services not supported. Service 91 returns status 9; service 212 handshake returns 0. No account chooser or successful token reply."
+    },
+    {
+      "package": "com.google.android.youtube",
+      "name": "YouTube",
+      "status": "failed",
+      "launchRendered": true,
+      "googleSignInAttempted": true,
+      "interactiveGoogleResultOk": false,
+      "remoteGoogleResultCanceled": true,
+      "accountSessionAccepted": false,
+      "videoPlaybackTested": false,
+      "explanation": "YouTube renders its home screen, then shows There was a problem signing in to your account. Tapping Sign In sends a remote GMS activity request which returns RESULT_CANCELED; the following display is black. Startup broker status9 is observed across several services, with status0 for services51/40. No successful account session, token reply or playback established. First staging attempt ran out of space before app launch; retry after cache cleanup is the live observation."
+    },
+    {
+      "package": "com.google.android.gm",
+      "name": "Gmail",
+      "status": "failed",
+      "launchRendered": true,
+      "googleSignInAttempted": true,
+      "accountChooserReached": false,
+      "accountSessionAccepted": false,
+      "mailboxSyncTested": false,
+      "explanation": "Gmail renders welcome and email setup. It repeatedly displays Device not compatible / Google Play services unsupported. Refresh list shows no accounts; selecting Add an email address then Google does not reach a Google account chooser. No mailbox session or sync established.",
+      "sourceGap": "LocalServiceBinders.accountService returns a no-account stub for this ordinary app configuration. The client has PLAY_SERVICES_CONNECT but no GOOGLE_AUTH_CONNECT, PLAY_SERVICES_SERVE or PLAY_STORE_SERVE. This is an additional integration gap; the observed compatibility message has not been causally isolated."
+    },
+    {
+      "package": "com.google.android.apps.docs",
+      "name": "Google Drive",
+      "status": "partial_blocked",
+      "explanation": "Drive discovers the existing test account and renders Home, Files and the account menu. Home and Files remain on loading spinners; no file listing or file read is established. Shared GMS diagnostics explicitly record silent_read_denied=true owner=com.google.android.apps.docs eight times in the captured interval. This is a local scoped-auth denial, not proof that Google rejected an issued token. The exact failed session/request condition is not yet isolated. Provider grants were not expanded.",
+      "launchRendered": true,
+      "existingTestAccountVisible": true,
+      "accountMenuRendered": true,
+      "homeAndFilesTabsRendered": true,
+      "fileListingAccepted": false,
+      "fileOpenTested": false,
+      "scopedAuthReadDenied": true,
+      "scopedAuthReadDeniedCountInWindow": 8
+    },
+    {
+      "package": "com.google.android.apps.maps",
+      "name": "Google Maps",
+      "status": "blocked_startup",
+      "processAlive": true,
+      "usableScreenRendered": false,
+      "googleSignInAttempted": false,
+      "mapTilesTested": false,
+      "searchTested": false,
+      "locationTested": false,
+      "navigationTested": false,
+      "explanation": "Maps remains alive with a black window and no relayout marker in the observed startup interval. An ART SIGQUIT dump shows the UI looper waiting in FutureTask.get through obfuscated Maps startup code. GMS service40 returns status0; no authentication rejection was established. The unresolved future dependency prevents account, map search and navigation validation. GNSS is disabled in this authentication configuration, and the runtime also reports that OH has not granted host location."
+    },
+    {
+      "package": "com.ubercab",
+      "name": "Uber",
+      "status": "failed_return",
+      "launchRendered": true,
+      "googleSignInAttempted": true,
+      "authenticationRoute": "Google web OAuth fallback",
+      "googleWebCredentialsAccepted": true,
+      "googleProfileEmailConsentAccepted": true,
+      "remoteGmsAccountChooserObserved": false,
+      "applicationSessionAccepted": false,
+      "bookingAttempted": false,
+      "locationTested": false,
+      "explanation": "Uber renders its login screen. Continue with Google opens web OAuth. Google accepts the authorized test credentials and presents ordinary profile/email consent. After consent, an Uber-branded page says Sorry, we could not find that page. No successful return into a signed-in Uber application session is established. This is a web fallback observation, not evidence of two-path GMS token delegation. Service212 broker status0 alone is insufficient. The failed redirect cause is not isolated; no booking or separate app signup was attempted."
+    }
+  ],
+  "facebookTests": {
+    "wp.wattpad": {
+      "webLoginRendered": true,
+      "authenticatedReturn": "passed_to_separate_application_signup_boundary",
+      "webViewInputAssertionObserved": true,
+      "credentialsSubmitted": true,
+      "webViewInputFixedAndValidated": true,
+      "facebookResponseReceived": true,
+      "exactAccountMatch": true,
+      "suggestedAccountRequiresUserConfirmation": false,
+      "separateAppAccountSignupCompleted": false,
+      "correctedIdentifierAccepted": true,
+      "facebookConsentReached": true,
+      "facebookConsentAccepted": true,
+      "localReuseFixturePassed": true,
+      "localReuseFixLiveValidated": true,
+      "facebookSdkResultOk": true,
+      "wattpadResultOk": true,
+      "fullApplicationAcceptance": false,
+      "explanation": "Corrected Facebook login accepted. Candidate47 reuses CustomTabMainActivity and delivers RESULT_OK through FacebookActivity to Wattpad. Wattpad displays Create an Account; stopped without completing signup."
+    },
+    "com.spotify.music": {
+      "status": "blocked_startup",
+      "launchAttempted": true,
+      "webLoginRendered": false,
+      "credentialsSubmitted": false,
+      "authenticatedReturn": false,
+      "fullApplicationAcceptance": false,
+      "explanation": "Candidate47 Facebook follow-up remains at a black screen before reaching the Spotify login UI. Process survives; no relayout or GMS request marker in the captured interval. ART dump places the UI looper in obfuscated Spotify startup code. This follow-up did not reach Facebook; it does not overturn the separately observed candidate43 Google service91 refusal. Underlying startup wait remains unresolved."
+    },
+    "com.mobilefootie.wc2010": {
+      "status": "passed_login_and_return",
+      "webLoginRendered": true,
+      "credentialsSubmitted": true,
+      "correctedIdentifierAccepted": true,
+      "facebookConsentReached": true,
+      "facebookConsentAccepted": true,
+      "localActivityReused": true,
+      "facebookSdkResultOk": true,
+      "applicationSignInActivityResultOk": true,
+      "authenticatedReturn": true,
+      "signedInUiObserved": true,
+      "matchListRendered": true,
+      "separateApplicationSignupPrompted": false,
+      "restartPersistenceTested": false,
+      "cloudPreferenceRoundTripProven": false,
+      "fullApplicationAcceptance": false,
+      "explanation": "Facebook accepts the corrected authorized credentials and ordinary profile/email consent. Candidate47 reuses CustomTabMainActivity and delivers RESULT_OK through FacebookActivity into FotMob SignInActivity. FotMob returns to a populated match list, and its account menu offers Sign out. This passes live login and return with visible signed-in application state. No separate signup form was submitted. Cloud preference round trip, restart persistence and full application acceptance remain unproven."
+    }
+  },
+  "fullApplicationPasses": 0,
+  "caveats": [
+    "Broker status 0 is not backend acceptance.",
+    "afterService attribution is process-global and approximate.",
+    "All clients share one development HAP UID; GMS has a separate dedicated HAP UID.",
+    "Long-run prior FotMob43 SIGTRAP remains unresolved.",
+    "Location is disabled in the current authentication test configuration."
+  ],
+  "googleTargetsAttempted": 8,
+  "facebookTargetsLaunched": 3,
+  "facebookAuthenticatedReturns": 2,
+  "facebookFullApplicationPasses": 0
+}
