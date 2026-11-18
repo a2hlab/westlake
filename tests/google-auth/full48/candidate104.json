@@ -1,0 +1,80 @@
+{
+  "candidate": 104,
+  "date": "2026-11-17",
+  "scope": "Original, unmodified TikTok welcome asset through Android MediaExtractor, MediaCodec and ImageReader on the OpenHarmony board.",
+  "apkVersionName": "47.1.4",
+  "apkSha256": "4226ed5d3031b68208c29f62d80ac421b281fc74201bc4163d98e442d0991a40",
+  "assetSha256": "19cf1e34dad70708d05eeae7741e6f8b50795b2ec38e01bb68f91695dbcd5376",
+  "softwareProvider": {
+    "ffmpegSource": "OpenHarmony third_party/ffmpeg",
+    "ffmpegCommit": "520f5adfa70807f04a250c494e8bb1743011481e",
+    "profile": "HEVC Main 8-bit",
+    "artifact": {
+      "path": "lib/libwl_hevc.so",
+      "bytes": 3346456,
+      "sha256": "6d43ff44e947d8108dcaa7c2e8cb3d9822bbbaa7d45b833bdc5a5bb0f43282dc"
+    },
+    "mediaBridge": {
+      "path": "lib/libwl_missing_natives.so",
+      "bytes": 2701792,
+      "sha256": "eff0c5a9a17000f2e6d0c3850d466a684ee840c11a0332f786c0083a1eb659ff"
+    }
+  },
+  "windowReadback": {
+    "sourceFrames": 122,
+    "firstSurfaceFrames": 3,
+    "secondSurfaceFrames": 119,
+    "acquiredPixels": [
+      500,
+      500
+    ],
+    "pixelFormat": "YUV_420_888; visible samples read as Y, U, V",
+    "lastPresentationTimeUs": 6050000,
+    "decodedPixelSha256": "eb9617be93658cf548ce6d24ce7c5f1ec80ddc24a6b13644b1bcb524a2ff0f0c",
+    "matchesIndependentHostDecode": true,
+    "timedReleaseExercised": true,
+    "mainLevel3DecoderLookup": "OH.video.hevc.decoder"
+  },
+  "lifecycle": {
+    "synchronousBufferFlushAfterFrames": 8,
+    "framesAfterFlushAndSeek": 122,
+    "framesAfterStopAndReconfigure": 122,
+    "bothPixelHashesMatch": true,
+    "callbackFlushBeforeAndAfter": [
+      122,
+      122
+    ],
+    "callbackEventsDuring350msBeforeResume": 0,
+    "callbacksOnRequestedHandler": true
+  },
+  "controlStreams": {
+    "generatedMainLevel3": {
+      "pixels": [
+        960,
+        540
+      ],
+      "fps": 30,
+      "frames": 60,
+      "firstSurfaceFrames": 3,
+      "secondSurfaceFrames": 57,
+      "pixelSha256": "4ffed2852c331bdc914051ad7b0aeb446e92b37d10672ad331b4246dfd77daf3",
+      "matchesHost": true
+    },
+    "h264": "End of stream",
+    "aac": "End of stream",
+    "main10": "Used the platform path and reported terminal CodecException on the requested handler.",
+    "withoutOptionalProvider": "Original HEVC clip on the platform path reported terminal CodecException on the requested handler."
+  },
+  "frameworkStage": {
+    "preloadPassed": true,
+    "fileCount": 469,
+    "bothLibraryHashesVerified": true,
+    "stagedLibrariesReplayedWholeAsset": true
+  },
+  "pending": [
+    "Original TikTok welcome widget rendering and on-screen dimensions",
+    "HEVC Main 10 playback",
+    "YouTube and other full48 app acceptance tests"
+  ],
+  "liveAppAtEnd": "Original TikTok foreground window displayed the birthday prompt. No input was submitted. New native libraries were verified in a separate framework stage."
+}

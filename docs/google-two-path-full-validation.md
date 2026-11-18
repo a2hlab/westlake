@@ -2090,3 +2090,33 @@ handler. The previous bridge waited past the 12-second callback deadline. As a
 control, an H.264 transcode of the same animation delivered all 122 frames
 across an output-surface change. On-screen sizing still requires a capture from
 the original TikTok player. [Board results](../tests/google-auth/full48/candidate102.json)
+
+### HEVC playback through the Android framework
+
+The runtime can now load a software HEVC Main decoder built from OpenHarmony’s
+FFmpeg source. On the test board the platform decoder lists Main 10, and the
+platform has no software HEVC provider. When a caller configures an 8-bit Main
+stream, Westlake can select the bundled decoder. Applications use the normal
+Android `MediaCodec` interface. To build the decoder and include it in the
+runtime artifact manifest, supply the OpenHarmony `third_party/ffmpeg` checkout
+as the fourth argument to `tools/build_missing_natives.sh`. The board run used
+FFmpeg commit `520f5adfa70807f04a250c494e8bb1743011481e`.
+
+The board read all 122 samples from the unchanged TikTok clip using Android
+`MediaExtractor`. Android `ImageReader` received three decoded frames on the
+first surface and 119 on its replacement. Every image was 500 × 500. The
+checksum of the visible Y, U and V pixels across all frames matched an
+independent host decode. The same result held for buffer output after flushing
+and seeking back to the beginning, and again after stopping and reconfiguring.
+The staged framework passed preload and repeated the surface readback test.
+A separate 960 × 540 Main Level 3 clip also matched its host reference.
+[Framework and pixel results](../tests/google-auth/full48/candidate104.json)
+
+The board also reproduced a callback-thread bug on a healthy H.264 clip. All
+27 input, output and format notifications arrived on threads other than the
+one requested by the Android client. The bridge now posts them to Android’s
+selected handler. H.264 and AAC completed on the requested thread, as did both
+122-frame HEVC passes before and after an asynchronous flush. The Main 10
+control still returned a terminal decoder error. TikTok’s own player has yet
+to show a measurable moving frame in a live capture.
+[Callback comparison](../tests/google-auth/full48/candidate103.json) · [Flush and format controls](../tests/google-auth/full48/candidate104.json)

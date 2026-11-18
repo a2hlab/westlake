@@ -1,5 +1,5 @@
 #!/bin/bash
-# build_missing_natives.sh <android-source> <oh-sdk-native> <out-dir>
+# build_missing_natives.sh <android-source> <oh-sdk-native> <out-dir> [oh-ffmpeg-source]
 # Builds libwl_missing_natives.so from framework/javacore-shim/missing_natives.c, media_natives.c, extractor_natives.c, text_natives.c, audiorecord_natives.c,
 # audioports_natives.c, localsocket_natives.c, canvas_natives.c, sqlite_natives.c, notification_natives.c, location_natives.c
 # (OH's location service through its NDK), socketbinder_natives.c and
@@ -44,7 +44,12 @@ ${CC/clang /clang++ } -shared -fuse-ld=lld -Wl,-soname,libwl_missing_natives.so 
   $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/seccomp_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
 # Export the same library for the manifest runtime composer and per-app launcher.
 # Keep the top-level output used by existing native callers.
-python3 - "$OUT" <<'PY'
+libraries=(libwl_missing_natives.so)
+if [[ -n "${4:-}" ]]; then
+  bash "$HERE/tools/build_hevc_decoder.sh" "$4" "$SDK" "$OUT"
+  libraries+=(libwl_hevc.so)
+fi
+python3 - "$OUT" "${libraries[@]}" <<'PY'
 import hashlib
 import json
 import shutil
@@ -54,16 +59,20 @@ from pathlib import Path
 
 output = Path(sys.argv[1])
 package = output / "runtime"
-library = Path("lib/libwl_missing_natives.so")
-(package / library.parent).mkdir(parents=True, exist_ok=True)
+(package / "lib").mkdir(parents=True, exist_ok=True)
+artifacts = {}
 with tempfile.TemporaryDirectory(dir=package) as temp:
-    copy = Path(temp) / library.name
-    shutil.copy2(output / library.name, copy)
-    entry = {"path": str(library), "bytes": copy.stat().st_size,
-             "sha256": hashlib.sha256(copy.read_bytes()).hexdigest()}
+    for name in sys.argv[2:]:
+        library = Path("lib") / name
+        copy = Path(temp) / name
+        shutil.copy2(output / name, copy)
+        artifacts[name] = {"path": str(library), "bytes": copy.stat().st_size,
+                           "sha256": hashlib.sha256(copy.read_bytes()).hexdigest()}
+        copy.replace(package / library)
+    if "libwl_hevc.so" not in artifacts:
+        (package / "lib/libwl_hevc.so").unlink(missing_ok=True)
     report = Path(temp) / "artifacts.json"
-    report.write_text(json.dumps({"artifacts": {library.name: entry}}, indent=2) + "\n")
-    copy.replace(package / library)
+    report.write_text(json.dumps({"artifacts": artifacts}, indent=2) + "\n")
     report.replace(package / report.name)
 PY
 echo "built $OUT/libwl_missing_natives.so and $OUT/runtime/artifacts.json"
