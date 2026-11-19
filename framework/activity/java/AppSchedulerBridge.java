@@ -1164,8 +1164,10 @@ public class AppSchedulerBridge {
      * The result stays sorted, as AppCompatCallbacks binary-searches it.
      */
     static long[] withoutLaterEdgeToEdge(long[] disabled) {
-        // The reported platform, read from its property: in this boot image a comparison of
-        // Build.VERSION.SDK_INT disagreed with the value the same method printed (34).
+        // The reported platform, read from its property. A Build.VERSION.SDK_INT comparison cannot
+        // tell: this code is dexed as an Android 15 platform build (D8 --android-platform-build
+        // --min-api 35), which answers every SDK_INT comparison for API 35 at dex time. Only reads
+        // of SDK_INT's value still return the reported level (34).
         int sdk = android.os.SystemProperties.getInt("ro.build.version.sdk", 0);
         boolean listed = java.util.Arrays.binarySearch(disabled, ENFORCE_EDGE_TO_EDGE) >= 0;
         boolean disable = sdk > 0 && sdk < 35 && !listed;
