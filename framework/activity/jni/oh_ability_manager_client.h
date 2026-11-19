@@ -173,6 +173,23 @@ public:
     void startForegroundHeartbeat(jlong ohTokenAddr, int intervalMs);
 
     /**
+     * ADR-0008 on OpenHarmony 7.0: the FOREGROUND reports sent for an ability token, counted, so that the bridge can
+     * tell whether the app reported FOREGROUND before OH's foreground timeout (ability_scheduler_adapter.cpp,
+     * wl_managed_foreground_deadline).
+     */
+    void noteForegroundReport(jlong ohTokenAddr);
+    uint64_t foregroundReports(jlong ohTokenAddr);
+
+    /**
+     * ADR-0008 on OpenHarmony 7.0: OH's ScheduleForegroundApplication requests, numbered, and which one was last
+     * answered with ApplicationForegrounded (by the app's main looper or the bridge's fallback, whichever came
+     * first; app_scheduler_adapter.cpp). claimApplicationForeground returns whether the caller answers this one.
+     */
+    uint64_t applicationForegroundRequested();
+    uint64_t applicationForegroundRequests();
+    bool claimApplicationForeground(uint64_t request);
+
+    /**
      * Get the IPC proxy for direct access (used by advanced operations).
      */
     OHOS::sptr<OHOS::AAFwk::IAbilityManager> getProxy() const { return proxy_; }

@@ -12,9 +12,16 @@
 #include "app_scheduler_adapter.h"
 
 #include <android/log.h>
+#include <chrono>
+#include <condition_variable>
 #include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <mutex>
+#include <set>
+#include <string>
+#include <thread>
 #include <nlohmann/json.hpp>
 
 // G2.2 (2026-04-30): missing ⑨ AttachAbilityThread reverse callback.
@@ -203,9 +210,36 @@ int AppSchedulerAdapter::mapMemoryLevel(int ohLevel)
 // Category 1: App Lifecycle
 // ================================================================
 
+// ADR-0008 on OpenHarmony 7.0: OH's foreground timeout for the ability (about 5 s) runs from before
+// ScheduleForegroundApplication, through ApplicationForegrounded and the ability's FOREGROUND transaction, to the app's
+// FOREGROUND report. An OH app's main looper is idle then; an Android app's is creating its first activity (the launch
+// item came first), and the main looper's answer waited for that: 2.8 s for Spotify, whose ability OH then cleaned
+// away. So when the main looper has not answered within WESTLAKE_APP_FOREGROUND_FALLBACK_MS (300), the bridge answers
+// from a thread of its own; whichever answers first sends ApplicationForegrounded, once. 0 turns the fallback off.
+static void wl_managed_application_foreground_fallback(uint64_t request) {
+    static const int fallbackMs = [] {
+        const char* value = getenv("WESTLAKE_APP_FOREGROUND_FALLBACK_MS");
+        const char* managed = getenv("WESTLAKE_MANAGED_LAUNCH");
+        if (managed == nullptr || std::string(managed) != "1") return 0;
+        return value != nullptr ? atoi(value) : 300;
+    }();
+    if (fallbackMs <= 0) return;
+    std::thread([request]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(fallbackMs));
+        if (!OHAbilityManagerClient::getInstance().claimApplicationForeground(request)) return;
+        ALOGI("[G2.14i] main looper busy %d ms: ApplicationForegrounded from the bridge", fallbackMs);
+        fprintf(stderr, "[WL-MANAGED] the main looper had not answered OH's foreground request after %d ms:"
+                " the bridge sent ApplicationForegrounded\n", fallbackMs);
+        fflush(stderr);
+        OHAppMgrClient::getInstance().notifyAppState(static_cast<int>(AppState::STATE_FOREGROUND));
+    }).detach();
+}
+
 bool AppSchedulerAdapter::ScheduleForegroundApplication()
 {
     ALOGI("[BRIDGED] ScheduleForegroundApplication -> setProcessState(PROCESS_STATE_TOP)");
+    const uint64_t request = OHAbilityManagerClient::getInstance().applicationForegroundRequested();
+    wl_managed_application_foreground_fallback(request);  // before anything here can wait for the JNI lock
     callJavaMethod("setProcessState", "(I)V", static_cast<jint>(PROCESS_STATE_TOP));
 
     // G2.14i (2026-05-01): mirror OH MainThread::HandleForegroundApplication.
@@ -250,6 +284,7 @@ bool AppSchedulerAdapter::ScheduleForegroundApplication()
     } else {
         ALOGE("[G2.14i] getJNIEnv failed; ApplicationForegrounded callback skipped");
     }
+
 
     return true;
 }
@@ -340,6 +375,44 @@ void AppSchedulerAdapter::ScheduleCjHeapMemory(OHOS::AppExecFwk::CjHeapDumpInfo 
 // Category 3: Application Launch
 // ================================================================
 
+// ADR-0008 on OpenHarmony 7.0: OH answers a launch with one-way calls to this process's app scheduler, in order:
+// ScheduleLaunchApplication, ScheduleAbilityStage, ScheduleLaunchAbility, ScheduleForegroundApplication; binder delivers
+// each only after the call before it returned. The Android bind (Application.onCreate) ran inside the first, and an
+// app's bind takes seconds (Instagram: 9.5 s), so the ability was attached that much later; OH's load timeout (about
+// 10 s from the process start here) then ended the ability (SceneBoard: handleLoadTimeout). An OH app's main thread
+// takes the launch work and its binder threads return at once. So in a managed launch the bind and the activity
+// launch run on threads of their own and these calls return at once: the ability is attached as soon as OH sends it,
+// the activity's launch still waits for the bind (AppSchedulerBridge.awaitManagedBind), and its lifecycle transactions
+// wait for its launch (AbilitySchedulerAdapter::ScheduleAbilityTransaction). WESTLAKE_ASYNC_LAUNCH=0 turns it off.
+static bool wl_managed_async_launch() {
+    static const bool async = [] {
+        const char* managed = getenv("WESTLAKE_MANAGED_LAUNCH");
+        const char* asyncLaunch = getenv("WESTLAKE_ASYNC_LAUNCH");
+        return managed != nullptr && std::string(managed) == "1" &&
+               !(asyncLaunch != nullptr && std::string(asyncLaunch) == "0");
+    }();
+    return async;
+}
+
+// Activity launches that run on a thread of their own, by ability token, until the Java side has scheduled them.
+namespace {
+std::mutex g_wlLaunchMutex;
+std::condition_variable g_wlLaunchDone;
+std::set<jlong> g_wlLaunching;
+}  // namespace
+
+}  // namespace oh_adapter
+
+// Waits (at most timeoutMs) until the launch of the ability whose token is tokenAddr was handed to Java, if one runs.
+// Global, as ability_scheduler_adapter.cpp declares it.
+bool wl_managed_await_launch(jlong tokenAddr, int timeoutMs) {
+    std::unique_lock<std::mutex> lock(oh_adapter::g_wlLaunchMutex);
+    return oh_adapter::g_wlLaunchDone.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                               [tokenAddr] { return oh_adapter::g_wlLaunching.count(tokenAddr) == 0; });
+}
+
+namespace oh_adapter {
+
 void AppSchedulerAdapter::ScheduleLaunchApplication(const OHOS::AppExecFwk::AppLaunchData &data,
                                                      const OHOS::AppExecFwk::Configuration &config)
 {
@@ -347,8 +420,8 @@ void AppSchedulerAdapter::ScheduleLaunchApplication(const OHOS::AppExecFwk::AppL
     // AttachApplication 后的反向 callback, 时机对应 AOSP IApplicationThread.bindApplication
     // → handleBindApplication。本入口路由到 Java AppSchedulerBridge.nativeOnScheduleLaunchApplication
     // 让 AOSP 自己跑完整 bind 流程 (LoadedApk / Application / Instrumentation / onCreate)。
-    const std::string& bundleName = data.GetApplicationInfo().bundleName;
-    const std::string& processName = data.GetProcessInfo().GetProcessName();
+    const std::string bundleName = data.GetApplicationInfo().bundleName;
+    const std::string processName = data.GetProcessInfo().GetProcessName();
     pid_t pid = data.GetProcessInfo().GetPid();
     int32_t recordId = data.GetRecordId();
     ALOGI("[BRIDGED] ScheduleLaunchApplication -> bindApplication: bundle=%s process=%s pid=%d recordId=%d",
@@ -358,7 +431,59 @@ void AppSchedulerAdapter::ScheduleLaunchApplication(const OHOS::AppExecFwk::AppL
     // (from ScheduleForegroundApplication) reaches the right OH AppRunningRecord.
     OHAppMgrClient::getInstance().setRecordId(recordId);
 
-    std::lock_guard<std::mutex> lock(jni_mutex_);
+    // Phase 1 (本次扩展): 把 OH Configuration 8 个标准 key 通过 GetItem 提取，
+    // 以扁平 String[] {k0,v0,k1,v1,...} 形式传给 Java 桥；Java 侧
+    // OhConfigurationConverter 据此构造完整 android.content.res.Configuration。
+    // 字段映射权威：doc/ability_manager_ipc_adapter_design.html §1.1.4.4
+    static const char* kConfigKeys[] = {
+        "ohos.system.locale",
+        "ohos.system.language",
+        "ohos.system.colorMode",
+        "ohos.system.hour",
+        "ohos.system.fontSizeScale",
+        "ohos.system.fontWeightScale",
+        "ohos.system.mcc",
+        "ohos.system.mnc",
+        "const.build.characteristics",
+        "input.pointer.device",
+    };
+
+    // A test round on a development board can give its apps a locale other than the board's (WESTLAKE_LOCALE, a
+    // BCP 47 tag such as en-US), to compare with a board set to that language; OH's own setting would change the
+    // language of the whole board.
+    static const std::string kRoundLocale = [] {
+        const char* value = getenv("WESTLAKE_LOCALE");
+        return std::string(value != nullptr ? value : "");
+    }();
+
+    std::vector<std::string> configKv;
+    for (const char* key : kConfigKeys) {
+        std::string val = config.GetItem(key);
+        if (!kRoundLocale.empty() && std::string(key) == "ohos.system.locale") {
+            val = kRoundLocale;
+        } else if (!kRoundLocale.empty() && std::string(key) == "ohos.system.language") {
+            val = kRoundLocale.substr(0, kRoundLocale.find('-'));
+        }
+        configKv.push_back(key);
+        configKv.push_back(val);
+    }
+
+    if (wl_managed_async_launch()) {
+        fprintf(stderr, "[WL-MANAGED] the application binds on a thread of its own; OH's launch calls return at once\n");
+        fflush(stderr);
+        std::thread([this, bundleName, processName, pid, configKv]() {
+            bindApplication(bundleName, processName, pid, configKv, false);
+        }).detach();
+        return;
+    }
+    bindApplication(bundleName, processName, pid, configKv, true);
+}
+
+void AppSchedulerAdapter::bindApplication(const std::string& bundleName, const std::string& processName, pid_t pid,
+                                          const std::vector<std::string>& configKv, bool lockJni)
+{
+    std::unique_lock<std::mutex> lock(jni_mutex_, std::defer_lock);
+    if (lockJni) lock.lock();
 
     if (app_thread_ == nullptr || app_thread_class_ == nullptr) {
         ALOGW("ScheduleLaunchApplication: IApplicationThread ref is null");
@@ -382,50 +507,12 @@ void AppSchedulerAdapter::ScheduleLaunchApplication(const OHOS::AppExecFwk::AppL
     // 2026-04-30 方向 3: route to AppSchedulerBridge.nativeOnScheduleLaunchApplication
     // for real handleBindApplication invocation. AppSchedulerBridge lives in
     // oh-adapter-runtime.jar (PathClassLoader, non-BCP) so we use adapter_bridge_load_class.
-    //
-    // Phase 1 (本次扩展): 把 OH Configuration 8 个标准 key 通过 GetItem 提取，
-    // 以扁平 String[] {k0,v0,k1,v1,...} 形式传给 Java 桥；Java 侧
-    // OhConfigurationConverter 据此构造完整 android.content.res.Configuration。
-    // 字段映射权威：doc/ability_manager_ipc_adapter_design.html §1.1.4.4
-    static const char* kConfigKeys[] = {
-        "ohos.system.locale",
-        "ohos.system.language",
-        "ohos.system.colorMode",
-        "ohos.system.hour",
-        "ohos.system.fontSizeScale",
-        "ohos.system.fontWeightScale",
-        "ohos.system.mcc",
-        "ohos.system.mnc",
-        "const.build.characteristics",
-        "input.pointer.device",
-    };
-    constexpr size_t kKeyCount = sizeof(kConfigKeys) / sizeof(kConfigKeys[0]);
-
-    // A test round on a development board can give its apps a locale other than the board's (WESTLAKE_LOCALE, a
-    // BCP 47 tag such as en-US), to compare with a board set to that language; OH's own setting would change the
-    // language of the whole board.
-    static const std::string kRoundLocale = [] {
-        const char* value = getenv("WESTLAKE_LOCALE");
-        return std::string(value != nullptr ? value : "");
-    }();
-
     jclass stringClass = env->FindClass("java/lang/String");
-    jobjectArray jKvArr = env->NewObjectArray(static_cast<jsize>(kKeyCount * 2),
-                                              stringClass, nullptr);
-    for (size_t i = 0; i < kKeyCount; ++i) {
-        const char* key = kConfigKeys[i];
-        std::string val = config.GetItem(key);
-        if (!kRoundLocale.empty() && std::string(key) == "ohos.system.locale") {
-            val = kRoundLocale;
-        } else if (!kRoundLocale.empty() && std::string(key) == "ohos.system.language") {
-            val = kRoundLocale.substr(0, kRoundLocale.find('-'));
-        }
-        jstring jKey = env->NewStringUTF(key);
-        jstring jVal = env->NewStringUTF(val.c_str());
-        env->SetObjectArrayElement(jKvArr, static_cast<jsize>(i * 2), jKey);
-        env->SetObjectArrayElement(jKvArr, static_cast<jsize>(i * 2 + 1), jVal);
-        env->DeleteLocalRef(jKey);
-        env->DeleteLocalRef(jVal);
+    jobjectArray jKvArr = env->NewObjectArray(static_cast<jsize>(configKv.size()), stringClass, nullptr);
+    for (size_t i = 0; i < configKv.size(); ++i) {
+        jstring jItem = env->NewStringUTF(configKv[i].c_str());
+        env->SetObjectArrayElement(jKvArr, static_cast<jsize>(i), jItem);
+        env->DeleteLocalRef(jItem);
     }
     env->DeleteLocalRef(stringClass);
 
@@ -504,17 +591,14 @@ void AppSchedulerAdapter::ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityI
     // Bridge to Android IApplicationThread.scheduleTransaction with LaunchActivityItem.
     // The actual Activity launch transaction construction requires Android-side
     // ClientTransaction building which is done in the Java bridge layer.
-    std::lock_guard<std::mutex> lock(jni_mutex_);
+    // A managed launch attaches the ability here at once and launches the activity on a thread of its own
+    // (wl_managed_async_launch, above ScheduleLaunchApplication).
+    const bool async = wl_managed_async_launch();
+    std::unique_lock<std::mutex> lock(jni_mutex_, std::defer_lock);
+    if (!async) lock.lock();
 
     if (app_thread_ == nullptr || app_thread_class_ == nullptr) {
         ALOGW("ScheduleLaunchAbility: IApplicationThread ref is null");
-        return;
-    }
-
-    JNIEnv* env = nullptr;
-    bool needDetach = getJNIEnv(&env);
-    if (env == nullptr) {
-        ALOGE("ScheduleLaunchAbility: Failed to obtain JNIEnv");
         return;
     }
 
@@ -720,6 +804,33 @@ void AppSchedulerAdapter::ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityI
         // Android lifecycle then.
     }
 
+    if (async) {
+        {
+            std::lock_guard<std::mutex> launching(g_wlLaunchMutex);
+            g_wlLaunching.insert(tokenAddr);
+        }
+        std::thread([this, bundleName = info.bundleName, abilityName = info.name, abilityRecordId, abilityJsonStr,
+                     wantJsonStr, tokenAddr]() {
+            launchAbility(bundleName, abilityName, abilityRecordId, abilityJsonStr, wantJsonStr, tokenAddr);
+            std::lock_guard<std::mutex> launching(g_wlLaunchMutex);
+            g_wlLaunching.erase(tokenAddr);
+            g_wlLaunchDone.notify_all();
+        }).detach();
+        return;
+    }
+    launchAbility(info.bundleName, info.name, abilityRecordId, abilityJsonStr, wantJsonStr, tokenAddr);
+}
+
+void AppSchedulerAdapter::launchAbility(const std::string& bundleName, const std::string& abilityName,
+                                        int32_t abilityRecordId, const std::string& abilityJsonStr,
+                                        const std::string& wantJsonStr, jlong tokenAddr)
+{
+    JNIEnv* env = nullptr;
+    bool needDetach = getJNIEnv(&env);
+    if (env == nullptr) {
+        ALOGE("ScheduleLaunchAbility: Failed to obtain JNIEnv");
+        return;
+    }
     jclass bridgeClass = adapter_bridge_load_class(env, "adapter.activity.AppSchedulerBridge");
     if (bridgeClass != nullptr) {
         // New signature (B.47): nativeOnScheduleLaunchAbility(Object, String, String, int, String, String, long)
@@ -728,8 +839,8 @@ void AppSchedulerAdapter::ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityI
             "nativeOnScheduleLaunchAbility",
             "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;J)V");
         if (onLaunch != nullptr) {
-            jstring jBundle  = env->NewStringUTF(info.bundleName.c_str());
-            jstring jAbility = env->NewStringUTF(info.name.c_str());
+            jstring jBundle  = env->NewStringUTF(bundleName.c_str());
+            jstring jAbility = env->NewStringUTF(abilityName.c_str());
             jstring jAbJson  = env->NewStringUTF(abilityJsonStr.c_str());
             jstring jWantJson = env->NewStringUTF(wantJsonStr.c_str());
             env->CallStaticVoidMethod(bridgeClass, onLaunch, app_thread_,

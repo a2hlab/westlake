@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdarg>
 #include <string>
+#include <vector>
 #include <mutex>
 
 #include "app_scheduler_host.h"
@@ -202,6 +203,18 @@ private:
      * Map OH memory level to Android TRIM_MEMORY_* constant.
      */
     int mapMemoryLevel(int ohLevel);
+
+    /**
+     * The Android side of ScheduleLaunchApplication: the application bind, with OH's configuration as key-value
+     * pairs. With lockJni, holds jni_mutex_ throughout (the bind on OH's binder thread); a managed launch runs it on a
+     * thread of its own without the lock, so that OH's next calls are answered meanwhile.
+     */
+    void bindApplication(const std::string& bundleName, const std::string& processName, pid_t pid,
+                         const std::vector<std::string>& configKv, bool lockJni);
+
+    /** The Android side of ScheduleLaunchAbility: the activity launch, in Java. */
+    void launchAbility(const std::string& bundleName, const std::string& abilityName, int32_t abilityRecordId,
+                       const std::string& abilityJson, const std::string& wantJson, jlong tokenAddr);
 
     JavaVM* jvm_ = nullptr;
     jobject app_thread_ = nullptr;       // Global ref to IApplicationThread

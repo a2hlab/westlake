@@ -17,14 +17,18 @@
  */
 
 #include "ability_scheduler_adapter.h"
+#include "oh_ability_manager_client.h"
 #include "session_info.h"
 
 #include <android/log.h>
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <string>
+#include <thread>
 
 // ADR-0008 managed launch. OH starts an ability in this process (AppMgr spawned it through appspawn-x) and
 // hands it the main window session SceneBoard created for it, with ScheduleAbilityTransaction. The window
@@ -95,6 +99,46 @@ extern "C" jclass adapter_bridge_load_class(JNIEnv* env, const char* binaryName)
 #define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 void wl_managed_foreground_main();  // oh_window_manager_client.cpp
+bool wl_managed_await_launch(jlong tokenAddr, int timeoutMs);  // app_scheduler_adapter.cpp
+
+// ADR-0008 on OpenHarmony 7.0: OH ends an ability that has not reported FOREGROUND when its foreground timeout runs out
+// (about 5 s after the FOREGROUND transaction on the OnePlus), and the app reports it with its first frame
+// (ActivityClientControllerAdapter.activityResumed). An app slower than that to create and draw its first activity was
+// cleaned away: Spotify, 5.0 s after the transaction, got rc=22 for its report and then ScheduleCleanAbility. Android
+// sets no such limit on a launch. So when the app has not reported FOREGROUND WESTLAKE_FOREGROUND_DEADLINE_MS (3500)
+// after OH asked, the bridge reports it, and the foreground heartbeat starts as after the app's own report; SceneBoard
+// keeps the starting window until the app's root node draws. 0 turns this off.
+static void wl_managed_foreground_deadline(jlong tokenAddr) {
+    static const int deadlineMs = [] {
+        const char* value = getenv("WESTLAKE_FOREGROUND_DEADLINE_MS");
+        return value != nullptr ? atoi(value) : 3500;
+    }();
+    static const bool managed = [] {
+        const char* value = getenv("WESTLAKE_MANAGED_LAUNCH");
+        return value != nullptr && std::string(value) == "1";
+    }();
+    if (!managed || deadlineMs <= 0 || tokenAddr == 0) return;
+    // The token stays alive while the deadline runs: the report goes to it by address, as the app's own does.
+    OHOS::sptr<OHOS::IRemoteObject> hold;
+    {
+        std::lock_guard<std::mutex> lock(g_wlManagedMutex);
+        auto found = wlManagedSessions().find(tokenAddr);
+        if (found != wlManagedSessions().end()) hold = found->second.token;
+    }
+    if (hold == nullptr) return;
+    const uint64_t before = oh_adapter::OHAbilityManagerClient::getInstance().foregroundReports(tokenAddr);
+    std::thread([tokenAddr, before, hold]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(deadlineMs));
+        auto& client = oh_adapter::OHAbilityManagerClient::getInstance();
+        if (client.foregroundReports(tokenAddr) != before) return;
+        client.noteForegroundReport(tokenAddr);
+        int rc = client.abilityTransitionDoneByTokenAddr(tokenAddr, 5 /* ABILITY_STATE_FOREGROUND_NEW */);
+        client.startForegroundHeartbeat(tokenAddr, 1000);
+        fprintf(stderr, "[WL-MANAGED] ability token 0x%llx: no FOREGROUND report %d ms after OH asked for it; the"
+                " bridge reported it (rc=%d)\n", static_cast<unsigned long long>(tokenAddr), deadlineMs, rc);
+        fflush(stderr);
+    }).detach();
+}
 
 namespace oh_adapter {
 
@@ -370,6 +414,17 @@ bool AbilitySchedulerAdapter::ScheduleAbilityTransaction(
             (sessionInfo != nullptr && sessionInfo->sessionToken != nullptr) ? "yes" : "no");
     fflush(stderr);
     wl_managed_note_session(tokenAddr_, sessionInfo);
+    // The deadline runs from OH's request, whatever the app is still doing; then a transaction waits for the activity
+    // launch that ScheduleLaunchAbility handed to a thread of its own (managed launch), which registers the activity's
+    // token: without it the transaction would find no activity and be dropped.
+    if (targetState.state == 5) {
+        wl_managed_foreground_deadline(tokenAddr_);
+    }
+    if (!wl_managed_await_launch(tokenAddr_, 60000)) {
+        fprintf(stderr, "[WL-MANAGED] ability token 0x%llx: its activity launch still runs after 60 s; the transaction"
+                " goes ahead\n", static_cast<unsigned long long>(tokenAddr_));
+        fflush(stderr);
+    }
 
     std::string wantJson = wantToJson(want);
     ScopedJniAttach attach(jvm_);
