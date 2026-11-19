@@ -46,6 +46,7 @@ final class ViewGeometryDump {
 
     static void dump() {
         StringBuilder out = new StringBuilder();
+        out.append(mainQueue()).append('\n');
         try {
             List<View> roots = WindowManagerGlobal.getInstance().getWindowViews();
             int[] budget = {0};
@@ -70,7 +71,7 @@ final class ViewGeometryDump {
                             .append(" cutout=").append(lp.layoutInDisplayCutoutMode)
                             .append(" title=").append(String.valueOf(lp.getTitle()).replace(' ', '_'));
                 }
-                out.append(" ====\n");
+                out.append(traversal(root)).append(" ====\n");
                 WindowInsets insets = root.getRootWindowInsets();
                 if (insets != null) {
                     out.append("GEOM insets system=[").append(insets.getSystemWindowInsetLeft()).append(',')
@@ -219,6 +220,61 @@ final class ViewGeometryDump {
             return listener.get(info) != null ? "1" : "0";
         } catch (ReflectiveOperationException | RuntimeException unavailable) {
             return "?";
+        }
+    }
+
+    /**
+     * The main thread's queue: its sync barriers (a barrier left behind stops every synchronous message, while
+     * input and frames, which are asynchronous here, keep running) and how long due synchronous messages wait.
+     */
+    private static String mainQueue() {
+        try {
+            android.os.MessageQueue queue = Looper.getMainLooper().getQueue();
+            Field head = android.os.MessageQueue.class.getDeclaredField("mMessages");
+            head.setAccessible(true);
+            Field next = android.os.Message.class.getDeclaredField("next");
+            next.setAccessible(true);
+            long now = android.os.SystemClock.uptimeMillis();
+            int total = 0, barriers = 0, async = 0, syncDue = 0, firstToken = -1;
+            long firstBarrierAge = -1, oldestSyncDue = -1;
+            StringBuilder tokens = new StringBuilder();
+            synchronized (queue) {
+                for (android.os.Message m = (android.os.Message) head.get(queue); m != null && total < 20000;
+                        m = (android.os.Message) next.get(m)) {
+                    total++;
+                    if (m.getTarget() == null) {
+                        barriers++;
+                        if (firstBarrierAge < 0) { firstBarrierAge = now - m.getWhen(); firstToken = m.arg1; }
+                        if (barriers <= 8) tokens.append(m.arg1).append('@').append(now - m.getWhen()).append("ms,");
+                    } else if (m.isAsynchronous()) {
+                        async++;
+                    } else if (m.getWhen() <= now) {
+                        syncDue++;
+                        if (oldestSyncDue < 0) oldestSyncDue = now - m.getWhen();
+                    }
+                }
+            }
+            return "GEOM queue messages=" + total + " barriers=" + barriers + " barrierTokens=" + tokens
+                    + " firstBarrierToken=" + firstToken + " firstBarrierAgeMs=" + firstBarrierAge
+                    + " asyncPending=" + async + " syncDue=" + syncDue + " oldestSyncDueMs=" + oldestSyncDue;
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return "GEOM queue unavailable " + unavailable.getClass().getName();
+        }
+    }
+
+    /** The root's ViewRootImpl traversal state: whether a traversal is scheduled and its barrier token. */
+    private static String traversal(View root) {
+        try {
+            Object impl = View.class.getMethod("getViewRootImpl").invoke(root);
+            if (impl == null) return " viewRoot=none";
+            Field scheduled = impl.getClass().getDeclaredField("mTraversalScheduled");
+            scheduled.setAccessible(true);
+            Field barrier = impl.getClass().getDeclaredField("mTraversalBarrier");
+            barrier.setAccessible(true);
+            return " traversalScheduled=" + (scheduled.getBoolean(impl) ? 1 : 0)
+                    + " traversalBarrier=" + barrier.getInt(impl);
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return " traversal=?";
         }
     }
 }
