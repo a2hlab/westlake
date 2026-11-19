@@ -325,12 +325,12 @@
             "evidence": "The Facebook SDK and original Wattpad onboarding activity received a successful result."
           },
           "account_session": {
-            "status": "open",
-            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed. 2026-11-18: with the user's test login, a new web login from the dedicated Wattpad reached Facebook's reCAPTCHA (\"Confirm you are human\"), which needs a person to complete; not attempted by the agent."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19 on the D600 (same delegated configuration). The dedicated Wattpad's Facebook web login, with the user's test login typed through a masked helper, again reached Facebook's reCAPTCHA; the user completed it on the board (the agent does not solve CAPTCHAs). The 11-18 attempt had stopped there. Facebook then returned to Wattpad, which opened its own \"Create an Account\" form; a new Facebook-linked Wattpad account was created with the test defaults (no marketing). Wattpad's home and profile showed the account with the Facebook profile's name and picture and a Facebook link."
           },
           "restart_persistence": {
-            "status": "open",
-            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed. 2026-11-18: with the user's test login, a new web login from the dedicated Wattpad reached Facebook's reCAPTCHA (\"Confirm you are human\"), which needs a person to complete; not attempted by the agent."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19: Wattpad was stopped and started again (a new app process). It reopened on its home signed in, and its profile showed the same Facebook-linked account."
           }
         }
       },
@@ -371,8 +371,8 @@
       "open": 5
     },
     "Facebook": {
-      "observed": 6,
-      "open": 5,
+      "observed": 8,
+      "open": 3,
       "partial": 1
     }
   }
