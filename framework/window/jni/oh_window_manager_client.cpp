@@ -2851,6 +2851,14 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
 // (e.g., WMS unilaterally hides due to AMS / focus policy), switch to A or B.
 
 int32_t OHWindowManagerClient::setWindowSecure(int32_t sessionId, bool secure) {
+    // A test round on a development board sets WESTLAKE_SECURE_LAYER=0, so that its screenshots show FLAG_SECURE
+    // windows as they show every other window (OH's screen capture draws a security layer black). The app still
+    // sees its flag set; only the OH window stays an ordinary layer. Returns 1 then.
+    static const bool kSecureLayer = [] {
+        const char* value = getenv("WESTLAKE_SECURE_LAYER");
+        return value == nullptr || std::string(value) != "0";
+    }();
+    if (!kSecureLayer) return 1;
     std::shared_ptr<OHOS::Rosen::RSSurfaceNode> node;
     {
         std::lock_guard<std::recursive_mutex> lock(sessionMutex_);
