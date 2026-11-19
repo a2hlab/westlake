@@ -61,7 +61,7 @@
           },
           "silent_token_renewal": {
             "status": "open",
-            "gap": "Spotify signed in with Google on 2026-11-18 and kept its session across a full restart. No later Google token request from Spotify was exercised, so silent renewal remains unverified."
+            "gap": "While signed in, Spotify made no Google token request at any later start, including starts after the token's one-hour lifetime. Its Log out also signs it out of Google: Log in with Google then showed Google's account chooser (an interactive choice, not a silent renewal); choosing the account signed it back in. The app gives no path on which a silent renewal can be observed. Spotify made no silent token request at sign-up either."
           },
           "restart_persistence": {
             "status": "observed",
@@ -92,7 +92,7 @@
           },
           "silent_token_renewal": {
             "status": "partial",
-            "evidence": "Expiry of the local SDK selection led back to signup. Actual Google token expiry and renewal for a Wattpad session remain unverified."
+            "evidence": "While signed in, Wattpad made no Google token request at any later start, including starts after the token's one-hour lifetime. Its Log out also signs it out of Google: Log in with Google then showed Google's account chooser (an interactive choice, not a silent renewal); choosing the account signed it back in. The app gives no path on which a silent renewal can be observed. (Earlier: expiry of the local SDK selection led back to signup.) Its one silent token request followed the account choice."
           },
           "restart_persistence": {
             "status": "observed",
@@ -194,8 +194,8 @@
         ],
         "checks": {
           "account_selection": {
-            "status": "partial",
-            "evidence": "Drive used the retained, consented account. The cited runs do not independently document an interactive account choice. Fresh dedicated Drive found no account and received authenticator unavailable when it asked to add one, including after connecting to both official services. With the dedicated Drive account connection restored, the provider returned one Android account and the official Play account content provider resolved. Drive still requested add-account and detached its window. The retained profile also failed on the current official-service configuration. Two dedicated cold starts captured 32 get_accounts replies from official Play services. All contained an empty typed account array. Drive requested add-account on each launch."
+            "status": "observed",
+            "evidence": "On the current build, a fresh dedicated Drive (its own host, its retained app data moved aside, an empty data directory) listed the device's Google account through the account service, received tokens through official Play services, and opened that account's Drive with its files; it made no add-account request. With one Google account on the device Drive selected it without asking; its account menu showed that account under Switch account with no other to choose. The menu greeted 'Hi there!' without the profile name."
           },
           "file_listing": {
             "status": "observed",
@@ -364,8 +364,8 @@
   },
   "counts": {
     "Google": {
-      "observed": 30,
-      "partial": 4,
+      "observed": 31,
+      "partial": 3,
       "open": 5
     },
     "Facebook": {

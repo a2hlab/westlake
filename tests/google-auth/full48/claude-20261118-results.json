@@ -57,7 +57,8 @@
     "wp.wattpad/sign_in": "observed",
     "wp.wattpad/account_session": "observed",
     "wp.wattpad/library_or_reading": "observed",
-    "wp.wattpad/restart_persistence": "observed"
+    "wp.wattpad/restart_persistence": "observed",
+    "com.google.android.apps.docs/account_selection": "observed"
   },
   "openGaps": [
     "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker."
@@ -78,5 +79,7 @@
   },
   "rootCauses": [
     "Host apps were killed by OpenHarmony under memory pressure (about 90 MB free); the apps' Android windows belonged to the killed host, so a restarted host showed an empty window. Freeing memory removed the blank screens; Westlake does not re-attach windows to a restarted host."
-  ]
+  ],
+  "renewalFinding": "Spotify and Wattpad request no Google token while signed in; signing out signs them out of Google, so signing in again is interactive. Silent renewal is not observable through either app.",
+  "openConfiguration": "Play services' return routes (WESTLAKE_REMOTE_HOST_ROUTES) list only Spotify: after Wattpad's Google login the result reached Wattpad, but the screen stayed on Play services until Wattpad was brought back by hand."
 }
