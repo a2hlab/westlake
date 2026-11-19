@@ -162,13 +162,13 @@ public final class LocalSyncService {
                 if ((Boolean) a[0]) request(null, null, new Bundle(), app.getPackageName());
                 return null;
             case "getSyncAutomatically": case "getSyncAutomaticallyAsUser":
-                return settings.getBoolean(key((Account) a[0], (String) a[1]) + ".auto", false);
+                return autoSync((Account) a[0], (String) a[1]);
             case "setSyncAutomatically": case "setSyncAutomaticallyAsUser": {
                 Account account = (Account) a[0]; String authority = (String) a[1];
                 requireAdapter(account, authority);
                 String key = key(account, authority);
                 boolean enable = (Boolean) a[2];
-                if (settings.getBoolean(key + ".auto", false) == enable) return null;
+                if (autoSync(account, authority) == enable) return null;
                 SharedPreferences.Editor edit = settings.edit().putBoolean(key + ".auto", enable);
                 if (enable && syncable(account, authority) == 2) {
                     // Android retries initialization when the user enables a previously uninitialized adapter.
@@ -366,7 +366,7 @@ public final class LocalSyncService {
                 for (Periodic p : new ArrayList<>(periodic)) {
                     long now = System.currentTimeMillis();
                     if (!p.schedule.due(now) || !Arrays.asList(visible).contains(p.sync.account)
-                            || !settings.getBoolean(key(p.sync.account, p.sync.authority) + ".auto", false)
+                            || !autoSync(p.sync.account, p.sync.authority)
                             || syncable(p.sync.account, p.sync.authority) == 0) continue;
                     requireAdapter(p.sync.account, p.sync.authority);
                     if (jobs.stream().anyMatch(j -> j.matches(p.sync.account, p.sync.authority)
@@ -432,7 +432,7 @@ public final class LocalSyncService {
                         || j.extras.getBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_SETTINGS);
                 int state = syncable(j.account, j.adapter.type.authority);
                 if (state == 0 || state > 0 && !manual && (!settings.getBoolean("master", true)
-                        || !settings.getBoolean(j.key + ".auto", false))) {
+                        || !autoSync(j.account, j.adapter.type.authority))) {
                     j.finish(null, "settings_disabled"); continue;
                 }
                 j.initializing = state < 0;
@@ -463,6 +463,17 @@ public final class LocalSyncService {
             try { o.callback.onStatusChanged(mask); }
             catch (Exception dead) { synchronized (LOCK) { observers.remove(o.callback.asBinder()); } }
         });
+    }
+
+    /**
+     * Whether the account's adapter for the authority syncs automatically. An explicit choice is kept. Without one,
+     * a Google account syncs: on an Android device Play services turns sync on for a Google account's adapters,
+     * system-wide, when the account is added. Each app host keeps its own sync settings here, so an app first
+     * started after the account was added saw its sync off (original Gmail: "Account sync is off") until the user
+     * turned it on. Other account types keep Android's own default, off.
+     */
+    private boolean autoSync(Account account, String authority) {
+        return settings.getBoolean(key(account, authority) + ".auto", "com.google".equals(account.type));
     }
 
     private static String key(Account account, String authority) {
@@ -558,7 +569,7 @@ public final class LocalSyncService {
                             boolean manual = extras.getBoolean(ContentResolver.SYNC_EXTRAS_MANUAL)
                                     || extras.getBoolean(ContentResolver.SYNC_EXTRAS_IGNORE_SETTINGS);
                             if (!manual && (!settings.getBoolean("master", true)
-                                    || !settings.getBoolean(key + ".auto", false))) {
+                                    || !autoSync(account, adapter.type.authority))) {
                                 finish(null, "settings_disabled"); return;
                             }
                             initializing = false; worker.execute(Job.this::start); return;
