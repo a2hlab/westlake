@@ -19,9 +19,10 @@ import org.json.JSONObject;
  * instance, so the memory is freed and the next launch starts clean.
  *
  * Host and app processes are not dumpable and /proc is mounted hidepid=invisible, so the app cannot find its host
- * in /proc. The host records its pid and main window id in window-state.json in its files directory. When that
- * window is this app's parent, the watch checks the pid with signal 0, which needs only the shared uid and signals
- * nothing. A host that does not record its pid is not watched.
+ * in /proc. The host's pid comes from window-state.json in the host's files directory, where the host records its
+ * pid and main window id, when that window is this app's parent; hosts built before that record have none, and the
+ * pid then comes from WL_PARENT_PID, which the launcher reads together with WL_PARENT_ID. The watch checks the pid
+ * with signal 0, which needs only the shared uid and signals nothing.
  *
  * A launch that serves other apps (Play services, the Play Store, the account broker) keeps running: other apps
  * depend on its services. WESTLAKE_EXIT_WITH_HOST=0 turns the watch off. The watch starts at the top of the
@@ -49,13 +50,13 @@ public final class HostLifecycleWatch {
                 return;
             }
             String window = System.getenv("WL_PARENT_ID");
-            String root = System.getenv("WESTLAKE_RUNTIME_REAL_ROOT");
-            Matcher base = root == null ? null : BASE.matcher(root + "/");
-            if (window == null || base == null || !base.find()) {
+            if (window == null) {
                 log("no host window; not watching " + procName);
                 return;
             }
-            String state = base.group(1) + "/haps/entry/files/window-state.json";
+            String root = System.getenv("WESTLAKE_RUNTIME_REAL_ROOT");
+            Matcher base = root == null ? null : BASE.matcher(root + "/");
+            String state = base != null && base.find() ? base.group(1) + "/haps/entry/files/window-state.json" : null;
             Thread thread = new Thread(() -> run(state, window, procName), "WlHostWatch");
             thread.setDaemon(true);
             thread.start();
@@ -74,15 +75,27 @@ public final class HostLifecycleWatch {
     private static void run(String state, String window, String procName) {
         try {
             int pid = 0;
-            for (int attempt = 0; attempt < ATTEMPTS && pid == 0; attempt++) {
-                pid = owner(state, window);
-                if (pid == 0 && !pause()) return;
+            String source = null;
+            for (int attempt = 0; attempt < ATTEMPTS; attempt++) {
+                int recorded = state == null ? 0 : owner(state, window);
+                int named = launcherPid();
+                if (recorded > 0 && alive(recorded)) {
+                    pid = recorded;
+                    source = "recorded by the host";
+                    break;
+                }
+                if (named > 0 && alive(named)) {
+                    pid = named;
+                    source = "named by the launcher";
+                    break;
+                }
+                if (!pause()) return;
             }
-            if (pid == 0 || !alive(pid)) {
+            if (pid == 0) {
                 log("no running host owns window " + window + "; not watching " + procName);
                 return;
             }
-            log("watching host pid " + pid + ", owner of window " + window + ", for " + procName);
+            log("watching host pid " + pid + " (" + source + "), owner of window " + window + ", for " + procName);
             while (pause()) {
                 if (alive(pid)) continue;
                 log("host pid " + pid + " ended; ending " + procName + ", whose windows belonged to it"
@@ -102,6 +115,16 @@ public final class HostLifecycleWatch {
             return Math.max(0, state.optInt("ownerPid", 0));
         } catch (Exception unreadable) {
             return 0;   // Not written yet, rewritten while being read, or written by a host that records no pid.
+        }
+    }
+
+    /** The host pid the launcher read with WL_PARENT_ID: the process that owned that window at launch; else 0. */
+    static int launcherPid() {
+        try {
+            String value = System.getenv("WL_PARENT_PID");
+            return value == null ? 0 : Math.max(0, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException invalid) {
+            return 0;
         }
     }
 
