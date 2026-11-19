@@ -92,6 +92,12 @@ public final class GoogleAuthOperations {
                     if (!origin.packageName.equals(extras.getString(key))) throw new SecurityException("silent origin mismatch");
                 } else if ("service_connection_start_time_millis".equals(key)) {
                     if (!(extras.get(key) instanceof Long)) throw new SecurityException("silent timing invalid");
+                } else if ("handle_notification".equals(key)) {
+                    // GoogleAuthUtil.getTokenWithNotification (original YouTube): for a failure the user must
+                    // resolve, Play services posts a notification instead of returning its intent. It changes
+                    // how a failure is shown, not what is authorized: account, signer, scopes and consent are
+                    // checked as for any other request.
+                    if (!(extras.get(key) instanceof Boolean)) throw new SecurityException("silent notification flag invalid");
                 } else throw new SecurityException("silent options unsupported");
             }
             operation.epoch = generation(origin.packageName);
