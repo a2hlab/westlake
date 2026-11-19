@@ -39,32 +39,33 @@
         "sources": [
           "candidate51-followup.json",
           "candidate93.json",
-          "candidate107.json"
+          "candidate107.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "sign_in": {
-            "status": "partial",
-            "evidence": "Google returned a successful activity result on the earlier shared host. Spotify asked for a separate signup. Later official-services-only setup on a dedicated host stayed on Checking info."
+            "status": "observed",
+            "evidence": "With the user's approval and test sign-up details, Google sign-in from Spotify's Create account returned RESULT_OK (account chooser offered the account) and Spotify created its account; the signed-in home showed the account avatar."
           },
           "account_session": {
-            "status": "open",
-            "gap": "No established Spotify profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "The signed-in home and Your Library belonged to the new account (avatar, followed artists from onboarding)."
           },
           "library_load": {
-            "status": "open",
-            "gap": "No established Spotify profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "Your Library loaded the account's followed artists from the server."
           },
           "playback": {
-            "status": "open",
-            "gap": "No established Spotify profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "An artist's play button started a track: pause control, equalizer mark and mini-player shown, and the progress bar advanced between captures; playback was then paused. Physical audibility was not measured."
           },
           "silent_token_renewal": {
             "status": "open",
             "gap": "No established Spotify profile was observed after Google sign-in."
           },
           "restart_persistence": {
-            "status": "open",
-            "gap": "No established Spotify profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "After a full restart of the Spotify process, the app opened signed in with the last track restored in the mini-player."
           }
         }
       },
@@ -73,28 +74,29 @@
         "sources": [
           "candidate51-followup.json",
           "candidate62.json",
-          "candidate116.json"
+          "candidate116.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "sign_in": {
-            "status": "partial",
-            "evidence": "The original app received the Google sign-in result and reached Wattpad signup. The fresh dedicated host reached the official Google Checking info screen."
+            "status": "observed",
+            "evidence": "Sign up with Google returned RESULT_OK; with the user's approval and test details Wattpad created the account and opened its signed-in home."
           },
           "account_session": {
-            "status": "open",
-            "gap": "No established Wattpad profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "The profile page showed the new account (display name from Google, username, joined minutes earlier)."
           },
           "library_or_reading": {
-            "status": "open",
-            "gap": "No established Wattpad profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "A public classic opened in the reader with its first chapter rendered. (A story added during onboarding did not appear in the Library tab.)"
           },
           "silent_token_renewal": {
             "status": "partial",
             "evidence": "Expiry of the local SDK selection led back to signup. Actual Google token expiry and renewal for a Wattpad session remain unverified."
           },
           "restart_persistence": {
-            "status": "open",
-            "gap": "No established Wattpad profile was observed after Google sign-in."
+            "status": "observed",
+            "evidence": "After a full restart of the Wattpad process, the app opened signed in (a Premium offer, closed, then the signed-in home)."
           }
         }
       },
@@ -362,9 +364,9 @@
   },
   "counts": {
     "Google": {
-      "observed": 21,
-      "partial": 6,
-      "open": 12
+      "observed": 30,
+      "partial": 4,
+      "open": 5
     },
     "Facebook": {
       "observed": 6,

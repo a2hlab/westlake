@@ -48,7 +48,16 @@
     "com.google.android.youtube/restart_persistence": "observed",
     "com.google.android.gm/account_selection": "observed",
     "com.google.android.gm/refresh": "observed (manual pull, new message)",
-    "com.google.android.apps.docs/token_renewal": "observed"
+    "com.google.android.apps.docs/token_renewal": "observed",
+    "com.spotify.music/sign_in": "observed",
+    "com.spotify.music/account_session": "observed",
+    "com.spotify.music/library_load": "observed",
+    "com.spotify.music/playback": "observed",
+    "com.spotify.music/restart_persistence": "observed",
+    "wp.wattpad/sign_in": "observed",
+    "wp.wattpad/account_session": "observed",
+    "wp.wattpad/library_or_reading": "observed",
+    "wp.wattpad/restart_persistence": "observed"
   },
   "openGaps": [
     "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker."
@@ -61,5 +70,13 @@
   "syncDefault": {
     "decision": "user, 2026-11-18: turn sync on by default for a Google account, as Android does",
     "test": "dedicated Gmail with its explicit auto-sync entry removed: synced at start (job success), no sync-off notice"
-  }
+  },
+  "signUps": {
+    "basis": "user, 2026-11-18: sign-ups OK with test defaults (birth date 1990-01-01, prefer-not-to-say, username as offered, no marketing, no payment); Uber skipped (phone verification)",
+    "emailVerificationLinkClicked": false,
+    "payments": false
+  },
+  "rootCauses": [
+    "Host apps were killed by OpenHarmony under memory pressure (about 90 MB free); the apps' Android windows belonged to the killed host, so a restarted host showed an empty window. Freeing memory removed the blank screens; Westlake does not re-attach windows to a restarted host."
+  ]
 }
