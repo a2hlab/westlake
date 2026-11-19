@@ -306,13 +306,21 @@ WSError SessionStageAdapter::UpdateAvoidArea(
         return WSError::WS_ERROR_NULLPTR;
     }
 
+    // The system bars Android reports as insets: OH's area at the top (status bar) and at the bottom
+    // (navigation bar or gesture indicator), each as x, y, width, height.
+    const Rect& top = avoidArea->topRect_;
+    const Rect& bottom = avoidArea->bottomRect_;
+    fprintf(stderr, "[WL-INSETS] avoid area type %d: top %d,%d %ux%u bottom %d,%d %ux%u\n",
+            static_cast<int>(type), top.posX_, top.posY_, top.width_, top.height_,
+            bottom.posX_, bottom.posY_, bottom.width_, bottom.height_);
+    fflush(stderr);
     std::lock_guard<std::mutex> lock(jniMutex_);
-    callBridgeVoidMethod("onUpdateAvoidArea", "(IIIII)V",
+    callBridgeVoidMethod("onUpdateAvoidArea", "(IIIIIIIII)V",
         static_cast<jint>(type),
-        static_cast<jint>(avoidArea->topRect_.posX_),
-        static_cast<jint>(avoidArea->topRect_.posY_),
-        static_cast<jint>(avoidArea->bottomRect_.posX_ + avoidArea->bottomRect_.width_),
-        static_cast<jint>(avoidArea->bottomRect_.posY_ + avoidArea->bottomRect_.height_));
+        static_cast<jint>(top.posX_), static_cast<jint>(top.posY_),
+        static_cast<jint>(top.width_), static_cast<jint>(top.height_),
+        static_cast<jint>(bottom.posX_), static_cast<jint>(bottom.posY_),
+        static_cast<jint>(bottom.width_), static_cast<jint>(bottom.height_));
 
     return WSError::WS_OK;
 }
@@ -340,6 +348,8 @@ void SessionStageAdapter::NotifyOccupiedAreaChangeInfo(
 WSError SessionStageAdapter::HandleBackEvent()
 {
     OH_BR_IPC_SCOPE("SessionStage.HandleBackEvent", "");
+    fprintf(stderr, "[WL-BACK] OH back event\n");
+    fflush(stderr);
 
     std::lock_guard<std::mutex> lock(jniMutex_);
     callBridgeVoidMethod("onHandleBackEvent", "()V");

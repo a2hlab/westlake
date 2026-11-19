@@ -351,7 +351,13 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     // ====================================================================
 
     @Override
-    public boolean moveActivityTaskToBack(IBinder token, boolean nonRoot) { return false; }
+    public boolean moveActivityTaskToBack(IBinder token, boolean nonRoot) {
+        // ADR-0008: OH holds a managed app's task; SceneBoard moves its ability to the background. A direct launch
+        // has no task to move.
+        if (!"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) return false;
+        if (!nonRoot && taskPosition(token) != 0) return false;
+        return nativeMoveManagedTaskToBack() == 0;
+    }
 
     @Override
     public boolean shouldUpRecreateTask(IBinder token, String destAffinity) { return false; }
@@ -380,7 +386,30 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
         try {
             // G2.14f — direct BCP call (see reportOhLifecycle for rationale).
             Long ohAddr = adapter.core.OhTokenRegistry.findOhToken(token);
-            if (ohAddr != null && ohAddr != 0L) {
+            if (ohAddr != null && ohAddr != 0L && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) {
+                // ADR-0008: one OH ability hosts the app's task. When its activity with the OH token finishes
+                // while others remain (a splash that started the main activity), the ability stays, its token
+                // passes to the task's top activity, and this one is destroyed here, as ATMS would; the last
+                // activity's finish ends the ability. Decided on the main thread after what is queued there:
+                // a splash calls startActivity and then finish(), and the activity it started does not exist yet.
+                final long addr = ohAddr;
+                final int resultCode = code;
+                final IBinder finishing = token;
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                    @Override public void run() {
+                        IBinder heir = taskHeir(finishing);
+                        if (heir != null && adapter.core.OhTokenRegistry.transfer(finishing, heir)) {
+                            Log.i(TAG, "finishActivity: OH ability 0x" + Long.toHexString(addr)
+                                    + " stays with the task's top " + heir);
+                            System.err.println("[WL-MANAGED] the OH ability stays with the task's next activity");
+                            scheduleLocalDestroy(finishing);
+                        } else {
+                            int rc = nativeTerminateAbilityByTokenAddr(addr, resultCode);
+                            System.err.println("[WL-MANAGED] the task's last activity finished: OH ability ends, rc=" + rc);
+                        }
+                    }
+                });
+            } else if (ohAddr != null && ohAddr != 0L) {
                 int rc = nativeTerminateAbilityByTokenAddr(ohAddr, code);
                 Log.i(TAG, "finishActivity: OH TerminateAbility(token=0x"
                         + Long.toHexString(ohAddr) + ", code=" + code + ") rc=" + rc);
@@ -395,6 +424,28 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
             Log.e(TAG, "finishActivity reverse callback failed", t);
         }
         return true;
+    }
+
+    /** Another live activity of the app's task to carry its OH ability: the task's top, else any other. */
+    private static IBinder taskHeir(IBinder finishing) {
+        java.util.List<IBinder> remaining = taskTokens();
+        for (int i = remaining.size() - 1; i >= 0; i--) {
+            if (remaining.get(i) != finishing) return remaining.get(i);
+        }
+        try {
+            android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
+            java.lang.reflect.Field field = android.app.ActivityThread.class.getDeclaredField("mActivities");
+            field.setAccessible(true);
+            java.util.Map<?, ?> activities = (java.util.Map<?, ?>) field.get(thread);
+            for (Object key : activities.keySet().toArray()) {
+                IBinder candidate = (IBinder) key;
+                android.app.Activity activity = thread.getActivity(candidate);
+                if (candidate != finishing && activity != null && !activity.isFinishing()) return candidate;
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "taskHeir: " + e);
+        }
+        return null;
     }
 
     private static void scheduleLocalDestroy(final IBinder token) {
@@ -656,7 +707,26 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     // ====================================================================
 
     @Override
-    public void onBackPressed(IBinder activityToken, IRequestFinishCallback callback) { /* no-op */ }
+    public void onBackPressed(IBinder activityToken, IRequestFinishCallback callback) {
+        // Android 12+ (ATMS): a back press the activity did not consume finishes it; at the root of a task the
+        // launcher started, the task moves to the back instead. In an ADR-0008 managed launch OH holds that task
+        // (OH's launcher started its ability): SceneBoard moves the ability to the background. A direct launch keeps
+        // its earlier behaviour (nothing happens).
+        if (!"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) return;
+        if (taskPosition(activityToken) == 0) {
+            int rc = nativeMoveManagedTaskToBack();
+            System.err.println("[WL-BACK] back at the task's root: the app moves to the background (rc=" + rc + ")");
+            return;
+        }
+        try {
+            if (callback != null) callback.requestFinish();
+            System.err.println("[WL-BACK] back press finishes the activity");
+        } catch (android.os.RemoteException e) {
+            Log.w(TAG, "onBackPressed: " + e);
+        }
+    }
+
+    private static native int nativeMoveManagedTaskToBack();
 
     @Override
     public void splashScreenAttached(IBinder token) { /* no-op */ }

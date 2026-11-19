@@ -1,7 +1,8 @@
 # ADR-0008: Manage APKs and HAPs under one OH process and security model
 
-- **Status:** accepted 2026-11-13 as the long-term direction (proposed the same day). A feasibility spike
-  comes first. Nothing here is implemented or device-verified.
+- **Status:** accepted 2026-11-13 as the long-term direction (proposed the same day). The feasibility
+  spike met the first milestone on the test board on 2026-11-15; see [Spike result](#spike-result-on-the-test-board-2026-11-15).
+  Direct launch stays the default.
 - **Date:** 2026-11-13
 - **Depends on:** [ADR-0003](0003-authenticated-app-identity-and-isolation.md) for identity and confinement,
   [ADR-0004](0004-scoped-play-compatibility-and-permissions.md) for Android permissions
@@ -132,6 +133,77 @@ OH itself may be changed on the test board for this work (decided 2026-11-13). T
 runtime selection, an init service for appspawn-x, the multi-process privilege and SELinux policy.
 Every change keeps the original files so that they can be restored, and none is made while a test round
 runs. A product still needs the platform owner's agreement.
+
+## Spike result on the test board (2026-11-15)
+
+The first milestone was met, then extended to two unrelated APKs, without changing OH. The procedure is
+the manifest's `docs/managed-launch.md`.
+
+- **Route.**
+  - Each APK gets its own OH bundle, made from the Westlake host HAP with a new `module.json`
+    (manifest `tools/make_managed_bundle.py`). The bundle name is the Android package, the entry
+    `srcEntry` is a dotted class name, and the ability is named after the launcher activity.
+  - OH 6.1's AppMgr sends such a bundle to the Cangjie spawner's socket (`IsCjApplication`), so
+    AppMgr needed no change.
+  - `appspawn-x --route` serves that socket. It passes each request to the bundle's own appspawn-x,
+    which it finds in a root-only registry.
+  - The spawner admits AppMgr's request (foundation's uid and SELinux context) only for its own bundle.
+    Its socket carries appspawn's SELinux context, because foundation may not connect to the shell's.
+- **Attach and bind.** OH's `ScheduleLaunchApplication` arrives on an IPC thread. The bind runs on the
+  main thread, and the first ability waits for it. The bind prepares the staged APK as a direct launch
+  does.
+- **Window.**
+  - The activity's window connects to its ability's own session (`ISession::Connect`) as the main
+    window.
+  - The app's other main-type windows, such as dialogs, become sub-windows of the main window.
+  - A SurfaceView's window stays below its activity's and takes no focus.
+  - A closed sub-window is destroyed through SceneSessionManager, so focus moves on.
+  - OH's avoid areas become Android's status-bar and navigation-bar insets.
+  - SceneBoard removes its starting window at the app's first frame, because the client reports its
+    frame layout when it connects.
+- **Task.** One OH ability hosts the Android task (decision 5).
+  - The app's own activities start in its process.
+  - Finishing the activity that holds the OH token hands the token to the top of the task.
+  - Finishing the last activity ends the ability.
+- **Input.** OH delivers taps and keys to the managed window. BACK behaves as on Android 12 and later:
+  - a shown keyboard closes first;
+  - then the activity handles BACK;
+  - BACK at the task root moves the app to the background (`RequestSessionBack`).
+- **Lifecycle.** OH moves the app to the background and back. In the background, ART's homogeneous
+  space compaction, a moving collection, crashed apps on objects in the protected old space. A
+  managed launch therefore uses a non-moving background collector (`APPSPAWNX_BACKGROUND_GC=CMS`).
+
+Observed on the test board, in builds up to 274, with Telegram X and The Guardian running at the same
+time, each under its own uid:
+- `aa dump` and the window manager listed each app's ability and main window.
+- Neither uid could read the other's app data (EACCES) or signal its process (EPERM).
+- `aa force-stop` removed an app's process, its windows and its ability record.
+- These worked:
+  - splash to home;
+  - dialogs, centred and dismissed by taps;
+  - BACK;
+  - the system bars;
+  - repeated moves to the background and back.
+
+**Against the acceptance criteria.**
+- The first milestone passed, except that BMS does not record the APK's signer or runtime type. The
+  bundle carries the package name and its own uid and token.
+- Of the second criterion, these were exercised with two unrelated APKs:
+  - attribution and kernel credentials;
+  - window ownership and focus;
+  - BACK, and showing and hiding the keyboard;
+  - lifecycle and cleanup;
+  - private-file isolation.
+- These were not exercised: rotation, a HAP alongside, secondary and isolated processes under AppMgr,
+  memory-pressure termination, and the corpus comparison.
+
+**Limits.**
+- The Cangjie route only works on the test board: while the router holds `CJAppSpawn`, Cangjie apps
+  cannot start. A product needs an ART branch in AppMgr (question 2).
+- The bundle requests only the network permissions (ADR-0004).
+- Android's input method manager binds no IME yet, because the IME metadata is not supplied; the
+  keyboard shows on `showSoftInput`. Typing into a managed app is not verified.
+- A SurfaceView's window is placed 54 px off.
 
 ## Implementation order
 

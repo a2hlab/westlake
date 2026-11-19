@@ -17,9 +17,71 @@
  */
 
 #include "ability_scheduler_adapter.h"
+#include "session_info.h"
 
 #include <android/log.h>
 #include <cstdarg>
+#include <cstdio>
+#include <map>
+#include <mutex>
+#include <string>
+
+// ADR-0008 managed launch. OH starts an ability in this process (AppMgr spawned it through appspawn-x) and
+// hands it the main window session SceneBoard created for it, with ScheduleAbilityTransaction. The window
+// client connects the activity's window to that session (wl_managed_take_session) instead of asking for a
+// sub-window under a host's window. Keyed by the ability token's address, as OhTokenRegistry is.
+namespace {
+struct WlManagedSession {
+    OHOS::sptr<OHOS::IRemoteObject> token;
+    OHOS::sptr<OHOS::IRemoteObject> session;
+    int32_t persistentId = 0;
+    std::string identityToken;
+    bool taken = false;
+};
+std::mutex g_wlManagedMutex;
+std::map<jlong, WlManagedSession>& wlManagedSessions() {
+    static std::map<jlong, WlManagedSession> sessions;
+    return sessions;
+}
+}  // namespace
+
+void wl_managed_note_ability_token(jlong tokenAddr, const OHOS::sptr<OHOS::IRemoteObject>& token) {
+    std::lock_guard<std::mutex> lock(g_wlManagedMutex);
+    wlManagedSessions()[tokenAddr].token = token;
+}
+
+void wl_managed_note_session(jlong tokenAddr, const OHOS::sptr<OHOS::AAFwk::SessionInfo>& info) {
+    if (info == nullptr || info->sessionToken == nullptr) return;
+    std::lock_guard<std::mutex> lock(g_wlManagedMutex);
+    WlManagedSession& entry = wlManagedSessions()[tokenAddr];
+    const bool fresh = entry.session == nullptr || entry.persistentId != info->persistentId;
+    entry.session = info->sessionToken;
+    entry.persistentId = info->persistentId;
+    entry.identityToken = info->identityToken;
+    if (fresh) {
+        fprintf(stderr, "[WL-MANAGED] ability token 0x%llx: OH main window session %d (identity %s)\n",
+                static_cast<unsigned long long>(tokenAddr), info->persistentId,
+                info->identityToken.empty() ? "none" : "present");
+        fflush(stderr);
+    }
+}
+
+// The session of the ability whose token is tokenAddr, for its activity's main window, once.
+bool wl_managed_take_session(jlong tokenAddr, OHOS::sptr<OHOS::IRemoteObject>& session,
+                             OHOS::sptr<OHOS::IRemoteObject>& token, int32_t& persistentId,
+                             std::string& identityToken) {
+    std::lock_guard<std::mutex> lock(g_wlManagedMutex);
+    auto found = wlManagedSessions().find(tokenAddr);
+    if (found == wlManagedSessions().end() || found->second.session == nullptr || found->second.taken) {
+        return false;
+    }
+    found->second.taken = true;
+    session = found->second.session;
+    token = found->second.token;
+    persistentId = found->second.persistentId;
+    identityToken = found->second.identityToken;
+    return true;
+}
 
 // adapter_bridge_load_class lives in adapter_bridge.cpp; loads classes via
 // the cached PathClassLoader (initialized in JNI_OnLoad from
@@ -301,6 +363,11 @@ bool AbilitySchedulerAdapter::ScheduleAbilityTransaction(
     // causing "No activity token found" warnings + dropped transactions.
     ALOGI("[BRIDGED] ScheduleAbilityTransaction: tokenAddr=0x%llx targetState=%d isNewWant=%d",
           static_cast<unsigned long long>(tokenAddr_), targetState.state, targetState.isNewWant);
+    fprintf(stderr, "[WL-MANAGED] ScheduleAbilityTransaction token 0x%llx state %d session %s\n",
+            static_cast<unsigned long long>(tokenAddr_), targetState.state,
+            (sessionInfo != nullptr && sessionInfo->sessionToken != nullptr) ? "yes" : "no");
+    fflush(stderr);
+    wl_managed_note_session(tokenAddr_, sessionInfo);
 
     std::string wantJson = wantToJson(want);
     ScopedJniAttach attach(jvm_);

@@ -61,6 +61,15 @@
 // the highest-sessionId main (which is wrong for multi-activity apps: A -> B ->
 // dialog must parent to B, not A). Updated when a main window is created/shown.
 static std::atomic<int32_t> g_fgMainSession{-1};
+// ADR-0008 managed launch: the main window session of the OH ability that hosts this process's Android task, once
+// an activity window connected to it; every other window of the process is its sub-window.
+static std::atomic<int32_t> g_wlManagedMainId{0};
+// Its size: a managed sub-window gets an OH window this size, and its content is placed inside it (placeWindow).
+static std::atomic<int32_t> g_wlManagedMainWidth{0};
+static std::atomic<int32_t> g_wlManagedMainHeight{0};
+// The main window session itself, for the requests an ability makes of SceneBoard (RequestSessionBack).
+static std::mutex g_wlManagedMainSessionMutex;
+static OHOS::sptr<OHOS::IRemoteObject> g_wlManagedMainSession;
 
 // 2026-06-26 IME-focus fix: set true while the adapter is summoning the OHOS
 // soft keyboard (input_method_bridge.cpp toggles it via oh_wm_set_ime_active).
@@ -136,6 +145,12 @@ extern "C" struct ANativeWindow* oh_anw_wrap(OHNativeWindow* oh);
 // IPCObjectProxy log line "desc:*.IDisplayManager error:1" came from the same
 // proxy and was the smoking gun.
 static constexpr int32_t SCENE_SESSION_MANAGER_ID = 4606;
+
+// ADR-0008 managed launch (activity/jni/ability_scheduler_adapter.cpp): the main window session OH created
+// for an ability it started in this process, taken once for that activity's window.
+bool wl_managed_take_session(jlong tokenAddr, OHOS::sptr<OHOS::IRemoteObject>& session,
+                             OHOS::sptr<OHOS::IRemoteObject>& token, int32_t& persistentId,
+                             std::string& identityToken);
 
 namespace oh_adapter {
 
@@ -890,6 +905,20 @@ OHWindowSession OHWindowManagerClient::createSession(
     // makes WindowSessionProperty Marshalling reject the property → server
     // returns ERR_INVALID_DATA → proxy logs "SendRequest failed".
     OHOS::Rosen::WindowType ohType = mapAndroidWindowType(androidWindowType);
+    // ADR-0008 managed launch: an activity's window (TYPE_BASE_APPLICATION) whose ability OH started in this
+    // process is that ability's main window. SceneBoard created its session; this process connects to it, as
+    // OH's WindowSceneSessionImpl does, and SceneBoard owns its placement, focus and input.
+    OHOS::sptr<OHOS::IRemoteObject> wl_mSession;
+    OHOS::sptr<OHOS::IRemoteObject> wl_mToken;
+    int32_t wl_mId = 0;
+    std::string wl_mIdentity;
+    const bool wl_managedMain = androidWindowType == 1 && ohTokenAddr != 0 &&
+        wl_managed_take_session(static_cast<jlong>(ohTokenAddr), wl_mSession, wl_mToken, wl_mId, wl_mIdentity);
+    if (wl_managedMain) {
+        ohType = OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW;
+        fprintf(stderr, "[WL-MANAGED] %s: the main window of OH session %d\n", windowName.c_str(), wl_mId);
+        fflush(stderr);
+    }
 
     // 2026-06-04 NATIVE TRANSLUCENT-DIALOG FIX (API-shape mismatch):
     // Android renders a BottomSheetDialog / translucent dialog as a full-screen,
@@ -913,7 +942,7 @@ OHWindowSession OHWindowManagerClient::createSession(
     // latest main and RE-SHOW it below so OHOS composites the dialog over it.
     uint32_t subParentWinId = 0;
     int32_t  subParentSession = -1;
-    if (ohType == OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW) {
+    if (!wl_managedMain && ohType == OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW) {
         std::lock_guard<std::recursive_mutex> lk(sessionMutex_);
         // 2026-06-05 #3: PREFER the foreground (most-recently-shown) main window
         // as the dialog's parent (correct for multi-activity: A->B->dialog parents
@@ -950,6 +979,35 @@ OHWindowSession OHWindowManagerClient::createSession(
                     subParentSession = kv.first;
                 }
             }
+        }
+    }
+    // ADR-0008: one OH ability hosts the app's Android task. Every other window of the process that would be a
+    // main window -- another activity of the task, a panel -- is a sub-window of the ability's main window, as a
+    // HAP's windows are; a dialog keeps its own activity's window as its parent (found above).
+    const int32_t wl_managedParent = g_wlManagedMainId.load();
+    const bool wl_managedSub = !wl_managedMain && wl_managedParent > 0 &&
+        ohType == OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW;
+    if (wl_managedSub && subParentWinId == 0) {
+        subParentWinId = static_cast<uint32_t>(wl_managedParent);
+        subParentSession = wl_managedParent;
+        fprintf(stderr, "[WL-MANAGED] %s: a sub-window of the ability's main window %d\n", windowName.c_str(),
+                wl_managedParent);
+        fflush(stderr);
+    }
+    // Its OH window is the main window's size, as a direct launch gives a dialog the display-sized window:
+    // Android places the content inside it (placeWindow, applyPosition), which a window only as large as a
+    // fixed-size dialog clipped.
+    // A SurfaceView's window keeps its own size: its buffer fills its node, and a display-sized one stretched it.
+    if (!wl_managedMain && wl_managedParent > 0 && subParentWinId != 0 &&
+        windowName.rfind("SurfaceView:", 0) != 0) {
+        const int32_t wl_w = g_wlManagedMainWidth.load();
+        const int32_t wl_h = g_wlManagedMainHeight.load();
+        if (wl_w > 0 && wl_h > 0 && (requestedWidth < wl_w || requestedHeight < wl_h)) {
+            fprintf(stderr, "[WL-MANAGED] %s: OH window %dx%d for content %dx%d\n", windowName.c_str(), wl_w, wl_h,
+                    requestedWidth, requestedHeight);
+            fflush(stderr);
+            requestedWidth = wl_w;
+            requestedHeight = wl_h;
         }
     }
     const bool asSubWindow = (subParentWinId != 0);
@@ -1134,7 +1192,10 @@ OHWindowSession OHWindowManagerClient::createSession(
     // XComponent/video content.  So keep the APP_WINDOW_NODE as the window we hand to SSM, and hang a
     // SELF_DRAWING child under it that hwui actually renders into.
     std::shared_ptr<OHOS::Rosen::RSSurfaceNode> wl_contentNode;
-    if (getenv("WL_SUB_WINDOW") != nullptr && getenv("WL_NO_CONTENT_NODE") == nullptr) {
+    // ADR-0008: a managed sub-window (a dialog, another activity) is drawn and placed as a direct launch's
+    // sub-windows are: into a content node its window can move inside the display-sized OH window.
+    if ((getenv("WL_SUB_WINDOW") != nullptr || (asSubWindow && wl_managedParent > 0)) &&
+        getenv("WL_NO_CONTENT_NODE") == nullptr) {
         OHOS::Rosen::RSSurfaceNodeConfig contentCfg;
         contentCfg.SurfaceNodeName = windowName + "_content";
         wl_contentNode = OHOS::Rosen::RSSurfaceNode::Create(
@@ -1326,7 +1387,17 @@ OHWindowSession OHWindowManagerClient::createSession(
         // keyboard/panels. A client Z of 9000 overrides that ordering and paints
         // the Android buffer over the visible keyboard. Keep the historical
         // display-attached fallback unchanged until it has an owner as well.
-        if (getenv("WL_SUB_WINDOW") == nullptr) {
+        // A managed window has an ability owner too: SceneBoard orders it with its keyboard and panels.
+        // ADR-0008: an ability's windows are siblings inside its window scene, drawn in order (RS sorts siblings by
+        // Z, then creation): the activity's window, then its other windows. A SurfaceView, created after the
+        // activity's window, painted over it whatever SceneBoard's z-level; Android keeps it below its window
+        // (sublayer -2) and shows it through the hole hwui leaves, so it goes below at Z -1. No other managed
+        // window gets a Z: RS also weighs a surface's Z against other scenes, and one above 0 painted over the
+        // keyboard.
+        if (asSubWindow && wl_managedParent > 0 && windowName.rfind("SurfaceView:", 0) == 0) {
+            surfaceNode->SetPositionZ(-1.0f);
+        }
+        if (getenv("WL_SUB_WINDOW") == nullptr && !wl_managedMain && !(asSubWindow && wl_managedParent > 0)) {
             surfaceNode->SetPositionZ(getenv("WL_Z_INVERT") != nullptr
                                           ? 9000.0f + static_cast<float>(16 - wl_zseq)
                                           : 9000.0f + static_cast<float>(wl_zseq));
@@ -1339,7 +1410,12 @@ OHWindowSession OHWindowManagerClient::createSession(
         // ★MarkUiFrameAvailable(true) does NOT exist on this board's RSSurfaceNode (it is at
         // rs_surface_node.h:293 but not public here) -- using it fails the TU, which the link
         // then silently drops (§77i).  Only the public notify flag is used.
-        surfaceNode->SetIsNotifyUIBufferAvailable(true);
+        // ADR-0008: not for an OH main window. SceneBoard removes the ability's starting window when RS reports the
+        // window's first buffer, and RS reports it only while this flag is false: set, the white starting window
+        // stayed over the activity.
+        if (!wl_managedMain) {
+            surfaceNode->SetIsNotifyUIBufferAvailable(true);
+        }
         // §284q TESTED AND REVERTED: `SetBootAnimation(true)` (rs_surface_node.h:223) looked
         // like the session-less compositing path the boot animation uses, but it REGRESSED --
         // noice nodes in the RS tree dropped from 3-5 to 1, `VisibleRegion` went to [Empty], and
@@ -1369,8 +1445,8 @@ OHWindowSession OHWindowManagerClient::createSession(
         // SkiaPipeline (§343 WL_TEST_COLOR) the screen stayed pure black, i.e. none of our pixels are
         // presented, while `nodes=1 nothingToDraw=0` proves Android is drawing real content.
         // So on the session path let SceneBoard own placement entirely.
-        const bool wl_selfAttach =
-            (getenv("WL_SUB_WINDOW") == nullptr) || (getenv("WL_SELF_ATTACH") != nullptr);
+        const bool wl_selfAttach = !wl_managedMain && !(asSubWindow && wl_managedParent > 0) &&
+            ((getenv("WL_SUB_WINDOW") == nullptr) || (getenv("WL_SELF_ATTACH") != nullptr));
         if (wl_selfAttach) {
             surfaceNode->AttachToDisplay(static_cast<uint64_t>(displayId));
             OHOS::Rosen::RSTransaction::FlushImplicitTransaction();
@@ -1708,6 +1784,23 @@ OHWindowSession OHWindowManagerClient::createSession(
             wl_prop->SetParentId(wl_parentId);
             wl_prop->SetParentPersistentId(wl_parentId);
         }
+        if (asSubWindow && wl_managedParent > 0) {
+            wl_prop->SetParentId(subParentWinId);
+            wl_prop->SetParentPersistentId(static_cast<int32_t>(subParentWinId));
+            // A SurfaceView's window sits below its activity's window (Android sublayer -2) and never takes
+            // focus or input. Ordered at creation, as SceneBoard takes the z-level then: set afterwards, it
+            // stayed above the activity until the app went to the background and back. Focusable, it took
+            // OH's focus from the activity, whose views were then never served by the input method.
+            if (windowName.rfind("SurfaceView:", 0) == 0) {
+                wl_prop->SetSubWindowZLevel(-2);
+                wl_prop->SetFocusable(false);
+                wl_prop->SetFocusableOnShow(false);
+            } else {
+                wl_prop->SetSubWindowZLevel(0);
+                wl_prop->SetFocusable(true);
+                wl_prop->SetFocusableOnShow(true);
+            }
+        }
 
         OHOS::sptr<oh_adapter::SessionStageAdapter> sessionStage =
             new oh_adapter::SessionStageAdapter(jvm, androidWindow);
@@ -1731,17 +1824,90 @@ OHWindowSession OHWindowManagerClient::createSession(
             OHOS::MessageParcel reply;
             OHOS::MessageOption option;
             OHOS::sptr<OHOS::Rosen::WindowSessionProperty> wl_propSptr(wl_prop);
-            bool wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") &&
-                         data.WriteRemoteObject(sessionStage->AsObject()) &&
-                         data.WriteRemoteObject(eventChannel->AsObject()) &&
-                         surfaceNode->Marshalling(data) &&
-                         data.WriteStrongParcelable(wl_propSptr);
-            int32_t v7err = wrote ? sceneProxy_->SendRequest(0, data, reply, option) : -1;
+            bool wrote = false;
+            int32_t v7err = -1;
             int32_t persistentId = 0;
             OHOS::sptr<OHOS::IRemoteObject> sessionObject = nullptr;
-            if (v7err == 0) {
-                persistentId = reply.ReadInt32();
-                sessionObject = reply.ReadRemoteObject();
+            if (wl_managedMain) {
+                // ISession::Connect (SessionProxy::Connect, OpenHarmony-v6.1-Release): stage, event channel,
+                // surface node, the property, the ability token when the property says it has one, and the
+                // identity token OH gave the ability. SceneBoard accepts it from the process AMS started.
+                wl_prop->SetWindowType(OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW);
+                wl_prop->SetParentId(OHOS::Rosen::INVALID_WINDOW_ID);
+                wl_prop->SetParentPersistentId(OHOS::Rosen::INVALID_SESSION_ID);
+                wl_prop->SetPersistentId(wl_mId);
+                wl_prop->SetFocusable(true);
+                wl_prop->SetFocusableOnShow(true);
+                wl_prop->SetTokenState(wl_mToken != nullptr);
+                {
+                    OHOS::Rosen::SessionInfo wl_si;
+                    wl_si.bundleName_ = bundleName;
+                    wl_si.moduleName_ = "entry";
+                    wl_si.abilityName_ = abilityName;
+                    wl_si.windowType_ = static_cast<uint32_t>(OHOS::Rosen::WindowType::WINDOW_TYPE_APP_MAIN_WINDOW);
+                    wl_si.screenId_ = static_cast<uint64_t>(displayId);
+                    wl_si.persistentId_ = wl_mId;
+                    wl_prop->SetSessionInfo(wl_si);
+                }
+                wrote = data.WriteInterfaceToken(u"OHOS.ISession") &&
+                        data.WriteRemoteObject(sessionStage->AsObject()) &&
+                        data.WriteRemoteObject(eventChannel->AsObject()) &&
+                        surfaceNode->Marshalling(data) &&
+                        data.WriteBool(true) &&
+                        data.WriteStrongParcelable(wl_propSptr) &&
+                        (wl_mToken == nullptr || data.WriteRemoteObject(wl_mToken)) &&
+                        data.WriteString(wl_mIdentity);
+                v7err = wrote ? wl_mSession->SendRequest(0, data, reply, option) : -1;
+                // The reply ends with the result code, after the system config and the session's properties.
+                int32_t wl_ret = -1;
+                if (v7err == 0 && reply.GetDataSize() >= sizeof(int32_t)) {
+                    reply.RewindRead(reply.GetDataSize() - sizeof(int32_t));
+                    wl_ret = reply.ReadInt32();
+                }
+                fprintf(stderr, "[WL-MANAGED] Connect(session %d) wrote=%d err=%d ret=%d token=%s\n",
+                        wl_mId, wrote ? 1 : 0, v7err, wl_ret, wl_mToken != nullptr ? "yes" : "no");
+                fflush(stderr);
+                if (v7err == 0 && wl_ret == 0) {
+                    persistentId = wl_mId;
+                    sessionObject = wl_mSession;
+                    g_wlManagedMainId.store(wl_mId);
+                    g_wlManagedMainWidth.store(requestedWidth);
+                    g_wlManagedMainHeight.store(requestedHeight);
+                    {
+                        std::lock_guard<std::mutex> wl_lock(g_wlManagedMainSessionMutex);
+                        g_wlManagedMainSession = wl_mSession;
+                    }
+                    // SceneBoard removes the ability's starting window once RS has the window's first buffer and the
+                    // window scene's frame matches the session's layout rect (ArkUI WindowScene: IsWindowSizeEqual),
+                    // which is what the client last reported laid out, as OH's own window client does after its first
+                    // layout (ISession::NotifyFrameLayoutFinishFromApp, code 135). Unreported, the sizes differed at
+                    // the first buffer and the white starting window stayed over the activity.
+                    {
+                        OHOS::MessageParcel ldata;
+                        OHOS::MessageParcel lreply;
+                        OHOS::MessageOption loption;
+                        const bool lwrote = ldata.WriteInterfaceToken(u"OHOS.ISession") && ldata.WriteBool(true) &&
+                                            ldata.WriteInt32(0) && ldata.WriteInt32(0) &&
+                                            ldata.WriteInt32(requestedWidth) && ldata.WriteInt32(requestedHeight);
+                        const int32_t lerr = lwrote ? wl_mSession->SendRequest(135, ldata, lreply, loption) : -1;
+                        fprintf(stderr, "[WL-MANAGED] NotifyFrameLayoutFinish(0,0,%dx%d) err=%d\n", requestedWidth,
+                                requestedHeight, lerr);
+                        fflush(stderr);
+                    }
+                } else if (v7err == 0) {
+                    v7err = wl_ret;
+                }
+            } else {
+                wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") &&
+                        data.WriteRemoteObject(sessionStage->AsObject()) &&
+                        data.WriteRemoteObject(eventChannel->AsObject()) &&
+                        surfaceNode->Marshalling(data) &&
+                        data.WriteStrongParcelable(wl_propSptr);
+                v7err = wrote ? sceneProxy_->SendRequest(0, data, reply, option) : -1;
+                if (v7err == 0) {
+                    persistentId = reply.ReadInt32();
+                    sessionObject = reply.ReadRemoteObject();
+                }
             }
             fprintf(stderr, "[WESTLAKE-WMC] V7 wrote=%d err=%d persistentId=%d session=%p\n",
                     wrote ? 1 : 0, v7err, persistentId,
@@ -1786,13 +1952,42 @@ OHWindowSession OHWindowManagerClient::createSession(
                                   fdata.WriteBool(true) &&
                                   fdata.WriteStrongParcelable(wl_propSptr) &&
                                   fdata.WriteBool(true) &&              // isFromClient
-                                  fdata.WriteString("");                // identityToken
+                                  fdata.WriteString(wl_managedMain ? wl_mIdentity : std::string(""));
                     int32_t ferr = fwrote ? sessionObject->SendRequest(1, fdata, freply, foption) : -1;
                     int32_t fret = (ferr == 0) ? freply.ReadInt32() : -1;
                     fprintf(stderr,
                             "[WESTLAKE-WMC] §338 Foreground(persistentId=%d) wrote=%d err=%d ret=%d\n",
                             persistentId, fwrote ? 1 : 0, ferr, fret);
                     fflush(stderr);
+                }
+                // ADR-0008: an OH main window learns its system bars from SceneBoard's avoid areas, pushed when
+                // they change; ask once now (ISession::GetAvoidAreaByType, code 108) and hand them to the stage
+                // as a push would be. On a thread of its own: the stage takes its JNI lock, which a SceneBoard
+                // callback can hold while it waits for this (UI) thread; asked from here, OH's foreground
+                // acknowledgement never came (LIFECYCLE_TIMEOUT).
+                // The ability's other windows (another activity of the task, a dialog) learn theirs the same way;
+                // a window that no bar overlaps gets no insets from them.
+                if (wl_managedMain || (asSubWindow && wl_managedParent > 0)) {
+                    OHOS::sptr<OHOS::IRemoteObject> wl_areaSession = sessionObject;
+                    OHOS::sptr<oh_adapter::SessionStageAdapter> wl_areaStage = sessionStage;
+                    std::thread([wl_areaSession, wl_areaStage]() {
+                        for (uint32_t wl_t = 0; wl_t <= 4; wl_t += 4) {
+                            OHOS::MessageParcel adata;
+                            OHOS::MessageParcel areply;
+                            OHOS::MessageOption aoption;
+                            bool awrote = adata.WriteInterfaceToken(u"OHOS.ISession") && adata.WriteUint32(wl_t) &&
+                                          adata.WriteInt32(0) && adata.WriteInt32(0) && adata.WriteInt32(0) &&
+                                          adata.WriteInt32(0) && adata.WriteInt32(20);
+                            int32_t aerr = awrote ? wl_areaSession->SendRequest(108, adata, areply, aoption) : -1;
+                            OHOS::sptr<OHOS::Rosen::AvoidArea> wl_area =
+                                aerr == 0 ? areply.ReadParcelable<OHOS::Rosen::AvoidArea>() : nullptr;
+                            if (wl_area != nullptr) {
+                                wl_areaStage->UpdateAvoidArea(wl_area, static_cast<OHOS::Rosen::AvoidAreaType>(wl_t));
+                            } else {
+                                fprintf(stderr, "[WL-INSETS] avoid area type %u not read (err=%d)\n", wl_t, aerr);
+                            }
+                        }
+                    }).detach();
                 }
                 // WESTLAKE §345: tell the session the app has DRAWN, and drop the starting window.
                 // §343/§344 proved RS never presents our pixels: with an UNCONDITIONAL opaque-red
@@ -1872,7 +2067,9 @@ OHWindowSession OHWindowManagerClient::createSession(
                             abilityName.c_str(), wl_only);
                     fflush(stderr);
                 }
-                if (!wl_skipRaise && getenv("WL_NO_RAISE") == nullptr) {
+                const bool wl_managedSurfaceView = asSubWindow && wl_managedParent > 0 &&
+                                                   windowName.rfind("SurfaceView:", 0) == 0;
+                if (!wl_skipRaise && !wl_managedSurfaceView && getenv("WL_NO_RAISE") == nullptr) {
                     OHOS::MessageParcel rdata;
                     OHOS::MessageParcel rreply;
                     OHOS::MessageOption roption;
@@ -2314,6 +2511,15 @@ int OHWindowManagerClient::notifyDrawingCompleted(int32_t sessionId) {
 
 void OHWindowManagerClient::destroySession(int32_t sessionId) {
     OH_BR_IPC_SCOPE("WMClient.destroySession", "session=%{public}d", sessionId);
+    // ADR-0008: the ability's main window outlives the activity window that connected to it while the task has
+    // other activities; OH ends the session when the ability terminates. Only the record of the window goes.
+    if (sessionId > 0 && sessionId == g_wlManagedMainId.load()) {
+        std::lock_guard<std::recursive_mutex> lock(sessionMutex_);
+        sessions_.erase(sessionId);
+        fprintf(stderr, "[WL-MANAGED] main window session %d kept: OH ends it with the ability\n", sessionId);
+        fflush(stderr);
+        return;
+    }
 
     OHOS::sptr<OHOS::Rosen::ISession> sessionProxy;
     OHOS::sptr<OHOS::IRemoteObject> sessionRemote;
@@ -2389,6 +2595,20 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
         };
         sendSessionCall(2, "Background");
         sendSessionCall(3, "Disconnect");
+    }
+
+    // ADR-0008: SceneBoard removes a sub-window it created for this client, and moves focus on, when the client
+    // destroys it (ISceneSessionManager::DestroyAndDisconnectSpecificSession, code 1), as WindowSessionImpl does.
+    // Only disconnected, a closed dialog kept OH's focus, and BACK went to a window that no longer existed.
+    if (g_wlManagedMainId.load() > 0 && sceneProxy_ != nullptr) {
+        OHOS::MessageParcel data;
+        OHOS::MessageParcel reply;
+        OHOS::MessageOption option;
+        const bool wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") && data.WriteInt32(sessionId);
+        const int32_t err = wrote ? sceneProxy_->SendRequest(1, data, reply, option) : -1;
+        const int32_t ret = (err == 0) ? reply.ReadInt32() : -1;
+        fprintf(stderr, "[WL-MANAGED] DestroyAndDisconnectSpecificSession(%d) err=%d ret=%d\n", sessionId, err, ret);
+        fflush(stderr);
     }
 
     // G2.14c — legacy path uses IWindowManager.RemoveWindow + DestroyWindow.
@@ -3255,3 +3475,25 @@ void* OHWindowManagerClient::getOhNativeWindow(int32_t sessionId) {
 }
 
 }  // namespace oh_adapter
+
+// ADR-0008: a back press at the root of the app's task moves the app to the background, as Android 12+ does
+// (ATMS moves the task to the back); for an OH ability SceneBoard does that on ISession::RequestSessionBack(true)
+// (SessionInterfaceCode TRANS_ID_BACKPRESSED, 103), as for an ArkTS ability whose onBackPressed asks for it.
+extern "C" JNIEXPORT jint JNICALL
+Java_adapter_activity_ActivityClientControllerAdapter_nativeMoveManagedTaskToBack(JNIEnv*, jclass) {
+    OHOS::sptr<OHOS::IRemoteObject> session;
+    {
+        std::lock_guard<std::mutex> lock(g_wlManagedMainSessionMutex);
+        session = g_wlManagedMainSession;
+    }
+    if (session == nullptr) return -1;
+    OHOS::MessageParcel data;
+    OHOS::MessageParcel reply;
+    OHOS::MessageOption option;
+    const bool wrote = data.WriteInterfaceToken(u"OHOS.ISession") && data.WriteBool(true);
+    const int32_t err = wrote ? session->SendRequest(103, data, reply, option) : -1;
+    const uint32_t ret = (err == 0) ? reply.ReadUint32() : UINT32_MAX;
+    fprintf(stderr, "[WL-MANAGED] RequestSessionBack(move to background) err=%d ret=%u\n", err, ret);
+    fflush(stderr);
+    return err == 0 ? static_cast<jint>(ret) : err;
+}

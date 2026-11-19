@@ -243,9 +243,11 @@ public class SessionStageBridge {
      *
      * OH avoid area maps to Android insets.
      */
-    public void onUpdateAvoidArea(int type, int left, int top, int right, int bottom) {
-        logBridged("UpdateAvoidArea(type=" + type + ")",
-                "-> IWindow.insetsControlChanged");
+    public void onUpdateAvoidArea(int type, int topX, int topY, int topWidth, int topHeight,
+                                  int bottomX, int bottomY, int bottomWidth, int bottomHeight) {
+        OhInsetsBridge.systemBars(mAndroidWindow, type, new android.graphics.Rect(topX, topY,
+                topX + topWidth, topY + topHeight), new android.graphics.Rect(bottomX, bottomY,
+                bottomX + bottomWidth, bottomY + bottomHeight));
     }
 
     /**
@@ -280,8 +282,78 @@ public class SessionStageBridge {
      * Strategy: Inject KEYCODE_BACK key event into input channel.
      */
     public void onHandleBackEvent() {
-        logPartial("HandleBackEvent",
-                "-> inject KEYCODE_BACK via input channel");
+        // SceneBoard asks a window to go back through its session stage (the BACK key itself reaches the window's
+        // input, see dispatchKey). Android expects KEYCODE_BACK on the window, which ViewRootImpl hands to the
+        // app's back callbacks or its dispatchKeyEvent and onBackPressed; a back press goes there.
+        if (!(mAndroidWindow instanceof IWindow)) return;
+        IWindow window = (IWindow) mAndroidWindow;
+        long now = android.os.SystemClock.uptimeMillis();
+        int flags = android.view.KeyEvent.FLAG_FROM_SYSTEM | android.view.KeyEvent.FLAG_VIRTUAL_HARD_KEY;
+        dispatchKey(window, android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_BACK, now, now, flags);
+        dispatchKey(window, android.view.KeyEvent.ACTION_UP, android.view.KeyEvent.KEYCODE_BACK, now, now, flags);
+    }
+
+    private static volatile android.os.Handler sMainInput;
+
+    /** Asynchronous, as Android's input events are: a Choreographer sync barrier does not hold them back. */
+    private static android.os.Handler mainInput() {
+        android.os.Handler handler = sMainInput;
+        if (handler == null) {
+            handler = android.os.Handler.createAsync(android.os.Looper.getMainLooper());
+            sMainInput = handler;
+        }
+        return handler;
+    }
+
+    /**
+     * A key for the app, delivered as Android's input dispatcher delivers it: to the focused window, on the main
+     * thread, through its ViewRootImpl input stages (its views, then the activity: onKeyUp(BACK) runs
+     * onBackPressed or the back callbacks). While the OH keyboard is shown, BACK goes to it first, as to an
+     * Android input method (OhImeBridge.takeBackKey). Called by a managed launch's MMI key consumer (ADR-0008) on
+     * OH's input thread; times are uptime milliseconds, 0 for now.
+     */
+    public static void dispatchKey(int action, int keyCode, long downTime, long eventTime) {
+        dispatchKey(null, action, keyCode, downTime, eventTime, android.view.KeyEvent.FLAG_FROM_SYSTEM);
+    }
+
+    private static void dispatchKey(final IWindow window, final int action, final int keyCode, final long downTime,
+            final long eventTime, final int flags) {
+        mainInput().post(new Runnable() {
+            @Override public void run() {
+                long now = android.os.SystemClock.uptimeMillis();
+                android.view.KeyEvent event = new android.view.KeyEvent(downTime > 0 ? downTime : now,
+                        eventTime > 0 ? eventTime : now, action, keyCode, 0, 0,
+                        android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags,
+                        android.view.InputDevice.SOURCE_KEYBOARD);
+                if (OhImeBridge.takeBackKey(event)) return;
+                android.view.ViewRootImpl root = null;
+                try {
+                    root = window != null ? OhInsetsBridge.rootOf(window) : focusedRoot();
+                } catch (ReflectiveOperationException | RuntimeException failure) {
+                    System.err.println("[WL-KEY] no window for key " + keyCode + ": " + failure);
+                }
+                if (root == null) {
+                    System.err.println("[WL-KEY] no window for key " + keyCode);
+                    return;
+                }
+                root.dispatchInputEvent(event);
+                if (keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+                    System.err.println("[WL-BACK] back " + (action == android.view.KeyEvent.ACTION_DOWN
+                            ? "down" : "up") + " to " + root.getTitle());
+                }
+            }
+        });
+    }
+
+    /** The window that gets keys: the one with window focus, else the newest. */
+    private static android.view.ViewRootImpl focusedRoot() {
+        android.view.View newest = null;
+        for (android.view.View view : android.view.WindowManagerGlobal.getInstance().getWindowViews()) {
+            if (view == null || view.getViewRootImpl() == null) continue;
+            if (view.hasWindowFocus()) return view.getViewRootImpl();
+            newest = view;
+        }
+        return newest == null ? null : newest.getViewRootImpl();
     }
 
     // ============================================================

@@ -36,6 +36,85 @@ public final class OhInsetsBridge {
         }
     }
 
+    // OH avoid area types (wm_common.h AvoidAreaType) that are Android system bars.
+    private static final int OH_AVOID_SYSTEM = 0;
+    private static final int OH_AVOID_NAVIGATION_INDICATOR = 4;
+    // The last status bar and navigation area OH reported for any of this app's windows. They belong to the
+    // screen: SceneBoard reports no status bar for a sub-window (another activity of the task), which covers
+    // the screen as the main window does.
+    private static final Rect sStatusBar = new Rect();
+    private static final Rect sNavigationBar = new Rect();
+
+    /**
+     * OH's system bar areas for a window it manages (ADR-0008): SceneBoard reports the status bar as the
+     * top of TYPE_SYSTEM and a navigation bar or gesture indicator at the bottom of TYPE_SYSTEM or of
+     * TYPE_NAVIGATION_INDICATOR. They become Android's status bar and navigation bar insets sources, as
+     * the window manager's system bars are on Android; an empty area hides the source.
+     */
+    public static void systemBars(final Object target, final int type, final Rect top, final Rect bottom) {
+        if (!(target instanceof IWindow)) return;
+        if (type != OH_AVOID_SYSTEM && type != OH_AVOID_NAVIGATION_INDICATOR) return;
+        final IWindow window = (IWindow) target;
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override public void run() {
+                try {
+                    synchronized (STATES) { if (RETIRED.containsKey(window.asBinder())) return; }
+                    ViewRootImpl root = rootOf(window);
+                    if (root == null || root.getView() == null) return;
+                    int[] size = WindowSessionAdapter.getDefaultDisplaySize();
+                    Rect display = new Rect(0, 0, size[0], size[1]);
+                    InsetsState state = new InsetsState(root.getInsetsController().getState(), true);
+                    state.setDisplayFrame(display);
+                    // Android makes a system bar an inset only when its frame spans the window's width
+                    // (InsetsSource.calculateInsets); OH's gesture indicator is a narrow area at the bottom.
+                    Rect status = top.isEmpty() ? new Rect() : new Rect(display.left, display.top, display.right,
+                            Math.min(top.bottom, display.bottom));
+                    Rect navigation = bottom.isEmpty() ? new Rect() : new Rect(display.left,
+                            Math.max(bottom.top, display.top), display.right, display.bottom);
+                    synchronized (sStatusBar) {
+                        if (type == OH_AVOID_SYSTEM) {
+                            if (status.isEmpty()) status.set(sStatusBar); else sStatusBar.set(status);
+                        }
+                        if (!navigation.isEmpty()) sNavigationBar.set(navigation);
+                    }
+                    if (type == OH_AVOID_SYSTEM) {
+                        source(state, WindowInsets.Type.statusBars(), status);
+                    }
+                    if (type == OH_AVOID_NAVIGATION_INDICATOR || !navigation.isEmpty()) {
+                        source(state, WindowInsets.Type.navigationBars(), navigation);
+                    }
+                    synchronized (STATES) { STATES.put(window.asBinder(), new InsetsState(state, true)); }
+                    root.getInsetsController().onStateChanged(state);
+                    root.requestFitSystemWindows();
+                    root.requestLayout();
+                    System.err.println("[OH_INSETS] system bars type=" + type + " status=" + status
+                            + " navigation=" + navigation);
+                } catch (ReflectiveOperationException | RuntimeException failure) {
+                    System.err.println("[OH_INSETS] system bars failed: " + failure);
+                }
+            }
+        });
+    }
+
+    private static void source(InsetsState state, int insetsType, Rect frame) {
+        state.getOrCreateSource(InsetsSource.createId(null, 0, insetsType), insetsType)
+                .setFrame(frame).setVisible(!frame.isEmpty());
+    }
+
+    static ViewRootImpl rootOf(IWindow window) throws ReflectiveOperationException {
+        Class<?> globalClass = Class.forName("android.view.WindowManagerGlobal");
+        Object global = globalClass.getMethod("getInstance").invoke(null);
+        Field rootsField = globalClass.getDeclaredField("mRoots");
+        rootsField.setAccessible(true);
+        Field windowField = ViewRootImpl.class.getDeclaredField("mWindow");
+        windowField.setAccessible(true);
+        for (Object item : ((ArrayList<?>) rootsField.get(global)).toArray()) {
+            ViewRootImpl root = (ViewRootImpl) item;
+            if (((IWindow) windowField.get(root)).asBinder().equals(window.asBinder())) return root;
+        }
+        return null;
+    }
+
     /** The legacy native callback supplies docked keyboard height in pixels. */
     public static void occupied(final Object target, final int height) {
         apply(target, height, null);

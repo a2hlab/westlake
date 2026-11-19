@@ -4776,6 +4776,57 @@ void OHInputBridge::monitorOHInputEvents() {
 //
 // See doc/Input_Adapter_design.html §3.3.5 for design rationale.
 // ============================================================
+// ADR-0008: in a managed launch a key goes where Android's input dispatcher sends it: to the focused window, on
+// the main thread, through its ViewRootImpl input stages (SessionStageBridge.dispatchKey, which lets the input
+// method take BACK first while its keyboard is shown). This consumer runs on its own EventRunner thread, where
+// dispatchKeyViaViewRoot's direct DecorView call reached the activity off the main thread: Telegram X's fragment
+// manager threw ("Must be called from main thread of fragment host") and its back press fell through to the task.
+static bool wl_dispatch_managed_key(int32_t action, int32_t keyCode, int64_t downNs, int64_t eventNs) {
+    static const bool managed = [] {
+        const char* value = getenv("WESTLAKE_MANAGED_LAUNCH");
+        return value != nullptr && strcmp(value, "1") == 0;
+    }();
+    if (!managed) return false;
+    JavaVM* vm = OHInputBridge::getInstance().javaVm();
+    if (vm == nullptr) return false;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        JavaVMAttachArgs args{JNI_VERSION_1_6, const_cast<char*>("oh-key-input"), nullptr};
+        if (vm->AttachCurrentThread(&env, &args) != JNI_OK) return false;
+        attached = true;
+    }
+    static jclass bridgeClass = nullptr;   // only this consumer's thread resolves and uses these
+    static jmethodID dispatchKey = nullptr;
+    if (dispatchKey == nullptr) {
+        jclass local = env->FindClass("adapter/window/SessionStageBridge");
+        jmethodID method = (local != nullptr && !env->ExceptionCheck())
+            ? env->GetStaticMethodID(local, "dispatchKey", "(IIJJ)V") : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            method = nullptr;
+        }
+        if (method != nullptr) {
+            bridgeClass = static_cast<jclass>(env->NewGlobalRef(local));
+            dispatchKey = method;
+        }
+        if (local != nullptr) env->DeleteLocalRef(local);
+    }
+    bool sent = false;
+    if (dispatchKey != nullptr) {
+        env->CallStaticVoidMethod(bridgeClass, dispatchKey, static_cast<jint>(action), static_cast<jint>(keyCode),
+                                  static_cast<jlong>(downNs / 1000000LL), static_cast<jlong>(eventNs / 1000000LL));
+        sent = !env->ExceptionCheck();
+        if (!sent) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+    }
+    if (attached) vm->DetachCurrentThread();
+    return sent;
+}
+
 class OhMmiInputConsumer : public OHOS::MMI::IInputEventConsumer {
 public:
     OhMmiInputConsumer() = default;
@@ -4820,24 +4871,35 @@ public:
         }
         int64_t eventTimeNs = keyEvent->GetActionTime() * 1000LL;
         static thread_local int64_t s_keyDownNs = 0;
-        int64_t downTimeNs;
-        if (androidAction == AKEY_EVENT_ACTION_DOWN) {
-            s_keyDownNs = eventTimeNs;
-            downTimeNs = eventTimeNs;
-        } else {
-            downTimeNs = (s_keyDownNs > 0) ? s_keyDownNs : eventTimeNs;
-        }
-        LOGI("OnInputEvent(KeyEvent): ohCode=%d -> android=%d action=%d session=%d (forwarding)",
-             ohCode, androidKey, androidAction, sessionId);
+        static thread_local int32_t s_keyDown = -1;
         // Primary path: dispatch DIRECTLY into the focused ViewRootImpl (the
         // deployed runtime's InputChannel consumer drops type=KEY). Fall back
         // to the InputChannel write if direct dispatch can't find a receiver
         // (e.g. on a runtime whose consumer DOES handle KEY).
-        int32_t rc = OHInputBridge::getInstance().dispatchKeyViaViewRoot(
-            androidAction, androidKey, downTimeNs, eventTimeNs);
-        if (rc != 0) {
-            OHInputBridge::getInstance().injectKeyEvent(sessionId, androidAction,
-                                                        androidKey, downTimeNs, eventTimeNs);
+        auto forward = [&](int32_t action, int64_t downNs) {
+            LOGI("OnInputEvent(KeyEvent): ohCode=%d -> android=%d action=%d session=%d (forwarding)",
+                 ohCode, androidKey, action, sessionId);
+            if (wl_dispatch_managed_key(action, androidKey, downNs, eventTimeNs)) return;
+            int32_t rc = OHInputBridge::getInstance().dispatchKeyViaViewRoot(
+                action, androidKey, downNs, eventTimeNs);
+            if (rc != 0) {
+                OHInputBridge::getInstance().injectKeyEvent(sessionId, action,
+                                                            androidKey, downNs, eventTimeNs);
+            }
+        };
+        if (androidAction == AKEY_EVENT_ACTION_DOWN) {
+            s_keyDownNs = eventTimeNs;
+            s_keyDown = androidKey;
+            forward(AKEY_EVENT_ACTION_DOWN, eventTimeNs);
+        } else {
+            // OH hands the focused window the BACK key's UP only, which an OH app acts on. Android acts on a
+            // tracked DOWN and UP pair: an UP whose DOWN never came gets one first.
+            if (s_keyDown != androidKey) {
+                s_keyDownNs = eventTimeNs;
+                forward(AKEY_EVENT_ACTION_DOWN, eventTimeNs);
+            }
+            forward(AKEY_EVENT_ACTION_UP, s_keyDownNs > 0 ? s_keyDownNs : eventTimeNs);
+            s_keyDown = -1;
         }
         keyEvent->MarkProcessed();
     }

@@ -27,6 +27,9 @@
 #include "oh_app_mgr_client.h"  // G2.14i: ApplicationForegrounded reverse callback
 #include <iremote_object.h>
 
+// ADR-0008 managed launch (ability_scheduler_adapter.cpp): the ability token, kept with its window session.
+void wl_managed_note_ability_token(jlong tokenAddr, const OHOS::sptr<OHOS::IRemoteObject>& token);
+
 // 2026-04-30 方向 2: AppSchedulerBridge 已搬到 oh-adapter-runtime.jar，OH IPC
 // native thread (system CL only) FindClass 找不到，必须走 PathClassLoader.loadClass。
 // adapter_bridge_load_class 在 adapter_bridge.cpp 里实现，cache 自 JNI_OnLoad 时
@@ -553,6 +556,7 @@ void AppSchedulerAdapter::ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityI
     // OH IRemoteObject pointer encoded as long for token map (reverse callback).
     // Java side stores in OhTokenRegistry; LifecycleAdapter uses for finishActivity → OH TerminateAbility.
     jlong tokenAddr = reinterpret_cast<jlong>(token.GetRefPtr());
+    wl_managed_note_ability_token(tokenAddr, token);
 
     ALOGI("[B47-SLA] ScheduleLaunchAbility: ability=%s want.action=%s abilityJsonLen=%zu wantJsonLen=%zu tokenAddr=0x%llx",
         info.name.c_str(),

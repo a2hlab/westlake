@@ -38,6 +38,9 @@ public:
     // Listens for connections, reads spawn requests, calls handler
     void run();
 
+    // ADR-0008 managed launches: route OH's spawn requests on this socket to each bundle's own spawner.
+    void runRouter();
+
     // Close the listening socket (called in child after fork)
     void closeSocket();
 
@@ -52,13 +55,18 @@ private:
     std::vector<uint8_t> launchRequest_;
     int32_t launchUid_ = -1;
 
+    // ADR-0008 managed launch: the OH bundle whose processes OH's application manager asks this spawner
+    // for (WESTLAKE_SPAWN_MANAGED_BUNDLE), or empty when only the launcher may ask.
+    std::string managedBundle_;
+
     // Handle a single client connection
     void handleConnection(int clientFd);
 
     // Decides whether the peer may make this request. The launcher (root) chooses credentials;
     // a process this spawner started may only name another process of its application, and its
     // request is rebuilt from the launch request. Sets fromLauncher; false refuses (logged).
-    bool admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher);
+    bool admit(int clientFd, std::vector<uint8_t>& buffer, bool isBinary, bool& fromLauncher,
+               bool& fromAppMgr);
 
     // Parse raw message buffer into SpawnMsg
     // In real implementation, this would use appspawn protocol parser

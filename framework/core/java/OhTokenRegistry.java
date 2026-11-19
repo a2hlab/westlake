@@ -99,6 +99,22 @@ public final class OhTokenRegistry {
      * app_scheduler_adapter.cpp::TokenDeathRecipient::OnRemoteDied via JNI.
      * Drops all maps keyed by the dead OH token.
      */
+    /**
+     * ADR-0008: the OH ability hosting the app's task outlives the activity that held its token. When that
+     * activity finishes while others remain, the token passes to the task's top activity, so OH's lifecycle
+     * reaches it and its finish ends the ability. Returns whether from held a token.
+     */
+    public static boolean transfer(IBinder from, IBinder to) {
+        if (from == null || to == null) return false;
+        Long ohTokenAddr = sAndroidToOh.remove(from);
+        if (ohTokenAddr == null) return false;
+        sOhToAndroid.put(ohTokenAddr, to);
+        sAndroidToOh.put(to, ohTokenAddr);
+        Integer session = sAndroidToMainSession.remove(from);
+        if (session != null) sAndroidToMainSession.put(to, session);
+        return true;
+    }
+
     public static void removeByOhToken(long ohTokenAddr) {
         IBinder b = sOhToAndroid.remove(ohTokenAddr);
         if (b != null) {
