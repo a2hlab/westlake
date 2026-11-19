@@ -345,20 +345,20 @@
         ],
         "checks": {
           "sign_in": {
-            "status": "partial",
-            "evidence": "Spotify showed the Facebook form and the full main-document origin in its own WebView on the dedicated host. Submission and authenticated return remain open. With the standalone Facebook app already running under another UID, Spotify still displayed the empty form in its own window. The native provider lookup missed twice more before the form appeared. The original APK declares a browser callback and the installed OpenHarmony host advertises only its home ability."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19 on the D600 (same delegated configuration). Spotify's Facebook login opened Facebook's web form inside Spotify. The user's test login was typed through a masked helper; Facebook answered with its reCAPTCHA, which the user completed on the board (the agent does not solve CAPTCHAs). Facebook then signed in and granted the requested scopes. Earlier records showed the empty form only."
           },
           "authenticated_return": {
-            "status": "open",
-            "gap": "No authenticated return to Spotify or established Spotify session was observed. A consumed Back closed the form. Four guest windows remained without focus, and foregrounding the host did not restore a guest window during the observation."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19: Facebook's redirect back to Spotify reached Spotify's Facebook callback activity, which Westlake launched in Spotify's own process, and the result was delivered to Facebook's login activity. Spotify then handled the login itself: it answered \"Signing up with Facebook isn't available right now. Try signing up with your email.\" and opened its email sign-up. Codex's earlier run had stopped before any return."
           },
           "account_session": {
             "status": "open",
-            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+            "gap": "Not observable with this Facebook account: after the authenticated return, Spotify's own service refused to create an account through Facebook (\"Signing up with Facebook isn't available right now\"), and the test Facebook account has no Spotify account. Observing it needs a Spotify account already linked to this Facebook account, or a user-approved scope change. Spotify was signed back in with Google afterwards."
           },
           "restart_persistence": {
             "status": "open",
-            "gap": "No authenticated return to Spotify or established Spotify session was observed."
+            "gap": "Not observable with this Facebook account: after the authenticated return, Spotify's own service refused to create an account through Facebook (\"Signing up with Facebook isn't available right now\"), and the test Facebook account has no Spotify account. Observing it needs a Spotify account already linked to this Facebook account, or a user-approved scope change. Spotify was signed back in with Google afterwards."
           }
         }
       }
@@ -371,9 +371,9 @@
       "open": 5
     },
     "Facebook": {
-      "observed": 8,
-      "open": 3,
-      "partial": 1
+      "observed": 10,
+      "partial": 0,
+      "open": 2
     }
   }
 }

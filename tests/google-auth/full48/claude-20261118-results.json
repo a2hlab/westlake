@@ -103,5 +103,12 @@
   },
   "fotmobHost": "Rebuilt with the current host pipeline and installed in place on 2026-11-19 with the user's approval; uid and token ID unchanged.",
   "windowContentFix": "A SurfaceView container layer's 0x0 position updates (RenderThread) set the activity window's content node to 0x0; the bridge now ignores empty layer bounds (westlake 6b80c26). Verified 2026-11-19 on the D600: Maps kept its place card and drew the route preview; YouTube's watch page kept its views under the playing video. Both logged the ignored empty bounds once.",
-  "boardNetwork20261119": "The board lost internet access from about 09:45 to 12:22 PST (Wi-Fi associated, every TCP connect timed out) until Wi-Fi self-cure re-associated; checks waited for it."
+  "boardNetwork20261119": "The board lost internet access from about 09:45 to 12:22 PST (Wi-Fi associated, every TCP connect timed out) until Wi-Fi self-cure re-associated; checks waited for it.",
+  "facebook20261119": {
+    "summary": "The user completed Facebook's reCAPTCHA on the D600 twice (Wattpad, then Spotify); the agent typed the test login through a masked helper and did not solve either CAPTCHA.",
+    "touchInput": "A finger on the D600 did nothing at first: these launches use the launcher's isolated touch mode, which makes a private tap mailbox and starts no touch forwarder, and OpenHarmony delivers screen touches to windows Westlake does not register. The forwarder was started by hand for the app on screen.",
+    "wattpad": "New Facebook-linked Wattpad account created with the test defaults; profile shows the Facebook name, picture and link; after a full restart Wattpad reopened signed in to it.",
+    "spotify": "Facebook signed in and its redirect returned to Spotify in-process; Spotify refused a Facebook sign-up (\"Signing up with Facebook isn't available right now\"). Session and restart checks need a Facebook-linked Spotify account or a scope change. Spotify was signed back in with Google.",
+    "pcLink": "At 15:14 PST the PC's shared hdc server lost the D600's USB session (the OnePlus had dropped into Qualcomm crash-dump mode moments earlier); it recovered on its own by 15:22 without a restart, and the D600 did not reboot."
+  }
 }
