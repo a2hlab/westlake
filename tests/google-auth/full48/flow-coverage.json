@@ -104,24 +104,25 @@
           "candidate106.json",
           "candidate107.json",
           "candidate108.json",
-          "candidate115.json"
+          "candidate115.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "sign_in": {
-            "status": "partial",
-            "evidence": "The original app opened its add-account path and returned with no signed-in account."
+            "status": "observed",
+            "evidence": "With the delegated broker grant (eight scopes taken from YouTube's own code, 24-hour native consent) and the silent-token fix for the notification flag, the original app listed the account with its YouTube identity and signed in; the signed-in Subscriptions page showed the account avatar."
           },
           "account_session": {
-            "status": "open",
-            "gap": "No signed-in YouTube session was observed."
+            "status": "observed",
+            "evidence": "The account tab showed the account's own page, including its private Watch later and Liked videos lists."
           },
           "video_playback": {
             "status": "observed",
             "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open."
           },
           "restart_persistence": {
-            "status": "partial",
-            "evidence": "A guest profile played after restart. A signed-in YouTube session has not been observed after restart."
+            "status": "observed",
+            "evidence": "After a full restart of the YouTube process, the app came back signed in: signed-in Subscriptions page and account avatar."
           }
         }
       },
@@ -155,20 +156,21 @@
           "candidate138.json",
           "candidate139.json",
           "candidate140.json",
-          "candidate141.json"
+          "candidate141.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "account_selection": {
-            "status": "partial",
-            "evidence": "The earlier app displayed and used the test account. The cited runs do not independently establish completing a new account selection. On the fresh dedicated host, enrollment remained at Set up email. On the repaired dedicated host, system touches reached the provider list and the manual address page for Other. With the empty account feature query fixed, the dedicated Gmail process first logged addAccount after the system clicked Google. The account chooser did not appear. With the private account provider connected on the dedicated UID, selecting Google invoked addAccount. The delegated adapter returned unsupported and setup stayed on the provider list. After the window inset repair, a normal tap at the center of the account icon opened the Google panel. The test account was absent from the sampled controls. A later retained-profile test found that Gmail’s internal drawer account was null while the system account provider was serving one-account lists for the Gmail package. In the same Gmail process Android returned one Google account, while the official provider returned zero on all 7 observed queries, including 4 from its catalog builder. In that run only Gmail had the account connector. A separate on-board regression fixture confirmed own-app account enumeration and package isolation checks. It did not complete a Gmail account selection."
+            "status": "observed",
+            "evidence": "On the fresh dedicated host (its own host and initially empty app data), Gmail's setup listed the test account and Take me to Gmail entered that account's mailbox. Westlake's per-app sync default is off, so Sync Gmail was turned on in Gmail's account settings; the first sync then filled the inbox."
           },
           "mailbox_sync": {
             "status": "observed",
             "evidence": "In the earlier delegated configuration, original Gmail populated its inbox and opened an existing message after enabling sync and restarting."
           },
           "refresh": {
-            "status": "partial",
-            "evidence": "After the sender confirmed submission, the original Gmail window still showed Getting your messages before and after a downward drag in the official-services-only control. The new message has not been observed in the original app. A repeat observed the same loading screen through 35 seconds. The retained app also consumed a test swipe with the official GMS main process active and stayed on the loading screen. After the feature fix, the retained profile restored its periodic schedule. Its refresh still produced no local sync request during the observed interval. The retained launcher omitted the delegated account connection, and the prior provider endpoint was absent. A new gesture produced zero local sync events through 38.5 seconds. Restoring the client’s private account connection brought the retained inbox back. Its visible rows stayed identical through a 69.8-second refresh observation; no new local sync request was recorded. Switching on Sync Gmail in the original app initialized its adapter. Actual sync returned failure. Reopening and refreshing Primary did not establish new mail delivery. The original Gmail sync callback acquired its mailbox provider and returned with the database-error flag already set. In two further failed syncs the Gmail process logged no notification enqueue, remote activity launch, or pending intent send during the job or through the subsequent delayed observation marker. The app trace missed callback return. Fresh delivery and in-app recovery remain open. In a new retained-inbox check, the visible rows matched the prior baseline after a system swipe and a second drag consumed by Gmail. Neither observation window produced a new local sync request, start, or completion. On a further board run, both a system swipe and an app-consumed drag left the visible Primary rows unchanged through 74.7 and 50.0 seconds, respectively. Neither produced a local sync marker. The updated retained client received a genuine system swipe, scrolled its list and displayed the original Gmail refresh arrow. The release retest showed no new local sync request, start, or completion and the inbox rows were unchanged. Four full pulls reached the original Gmail refresh listener and returned. Two short controls took the cancel path. Both network checks in the enhanced build returned a connected network to Gmail on the listener stack. The visible inbox and local sync counters still showed no delivery. With storage above the local scheduler threshold, two pulls still produced no local sync. Re-enabling Sync Gmail started the mailbox adapter and the official authentication interface returned BadAuthentication with a recovery field during the failed job. The recovery intent matched a published Play services activity filter. A query using only public metadata resolved one enabled, exported target from Gmail. During the job, the observer recorded zero copies from the non-null path of Gmail’s recovery-exception accessor. Gmail received a system pull-to-refresh gesture. Across three samples through 44.5 seconds, the visible message list stayed identical. A date-range search lost its window before results appeared. Cold restart restored the same visible inbox rows. Submitting a date range and selecting a recent query each reached the same account lookup failure inside the original APK. After a cold launch, original Gmail showed Primary again. A system swipe reached the app. Through 59.5 seconds the sampled rows matched the existing inbox reference and the app recorded zero mailbox job starts. Gmail’s navigation drawer reported two rows, a header and a divider, when All mail was unavailable."
+            "status": "observed",
+            "evidence": "After the network compat library fix, Gmail's automatic sync after start fetched the newly sent test message; it appeared in Primary and its body rendered. A manual pull with another new message was not repeated."
           },
           "restart_persistence": {
             "status": "observed",
@@ -185,7 +187,8 @@
           "candidate116.json",
           "candidate125.json",
           "candidate126.json",
-          "candidate134.json"
+          "candidate134.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "account_selection": {
@@ -201,8 +204,8 @@
             "evidence": "The original Drive preview rendered the three expected lines of the 107-byte file. The current account-path retest did not reach the file list."
           },
           "token_renewal": {
-            "status": "partial",
-            "evidence": "The restarted process got successful native account replies. The previous token was not shown to have expired."
+            "status": "observed",
+            "evidence": "In one running Drive process, the last token was issued at 17:15:42 PST. Opening the fixture at 18:29:06, 73 minutes later and past the one-hour token lifetime, made Play services accept a silent request; the broker issued a new token under the native consent, and the fixture content rendered."
           },
           "restart_persistence": {
             "status": "observed",
@@ -359,9 +362,9 @@
   },
   "counts": {
     "Google": {
-      "observed": 15,
-      "partial": 11,
-      "open": 13
+      "observed": 21,
+      "partial": 6,
+      "open": 12
     },
     "Facebook": {
       "observed": 6,

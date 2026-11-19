@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "date": "2026-11-18",
+  "device": "D600 board",
+  "configuration": {
+    "playServices": "official, uncertified board",
+    "accountBroker": "microG",
+    "identityServiceCompat": {
+      "enabled": true,
+      "ids": [
+        212,
+        213,
+        91,
+        44,
+        5,
+        29
+      ]
+    }
+  },
+  "localCommits": {
+    "610071c": "accept handle_notification on a silent token request",
+    "f08b05b": "finish a non-root activity on Back",
+    "56d1b31": "edge-to-edge rule from the reported SDK property",
+    "e8bf81c": "serve the Services Framework settings table in Play services hosted alone",
+    "e5ee3f1": "offer the account in an app's own Play services account picker"
+  },
+  "grants": {
+    "com.google.android.youtube": {
+      "signerPinned": true,
+      "nativeConsentHours": 24,
+      "scopes": [
+        "https://www.googleapis.com/auth/youtube",
+        "https://www.googleapis.com/auth/youtube.force-ssl",
+        "https://www.googleapis.com/auth/identity.lateimpersonation",
+        "https://www.googleapis.com/auth/accounts.reauth",
+        "https://www.googleapis.com/auth/notifications",
+        "https://www.googleapis.com/auth/peopleapi.readonly",
+        "https://www.googleapis.com/auth/photos.image.readonly",
+        "https://www.googleapis.com/auth/oauth_integrations"
+      ],
+      "basis": "user approval for validation-flow grants"
+    }
+  },
+  "results": {
+    "com.google.android.youtube/sign_in": "observed",
+    "com.google.android.youtube/account_session": "observed",
+    "com.google.android.youtube/restart_persistence": "observed",
+    "com.google.android.gm/account_selection": "observed",
+    "com.google.android.gm/refresh": "observed",
+    "com.google.android.apps.docs/token_renewal": "observed"
+  },
+  "openGaps": [
+    "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker.",
+    "Per-app sync settings default auto-sync off for a newly added account (Android: system-wide, enabled by Play services)."
+  ],
+  "prComments": [
+    "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997573345",
+    "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997777097",
+    "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997848231"
+  ]
+}
