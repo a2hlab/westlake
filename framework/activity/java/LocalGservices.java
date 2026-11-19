@@ -44,6 +44,7 @@ final class LocalGservices extends ContentProvider {
     static synchronized ContentProviderHolder holder() {
         if (sHolder != null) return sHolder;
         ProviderInfo info = adapter.packagemanager.GuestPackages.resolveProvider(AUTHORITY, 0);
+        if (info == null) info = playServicesOwnInfo();
         if (info == null) return null;
         LocalGservices provider = new LocalGservices();
         provider.attachInfo(ActivityThread.currentActivityThread().getSystemContext(), info);
@@ -52,6 +53,44 @@ final class LocalGservices extends ContentProvider {
         holder.noReleaseNeeded = true;
         sHolder = holder;
         return holder;
+    }
+
+    /**
+     * The table as Play services' own, when no Services Framework package is staged beside it (original Play
+     * services hosted alone). Westlake tells apps they run on Android 14, which keeps this table in Services
+     * Framework, but no such package exists here, and Play services serves the table itself only from Android
+     * 15: original Gmail and Play services each found no provider for it. Null outside Play services and when
+     * the app declares the authority itself, so a provider of its own (microG's) keeps answering.
+     */
+    private static ProviderInfo playServicesOwnInfo() {
+        android.app.Application app = ActivityThread.currentApplication();
+        if (app == null || !"com.google.android.gms".equals(app.getPackageName())) return null;
+        try {
+            android.content.pm.PackageInfo own = app.getPackageManager().getPackageInfo(
+                    app.getPackageName(), android.content.pm.PackageManager.GET_PROVIDERS);
+            if (own != null && own.providers != null) {
+                for (ProviderInfo declared : own.providers) {
+                    if (declared.authority == null || !declared.enabled) continue;
+                    for (String name : declared.authority.split(";")) {
+                        if (AUTHORITY.equals(name.trim())) return null;
+                    }
+                }
+            }
+        } catch (Exception unknown) {
+            return null;
+        }
+        ProviderInfo info = new ProviderInfo();
+        info.authority = AUTHORITY;
+        info.name = LocalGservices.class.getName();
+        info.packageName = app.getPackageName();
+        info.applicationInfo = app.getApplicationInfo();
+        info.processName = app.getApplicationInfo().processName;
+        info.exported = true;
+        info.enabled = true;
+        info.readPermission = "com.google.android.providers.gsf.permission.READ_GSERVICES";
+        info.writePermission = "com.google.android.providers.gsf.permission.WRITE_GSERVICES";
+        System.err.println("[WL-GSERVICES] serving " + AUTHORITY + " as Play services' own table (no Services Framework staged)");
+        return info;
     }
 
     private static File file(String name) {
