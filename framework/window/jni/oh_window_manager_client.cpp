@@ -71,6 +71,9 @@ static std::atomic<int32_t> g_wlManagedMainHeight{0};
 // The main window session itself, for the requests an ability makes of SceneBoard (RequestSessionBack).
 static std::mutex g_wlManagedMainSessionMutex;
 static OHOS::sptr<OHOS::IRemoteObject> g_wlManagedMainSession;
+// What ISession::Foreground needs to bring the main window back when OH foregrounds the ability again.
+static OHOS::sptr<OHOS::Rosen::WindowSessionProperty> g_wlManagedMainProperty;
+static std::string g_wlManagedMainIdentity;
 
 // 2026-06-26 IME-focus fix: set true while the adapter is summoning the OHOS
 // soft keyboard (input_method_bridge.cpp toggles it via oh_wm_set_ime_active).
@@ -2002,6 +2005,8 @@ OHWindowSession OHWindowManagerClient::createSession(
                     {
                         std::lock_guard<std::mutex> wl_lock(g_wlManagedMainSessionMutex);
                         g_wlManagedMainSession = wl_mSession;
+                        g_wlManagedMainProperty = wl_propSptr;
+                        g_wlManagedMainIdentity = wl_mIdentity;
                     }
                     // SceneBoard removes the ability's starting window once RS has the window's first buffer and the
                     // window scene's frame matches the session's layout rect (ArkUI WindowScene: IsWindowSizeEqual),
@@ -3678,6 +3683,34 @@ void* OHWindowManagerClient::getOhNativeWindow(int32_t sessionId) {
 }
 
 }  // namespace oh_adapter
+
+// ADR-0008: when OH brings the ability back to the foreground (ScheduleAbilityTransaction FOREGROUND_NEW), the
+// client foregrounds its main window session, as OH's window client does when the ability shows its window again
+// (WindowSceneSessionImpl::Show -> ISession::Foreground). The first foreground connects the window instead. Without
+// it SceneBoard kept the session in the background on 7.0: it showed the app's snapshot, its windows stayed hidden,
+// and the next tap went to SceneBoard, which took it as a gesture home.
+void wl_managed_foreground_main() {
+    OHOS::sptr<OHOS::IRemoteObject> session;
+    OHOS::sptr<OHOS::Rosen::WindowSessionProperty> property;
+    std::string identity;
+    {
+        std::lock_guard<std::mutex> lock(g_wlManagedMainSessionMutex);
+        session = g_wlManagedMainSession;
+        property = g_wlManagedMainProperty;
+        identity = g_wlManagedMainIdentity;
+    }
+    if (session == nullptr || property == nullptr) return;
+    OHOS::MessageParcel data;
+    OHOS::MessageParcel reply;
+    OHOS::MessageOption option;
+    const bool wrote = data.WriteInterfaceToken(u"OHOS.ISession") && data.WriteBool(true) &&
+                       data.WriteStrongParcelable(property) && data.WriteBool(true) &&  // isFromClient
+                       data.WriteString(identity);
+    const int32_t err = wrote ? session->SendRequest(1, data, reply, option) : -1;
+    const int32_t ret = (err == 0) ? reply.ReadInt32() : -1;
+    fprintf(stderr, "[WL-MANAGED] Foreground(session %d) again: err=%d ret=%d\n", g_wlManagedMainId.load(), err, ret);
+    fflush(stderr);
+}
 
 // ADR-0008: a back press at the root of the app's task moves the app to the background, as Android 12+ does
 // (ATMS moves the task to the back); for an OH ability SceneBoard does that on ISession::RequestSessionBack(true)

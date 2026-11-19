@@ -94,6 +94,8 @@ extern "C" jclass adapter_bridge_load_class(JNIEnv* env, const char* binaryName)
 #define ALOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+void wl_managed_foreground_main();  // oh_window_manager_client.cpp
+
 namespace oh_adapter {
 
 namespace {
@@ -397,6 +399,9 @@ bool AbilitySchedulerAdapter::ScheduleAbilityTransaction(
                        jBundleName);
     env->DeleteLocalRef(jWantJson);
     env->DeleteLocalRef(jBundleName);
+    if (targetState.state == 5) {  // FOREGROUND_NEW: a connected main window shows again (no-op before it exists)
+        wl_managed_foreground_main();
+    }
     return true;
 }
 
