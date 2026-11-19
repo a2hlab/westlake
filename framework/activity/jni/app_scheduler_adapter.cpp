@@ -401,12 +401,25 @@ void AppSchedulerAdapter::ScheduleLaunchApplication(const OHOS::AppExecFwk::AppL
     };
     constexpr size_t kKeyCount = sizeof(kConfigKeys) / sizeof(kConfigKeys[0]);
 
+    // A test round on a development board can give its apps a locale other than the board's (WESTLAKE_LOCALE, a
+    // BCP 47 tag such as en-US), to compare with a board set to that language; OH's own setting would change the
+    // language of the whole board.
+    static const std::string kRoundLocale = [] {
+        const char* value = getenv("WESTLAKE_LOCALE");
+        return std::string(value != nullptr ? value : "");
+    }();
+
     jclass stringClass = env->FindClass("java/lang/String");
     jobjectArray jKvArr = env->NewObjectArray(static_cast<jsize>(kKeyCount * 2),
                                               stringClass, nullptr);
     for (size_t i = 0; i < kKeyCount; ++i) {
         const char* key = kConfigKeys[i];
         std::string val = config.GetItem(key);
+        if (!kRoundLocale.empty() && std::string(key) == "ohos.system.locale") {
+            val = kRoundLocale;
+        } else if (!kRoundLocale.empty() && std::string(key) == "ohos.system.language") {
+            val = kRoundLocale.substr(0, kRoundLocale.find('-'));
+        }
         jstring jKey = env->NewStringUTF(key);
         jstring jVal = env->NewStringUTF(val.c_str());
         env->SetObjectArrayElement(jKvArr, static_cast<jsize>(i * 2), jKey);
