@@ -447,7 +447,14 @@ static bool peerIsAppMgr(int clientFd, const struct ucred& peer) {
     char context[128] = {};
     socklen_t length = sizeof(context) - 1;
     if (getsockopt(clientFd, SOL_SOCKET, SO_PEERSEC, context, &length) != 0) {
-        LOGE("[WESTLAKE-SPAWN] no SELinux context for pid %d: %s", static_cast<int>(peer.pid), strerror(errno));
+        const int error = errno;
+        // A kernel without SELinux (no selinuxfs, as on the OnePlus 6 port) has no context to give: the uid is
+        // then all that tells foundation apart. A system with SELinux that fails to answer is refused.
+        if (error == ENOPROTOOPT && access("/sys/fs/selinux", F_OK) != 0) {
+            LOGI("[WESTLAKE-SPAWN] no SELinux on this system: pid %d admitted by its uid", static_cast<int>(peer.pid));
+            return true;
+        }
+        LOGE("[WESTLAKE-SPAWN] no SELinux context for pid %d: %s", static_cast<int>(peer.pid), strerror(error));
         return false;
     }
     return strcmp(context, "u:r:foundation:s0") == 0;

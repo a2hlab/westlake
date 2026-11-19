@@ -142,8 +142,14 @@ OHOS::Rosen::WMError WindowCallbackAdapter::UpdateWindowRect(
     return OHOS::Rosen::WMError::WM_OK;
 }
 
+#if WESTLAKE_OH_RELEASE >= 70
+OHOS::Rosen::WMError WindowCallbackAdapter::UpdateWindowMode(const OHOS::Rosen::WindowModeInfo& windowModeInfo)
+{
+    const OHOS::Rosen::WindowMode mode = windowModeInfo.windowMode;
+#else
 OHOS::Rosen::WMError WindowCallbackAdapter::UpdateWindowMode(OHOS::Rosen::WindowMode mode)
 {
+#endif
     OH_BR_IPC_SCOPE("WindowCB.UpdateWindowMode", "mode=%{public}d", static_cast<int>(mode));
 
     std::lock_guard<std::mutex> lock(jniMutex_);

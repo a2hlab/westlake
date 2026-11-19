@@ -95,7 +95,16 @@ public:
     // ================================================================
 
     // [BRIDGED] -> IWindow.resized (windowing mode in config)
+#if WESTLAKE_OH_RELEASE >= 70
+    // OpenHarmony 7.0 passes a WindowModeInfo; its mode is what this bridges
+    WSError UpdateWindowMode(const OHOS::Rosen::WindowModeInfo& windowModeInfo) override
+    {
+        return UpdateWindowMode(windowModeInfo.windowMode);
+    }
+    WSError UpdateWindowMode(OHOS::Rosen::WindowMode mode);
+#else
     WSError UpdateWindowMode(OHOS::Rosen::WindowMode mode) override;
+#endif
 
     // [OH_ONLY] Android uses FULLSCREEN
     WSError UpdateMaximizeMode(OHOS::Rosen::MaximizeMode mode) override;
@@ -104,7 +113,15 @@ public:
     WSError NotifyLayoutFinishAfterWindowModeChange(OHOS::Rosen::WindowMode mode) override;
 
     // [OH_ONLY] Free multi-window toggle
+#if WESTLAKE_OH_RELEASE >= 70
+    WSError SwitchFreeMultiWindow(bool enable, const std::set<OHOS::Rosen::ScreenId>& /*supportMultiWindowScreenSet*/) override
+    {
+        return SwitchFreeMultiWindow(enable);
+    }
+    WSError SwitchFreeMultiWindow(bool enable);
+#else
     WSError SwitchFreeMultiWindow(bool enable) override;
+#endif
 
     // ================================================================
     // Category 4: Focus
@@ -256,21 +273,25 @@ public:
     WSError NotifyAppForceLandscapeConfigUpdated() override;
     #if defined(__aarch64__)
     WSError NotifyAppForceLandscapeConfigEnableUpdated()
-    #if !defined(OH_CALLBACK_OVERLAY_ONLY)
+    #if !defined(OH_CALLBACK_OVERLAY_ONLY) && !(WESTLAKE_OH_RELEASE >= 70)
         override
     #endif
         ;
     #else
     WSError NotifyAppForceLandscapeConfigEnableUpdated(bool needUpdateViewport = false) override;
     #endif
-    WSError NotifyAppHookWindowInfoUpdated() override;
+    WSError NotifyAppHookWindowInfoUpdated()
+#if !(WESTLAKE_OH_RELEASE >= 70)  // 7.0 dropped it from ISessionStage
+        override
+#endif
+        ;
 
     // ================================================================
     // V7-only newly added pure virtuals — implemented as no-op OH_ONLY
     // (Android side has no semantic counterpart; SSM still requires the
     //  symbol to instantiate the stub.)
     // ================================================================
-    #if defined(__aarch64__)
+    #if defined(__aarch64__) && !(WESTLAKE_OH_RELEASE >= 70)
     WSError NotifySubWindowAfterParentWindowSizeChange(OHOS::Rosen::Rect rect);
     #else
     WSError NotifySubWindowAfterParentWindowSizeChange(OHOS::Rosen::Rect rect) override;
@@ -285,7 +306,7 @@ public:
     #else
     WSError GetSceneNodeCount(uint32_t& nodeCount) override;
     #endif
-    #if defined(__aarch64__)
+    #if defined(__aarch64__) && !(WESTLAKE_OH_RELEASE >= 70)
     WSError UpdateAppHookWindowInfo(const OHOS::Rosen::HookWindowInfo& hookWindowInfo);
     #else
     WSError UpdateAppHookWindowInfo(const OHOS::Rosen::HookWindowInfo& hookWindowInfo) override;
@@ -298,14 +319,57 @@ public:
     WSError SetStageKeyFramePolicy(const OHOS::Rosen::KeyFramePolicy& keyFramePolicy) override;
     WSError SetSplitButtonVisible(bool isVisible) override;
     WSError SetEnableDragBySystem(bool dragEnable) override;
+#if WESTLAKE_OH_RELEASE >= 70
+    WSError SetDragActivated(uint32_t dragActivatedBitmap) override
+    {
+        return SetDragActivated(dragActivatedBitmap != 0);
+    }
+    WSError SetDragActivated(bool dragActivated);
+#else
     WSError SetDragActivated(bool dragActivated) override;
+#endif
     WSError SendContainerModalEvent(const std::string& eventName,
         const std::string& eventValue) override;
     void NotifyWindowCrossAxisChange(OHOS::Rosen::CrossAxisState state) override;
+#if WESTLAKE_OH_RELEASE >= 70
+    WSError SendFbActionEvent(const std::string& action, const std::string& /*reason*/) override
+    {
+        return SendFbActionEvent(action);
+    }
+    WSError SendFbActionEvent(const std::string& action);
+#else
     WSError SendFbActionEvent(const std::string& action) override;
+#endif
     WSError UpdateIsShowDecorInFreeMultiWindow(bool isShow) override;
     WSError UpdateBrightness(float brightness) override;
     WMError UpdateWindowModeForUITest(int32_t updateMode) override;
+#if WESTLAKE_OH_RELEASE >= 70
+    // [OH_ONLY] OpenHarmony 7.0 ISessionStage additions; nothing on the Android side
+    WSError NotifySubWindowAfterParentWindowStatusChange(OHOS::Rosen::WindowMode mode,
+        OHOS::Rosen::MaximizeMode /*maximizeMode*/, bool /*isLayoutFullScreen*/) override
+    {
+        return NotifySubWindowAfterParentWindowStatusChange(mode);
+    }
+    WSError GetSceneNodeCount(const OHOS::sptr<OHOS::IRemoteObject>& /*callback*/) override { return WSError::WS_OK; }
+    WSError ConfigDockAutoHide(bool /*isDockAutoHide*/) override { return WSError::WS_OK; }
+    WSError NotifyOrientationExecutionResult(uint32_t /*promiseId*/,
+        OHOS::Rosen::OrientationExecutionResult /*result*/) override { return WSError::WS_OK; }
+    WSError SendFvActionEvent(const std::string& /*action*/, const std::string& /*reason*/) override
+    {
+        return WSError::WS_OK;
+    }
+    WSError SetForceSplitEnable(bool /*isForceSplitEnabled*/, bool /*needUpdateViewport*/,
+        OHOS::Rosen::SelectMode /*selectMode*/) override { return WSError::WS_OK; }
+    WSError SyncFvLimits(const std::map<uint32_t, OHOS::Rosen::FloatViewLimits>& /*limits*/) override
+    {
+        return WSError::WS_OK;
+    }
+    WSError SyncFvWindowInfo(const OHOS::Rosen::FloatViewWindowInfo& /*windowInfo*/,
+        const std::string& /*reason*/) override { return WSError::WS_OK; }
+    WSError UpdateLSState(bool /*isLSState*/) override { return WSError::WS_OK; }
+    WSError UpdateScreenSupportMultiWindow(
+        const std::set<OHOS::Rosen::ScreenId>& /*supportMultiWindowScreenSet*/) override { return WSError::WS_OK; }
+#endif
 
 private:
     // Obtain JNIEnv for the current thread, attaching to JVM if needed.

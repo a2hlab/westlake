@@ -156,6 +156,12 @@ public:
     int32_t hideWindow(int32_t sessionId);
 
     /**
+     * Android FLAG_SECURE: the node with the window's pixels becomes a render-service security layer, which
+     * screenshots, screen recording and snapshots leave out, as OH's privacy mode does.
+     */
+    int32_t setWindowSecure(int32_t sessionId, bool secure);
+
+    /**
      * 2026-05-19: Show a previously-hidden window on OH WMS side.  Mirrors
      * ArkUI WindowImpl::Show line 1972 which calls
      * wmsInterface->AddWindow(property).  Idempotent: if wmsShown is already

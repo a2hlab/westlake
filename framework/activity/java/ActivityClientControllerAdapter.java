@@ -395,8 +395,17 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
                 final long addr = ohAddr;
                 final int resultCode = code;
                 final IBinder finishing = token;
+                adapter.core.OhTokenRegistry.holderFinishing(finishing);
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
                     @Override public void run() {
+                        adapter.core.OhTokenRegistry.finishingDone(finishing);
+                        if (adapter.core.OhTokenRegistry.findOhToken(finishing) == null) {
+                            // The activity it started took the token with its window (a splash that never drew:
+                            // WindowSessionAdapter.takeTokenFromSplash).
+                            System.err.println("[WL-MANAGED] the OH ability went with the next activity's window");
+                            scheduleLocalDestroy(finishing);
+                            return;
+                        }
                         IBinder heir = taskHeir(finishing);
                         if (heir != null && adapter.core.OhTokenRegistry.transfer(finishing, heir)) {
                             Log.i(TAG, "finishActivity: OH ability 0x" + Long.toHexString(addr)
@@ -469,8 +478,44 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
         });
     }
 
+    /**
+     * Activity.finishAffinity(): this activity and the activities below it in its task that share its task affinity,
+     * as ATMS finishes them (the ones below first; it stops at the first one with another affinity). This answered
+     * true and finished nothing: Activity then marked itself finished, and the activity stayed, holding its OH
+     * ability's token in a managed launch. WhatsApp's first activity starts its EULA and calls finishAffinity(); the
+     * EULA's window waited for an OH main window that never came. Each one goes through finishActivity, so the OH
+     * ability passes to the task's next activity as when an activity calls finish().
+     */
     @Override
-    public boolean finishActivityAffinity(IBinder token) { return true; }
+    public boolean finishActivityAffinity(IBinder token) {
+        if (token == null) return false;
+        String affinity = taskAffinity(token);
+        java.util.List<IBinder> task = taskTokens();
+        for (int i = task.indexOf(token) - 1; i >= 0; i--) {
+            IBinder below = task.get(i);
+            if (!java.util.Objects.equals(affinity, taskAffinity(below))) break;
+            finishActivity(below, android.app.Activity.RESULT_CANCELED, null,
+                    0 /* Activity.DONT_FINISH_TASK_WITH_ACTIVITY */);
+        }
+        return finishActivity(token, android.app.Activity.RESULT_CANCELED, null,
+                0 /* Activity.DONT_FINISH_TASK_WITH_ACTIVITY */);
+    }
+
+    /** The task affinity of the activity whose token this is (its ActivityInfo's), or null. */
+    private static String taskAffinity(IBinder token) {
+        try {
+            android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
+            android.app.Activity activity = thread == null ? null : thread.getActivity(token);
+            if (activity == null) return null;
+            java.lang.reflect.Field info = android.app.Activity.class.getDeclaredField("mActivityInfo");
+            info.setAccessible(true);
+            android.content.pm.ActivityInfo activityInfo = (android.content.pm.ActivityInfo) info.get(activity);
+            return activityInfo == null ? null : activityInfo.taskAffinity;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "taskAffinity: " + e);
+            return null;
+        }
+    }
 
     @Override
     public void finishSubActivity(IBinder token, String resultWho, int requestCode) { /* no-op */ }

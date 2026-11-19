@@ -119,6 +119,10 @@ jint nativeHideWindow_impl(JNIEnv*, jclass, jint sessionId) {
     return OHWindowManagerClient::getInstance().hideWindow(sessionId);
 }
 
+jint nativeSetWindowSecure_impl(JNIEnv*, jclass, jint sessionId, jboolean secure) {
+    return OHWindowManagerClient::getInstance().setWindowSecure(sessionId, secure == JNI_TRUE);
+}
+
 jint nativeShowWindow_impl(JNIEnv*, jclass, jint sessionId) {
     { static int wl_n = 0; if (wl_n < 8) { wl_n++;
         fprintf(stderr, "[WESTLAKE-WSA] nativeShowWindow_impl ENTER #%d\n", wl_n); fflush(stderr); } }
@@ -385,6 +389,7 @@ const JNINativeMethod kMethods[] = {
     {"nativeNotifyDrawingCompleted",   "(I)I",       (void*)nativeNotifyDrawingCompleted_impl},
     {"nativeDestroySession",           "(I)V",       (void*)nativeDestroySession_impl},
     {"nativeHideWindow",               "(I)I",       (void*)nativeHideWindow_impl},
+    {"nativeSetWindowSecure",          "(IZ)I",      (void*)nativeSetWindowSecure_impl},
     {"nativeShowWindow",               "(I)I",       (void*)nativeShowWindow_impl},
     {"nativeGetSurfaceNodeId",         "(I)J",       (void*)nativeGetSurfaceNodeId_impl},
     {"nativeAttachSessionToSc", "(Landroid/view/SurfaceControl;I)V", (void*)nativeAttachSessionToSc_impl},

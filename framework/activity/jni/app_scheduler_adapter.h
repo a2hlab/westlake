@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstdarg>
 #include <string>
+#include <vector>
 #include <mutex>
 
 #include "app_scheduler_host.h"
@@ -59,7 +60,9 @@ public:
     void ScheduleShrinkMemory(const int level) override;
 
     // [BRIDGED] -> IApplicationThread.scheduleTrimMemory(mappedLevel)
-    #if defined(__aarch64__)
+    // WESTLAKE_OH_RELEASE >= 70 (set by native/bridge15-sources-oh70.json): OpenHarmony 7.0's IAppScheduler, which
+    // adds isShellCall here, an AppUpdateInfo to ScheduleLaunchAbility and ScheduleMem. Unset, it is 6.1's.
+#if defined(__aarch64__) && !(WESTLAKE_OH_RELEASE >= 70)
     void ScheduleMemoryLevel(int32_t level) override;
 #else
     void ScheduleMemoryLevel(int32_t level, bool isShellCall = false) override;
@@ -91,7 +94,16 @@ public:
     void ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityInfo &info,
                                const OHOS::sptr<OHOS::IRemoteObject> &token,
                                const std::shared_ptr<OHOS::AAFwk::Want> &want,
+#if WESTLAKE_OH_RELEASE >= 70
+                               int32_t abilityRecordId,
+                               std::shared_ptr<OHOS::AppExecFwk::AppUpdateInfo> updateInfo = nullptr) override;
+
+    // [OH_ONLY] a memory dump request (OpenHarmony 7.0); answered empty, so the requester does not wait
+    void ScheduleMem(OHOS::AppExecFwk::MemDumpInfo &info,
+                     OHOS::sptr<OHOS::AppExecFwk::IMemDumpCallback> callback) override;
+#else
                                int32_t abilityRecordId) override;
+#endif
 
     // [BRIDGED] -> IApplicationThread.scheduleTransaction(DestroyActivityItem)
     void ScheduleCleanAbility(const OHOS::sptr<OHOS::IRemoteObject> &token,
@@ -191,6 +203,18 @@ private:
      * Map OH memory level to Android TRIM_MEMORY_* constant.
      */
     int mapMemoryLevel(int ohLevel);
+
+    /**
+     * The Android side of ScheduleLaunchApplication: the application bind, with OH's configuration as key-value
+     * pairs. With lockJni, holds jni_mutex_ throughout (the bind on OH's binder thread); a managed launch runs it on a
+     * thread of its own without the lock, so that OH's next calls are answered meanwhile.
+     */
+    void bindApplication(const std::string& bundleName, const std::string& processName, pid_t pid,
+                         const std::vector<std::string>& configKv, bool lockJni);
+
+    /** The Android side of ScheduleLaunchAbility: the activity launch, in Java. */
+    void launchAbility(const std::string& bundleName, const std::string& abilityName, int32_t abilityRecordId,
+                       const std::string& abilityJson, const std::string& wantJson, jlong tokenAddr);
 
     JavaVM* jvm_ = nullptr;
     jobject app_thread_ = nullptr;       // Global ref to IApplicationThread

@@ -18,6 +18,8 @@
 #include <atomic>
 #include <unistd.h>
 #include <cstdint>
+#include <map>
+#include <mutex>
 
 #include "ipc_skeleton.h"
 #include "iservice_registry.h"
@@ -484,6 +486,39 @@ int32_t OHAbilityManagerClient::terminateAbilityByTokenAddr(jlong ohTokenAddr, i
 // OH AMS triggers LIFECYCLE_HALF_TIMEOUT (~1s) and kills the app.
 // Spec: doc/ability_manager_ipc_adapter_design.html (planned §3.x reverse).
 // 2026-06-04 LIFECYCLE-FREEZE FIX: foreground heartbeat. See header.
+static std::mutex g_fgReportsMutex;
+static std::map<uint64_t, uint64_t> g_fgReports;
+
+void OHAbilityManagerClient::noteForegroundReport(jlong ohTokenAddr) {
+    std::lock_guard<std::mutex> lock(g_fgReportsMutex);
+    ++g_fgReports[static_cast<uint64_t>(ohTokenAddr)];
+}
+
+uint64_t OHAbilityManagerClient::foregroundReports(jlong ohTokenAddr) {
+    std::lock_guard<std::mutex> lock(g_fgReportsMutex);
+    auto found = g_fgReports.find(static_cast<uint64_t>(ohTokenAddr));
+    return found == g_fgReports.end() ? 0 : found->second;
+}
+
+static std::atomic<uint64_t> g_appFgRequests{0};
+static std::atomic<uint64_t> g_appFgAnswered{0};
+
+uint64_t OHAbilityManagerClient::applicationForegroundRequested() {
+    return ++g_appFgRequests;
+}
+
+uint64_t OHAbilityManagerClient::applicationForegroundRequests() {
+    return g_appFgRequests.load();
+}
+
+bool OHAbilityManagerClient::claimApplicationForeground(uint64_t request) {
+    uint64_t answered = g_appFgAnswered.load();
+    while (answered < request) {
+        if (g_appFgAnswered.compare_exchange_weak(answered, request)) return true;
+    }
+    return false;
+}
+
 static std::atomic<uint64_t> g_hbTokenAddr{0};
 static std::atomic<bool> g_hbStarted{false};
 static std::atomic<int> g_hbIntervalMs{60000};
@@ -598,6 +633,7 @@ Java_adapter_activity_ActivityClientControllerAdapter_nativeAbilityTransitionDon
     // never disarms → APP_FREEZE kill. The heartbeat re-ACKs foreground every
     // 45s so any pending FOREGROUND_TIMEOUT_MSG is removed before it fires.
     if (ohState == 9 /*FOREGROUND*/ && ohTokenAddr != 0) {
+        oh_adapter::OHAbilityManagerClient::getInstance().noteForegroundReport(ohTokenAddr);
         // [COLD-FG-FIX 2026-06-29] 45000 -> 1000: re-ACK every 1s so the cold-boot
         // foreground transition converges before the ForegroundLifecycle watchdog
         // kills the app. Verified noice 6/6 cold-launch + reboot-persistent.
@@ -628,6 +664,13 @@ Java_adapter_activity_AppSchedulerBridge_nativeNotifyApplicationForegrounded(
     // Update the cached recordId so subsequent calls also use the latest.
     if (recordId >= 0) {
         oh_adapter::OHAppMgrClient::getInstance().setRecordId(recordId);
+    }
+    // The bridge's fallback may have answered the latest request already (the main looper was busy).
+    auto& client = oh_adapter::OHAbilityManagerClient::getInstance();
+    if (!client.claimApplicationForeground(client.applicationForegroundRequests())) {
+        __android_log_print(ANDROID_LOG_INFO, "OH_AbilityMgrClient",
+            "[G2.14i] main-looper ApplicationForegrounded: already sent by the bridge");
+        return;
     }
     oh_adapter::OHAppMgrClient::getInstance().notifyAppState(
         static_cast<int>(oh_adapter::AppState::STATE_FOREGROUND));

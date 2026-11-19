@@ -51,6 +51,7 @@
 #include "system_ability_manager_proxy.h"
 #include "window_manager_hilog.h"
 #include "ui/rs_surface_node.h"
+#include "ui/rs_root_node.h"
 #include "transaction/rs_interfaces.h"                       // RSSurfaceNode::Create
 #include "transaction/rs_transaction.h"
 #include <unistd.h>               // RSTransaction::FlushImplicitTransaction
@@ -70,6 +71,9 @@ static std::atomic<int32_t> g_wlManagedMainHeight{0};
 // The main window session itself, for the requests an ability makes of SceneBoard (RequestSessionBack).
 static std::mutex g_wlManagedMainSessionMutex;
 static OHOS::sptr<OHOS::IRemoteObject> g_wlManagedMainSession;
+// What ISession::Foreground needs to bring the main window back when OH foregrounds the ability again.
+static OHOS::sptr<OHOS::Rosen::WindowSessionProperty> g_wlManagedMainProperty;
+static std::string g_wlManagedMainIdentity;
 
 // 2026-06-26 IME-focus fix: set true while the adapter is summoning the OHOS
 // soft keyboard (input_method_bridge.cpp toggles it via oh_wm_set_ime_active).
@@ -206,7 +210,11 @@ static int32_t wl_query_ability_main_window_id(const OHOS::sptr<OHOS::IRemoteObj
     OHOS::MessageParcel r;
     OHOS::MessageOption o;
     if (!d.WriteInterfaceToken(u"OHOS.ISceneSessionManager")) { return 0; }
+#if WESTLAKE_OH_RELEASE >= 70
+    const int32_t err = proxy->SendRequest(58, d, r, o);  // TRANS_ID_GET_ALL_MAIN_WINDOW_INFO, OH 7.0
+#else
     const int32_t err = proxy->SendRequest(56, d, r, o);
+#endif
     if (err != 0) {
         fprintf(stderr, "[WESTLAKE-WMC] §340 GetAllMainWindowInfo err=%d\n", err);
         fflush(stderr);
@@ -413,6 +421,44 @@ static std::map<int32_t, std::shared_ptr<OHOS::Rosen::RSSurfaceNode>>& wl_window
     static std::map<int32_t, std::shared_ptr<OHOS::Rosen::RSSurfaceNode>> m;
     return m;
 }
+
+// OH 7.0 managed windows: the client handle on the window node SceneBoard made, by session id.
+static std::map<int32_t, std::shared_ptr<OHOS::Rosen::RSSurfaceNode>>& wl_scene_window_nodes() {
+    static std::map<int32_t, std::shared_ptr<OHOS::Rosen::RSSurfaceNode>> m;
+    return m;
+}
+
+// OH 7.0 managed windows: the root node between that window node and the window's content node, by session id.
+static std::map<int32_t, std::shared_ptr<OHOS::Rosen::RSNode>>& wl_root_nodes() {
+    static std::map<int32_t, std::shared_ptr<OHOS::Rosen::RSNode>> m;
+    return m;
+}
+
+#if WESTLAKE_OH_RELEASE >= 70
+// OH 7.0: SceneBoard makes a window's node (Session::CreateSurfaceNode) under the node id the client sends at
+// Connect / CreateAndConnectSpecificSession. A client handle on it (RSSurfaceNode::Unmarshalling reads what
+// RSSurfaceNode::Marshalling writes; skip: the handle never destroys the node) takes the window's content: the
+// root node above its content node.
+static bool wl_attach_to_scene_node(uint64_t nodeId, const std::string& name,
+                                    const std::shared_ptr<OHOS::Rosen::RSNode>& root, int32_t sessionId) {
+    OHOS::Parcel parcel;
+    std::shared_ptr<OHOS::Rosen::RSSurfaceNode> node;
+    if (parcel.WriteUint64(nodeId) && parcel.WriteString(name) && parcel.WriteBool(true)) {
+        node = OHOS::Rosen::RSSurfaceNode::Unmarshalling(parcel, true);
+    }
+    if (node != nullptr) {
+        node->AddChild(root, -1);
+        wl_scene_window_nodes()[sessionId] = node;
+        wl_root_nodes()[sessionId] = root;
+        OHOS::Rosen::RSTransaction::FlushImplicitTransaction();
+    }
+    fprintf(stderr, "[WL-MANAGED] SceneBoard's window node %llu (session %d) %s the content's root node %llu\n",
+            (unsigned long long)nodeId, sessionId, node != nullptr ? "holds" : "MISSING for",
+            (unsigned long long)root->GetId());
+    fflush(stderr);
+    return node != nullptr;
+}
+#endif
 
 // WESTLAKE §253: app IWindow (global ref) + re-send helper, see wl_send_app_visible().
 jobject g_wlAppWindow = nullptr;
@@ -1194,7 +1240,18 @@ OHWindowSession OHWindowManagerClient::createSession(
     std::shared_ptr<OHOS::Rosen::RSSurfaceNode> wl_contentNode;
     // ADR-0008: a managed sub-window (a dialog, another activity) is drawn and placed as a direct launch's
     // sub-windows are: into a content node its window can move inside the display-sized OH window.
-    if ((getenv("WL_SUB_WINDOW") != nullptr || (asSubWindow && wl_managedParent > 0)) &&
+    // On OH 7.0 a managed main window draws into a content node too, under a root node (below). A main window's
+    // own buffers are consumed but do not dirty it: its visible dirty region comes from its children
+    // (RSSurfaceRenderNodeDrawable::CalculateVisibleDirtyRegion), so under partial rendering (on by default)
+    // every frame after the first was skipped (DrawSkipType OCCLUSION_SKIP) and SceneBoard's blur stayed on
+    // screen. A self-drawing child's buffer dirties its window, as an ArkUI XComponent's does.
+#if WESTLAKE_OH_RELEASE >= 70
+    const bool wl_sceneNode = wl_managedMain || (asSubWindow && wl_managedParent > 0);
+#else
+    const bool wl_sceneNode = false;
+#endif
+    std::shared_ptr<OHOS::Rosen::RSNode> wl_rootNode;
+    if ((getenv("WL_SUB_WINDOW") != nullptr || (asSubWindow && wl_managedParent > 0) || wl_sceneNode) &&
         getenv("WL_NO_CONTENT_NODE") == nullptr) {
         OHOS::Rosen::RSSurfaceNodeConfig contentCfg;
         contentCfg.SurfaceNodeName = windowName + "_content";
@@ -1272,7 +1329,23 @@ OHWindowSession OHWindowManagerClient::createSession(
                 surfaceNode->SetAlpha(0.0f);
                 wl_contentNode->SetAlpha(0.0f);
             }
-            surfaceNode->AddChild(wl_contentNode, -1);
+            if (wl_sceneNode) {
+                // SceneBoard removes the starting window once the render service reports the window's first
+                // frame (RSSurfaceRenderNode::IsUIBufferAvailable): a root node child with a frame, as ArkUI's
+                // root is, or a buffer in the window node itself, which now gets none. The content node hangs
+                // under a root node the window's size, as an XComponent's surface hangs under ArkUI's root.
+                wl_rootNode = OHOS::Rosen::RSRootNode::Create();
+            }
+            if (wl_rootNode != nullptr) {
+                // The root node goes under the window node SceneBoard makes at Connect (below), not under ours.
+                wl_rootNode->SetBounds(0.0f, 0.0f, static_cast<float>(requestedWidth),
+                                       static_cast<float>(requestedHeight));
+                wl_rootNode->SetFrame(0.0f, 0.0f, static_cast<float>(requestedWidth),
+                                      static_cast<float>(requestedHeight));
+                wl_rootNode->AddChild(wl_contentNode, -1);
+            } else {
+                surfaceNode->AddChild(wl_contentNode, -1);
+            }
         }
         fprintf(stderr, "[WESTLAKE-CONTENTNODE] §347 self-drawing child=%llu under window=%llu (%dx%d)\n",
                 (unsigned long long)(wl_contentNode ? wl_contentNode->GetId() : 0),
@@ -1866,6 +1939,11 @@ OHWindowSession OHWindowManagerClient::createSession(
             int32_t v7err = -1;
             int32_t persistentId = 0;
             OHOS::sptr<OHOS::IRemoteObject> sessionObject = nullptr;
+#if WESTLAKE_OH_RELEASE >= 70
+            // SceneBoard's window node gets a fresh id when the content hangs under a root node of ours (below).
+            const uint64_t wl_sessionNodeId =
+                wl_rootNode != nullptr ? OHOS::Rosen::RSNode::GenerateId() : surfaceNode->GetId();
+#endif
             if (wl_managedMain) {
                 // ISession::Connect (SessionProxy::Connect, OpenHarmony-v6.1-Release): stage, event channel,
                 // surface node, the property, the ability token when the property says it has one, and the
@@ -1890,7 +1968,15 @@ OHWindowSession OHWindowManagerClient::createSession(
                 wrote = data.WriteInterfaceToken(u"OHOS.ISession") &&
                         data.WriteRemoteObject(sessionStage->AsObject()) &&
                         data.WriteRemoteObject(eventChannel->AsObject()) &&
+#if WESTLAKE_OH_RELEASE >= 70
+                        // OH 7.0 sends a node id, and SceneBoard makes the window's node under it
+                        // (Session::CreateSurfaceNode), as for OH's own window client (RSNode::GenerateId). Not
+                        // ours: a second node under an id the render service already has leaves the window
+                        // drawn from params that never got its visible region, and every frame was skipped.
+                        data.WriteUint64(wl_sessionNodeId) &&
+#else
                         surfaceNode->Marshalling(data) &&
+#endif
                         data.WriteBool(true) &&
                         data.WriteStrongParcelable(wl_propSptr) &&
                         (wl_mToken == nullptr || data.WriteRemoteObject(wl_mToken)) &&
@@ -1906,6 +1992,11 @@ OHWindowSession OHWindowManagerClient::createSession(
                         wl_mId, wrote ? 1 : 0, v7err, wl_ret, wl_mToken != nullptr ? "yes" : "no");
                 fflush(stderr);
                 if (v7err == 0 && wl_ret == 0) {
+#if WESTLAKE_OH_RELEASE >= 70
+                    if (wl_rootNode != nullptr) {
+                        wl_attach_to_scene_node(wl_sessionNodeId, windowName, wl_rootNode, wl_mId);
+                    }
+#endif
                     persistentId = wl_mId;
                     sessionObject = wl_mSession;
                     g_wlManagedMainId.store(wl_mId);
@@ -1914,6 +2005,8 @@ OHWindowSession OHWindowManagerClient::createSession(
                     {
                         std::lock_guard<std::mutex> wl_lock(g_wlManagedMainSessionMutex);
                         g_wlManagedMainSession = wl_mSession;
+                        g_wlManagedMainProperty = wl_propSptr;
+                        g_wlManagedMainIdentity = wl_mIdentity;
                     }
                     // SceneBoard removes the ability's starting window once RS has the window's first buffer and the
                     // window scene's frame matches the session's layout rect (ArkUI WindowScene: IsWindowSizeEqual),
@@ -1927,7 +2020,13 @@ OHWindowSession OHWindowManagerClient::createSession(
                         const bool lwrote = ldata.WriteInterfaceToken(u"OHOS.ISession") && ldata.WriteBool(true) &&
                                             ldata.WriteInt32(0) && ldata.WriteInt32(0) &&
                                             ldata.WriteInt32(requestedWidth) && ldata.WriteInt32(requestedHeight);
-                        const int32_t lerr = lwrote ? wl_mSession->SendRequest(135, ldata, lreply, loption) : -1;
+#if WESTLAKE_OH_RELEASE >= 70
+                        constexpr uint32_t wl_frameLayoutFinish = 136;  // TRANS_ID_FRAME_LAYOUT_FINISH, OH 7.0
+#else
+                        constexpr uint32_t wl_frameLayoutFinish = 135;
+#endif
+                        const int32_t lerr = lwrote ? wl_mSession->SendRequest(wl_frameLayoutFinish, ldata, lreply,
+                                                                               loption) : -1;
                         fprintf(stderr, "[WL-MANAGED] NotifyFrameLayoutFinish(0,0,%dx%d) err=%d\n", requestedWidth,
                                 requestedHeight, lerr);
                         fflush(stderr);
@@ -1939,12 +2038,36 @@ OHWindowSession OHWindowManagerClient::createSession(
                 wrote = data.WriteInterfaceToken(u"OHOS.ISceneSessionManager") &&
                         data.WriteRemoteObject(sessionStage->AsObject()) &&
                         data.WriteRemoteObject(eventChannel->AsObject()) &&
+#if WESTLAKE_OH_RELEASE >= 70
+                        data.WriteUint64(wl_sessionNodeId) &&  // OH 7.0: a node id, as for Connect
+#else
                         surfaceNode->Marshalling(data) &&
+#endif
                         data.WriteStrongParcelable(wl_propSptr);
                 v7err = wrote ? sceneProxy_->SendRequest(0, data, reply, option) : -1;
+#if WESTLAKE_OH_RELEASE >= 70
+                // OH 7.0 answers with the result first (WSErrorResult: code, message), then the id and session.
+                if (wrote && reply.GetDataSize() > 0) {
+                    const int32_t wl_errCode = reply.ReadInt32();
+                    const std::string wl_errMsg = reply.ReadString();
+                    if (wl_errCode != 0 || v7err != 0) {
+                        fprintf(stderr, "[WESTLAKE-WMC] CreateAndConnectSpecificSession err=%d result=%d: %s\n",
+                                v7err, wl_errCode, wl_errMsg.c_str());
+                        fflush(stderr);
+                        if (v7err == 0) {
+                            v7err = wl_errCode;
+                        }
+                    }
+                }
+#endif
                 if (v7err == 0) {
                     persistentId = reply.ReadInt32();
                     sessionObject = reply.ReadRemoteObject();
+#if WESTLAKE_OH_RELEASE >= 70
+                    if (wl_rootNode != nullptr && persistentId > 0) {
+                        wl_attach_to_scene_node(wl_sessionNodeId, windowName, wl_rootNode, persistentId);
+                    }
+#endif
                 }
             }
             fprintf(stderr, "[WESTLAKE-WMC] V7 wrote=%d err=%d persistentId=%d session=%p\n",
@@ -2146,6 +2269,7 @@ OHWindowSession OHWindowManagerClient::createSession(
                     if (wl_contentNode != nullptr) {
                         wl_window_nodes()[persistentId] = surfaceNode;
                     }
+
                     entry.surfaceNode    = (wl_contentNode != nullptr) ? wl_contentNode : surfaceNode;
                     entry.windowId       = static_cast<uint32_t>(persistentId);
                     entry.windowProperty = property;
@@ -2638,6 +2762,12 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
         wl_hide(contentNode);
         if (windowNode != contentNode) { wl_hide(windowNode); }
         if (nit != nodes.end()) { nodes.erase(nit); }
+        auto rit = wl_root_nodes().find(sessionId);
+        if (rit != wl_root_nodes().end()) {
+            rit->second->RemoveFromTree();
+            wl_root_nodes().erase(rit);
+        }
+        wl_scene_window_nodes().erase(sessionId);
         OHOS::Rosen::RSTransaction::FlushImplicitTransaction();
         fprintf(stderr, "[WESTLAKE-WMC] §538/§567 hid+detached RS nodes for session=%d (content=%d window=%d)\n",
                 sessionId, contentNode != nullptr ? 1 : 0, windowNode != nullptr ? 1 : 0);
@@ -2660,7 +2790,11 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
             OHOS::MessageOption option;
             const bool wrote = data.WriteInterfaceToken(u"OHOS.ISession") &&
                                data.WriteBool(true) &&   // isFromClient
-                               data.WriteString("");     // identityToken
+                               data.WriteString("")      // identityToken
+#if WESTLAKE_OH_RELEASE >= 70
+                               && data.WriteBool(false)  // isFromInnerkits (OH 7.0), as WindowSceneSessionImpl::Destroy
+#endif
+                               ;
             const int32_t err = wrote ? sessionRemote->SendRequest(code, data, reply, option) : -1;
             const int32_t ret = (err == 0) ? reply.ReadInt32() : -1;
             fprintf(stderr, "[WESTLAKE-WMC] §536 %s(persistentId=%d) wrote=%d err=%d ret=%d\n",
@@ -2715,6 +2849,28 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
 //
 // Future drift mitigation: if adapter's wmsShown diverges from real OH state
 // (e.g., WMS unilaterally hides due to AMS / focus policy), switch to A or B.
+
+int32_t OHWindowManagerClient::setWindowSecure(int32_t sessionId, bool secure) {
+    // A test round on a development board sets WESTLAKE_SECURE_LAYER=0, so that its screenshots show FLAG_SECURE
+    // windows as they show every other window (OH's screen capture draws a security layer black). The app still
+    // sees its flag set; only the OH window stays an ordinary layer. Returns 1 then.
+    static const bool kSecureLayer = [] {
+        const char* value = getenv("WESTLAKE_SECURE_LAYER");
+        return value == nullptr || std::string(value) != "0";
+    }();
+    if (!kSecureLayer) return 1;
+    std::shared_ptr<OHOS::Rosen::RSSurfaceNode> node;
+    {
+        std::lock_guard<std::recursive_mutex> lock(sessionMutex_);
+        auto it = sessions_.find(sessionId);
+        if (it == sessions_.end()) return -1;
+        node = it->second.surfaceNode;
+    }
+    if (node == nullptr) return -2;
+    node->SetSecurityLayer(secure);
+    OHOS::Rosen::RSTransaction::FlushImplicitTransaction();
+    return 0;
+}
 
 int32_t OHWindowManagerClient::hideWindow(int32_t sessionId) {
     OH_BR_IPC_SCOPE("WMClient.hideWindow", "session=%{public}d", sessionId);
@@ -3549,6 +3705,34 @@ void* OHWindowManagerClient::getOhNativeWindow(int32_t sessionId) {
 }
 
 }  // namespace oh_adapter
+
+// ADR-0008: when OH brings the ability back to the foreground (ScheduleAbilityTransaction FOREGROUND_NEW), the
+// client foregrounds its main window session, as OH's window client does when the ability shows its window again
+// (WindowSceneSessionImpl::Show -> ISession::Foreground). The first foreground connects the window instead. Without
+// it SceneBoard kept the session in the background on 7.0: it showed the app's snapshot, its windows stayed hidden,
+// and the next tap went to SceneBoard, which took it as a gesture home.
+void wl_managed_foreground_main() {
+    OHOS::sptr<OHOS::IRemoteObject> session;
+    OHOS::sptr<OHOS::Rosen::WindowSessionProperty> property;
+    std::string identity;
+    {
+        std::lock_guard<std::mutex> lock(g_wlManagedMainSessionMutex);
+        session = g_wlManagedMainSession;
+        property = g_wlManagedMainProperty;
+        identity = g_wlManagedMainIdentity;
+    }
+    if (session == nullptr || property == nullptr) return;
+    OHOS::MessageParcel data;
+    OHOS::MessageParcel reply;
+    OHOS::MessageOption option;
+    const bool wrote = data.WriteInterfaceToken(u"OHOS.ISession") && data.WriteBool(true) &&
+                       data.WriteStrongParcelable(property) && data.WriteBool(true) &&  // isFromClient
+                       data.WriteString(identity);
+    const int32_t err = wrote ? session->SendRequest(1, data, reply, option) : -1;
+    const int32_t ret = (err == 0) ? reply.ReadInt32() : -1;
+    fprintf(stderr, "[WL-MANAGED] Foreground(session %d) again: err=%d ret=%d\n", g_wlManagedMainId.load(), err, ret);
+    fflush(stderr);
+}
 
 // ADR-0008: a back press at the root of the app's task moves the app to the background, as Android 12+ does
 // (ATMS moves the task to the back); for an OH ability SceneBoard does that on ISession::RequestSessionBack(true)
