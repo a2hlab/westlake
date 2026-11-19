@@ -61,7 +61,7 @@
           },
           "silent_token_renewal": {
             "status": "open",
-            "gap": "No established Spotify profile was observed after Google sign-in."
+            "gap": "Spotify signed in with Google on 2026-11-18 and kept its session across a full restart. No later Google token request from Spotify was exercised, so silent renewal remains unverified."
           },
           "restart_persistence": {
             "status": "observed",
