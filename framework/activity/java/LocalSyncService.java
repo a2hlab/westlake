@@ -614,6 +614,7 @@ public final class LocalSyncService {
                     notifyStatus(ContentResolver.SYNC_OBSERVER_TYPE_ACTIVE | ContentResolver.SYNC_OBSERVER_TYPE_PENDING);
                     trace("start=true job=" + id + " authority=" + adapter.type.authority + " initialize=" + initializing);
                 }
+                startMethodTrace(this);
                 remote.startSync(attempt, adapter.type.authority, account, request);
                 synchronized (LOCK) {
                     // Cancellation can race the Binder call; repeat it after start returns.
@@ -648,6 +649,7 @@ public final class LocalSyncService {
                 else { value.lastFailureTime = System.currentTimeMillis(); value.lastFailureMesg = reason; }
                 if (remote != null) remote.asBinder().unlinkToDeath(this, 0);
                 if (bound) main.post(() -> { try { app.unbindService(this); } catch (Exception ignored) {} });
+                stopMethodTrace(this);
                 trace("finished=true job=" + id + " reason=" + reason + " success=" + success
                         + " auth_error=" + (result != null && result.stats.numAuthExceptions > 0)
                         + " io_error=" + (result != null && result.stats.numIoExceptions > 0)
@@ -660,5 +662,39 @@ public final class LocalSyncService {
         @Override public void onBindingDied(ComponentName name) { finish(null, "binding_died"); }
         @Override public void onNullBinding(ComponentName name) { finish(null, "null_binding"); }
         @Override public void binderDied() { finish(null, "binder_died"); }
+    }
+
+    /** The job a method trace was started for (WESTLAKE_SYNC_METHOD_TRACE), or null. */
+    private static Object sTracedJob;
+
+    /**
+     * Diagnosis only, opt-in: WESTLAKE_SYNC_METHOD_TRACE names a private directory owned by the app. The
+     * adapter's own error handling can swallow the exception behind a failed sync (original Gmail's legacy
+     * mail engine sets databaseError and logs below its release level); Android's method trace records which
+     * methods left by an exception. Method and thread names only, no values; one job at a time.
+     */
+    private static void startMethodTrace(Object job) {
+        String dir = System.getenv("WESTLAKE_SYNC_METHOD_TRACE");
+        if (dir == null || !dir.startsWith("/")) return;
+        synchronized (LocalSyncService.class) {
+            if (sTracedJob != null) return;
+            try {
+                String path = dir + "/sync-" + System.currentTimeMillis() + ".trace";
+                android.os.Debug.startMethodTracing(path, 96 * 1024 * 1024);
+                sTracedJob = job;
+                System.err.println("[WL-SYNC] method_trace=started");
+            } catch (RuntimeException unsupported) {
+                System.err.println("[WL-SYNC] method_trace=unavailable type=" + unsupported.getClass().getName());
+            }
+        }
+    }
+
+    private static void stopMethodTrace(Object job) {
+        synchronized (LocalSyncService.class) {
+            if (sTracedJob != job) return;
+            sTracedJob = null;
+            try { android.os.Debug.stopMethodTracing(); System.err.println("[WL-SYNC] method_trace=stopped"); }
+            catch (RuntimeException ignored) {}
+        }
     }
 }
