@@ -83,5 +83,20 @@
   "renewalFinding": "Spotify and Wattpad request no Google token while signed in; signing out signs them out of Google, so signing in again is interactive. Silent renewal is not observable through either app.",
   "openConfiguration": "Resolved 2026-11-18: Play services' return routes now list every client app (launch configuration); Wattpad's Google login returned to Wattpad by itself.",
   "facebookBlocker": "Facebook answered a new web login (dedicated Wattpad) with reCAPTCHA; the agent does not solve CAPTCHAs, so the Facebook checks wait for a person. The board's Facebook app was never signed in.",
-  "hostWatchExemption": "Observed: Play services' main and persistent processes log that the launch serves other apps and keeps running if its host ends."
+  "hostWatchExemption": "Observed: Play services' main and persistent processes log that the launch serves other apps and keeps running if its host ends.",
+  "reobservedSweep": {
+    "com.google.android.apps.docs/file_listing": "Re-observed 2026-11-18 on the current build: a fresh dedicated Drive listed the account's files, and listed them again after a full restart.",
+    "com.google.android.apps.docs/file_open": "Re-observed 2026-11-18 on the current build: the validation fixture opened and its text rendered, with tokens through official Play services.",
+    "com.google.android.apps.docs/restart_persistence": "Re-observed 2026-11-18: after a full restart Drive opened signed in with its files listed.",
+    "com.google.android.gm/mailbox_sync": "Re-observed 2026-11-18: after its host was killed and the launch restarted, original Gmail synced and showed the inbox with the account's mail.",
+    "com.google.android.gm/restart_persistence": "Re-observed 2026-11-18: the same relaunch opened signed in without any account step.",
+    "com.google.android.youtube/restart_persistence": "Re-observed 2026-11-18: after a full restart YouTube opened signed in.",
+    "com.google.android.youtube/video_playback#note": "2026-11-18, signed in, current build: pre-roll ads played with advancing frames; the chosen public video showed its first frame and then stopped advancing for over a minute. The app's own UI below and over the video stayed black: the video's surface window sits above the app's window (known order gap), so its controls were not visible. Signed-in playback remains open.",
+    "com.google.android.apps.maps/startup": "Re-observed 2026-11-18 on the current build: original Maps opened in guest mode.",
+    "com.google.android.apps.maps/map_tiles": "Re-observed 2026-11-18: labeled map tiles rendered, and street-level tiles after search.",
+    "com.google.android.apps.maps/search": "Re-observed 2026-11-18 (guest): the same place query moved the map to the result and placed a pin. After the keyboard opened, Maps' own controls and place card stayed hidden under the map surface (window order gap); the query was typed through the test input path.",
+    "com.google.android.apps.maps/restart_persistence": "Re-observed 2026-11-18: after a full restart guest Maps opened with tiles and its controls.",
+    "com.google.android.apps.maps/route_preview#note": "2026-11-18: not re-observed. From the start screen the directions button did not open the directions screen; after a search, Maps' controls stayed hidden under the map surface. The earlier observation stands.",
+    "com.mobilefootie.wc2010/sign_in#note": "2026-11-18, dedicated FotMob host (signed out): Sign in with Google could not open Play services' account chooser. The host refused the hand-off to Play services' sign-in host (window handoff invalid): this host build predates that route, as YouTube's did before its host was rebuilt. FotMob's account checks could not be re-observed today."
+  }
 }

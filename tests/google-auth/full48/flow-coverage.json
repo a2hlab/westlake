@@ -13,12 +13,13 @@
         "sources": [
           "candidate74.json",
           "candidate75.json",
-          "candidate116.json"
+          "candidate116.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "sign_in": {
             "status": "observed",
-            "evidence": "The original app reached its signed-in screen from a fresh app profile."
+            "evidence": "The original app reached its signed-in screen from a fresh app profile. 2026-11-18, dedicated FotMob host (signed out): Sign in with Google could not open Play services' account chooser. The host refused the hand-off to Play services' sign-in host (window handoff invalid): this host build predates that route, as YouTube's did before its host was rebuilt. FotMob's account checks could not be re-observed today."
           },
           "private_preference_cloud_round_trip": {
             "status": "observed",
@@ -120,11 +121,11 @@
           },
           "video_playback": {
             "status": "observed",
-            "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open."
+            "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open. 2026-11-18, signed in, current build: pre-roll ads played with advancing frames; the chosen public video showed its first frame and then stopped advancing for over a minute. The app's own UI below and over the video stayed black: the video's surface window sits above the app's window (known order gap), so its controls were not visible. Signed-in playback remains open."
           },
           "restart_persistence": {
             "status": "observed",
-            "evidence": "After a full restart of the YouTube process, the app came back signed in: signed-in Subscriptions page and account avatar."
+            "evidence": "After a full restart of the YouTube process, the app came back signed in: signed-in Subscriptions page and account avatar. Re-observed 2026-11-18: after a full restart YouTube opened signed in."
           }
         }
       },
@@ -168,7 +169,7 @@
           },
           "mailbox_sync": {
             "status": "observed",
-            "evidence": "In the earlier delegated configuration, original Gmail populated its inbox and opened an existing message after enabling sync and restarting."
+            "evidence": "In the earlier delegated configuration, original Gmail populated its inbox and opened an existing message after enabling sync and restarting. Re-observed 2026-11-18: after its host was killed and the launch restarted, original Gmail synced and showed the inbox with the account's mail."
           },
           "refresh": {
             "status": "observed",
@@ -176,7 +177,7 @@
           },
           "restart_persistence": {
             "status": "observed",
-            "evidence": "The earlier configuration retained the account, inbox and automatic-sync preference across a client restart. The dedicated fresh-profile control stopped at setup. After the account provider was restored, it verified a newly restarted original Gmail process and the retained Primary inbox reappeared."
+            "evidence": "The earlier configuration retained the account, inbox and automatic-sync preference across a client restart. The dedicated fresh-profile control stopped at setup. After the account provider was restored, it verified a newly restarted original Gmail process and the retained Primary inbox reappeared. Re-observed 2026-11-18: the same relaunch opened signed in without any account step."
           }
         }
       },
@@ -199,11 +200,11 @@
           },
           "file_listing": {
             "status": "observed",
-            "evidence": "My Drive listed the approved fixture after a process restart. The current account-path retest did not reach the file list."
+            "evidence": "My Drive listed the approved fixture after a process restart. The current account-path retest did not reach the file list. Re-observed 2026-11-18 on the current build: a fresh dedicated Drive listed the account's files, and listed them again after a full restart."
           },
           "file_open": {
             "status": "observed",
-            "evidence": "The original Drive preview rendered the three expected lines of the 107-byte file. The current account-path retest did not reach the file list."
+            "evidence": "The original Drive preview rendered the three expected lines of the 107-byte file. The current account-path retest did not reach the file list. Re-observed 2026-11-18 on the current build: the validation fixture opened and its text rendered, with tokens through official Play services."
           },
           "token_renewal": {
             "status": "observed",
@@ -211,7 +212,7 @@
           },
           "restart_persistence": {
             "status": "observed",
-            "evidence": "The same profile listed and opened the fixture after restart. Its contents could have been cached. The current account-path retest did not reach the file list."
+            "evidence": "The same profile listed and opened the fixture after restart. Its contents could have been cached. The current account-path retest did not reach the file list. Re-observed 2026-11-18: after a full restart Drive opened signed in with its files listed."
           }
         }
       },
@@ -221,20 +222,21 @@
           "candidate83.json",
           "candidate88.json",
           "candidate127.json",
-          "candidate135.json"
+          "candidate135.json",
+          "claude-20261118-results.json"
         ],
         "checks": {
           "startup": {
             "status": "observed",
-            "evidence": "Original Maps opened in guest mode."
+            "evidence": "Original Maps opened in guest mode. Re-observed 2026-11-18 on the current build: original Maps opened in guest mode."
           },
           "map_tiles": {
             "status": "observed",
-            "evidence": "The guest UI displayed labeled map tiles."
+            "evidence": "The guest UI displayed labeled map tiles. Re-observed 2026-11-18: labeled map tiles rendered, and street-level tiles after search."
           },
           "search": {
             "status": "observed",
-            "evidence": "Guest place search returned a result with the services connected. Signed-in place search remains open."
+            "evidence": "Guest place search returned a result with the services connected. Signed-in place search remains open. Re-observed 2026-11-18 (guest): the same place query moved the map to the result and placed a pin. After the keyboard opened, Maps' own controls and place card stayed hidden under the map surface (window order gap); the query was typed through the test input path."
           },
           "real_location": {
             "status": "partial",
@@ -242,11 +244,11 @@
           },
           "route_preview": {
             "status": "observed",
-            "evidence": "The guest directions screen displayed a route preview between specified endpoints."
+            "evidence": "The guest directions screen displayed a route preview between specified endpoints. 2026-11-18: not re-observed. From the start screen the directions button did not open the directions screen; after a search, Maps' controls stayed hidden under the map surface. The earlier observation stands."
           },
           "restart_persistence": {
             "status": "observed",
-            "evidence": "The retained guest configuration survived restart and repeated the directions flow."
+            "evidence": "The retained guest configuration survived restart and repeated the directions flow. Re-observed 2026-11-18: after a full restart guest Maps opened with tiles and its controls."
           }
         }
       },
