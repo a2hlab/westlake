@@ -71,6 +71,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     private static final long HELD_BACK_FALLBACK_MS = 3000;
     private static final long HELD_BACK_LIMIT_MS = 60000;
     private final java.util.Set<IBinder> mTokensWithBase = new java.util.HashSet<>();
+    /** ADR-0008 managed launch: the OH ability's main window has its session. */
+    private volatile boolean mManagedMainConnected;
     /** Activities that ever added their window (mTokensWithBase forgets a removed one). */
     private final java.util.Set<IBinder> mTokensThatDrew = new java.util.HashSet<>();
     private final Map<IBinder, IBinder> mBaseWindowTokens = new HashMap<>();
@@ -454,6 +456,31 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
     }
 
+    /**
+     * ADR-0008: the OH ability's main window is the window of the activity that holds its token, and the app's other
+     * activity windows are sub-windows of it. An activity the token's activity starts from onCreate (Aegis's intro)
+     * can add its window first, when there is no main window to be a sub-window of: it waits for the main window and
+     * then goes above it, as it would on Android.
+     */
+    private boolean waitsForManagedMain(int windowType, long ohTokenAddr) {
+        return windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && ohTokenAddr == 0L
+                && !mManagedMainConnected && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"));
+    }
+
+    /** The OH ability's main window has its session: the activity windows waiting for it get theirs. */
+    private void managedMainConnected() {
+        mManagedMainConnected = true;
+        java.util.List<IBinder> release = new java.util.ArrayList<>();
+        synchronized (mHeldBack) {
+            for (Map.Entry<IBinder, HeldBackWindow> entry : mHeldBack.entrySet()) {
+                if (entry.getValue().windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION) {
+                    release.add(entry.getKey());
+                }
+            }
+        }
+        for (IBinder key : release) createHeldBackSession(key, "the OH ability's main window has its session");
+    }
+
     /** An application window on an activity token whose base window has no OH session yet. */
     private boolean shouldHoldBack(int windowType, IBinder token) {
         if (token == null
@@ -476,7 +503,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             mHeldBack.put(key, held);
         }
         System.err.println("[OH_WSA] holding back type=" + held.windowType + " '" + held.windowName
-                + "' until its activity's window has an OH session");
+                + (held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                        ? "' until the OH ability's main window has its session"
+                        : "' until its activity's window has an OH session"));
         if (outInputChannel != null) {
             InputEventBridge.getInstance().createUnboundInputChannelPair(key, held.windowName)
                     .copyTo(outInputChannel);
@@ -499,11 +528,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         mMainHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
+                HeldBackWindow held;
                 synchronized (mHeldBack) {
-                    if (!mHeldBack.containsKey(key)) return;
+                    held = mHeldBack.get(key);
                 }
+                if (held == null) return;
                 long waited = android.os.SystemClock.uptimeMillis() - heldSince;
-                if (activityStillComing(token) && waited < HELD_BACK_LIMIT_MS) {
+                boolean stillComing = held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                        ? !mManagedMainConnected && adapter.core.OhTokenRegistry.findOhToken(token) == null
+                        : activityStillComing(token);
+                if (stillComing && waited < HELD_BACK_LIMIT_MS) {
                     scheduleHeldBackCheck(key, token, heldSince);
                     return;
                 }
@@ -575,10 +609,16 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         if (held == null) return;
         addDimLayer(key, held.token, held.dimAmount, held.windowName);
         int[] sessionInfo;
+        long ohTokenAddr = held.ohTokenAddr;
+        if (held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION) {
+            // A token transfer while it waited makes it the main window itself.
+            Long now = adapter.core.OhTokenRegistry.findOhToken(held.token);
+            if (now != null) ohTokenAddr = now;
+        }
         try {
             sessionInfo = nativeCreateSession(key, held.bundleName, held.abilityName, held.moduleName,
                     held.windowName, held.windowType, held.layerStackId, held.width, held.height,
-                    held.ohTokenAddr);
+                    ohTokenAddr);
         } catch (Throwable t) {
             System.err.println("[OH_WSA] held-back nativeCreateSession threw " + t);
             return;
@@ -592,6 +632,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         InputEventBridge.getInstance().bindInputChannel(key, sessionInfo[0]);
         System.err.println("[OH_WSA] held-back type=" + held.windowType + " '" + held.windowName
                 + "' -> sessionId=" + sessionInfo[0] + " (" + why + ")");
+        if (held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && held.token != null) {
+            if (ohTokenAddr != 0L && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) mManagedMainConnected = true;
+            baseWindowAdded(key, held.token);
+        }
         // Its earlier relayouts returned no surface; a forced relayout now picks one up.
         try {
             ClientWindowFrames frames = new ClientWindowFrames();
@@ -914,7 +958,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
 
         // A dim layer is created right before the window it dims and must stay right under it.
         boolean dimLayer = attrs.getTitle() != null && attrs.getTitle().toString().startsWith("DimLayer:");
-        if (!dimLayer && shouldHoldBack(windowType, attrs.token)) {
+        if (!dimLayer && (shouldHoldBack(windowType, attrs.token) || waitsForManagedMain(windowType, ohTokenAddr))) {
             return holdBack(new HeldBackWindow(new HeldBackWindow(window, attrs.token, bundleName,
                     abilityName, moduleName, windowName, windowType, layerStackId, width, height,
                     ohTokenAddr), dimAmountOf(attrs)),
@@ -965,6 +1009,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 + sessionInfo[3] + "x" + sessionInfo[4]);
         mSessionMap.put(window.asBinder(), sessionInfo);
         System.err.println("[OH_WSA] step2 mSessionMap.put OK");
+        if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && ohTokenAddr != 0L
+                && !mManagedMainConnected && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) {
+            managedMainConnected();
+        }
         if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && attrs.token != null) {
             baseWindowAdded(window.asBinder(), attrs.token);
         }
