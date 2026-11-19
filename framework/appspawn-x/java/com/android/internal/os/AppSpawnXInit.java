@@ -989,6 +989,12 @@ public class AppSpawnXInit {
         } catch (Throwable t0) {
             // nativeHiLog may be unbound on broken child; swallow.
         }
+        // End this process with the OpenHarmony host instance its windows belong to.
+        try {
+            adapter.activity.HostLifecycleWatch.start(procName);
+        } catch (Throwable watchUnavailable) {
+            // Never block the app start on the watch.
+        }
 
         // [FIX-AII 2026-05-24] RESOURCES SAFETY PRE-INIT — ensure
         // android.content.res.Resources.getSystem() is non-null in this child
