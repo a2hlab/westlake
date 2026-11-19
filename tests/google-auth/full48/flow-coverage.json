@@ -324,11 +324,11 @@
           },
           "account_session": {
             "status": "open",
-            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed."
+            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed. 2026-11-18: with the user's test login, a new web login from the dedicated Wattpad reached Facebook's reCAPTCHA (\"Confirm you are human\"), which needs a person to complete; not attempted by the agent."
           },
           "restart_persistence": {
             "status": "open",
-            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed."
+            "gap": "Wattpad requested separate signup. No authenticated Wattpad profile or subsequent restart was observed. 2026-11-18: with the user's test login, a new web login from the dedicated Wattpad reached Facebook's reCAPTCHA (\"Confirm you are human\"), which needs a person to complete; not attempted by the agent."
           }
         }
       },

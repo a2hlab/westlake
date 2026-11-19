@@ -81,5 +81,7 @@
     "Host apps were killed by OpenHarmony under memory pressure (about 90 MB free); the apps' Android windows belonged to the killed host, so a restarted host showed an empty window. Freeing memory removed the blank screens; Westlake does not re-attach windows to a restarted host."
   ],
   "renewalFinding": "Spotify and Wattpad request no Google token while signed in; signing out signs them out of Google, so signing in again is interactive. Silent renewal is not observable through either app.",
-  "openConfiguration": "Play services' return routes (WESTLAKE_REMOTE_HOST_ROUTES) list only Spotify: after Wattpad's Google login the result reached Wattpad, but the screen stayed on Play services until Wattpad was brought back by hand."
+  "openConfiguration": "Resolved 2026-11-18: Play services' return routes now list every client app (launch configuration); Wattpad's Google login returned to Wattpad by itself.",
+  "facebookBlocker": "Facebook answered a new web login (dedicated Wattpad) with reCAPTCHA; the agent does not solve CAPTCHAs, so the Facebook checks wait for a person. The board's Facebook app was never signed in.",
+  "hostWatchExemption": "Observed: Play services' main and persistent processes log that the launch serves other apps and keeps running if its host ends."
 }
