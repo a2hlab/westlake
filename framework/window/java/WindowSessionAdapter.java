@@ -148,6 +148,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // See oh_window_manager_client.cpp::hideWindow / showWindow for design
     // notes (in-App-process C++ cache, idempotent at native layer).
     private static native int nativeHideWindow(int sessionId);
+    private static native int nativeSetWindowSecure(int sessionId, boolean secure);
     private static native int nativeShowWindow(int sessionId);
     private static native long nativeGetSurfaceNodeId(int sessionId);
     // [G3.6-MULTIWINDOW 2026-06-02] stamp the SurfaceControl's session (bridge JNI ->
@@ -205,6 +206,25 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     // placement needs gravity, x/y and flags on every relayout, so each window's are kept.
     private final Map<IBinder, WindowManager.LayoutParams> mWindowAttrs = new HashMap<>();
     private final Map<IBinder, Point> mSurfaceSizes = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Windows whose OH node is a security layer (FLAG_SECURE), by window. */
+    private final Map<IBinder, Boolean> mSecure = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Android's FLAG_SECURE keeps a window out of screenshots, screen recording and the recents snapshot. OH's privacy
+     * mode does that by making the window's render node a security layer (WindowSessionImpl::SetPrivacyMode), so the
+     * node with the window's pixels becomes one while the flag is set.
+     */
+    private void applySecureFlag(IBinder key, WindowManager.LayoutParams attrs) {
+        if (attrs == null) return;
+        int[] info = mSessionMap.get(key);
+        if (info == null || info[0] <= 0) return;
+        boolean secure = (attrs.flags & WindowManager.LayoutParams.FLAG_SECURE) != 0;
+        Boolean before = mSecure.put(key, secure);
+        if (before == null ? !secure : before == secure) return;
+        int rc = nativeSetWindowSecure(info[0], secure);
+        System.err.println("[OH_WSA] session " + info[0] + " FLAG_SECURE=" + secure + " -> OH security layer rc=" + rc);
+    }
 
     private WindowManager.LayoutParams rememberAttrs(IWindow window, WindowManager.LayoutParams attrs) {
         synchronized (mWindowAttrs) {
@@ -629,6 +649,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             return;
         }
         mSessionMap.put(key, sessionInfo);
+        applySecureFlag(key, rememberAttrs(held.window, null));
         InputEventBridge.getInstance().bindInputChannel(key, sessionInfo[0]);
         System.err.println("[OH_WSA] held-back type=" + held.windowType + " '" + held.windowName
                 + "' -> sessionId=" + sessionInfo[0] + " (" + why + ")");
@@ -1009,6 +1030,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 + sessionInfo[3] + "x" + sessionInfo[4]);
         mSessionMap.put(window.asBinder(), sessionInfo);
         System.err.println("[OH_WSA] step2 mSessionMap.put OK");
+        applySecureFlag(window.asBinder(), attrs);
         if (windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && ohTokenAddr != 0L
                 && !mManagedMainConnected && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) {
             managedMainConnected();
@@ -1181,6 +1203,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         InputEventBridge.getInstance().destroyInputChannel(window.asBinder());
 
         int[] sessionInfo = mSessionMap.remove(window.asBinder());
+        mSecure.remove(window.asBinder());
         if (sessionInfo != null) {
             int sessionId = sessionInfo[0];
             // Destroy OH surface resources (RSSurfaceNode, RSUIDirector, OHGraphicBufferProducer)
@@ -1220,6 +1243,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         logBridged("relayout", "-> OH ISession.UpdateSessionRect");
 
         final WindowManager.LayoutParams windowAttrs = rememberAttrs(window, attrs);
+        applySecureFlag(window.asBinder(), windowAttrs);
         HeldBackWindow held;
         synchronized (mHeldBack) {
             held = mHeldBack.get(window.asBinder());

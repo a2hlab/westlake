@@ -2850,6 +2850,20 @@ void OHWindowManagerClient::destroySession(int32_t sessionId) {
 // Future drift mitigation: if adapter's wmsShown diverges from real OH state
 // (e.g., WMS unilaterally hides due to AMS / focus policy), switch to A or B.
 
+int32_t OHWindowManagerClient::setWindowSecure(int32_t sessionId, bool secure) {
+    std::shared_ptr<OHOS::Rosen::RSSurfaceNode> node;
+    {
+        std::lock_guard<std::recursive_mutex> lock(sessionMutex_);
+        auto it = sessions_.find(sessionId);
+        if (it == sessions_.end()) return -1;
+        node = it->second.surfaceNode;
+    }
+    if (node == nullptr) return -2;
+    node->SetSecurityLayer(secure);
+    OHOS::Rosen::RSTransaction::FlushImplicitTransaction();
+    return 0;
+}
+
 int32_t OHWindowManagerClient::hideWindow(int32_t sessionId) {
     OH_BR_IPC_SCOPE("WMClient.hideWindow", "session=%{public}d", sessionId);
 
