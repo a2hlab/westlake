@@ -395,8 +395,17 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
                 final long addr = ohAddr;
                 final int resultCode = code;
                 final IBinder finishing = token;
+                adapter.core.OhTokenRegistry.holderFinishing(finishing);
                 new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
                     @Override public void run() {
+                        adapter.core.OhTokenRegistry.finishingDone(finishing);
+                        if (adapter.core.OhTokenRegistry.findOhToken(finishing) == null) {
+                            // The activity it started took the token with its window (a splash that never drew:
+                            // WindowSessionAdapter.takeTokenFromSplash).
+                            System.err.println("[WL-MANAGED] the OH ability went with the next activity's window");
+                            scheduleLocalDestroy(finishing);
+                            return;
+                        }
                         IBinder heir = taskHeir(finishing);
                         if (heir != null && adapter.core.OhTokenRegistry.transfer(finishing, heir)) {
                             Log.i(TAG, "finishActivity: OH ability 0x" + Long.toHexString(addr)

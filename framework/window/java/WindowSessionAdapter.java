@@ -71,6 +71,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     private static final long HELD_BACK_FALLBACK_MS = 3000;
     private static final long HELD_BACK_LIMIT_MS = 60000;
     private final java.util.Set<IBinder> mTokensWithBase = new java.util.HashSet<>();
+    /** Activities that ever added their window (mTokensWithBase forgets a removed one). */
+    private final java.util.Set<IBinder> mTokensThatDrew = new java.util.HashSet<>();
     private final Map<IBinder, IBinder> mBaseWindowTokens = new HashMap<>();
     private final Map<IBinder, HeldBackWindow> mHeldBack = new java.util.LinkedHashMap<>();
     private android.os.Handler mMainHandler;
@@ -528,10 +530,34 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         }
     }
 
+    /**
+     * ADR-0008: the OH ability's main window is the app's first activity window. A splash that holds the ability's
+     * token and finishes before it draws (it starts the main activity from onCreate) leaves that window to the
+     * activity it started, whose window comes before the token transfer queued at the splash's finish(): the token
+     * passes to it now, and its window connects the ability's main session. A splash that drew keeps the main
+     * window, and the next activity's window is a sub-window of it.
+     */
+    private Long takeTokenFromSplash(int windowType, IBinder token) {
+        if (windowType != WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                || !"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) {
+            return null;
+        }
+        IBinder holder = adapter.core.OhTokenRegistry.finishingHolder();
+        if (holder == null || holder == token) return null;
+        synchronized (mHeldBack) {
+            if (mTokensThatDrew.contains(holder)) return null;
+        }
+        if (!adapter.core.OhTokenRegistry.takeFromFinishing(holder, token)) return null;
+        System.err.println("[WL-MANAGED] the finishing splash never drew: the next activity's window is its OH"
+                + " ability's main window");
+        return adapter.core.OhTokenRegistry.findOhToken(token);
+    }
+
     private void baseWindowAdded(IBinder baseWindow, IBinder token) {
         java.util.List<IBinder> release = new java.util.ArrayList<>();
         synchronized (mHeldBack) {
             mTokensWithBase.add(token);
+            mTokensThatDrew.add(token);
             mBaseWindowTokens.put(baseWindow, token);
             for (Map.Entry<IBinder, HeldBackWindow> entry : mHeldBack.entrySet()) {
                 if (entry.getValue().token == token) release.add(entry.getKey());
@@ -851,6 +877,7 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         long ohTokenAddr = 0L;
         if (attrs.token != null) {
             Long addr = adapter.core.OhTokenRegistry.findOhToken(attrs.token);
+            if (addr == null) addr = takeTokenFromSplash(windowType, attrs.token);
             if (addr != null) ohTokenAddr = addr;
         }
 

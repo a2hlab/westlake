@@ -104,6 +104,28 @@ public final class OhTokenRegistry {
      * activity finishes while others remain, the token passes to the task's top activity, so OH's lifecycle
      * reaches it and its finish ends the ability. Returns whether from held a token.
      */
+    /** ADR-0008: the token's activity that finished while its task goes on, until its heir is decided. */
+    private static IBinder sFinishingHolder;
+
+    public static synchronized void holderFinishing(IBinder holder) {
+        sFinishingHolder = holder;
+    }
+
+    public static synchronized IBinder finishingHolder() {
+        return sFinishingHolder;
+    }
+
+    /** The finishing holder's token passes to {@code to} now, before the transfer queued at its finish(). */
+    public static synchronized boolean takeFromFinishing(IBinder holder, IBinder to) {
+        if (holder == null || holder != sFinishingHolder) return false;
+        sFinishingHolder = null;
+        return transfer(holder, to);
+    }
+
+    public static synchronized void finishingDone(IBinder holder) {
+        if (sFinishingHolder == holder) sFinishingHolder = null;
+    }
+
     public static boolean transfer(IBinder from, IBinder to) {
         if (from == null || to == null) return false;
         Long ohTokenAddr = sAndroidToOh.remove(from);
