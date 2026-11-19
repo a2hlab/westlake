@@ -59,7 +59,9 @@ public:
     void ScheduleShrinkMemory(const int level) override;
 
     // [BRIDGED] -> IApplicationThread.scheduleTrimMemory(mappedLevel)
-    #if defined(__aarch64__)
+    // WESTLAKE_OH_RELEASE >= 70 (set by native/bridge15-sources-oh70.json): OpenHarmony 7.0's IAppScheduler, which
+    // adds isShellCall here, an AppUpdateInfo to ScheduleLaunchAbility and ScheduleMem. Unset, it is 6.1's.
+#if defined(__aarch64__) && !(WESTLAKE_OH_RELEASE >= 70)
     void ScheduleMemoryLevel(int32_t level) override;
 #else
     void ScheduleMemoryLevel(int32_t level, bool isShellCall = false) override;
@@ -91,7 +93,16 @@ public:
     void ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityInfo &info,
                                const OHOS::sptr<OHOS::IRemoteObject> &token,
                                const std::shared_ptr<OHOS::AAFwk::Want> &want,
+#if WESTLAKE_OH_RELEASE >= 70
+                               int32_t abilityRecordId,
+                               std::shared_ptr<OHOS::AppExecFwk::AppUpdateInfo> updateInfo = nullptr) override;
+
+    // [OH_ONLY] a memory dump request (OpenHarmony 7.0); answered empty, so the requester does not wait
+    void ScheduleMem(OHOS::AppExecFwk::MemDumpInfo &info,
+                     OHOS::sptr<OHOS::AppExecFwk::IMemDumpCallback> callback) override;
+#else
                                int32_t abilityRecordId) override;
+#endif
 
     // [BRIDGED] -> IApplicationThread.scheduleTransaction(DestroyActivityItem)
     void ScheduleCleanAbility(const OHOS::sptr<OHOS::IRemoteObject> &token,

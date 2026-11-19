@@ -68,6 +68,11 @@ public:
     void NotifyWindowSystemBarPropertyChange(OHOS::Rosen::WindowType type,
         const OHOS::Rosen::SystemBarProperty& systemBarProperty) override;
 
+#if WESTLAKE_OH_RELEASE >= 70
+    // [OH_ONLY] OpenHarmony 7.0: a session's snapshot was saved; nothing to do here
+    void NotifySessionSaveSnapShotComplete(int32_t /*persistentId*/) override {}
+#endif
+
     // ============================================================
     // Category 5: Accessibility
     // ============================================================

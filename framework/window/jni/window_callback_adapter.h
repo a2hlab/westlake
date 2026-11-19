@@ -61,7 +61,11 @@ public:
         const std::shared_ptr<OHOS::Rosen::RSTransaction>& rsTransaction = nullptr) override;
 
     // [BRIDGED] -> IWindow.resized (via config change, windowing mode)
+#if WESTLAKE_OH_RELEASE >= 70
+    OHOS::Rosen::WMError UpdateWindowMode(const OHOS::Rosen::WindowModeInfo& windowModeInfo) override;  // 7.0
+#else
     OHOS::Rosen::WMError UpdateWindowMode(OHOS::Rosen::WindowMode mode) override;
+#endif
 
     // [OH_ONLY] Android WMS manages mode constraints internally
     OHOS::Rosen::WMError UpdateWindowModeSupportType(uint32_t windowModeSupportType) override;

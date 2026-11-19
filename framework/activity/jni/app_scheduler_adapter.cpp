@@ -295,7 +295,7 @@ void AppSchedulerAdapter::ScheduleShrinkMemory(const int level)
     callJavaMethod("scheduleTrimMemory", "(I)V", static_cast<jint>(androidLevel));
 }
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !(WESTLAKE_OH_RELEASE >= 70)
 void AppSchedulerAdapter::ScheduleMemoryLevel(int32_t level)
 #else
 void AppSchedulerAdapter::ScheduleMemoryLevel(int32_t level, bool isShellCall)
@@ -306,6 +306,17 @@ void AppSchedulerAdapter::ScheduleMemoryLevel(int32_t level, bool isShellCall)
           level, false, androidLevel);
     callJavaMethod("scheduleTrimMemory", "(I)V", static_cast<jint>(androidLevel));
 }
+
+#if WESTLAKE_OH_RELEASE >= 70
+void AppSchedulerAdapter::ScheduleMem(OHOS::AppExecFwk::MemDumpInfo & /*info*/,
+                                      OHOS::sptr<OHOS::AppExecFwk::IMemDumpCallback> callback)
+{
+    ALOGI("[OH_ONLY] ScheduleMem: answered with an empty dump");
+    if (callback != nullptr) {
+        callback->OnMemDumpDone("");
+    }
+}
+#endif
 
 void AppSchedulerAdapter::ScheduleHeapMemory(const int32_t pid,
                                               OHOS::AppExecFwk::MallocInfo &mallocInfo)
@@ -467,7 +478,12 @@ void AppSchedulerAdapter::ScheduleAbilityStage(const OHOS::AppExecFwk::HapModule
 void AppSchedulerAdapter::ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityInfo &info,
                                                  const OHOS::sptr<OHOS::IRemoteObject> &token,
                                                  const std::shared_ptr<OHOS::AAFwk::Want> &want,
+#if WESTLAKE_OH_RELEASE >= 70
+                                                 int32_t abilityRecordId,
+                                                 std::shared_ptr<OHOS::AppExecFwk::AppUpdateInfo> /*updateInfo*/)
+#else
                                                  int32_t abilityRecordId)
+#endif
 {
     ALOGI("[BRIDGED] ScheduleLaunchAbility(recordId=%d) "
           "-> scheduleTransaction(LaunchActivityItem)", abilityRecordId);
@@ -508,7 +524,12 @@ void AppSchedulerAdapter::ScheduleLaunchAbility(const OHOS::AppExecFwk::AbilityI
         for (const auto& e : want->GetEntities()) entitiesJson.push_back(e);
         wantJson["entities"]    = entitiesJson;
         nlohmann::json paramsJson;
+#if WESTLAKE_OH_RELEASE >= 70
+        // 7.0 dropped WantParams::ToJson; its to_json goes through the JSON text the same way.
+        paramsJson = nlohmann::json::parse(want->GetParams().ToString(), nullptr, false);
+#else
         want->GetParams().ToJson(paramsJson);
+#endif
         wantJson["parameters"]  = paramsJson;
     }
     nlohmann::json abilityJson;
