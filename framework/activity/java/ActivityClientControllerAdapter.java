@@ -656,7 +656,19 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
     // ====================================================================
 
     @Override
-    public void onBackPressed(IBinder activityToken, IRequestFinishCallback callback) { /* no-op */ }
+    public void onBackPressed(IBinder activityToken, IRequestFinishCallback callback) {
+        // Android 12+'s Activity.onBackPressed leaves finishing to the system once the activity has no back
+        // stack of its own left: ActivityClientController finishes an activity that is not its task's root
+        // (callback.requestFinish), and moves a launcher-started root's task to the back instead. As a no-op,
+        // Back could close no activity at all: original Gmail's settings stayed up over its inbox. A root
+        // keeps the old behavior here; moving the task to the back is not implemented.
+        if (activityToken == null || callback == null || taskPosition(activityToken) == 0) return;
+        try {
+            callback.requestFinish();
+        } catch (android.os.RemoteException | RuntimeException failed) {
+            Log.e(TAG, "onBackPressed: requestFinish failed", failed);
+        }
+    }
 
     @Override
     public void splashScreenAttached(IBinder token) { /* no-op */ }
