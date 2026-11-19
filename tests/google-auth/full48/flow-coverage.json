@@ -19,11 +19,11 @@
         "checks": {
           "sign_in": {
             "status": "observed",
-            "evidence": "The original app reached its signed-in screen from a fresh app profile. 2026-11-18, dedicated FotMob host (signed out): Sign in with Google could not open Play services' account chooser. The host refused the hand-off to Play services' sign-in host (window handoff invalid): this host build predates that route, as YouTube's did before its host was rebuilt. FotMob's account checks could not be re-observed today."
+            "evidence": "The original app reached its signed-in screen from a fresh app profile.  Re-observed 2026-11-19 on the rebuilt dedicated host (user-approved install; uid unchanged): Sign in with Google opened Play services' account chooser, the account choice returned RESULT_OK, and FotMob showed its signed-in account."
           },
           "private_preference_cloud_round_trip": {
             "status": "observed",
-            "evidence": "The changed favorite was restored after the local favorites cache was cleared. The read endpoint also accepted an invalid-token control, so the read alone does not establish authorization."
+            "evidence": "The changed favorite was restored after the local favorites cache was cleared. The read endpoint also accepted an invalid-token control, so the read alone does not establish authorization. Re-observed 2026-11-19: a team followed while signed in; FotMob stopped and its four local favorite-team files moved aside; after restart FotMob re-created them, including the sync ETag file, and showed all three teams. The added team was then removed again."
           },
           "silent_token_renewal": {
             "status": "observed",
@@ -31,7 +31,7 @@
           },
           "restart_persistence": {
             "status": "observed",
-            "evidence": "The signed-in UI and account identifier survived client restart."
+            "evidence": "The signed-in UI and account identifier survived client restart. Re-observed 2026-11-19: after a full restart FotMob opened signed in."
           }
         }
       },

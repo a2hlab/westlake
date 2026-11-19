@@ -97,6 +97,10 @@
     "com.google.android.apps.maps/search": "Re-observed 2026-11-18 (guest): the same place query moved the map to the result and placed a pin. After the keyboard opened, Maps' own controls and place card stayed hidden under the map surface (window order gap); the query was typed through the test input path.",
     "com.google.android.apps.maps/restart_persistence": "Re-observed 2026-11-18: after a full restart guest Maps opened with tiles and its controls.",
     "com.google.android.apps.maps/route_preview#note": "2026-11-18: not re-observed. From the start screen the directions button did not open the directions screen; after a search, Maps' controls stayed hidden under the map surface. The earlier observation stands.",
-    "com.mobilefootie.wc2010/sign_in#note": "2026-11-18, dedicated FotMob host (signed out): Sign in with Google could not open Play services' account chooser. The host refused the hand-off to Play services' sign-in host (window handoff invalid): this host build predates that route, as YouTube's did before its host was rebuilt. FotMob's account checks could not be re-observed today."
-  }
+    "com.mobilefootie.wc2010/sign_in": "Re-observed 2026-11-19 on the rebuilt dedicated host (user-approved install; uid unchanged): Sign in with Google opened Play services' account chooser, the account choice returned RESULT_OK, and FotMob showed its signed-in account.",
+    "com.mobilefootie.wc2010/private_preference_cloud_round_trip": "Re-observed 2026-11-19: a team followed while signed in; FotMob stopped and its four local favorite-team files moved aside; after restart FotMob re-created them, including the sync ETag file, and showed all three teams. The added team was then removed again.",
+    "com.mobilefootie.wc2010/restart_persistence": "Re-observed 2026-11-19: after a full restart FotMob opened signed in."
+  },
+  "fotmobHost": "Rebuilt with the current host pipeline and installed in place on 2026-11-19 with the user's approval; uid and token ID unchanged.",
+  "windowContentFix": "A SurfaceView container layer's 0x0 position updates (RenderThread) set the activity window's content node to 0x0; the bridge now ignores empty layer bounds (westlake 6b80c26); Maps kept its controls after a search."
 }
