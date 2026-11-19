@@ -27,7 +27,7 @@
           },
           "silent_token_renewal": {
             "status": "observed",
-            "evidence": "A fresh signed ID token reached FotMob after expiry of its saved token."
+            "evidence": "A fresh signed ID token reached FotMob after expiry of its saved token. Re-observed 2026-11-19 on the rebuilt host: FotMob's last ID tokens were issued at 09:30 PST; after a restart at 12:35 PST Play services issued FotMob's ID token again without any screen, three hours later and past the token's one-hour lifetime, and FotMob stayed signed in."
           },
           "restart_persistence": {
             "status": "observed",
@@ -121,7 +121,7 @@
           },
           "video_playback": {
             "status": "observed",
-            "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open. 2026-11-18, signed in, current build: pre-roll ads played with advancing frames; the chosen public video showed its first frame and then stopped advancing for over a minute. The app's own UI below and over the video stayed black: the video's surface window sits above the app's window (known order gap), so its controls were not visible. Signed-in playback remains open."
+            "evidence": "The original APK played a public clip to the end. Repeats included a retained guest profile. Signed-in playback and physical audibility remain open. 2026-11-18, signed in, current build: pre-roll ads played with advancing frames; the chosen public video showed its first frame and then stopped advancing for over a minute. The app's own UI below and over the video stayed black: the video's surface window sits above the app's window (known order gap), so its controls were not visible. Signed-in playback remains open. 2026-11-19 with the window content fix (signed in): the watch page kept its title, buttons, comments and next video drawn below the playing video; frames advanced for about 30 seconds, then the player reported a playback problem, and a retry stopped at the same position. OpenHarmony's video decoder logged no error. Signed-in playback to the end remains open."
           },
           "restart_persistence": {
             "status": "observed",
@@ -236,7 +236,7 @@
           },
           "search": {
             "status": "observed",
-            "evidence": "Guest place search returned a result with the services connected. Signed-in place search remains open. Re-observed 2026-11-18 (guest): the same place query moved the map to the result and placed a pin. After the keyboard opened, Maps' own controls and place card stayed hidden under the map surface (window order gap); the query was typed through the test input path."
+            "evidence": "Guest place search returned a result with the services connected. Signed-in place search remains open. Re-observed 2026-11-18 (guest): the same place query moved the map to the result and placed a pin. After the keyboard opened, Maps' own controls and place card stayed hidden under the map surface (window order gap); the query was typed through the test input path. Re-observed 2026-11-19 with the window content fix (westlake 6b80c26, guest): after the search the map moved to the place and its place card (Directions, Share, Save, photos) stayed on screen over the map."
           },
           "real_location": {
             "status": "partial",
@@ -244,7 +244,7 @@
           },
           "route_preview": {
             "status": "observed",
-            "evidence": "The guest directions screen displayed a route preview between specified endpoints. 2026-11-18: not re-observed. From the start screen the directions button did not open the directions screen; after a search, Maps' controls stayed hidden under the map surface. The earlier observation stands."
+            "evidence": "The guest directions screen displayed a route preview between specified endpoints. 2026-11-18: not re-observed. From the start screen the directions button did not open the directions screen; after a search, Maps' controls stayed hidden under the map surface. The earlier observation stands. Re-observed 2026-11-19 with the window content fix (guest): from the place card, Directions, a start point typed and chosen from the suggestions; Maps drew both endpoints, the route lines and its route sheet (driving time and distance, transit and walking times, Preview)."
           },
           "restart_persistence": {
             "status": "observed",

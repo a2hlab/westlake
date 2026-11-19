@@ -102,5 +102,6 @@
     "com.mobilefootie.wc2010/restart_persistence": "Re-observed 2026-11-19: after a full restart FotMob opened signed in."
   },
   "fotmobHost": "Rebuilt with the current host pipeline and installed in place on 2026-11-19 with the user's approval; uid and token ID unchanged.",
-  "windowContentFix": "A SurfaceView container layer's 0x0 position updates (RenderThread) set the activity window's content node to 0x0; the bridge now ignores empty layer bounds (westlake 6b80c26); Maps kept its controls after a search."
+  "windowContentFix": "A SurfaceView container layer's 0x0 position updates (RenderThread) set the activity window's content node to 0x0; the bridge now ignores empty layer bounds (westlake 6b80c26). Verified 2026-11-19 on the D600: Maps kept its place card and drew the route preview; YouTube's watch page kept its views under the playing video. Both logged the ignored empty bounds once.",
+  "boardNetwork20261119": "The board lost internet access from about 09:45 to 12:22 PST (Wi-Fi associated, every TCP connect timed out) until Wi-Fi self-cure re-associated; checks waited for it."
 }
