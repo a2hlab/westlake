@@ -22,7 +22,8 @@
     "f08b05b": "finish a non-root activity on Back",
     "56d1b31": "edge-to-edge rule from the reported SDK property",
     "e8bf81c": "serve the Services Framework settings table in Play services hosted alone",
-    "e5ee3f1": "offer the account in an app's own Play services account picker"
+    "e5ee3f1": "offer the account in an app's own Play services account picker",
+    "13b664f": "sync a Google account automatically unless told otherwise"
   },
   "grants": {
     "com.google.android.youtube": {
@@ -46,16 +47,19 @@
     "com.google.android.youtube/account_session": "observed",
     "com.google.android.youtube/restart_persistence": "observed",
     "com.google.android.gm/account_selection": "observed",
-    "com.google.android.gm/refresh": "observed",
+    "com.google.android.gm/refresh": "observed (manual pull, new message)",
     "com.google.android.apps.docs/token_renewal": "observed"
   },
   "openGaps": [
-    "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker.",
-    "Per-app sync settings default auto-sync off for a newly added account (Android: system-wide, enabled by Play services)."
+    "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker."
   ],
   "prComments": [
     "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997573345",
     "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997777097",
     "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997848231"
-  ]
+  ],
+  "syncDefault": {
+    "decision": "user, 2026-11-18: turn sync on by default for a Google account, as Android does",
+    "test": "dedicated Gmail with its explicit auto-sync entry removed: synced at start (job success), no sync-off notice"
+  }
 }

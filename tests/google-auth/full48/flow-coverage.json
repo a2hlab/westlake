@@ -162,7 +162,7 @@
         "checks": {
           "account_selection": {
             "status": "observed",
-            "evidence": "On the fresh dedicated host (its own host and initially empty app data), Gmail's setup listed the test account and Take me to Gmail entered that account's mailbox. Westlake's per-app sync default is off, so Sync Gmail was turned on in Gmail's account settings; the first sync then filled the inbox."
+            "evidence": "On the fresh dedicated host (its own host and initially empty app data), Gmail's setup listed the test account and Take me to Gmail entered that account's mailbox. Sync first had to be turned on in Gmail's account settings; with the Google-account sync default (local 13b664f) and no explicit setting, the same host synced by itself at start and showed no sync-off notice."
           },
           "mailbox_sync": {
             "status": "observed",
@@ -170,7 +170,7 @@
           },
           "refresh": {
             "status": "observed",
-            "evidence": "After the network compat library fix, Gmail's automatic sync after start fetched the newly sent test message; it appeared in Primary and its body rendered. A manual pull with another new message was not repeated."
+            "evidence": "A message the user sent at 18:49 PST was not in the original Gmail's inbox at 18:55; a manual pull at 18:55:40 showed it at the top within 15 seconds (no sync-adapter job ran, so Gmail's pull uses its own fetch). Earlier, after the network compat library fix, Gmail's automatic sync after start had fetched the first test message."
           },
           "restart_persistence": {
             "status": "observed",
