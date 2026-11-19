@@ -47,6 +47,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <mutex>
 #include <unistd.h>
 
 #include "ipc_skeleton.h"
@@ -2736,6 +2737,25 @@ void oh_rs_set_layer_bounds(int32_t sessionId, float x, float y, float w, float 
                     sessionId, x, y, w, h);
     auto node = oh_adapter::OHWindowManagerClient::getInstance().getRSSurfaceNode(sessionId);
     if (!node) return;
+    // An empty rectangle is never the window's layout. A SurfaceView's container layer carries its window's session
+    // but no size of its own, and hwui's RenderThread reports the SurfaceView's position changes on it: routed here
+    // they set the window's content node to 0x0, and the activity's views vanished over the SurfaceView below
+    // (Maps after a search, its map still showing). Android hides a layer through its visibility, not its size.
+    if (!(w > 0.0f) || !(h > 0.0f)) {
+        static std::mutex wl_emptyMu;
+        static std::set<int32_t> wl_emptySessions;
+        bool first;
+        {
+            std::lock_guard<std::mutex> lock(wl_emptyMu);
+            first = wl_emptySessions.insert(sessionId).second;
+        }
+        if (first) {
+            fprintf(stderr, "[WESTLAKE-WMC] session=%d empty layer bounds %.1fx%.1f at %.1f,%.1f ignored\n",
+                    sessionId, w, h, x, y);
+            fflush(stderr);
+        }
+        return;
+    }
     // 2026-05-11 G2.14ap: OH RSNode requires SetBounds AND SetFrame as a pair
     // (per foundation/graphic/graphic_2d/.../rs_screen_render_node.h standard
     //  usage).  Without SetFrame, Frame stays at sentinel [-inf, -inf, -inf, -inf]
