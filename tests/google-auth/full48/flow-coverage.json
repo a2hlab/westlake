@@ -4,7 +4,8 @@
   "meaning": {
     "observed": "Direct evidence for the named operation in the stated profile and build. Guest playback or guest Maps navigation does not establish signed-in behavior.",
     "partial": "One or more relevant steps ran. The intended result or a necessary control remains unverified.",
-    "open": "The records cited for the app do not demonstrate the named operation."
+    "open": "The records cited for the app do not demonstrate the named operation.",
+    "scope_change": "Removed from the required set by an explicit user decision; not evidence that the operation works."
   },
   "providers": {
     "Google": {
@@ -353,12 +354,14 @@
             "evidence": "Observed 2026-11-19: Facebook's redirect back to Spotify reached Spotify's Facebook callback activity, which Westlake launched in Spotify's own process, and the result was delivered to Facebook's login activity. Spotify then handled the login itself: it answered \"Signing up with Facebook isn't available right now. Try signing up with your email.\" and opened its email sign-up. Codex's earlier run had stopped before any return."
           },
           "account_session": {
-            "status": "open",
-            "gap": "Not observable with this Facebook account: after the authenticated return, Spotify's own service refused to create an account through Facebook (\"Signing up with Facebook isn't available right now\"), and the test Facebook account has no Spotify account. Observing it needs a Spotify account already linked to this Facebook account, or a user-approved scope change. Spotify was signed back in with Google afterwards."
+            "status": "scope_change",
+            "gap": "Not observable with this Facebook account: after the authenticated return, Spotify's own service refused to create an account through Facebook (\"Signing up with Facebook isn't available right now\"), and the test Facebook account has no Spotify account. Observing it needs a Spotify account already linked to this Facebook account, or a user-approved scope change. Spotify was signed back in with Google afterwards.",
+            "decision": "User 2026-11-20: 'skip spotify and uber' (Spotify's Facebook session and restart checks waited on a reCAPTCHA only the user can solve)."
           },
           "restart_persistence": {
-            "status": "open",
-            "gap": "Not observable with this Facebook account: after the authenticated return, Spotify's own service refused to create an account through Facebook (\"Signing up with Facebook isn't available right now\"), and the test Facebook account has no Spotify account. Observing it needs a Spotify account already linked to this Facebook account, or a user-approved scope change. Spotify was signed back in with Google afterwards."
+            "status": "scope_change",
+            "gap": "Not observable with this Facebook account: after the authenticated return, Spotify's own service refused to create an account through Facebook (\"Signing up with Facebook isn't available right now\"), and the test Facebook account has no Spotify account. Observing it needs a Spotify account already linked to this Facebook account, or a user-approved scope change. Spotify was signed back in with Google afterwards.",
+            "decision": "User 2026-11-20: 'skip spotify and uber' (Spotify's Facebook session and restart checks waited on a reCAPTCHA only the user can solve)."
           }
         }
       }
@@ -367,13 +370,12 @@
   "counts": {
     "Google": {
       "observed": 36,
-      "partial": 2,
-      "open": 1
+      "open": 1,
+      "partial": 2
     },
     "Facebook": {
       "observed": 10,
-      "partial": 0,
-      "open": 2
+      "scope_change": 2
     }
   }
 }

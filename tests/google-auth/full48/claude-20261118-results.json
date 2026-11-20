@@ -194,5 +194,10 @@
     "The keyboard stays up after leaving Maps' search field and covers the place card.",
     "YouTube's Accounts chip on the You page takes no taps (signed-out playback comparison still blocked).",
     "Back in Wattpad's reader does nothing; the reader's own back arrow works."
-  ]
+  ],
+  "scopeChanges20261120": {
+    "decision": "User 2026-11-20: 'skip spotify and uber. move to the next batch'.",
+    "spotify": "Facebook account_session and restart_persistence: scope change (ledger), not passes.",
+    "uber": "Back black-screen host fix not pursued; Uber's five flows stay observed, the Back gap stays recorded."
+  }
 }

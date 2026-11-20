@@ -1,0 +1,270 @@
+{
+  "schema": 1,
+  "batch": "two-path batch 2",
+  "date": "2026-11-20",
+  "board": "D600 (DAYU200 profile), OpenHarmony 6.1",
+  "approval": "User 2026-11-20: sign-ups with the Google test account in the 8 named apps and with the Facebook test account in the 5 that offer it, test defaults, stop at phone verification, payment, ID or age checks and CAPTCHAs; one new dedicated host per app.",
+  "scopeChanges": {
+    "com.spotify.music": "Batch 1: Facebook account_session and restart_persistence skipped by the user (2026-11-20). Not passes.",
+    "com.ubercab": "Batch 1: Back black-screen host fix skipped by the user (2026-11-20). Not a pass."
+  },
+  "stack": {
+    "framework": "v25 (adapter 56e2d93e, framework.jar 625f7c16)",
+    "libraries": "texture-window shim 00e85de5, network compat 6e265ecb, runtime 8e5d7304 (same as batch-1 Wattpad)",
+    "playServices": "official Play services on v25 with remote-host routes for the 8 new hosts (restart 2026-11-20)",
+    "accountBroker": "microG on v25m, one delegated grant per app (signer-pinned, server client ID, identity scopes, 24 h native consent)",
+    "hosts": "one dedicated host per app (org.westlake.apk.<package>), built from westlake-two-path-next with the window handoff",
+    "inputs": "original HK-corpus APKs and splits, signer verified against the corpus registry"
+  },
+  "boardSettings": [
+    "Timezone set from Asia/Shanghai to Asia/Hong_Kong (same UTC+8 clock). Duolingo's China check keys on Asia/Shanghai/Chongqing/Urumqi; with them it showed only a +86 phone and email login. The batch targets Hong Kong apps."
+  ],
+  "apps": {
+    "com.duolingo": {
+      "app": "Duolingo",
+      "version": "6.102.4 (2481)",
+      "signInSdk": "GoogleSignIn (play-services-auth) and Facebook Login",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "Welcome screen rendered on the dedicated host and on v25."
+        },
+        "google_sign_in": {
+          "status": "observed",
+          "evidence": "Sign in -> Google -> Play services' chooser (Choose an account to continue to Duolingo) listed the test account; selecting it returned OAuth and ID tokens through the broker and Duolingo's server answered with the account: 'There is no Duolingo profile for that Google account'. The first try was refused locally (client_id_not_granted): Duolingo requests the project-number client ID (<number>.apps.googleusercontent.com), not its default_web_client_id; the grant now names that ID."
+        },
+        "google_sign_up": {
+          "status": "blocked",
+          "gap": "Profile creation follows onboarding and a first lesson. Starting the lesson crashed the app: SIGSEGV in librive-android.so (Rive runtime, worker thread) at file offset 0x48c138, a 16-byte load from a null-based array (address -112) in a loop over 112-byte records. Not an EGL or GL call; cause open. The OH crash dump's backtrace offsets are 0x31000 too high (the faulting map gives 0x48c138)."
+        },
+        "onboarding": {
+          "status": "observed",
+          "evidence": "Course choice, source, level, reason, daily goal, reminder prompt (declined) and the course download all worked."
+        },
+        "facebook_sign_in": {
+          "status": "blocked",
+          "gap": "Facebook -> FacebookActivity (no Facebook app) -> CustomTabMainActivity -> Facebook's web login (m.facebook.com) rendered in Westlake's in-app web view. Focusing the email field crashed the app twice with SIGTRAP inside the in-process Chromium (Chrome_InProcRendererThread; once ThreadPoolForeground), before any credential was submitted. Same crash class as FotMob's earlier Chrome-thread trap; cause open."
+        }
+      },
+      "otherGaps": [
+        "Plain taps (tap channel 'i') reach the window but no view takes them (down=0 up=0); the main-queue click ('c') works.",
+        "Duolingo's widget prompt calls appwidget.requestPinAppWidget; Westlake answers every call with defaults and no pin result follows, so the 'I'm in' screen needs a second tap.",
+        "One start aborted with 'RenderThread Looper POLL_ERROR!' (hwui RenderThread looper epoll error); the next start was fine.",
+        "Permission checks log 'granted (one rule: denied: ...)' for BLUETOOTH, INTERACT_ACROSS_USERS and READ/WRITE_CALENDAR: an app is answered granted for permissions a rule marks denied."
+      ]
+    },
+    "com.tencent.ibg.joox": {
+      "app": "JOOX",
+      "signInSdk": "GoogleSignIn (legacy SignInHubActivity) and Facebook Login",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "The welcome/login sheet (Google, Facebook, Mobile, Email) rendered over the main tabs after a slow first draw (about a minute on a fresh stage)."
+        },
+        "region": {
+          "status": "blocked_external",
+          "evidence": "JOOX shows 'Sorry, JOOX is not available in this location.' The board's network is outside JOOX's markets; content is region-locked, not a Westlake fault."
+        },
+        "google_account_selection": {
+          "status": "observed",
+          "evidence": "Google -> Play services' legacy chain (SignInActivity -> GoogleApiActivity -> signin SignInActivity -> AccountPickerActivity). microG offered the test account to JOOX's own live picker (picker_accounts offered=true) and 'Choose an account to continue to JOOX' listed it; selecting it was accepted."
+        },
+        "google_sign_in": {
+          "status": "blocked",
+          "gap": "JOOX also requests https://www.googleapis.com/auth/user.birthday.read. With only the identity scopes granted the broker refused it (scope_not_granted). With the scope added, Play services needed Google's interactive consent (GetTokenActivity -> MinuteMaidActivity) and Google's page answered 'This device isn't Play Protect certified'. Back cancelled cleanly (RESULT_CANCELED to JOOX). Blocked by the board's uncertified status, which stays honest."
+        },
+        "facebook_sign_in": {
+          "status": "not_run",
+          "gap": "Not tried: JOOX is region-locked from the board's network, and the in-app Facebook web view crashed on Duolingo."
+        }
+      },
+      "otherGaps": [
+        "First attempt: JOOX's SignInHubActivity finished with RESULT_CANCELED a few seconds after handing off to Play services, so the incoming request was closed before the account picker (no live caller, count=0, addAccount unsupported). The retry from a fresh process did not repeat it; cause open.",
+        "One launch died at startup: Tencent FireEye's memory monitor got a null element from File.listFiles() on /proc/<pid>/fd (NPE in UnixFileSystem.resolve), and an ad SDK's handler killed the process. Not repeated in three other launches; cause open.",
+        "Play services' web 'Got it' button (MinuteMaid) showed its pressed state but did not act on a tap-channel touch; Back worked."
+      ]
+    },
+    "com.naver.linewebtoon": {
+      "app": "WEBTOON",
+      "signInSdk": "androidx Credential Manager (Play services provider) and Facebook Login",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "Splash then the login screen (Continue with Email / Google / Facebook) rendered; the first frame of the login screen appeared only after another event (frame lag)."
+        },
+        "google_account_selection": {
+          "status": "observed",
+          "evidence": "Continue with Google -> Credential Manager found no framework credential service and used Play services (androidx.credentials HiddenActivity -> GIS PendingIntent). 'Choose an account to continue to WEBTOON' listed the test account; selecting it returned RESULT_OK."
+        },
+        "google_tokens": {
+          "status": "observed",
+          "evidence": "The broker issued two OAuth tokens and an ID token for WEBTOON's server client ID (google_server_app_id) and granted the session."
+        },
+        "google_sign_in": {
+          "status": "failed",
+          "gap": "After the credential reached the app, WEBTOON showed 'Login with your Google account failed.' WEBTOON made no further Play services call; its own login step (server) refused or failed. Cause open (not observable without the app's network trace)."
+        }
+      },
+      "otherGaps": [
+        "Compose buttons need a real touch ('i'); 'c' (performClick on the View under the point) cannot reach a Compose node."
+      ]
+    },
+    "com.canva.editor": {
+      "app": "Canva",
+      "signInSdk": "GoogleSignIn (legacy SignInHubActivity) from Canva's web login",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "Splash then Canva's web-based login (LoginXActivity, 'Continue to sign up for free'); the first load needed Canva's own Reload."
+        },
+        "google_sign_in": {
+          "status": "observed",
+          "evidence": "Continue with Google -> Play services' account picker (account offered to Canva's live picker) -> test account selected; the broker issued an OAuth token, an ID token and a server auth code for Canva's server client ID, granted the session, and RESULT_OK reached Canva's login activity, which opened HomeXV2Activity."
+        },
+        "account_creation": {
+          "status": "observed",
+          "evidence": "Canva's new-account onboarding ('Let's create a Canva designed for you'): Personal projects, notifications skipped, AI-training toggle turned off, then the signed-in Templates home."
+        },
+        "restart_persistence": {
+          "status": "observed",
+          "evidence": "After a full restart Canva went straight from the splash to its signed-in home (no login screen): 'What will you Canva today?' with Home, Your Designs, Templates, Canva AI and More tabs."
+        }
+      },
+      "otherGaps": [
+        "Play services' picker showed Canva as 'com.canva.app.editor.EditorApplication' with the generic Android icon: the app label and icon were not resolved in Play services' process for this package (other apps showed theirs).",
+        "Canva's web pages load slowly on the board's WebView ('It's taking longer than expected to load'); Reload and waiting got through."
+      ]
+    },
+    "com.strava": {
+      "app": "Strava",
+      "signInSdk": "GoogleSignIn (legacy SignInHubActivity) and Facebook Login",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "Welcome carousel (Join for free / Log In) rendered; frames reached the display only after a later event (the geometry-dump request), so captures lag the app."
+        },
+        "google_tokens": {
+          "status": "observed",
+          "evidence": "Join for free -> Sign up with Google, and separately Log In -> Google: Play services' picker offered the test account; the broker issued an OAuth token, an ID token and a server auth code for Strava's server client ID, granted the session, and RESULT_OK reached LogInOrSignUpActivity both times."
+        },
+        "google_sign_in": {
+          "status": "failed",
+          "gap": "Both times Strava then started SplashActivity, which routed back to the welcome carousel (not signed in). No exception, network error, toast or AccountManager call was logged; Strava also binds Play Integrity (express) through the Play Store. Cause open; an app/server-side check failing on this uncertified board is a hypothesis, not established."
+        },
+        "facebook_sign_in": {
+          "status": "not_run",
+          "gap": "Join for free started LogInOrSignUpActivity, but its window stayed unattached (0x0 Compose root) while the welcome carousel stayed on screen; not retried this session."
+        }
+      },
+      "otherGaps": [
+        "Strava keeps six or more older activity windows attached; new windows' frames appear on the display late."
+      ]
+    },
+    "com.viu.phone": {
+      "app": "Viu",
+      "signInSdk": "GoogleSignIn, Credential Manager and Facebook Login",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "RouterActivity rendered Viu's region gate."
+        },
+        "region": {
+          "status": "blocked_external",
+          "evidence": "'Sorry, this service is not available in your country yet' with only Retry and My Downloads: Viu gates on the network location; the board's network is outside Viu's markets. No login screen was reachable, so neither Google nor Facebook sign-in could be tried."
+        },
+        "facebook_sign_in": {
+          "status": "blocked_external",
+          "gap": "Viu's region gate shows no login screen."
+        }
+      }
+    },
+    "com.dropbox.android": {
+      "app": "Dropbox",
+      "signInSdk": "Google Identity Services One Tap (BeginSignIn)",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "Welcome (Sign up / Log in) and the 'Welcome to Dropbox' sheet (Continue with Google, Continue with email) rendered."
+        },
+        "google_sign_in": {
+          "status": "failed",
+          "gap": "Continue with Google sent GIS's PendingIntent; Play services' AssistedSignInActivity (ASSISTED_SIGNIN, One Tap) closed with RESULT_CANCELED after about 2 s without showing UI, twice (also once on the sheet's own auto-prompt). No account query, broker request or denial was logged, so the decision is inside Play services (no eligible One Tap credential, a cooldown, or a server refusal); cause open. Dropbox did not fall back to the button flow that worked for Duolingo (GoogleSignInActivity)."
+        }
+      }
+    },
+    "ctrip.english": {
+      "app": "Trip.com",
+      "signInSdk": "GoogleSignIn (legacy SignInHubActivity) and Facebook Login; React Native UI",
+      "flows": {
+        "launch": {
+          "status": "observed",
+          "evidence": "Intro, notification prompt (Not Now) and the guest home (Hotels, Flights, search) rendered; React Native views need real touches ('i')."
+        },
+        "google_tokens": {
+          "status": "observed",
+          "evidence": "Sign In -> Continue with Google -> 'Choose an account to continue to Trip.com' -> test account: the broker issued OAuth and ID tokens, granted the session, and RESULT_OK reached LoginMainActivity."
+        },
+        "google_sign_in": {
+          "status": "failed",
+          "gap": "Trip.com's next page showed 'There seems to be a problem with your Internet connection. Please try again.(-503)', also after Retry. The connections Westlake logged in that window were only Trip.com's local anti-tamper probes (127.0.0.1:27042/9317, refused as on a clean phone). Cause open."
+        },
+        "facebook_sign_in": {
+          "status": "not_run",
+          "gap": "Not tried this session (Trip.com's login page fails with -503 after the Google return)."
+        }
+      }
+    }
+  },
+  "summary": {
+    "google": {
+      "observed_end_to_end": [
+        "com.canva.editor"
+      ],
+      "server_accepted_token": [
+        "com.duolingo"
+      ],
+      "tokens_delivered_app_rejected": [
+        "com.naver.linewebtoon",
+        "com.strava",
+        "ctrip.english"
+      ],
+      "blocked_uncertified_consent": [
+        "com.tencent.ibg.joox"
+      ],
+      "one_tap_cancelled_in_play_services": [
+        "com.dropbox.android"
+      ],
+      "region_locked": [
+        "com.viu.phone"
+      ]
+    },
+    "facebook": {
+      "blocked_webview_renderer_crash": [
+        "com.duolingo"
+      ],
+      "not_run": [
+        "com.tencent.ibg.joox",
+        "com.strava",
+        "ctrip.english"
+      ],
+      "region_locked": [
+        "com.viu.phone"
+      ]
+    },
+    "westlake_fixes_needed": [
+      "In-process Chromium renderer SIGTRAP when a web login field gets focus (blocks Facebook web login)",
+      "Grant model holds one server client ID per app; apps use project-number or alternate IDs (found by trial)",
+      "Window/frame lag: new activity windows (Strava, WEBTOON) attach or present late; captures show the previous window",
+      "Rive runtime crash at Duolingo's first lesson (librive-android.so)",
+      "Play services picker label/icon for Canva unresolved",
+      "appwidget pin answers (requestPinAppWidget) give no result",
+      "RenderThread Looper POLL_ERROR abort (intermittent)",
+      "Permission checks answer granted where a rule says denied"
+    ],
+    "environment": [
+      "Board timezone set to Asia/Hong_Kong for HK apps",
+      "JOOX and Viu need a Hong Kong network exit",
+      "Board is uncertified (honest): Google refuses interactive consent for extra scopes"
+    ]
+  }
+}
