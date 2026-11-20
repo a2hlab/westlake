@@ -104,6 +104,21 @@ container, at some memory cost, which H6 measures.
 4. W3, W6 and W5.
 5. W7, W8, W9 and W10.
 
+### 4. Owners
+
+Work is split by device (proposed 2026-11-20 by the OnePlus session at the user's request, accepted by the D600
+session; for the user's review here).
+
+| Device | Items | Why there |
+|---|---|---|
+| OnePlus 6 (OpenHarmony 7.0, SceneBoard, managed launch, Adreno on Mesa, real battery, GNSS, camera, SIM, Bluetooth, NFC) | <ul><li>W10 media and hardware;</li><li>W4 on Mesa;</li><li>W2 and W5 on the managed launch;</li><li>W3 on the managed launch;</li><li>the power side of W6;</li><li>H6;</li><li>phone corpus rounds;</li><li>the non-Mali leg of H9.</li></ul> | Phone hardware and the target launch model are there. |
+| D600 (OpenHarmony 6.1, Mali with Vulkan, two-path Play setup and test accounts) | <ul><li>W9 and W8;</li><li>W1;</li><li>W7;</li><li>W3 in general (isolated and secondary processes, providers and receivers, Play services processes);</li><li>W6 push delivery;</li><li>W4 on Mali (hidden windows, PixelCopy content);</li><li>H1 to H5 and H7 to H9.</li></ul> | Google services, the Play setup and the descriptor work are there. |
+
+Shared code needs one design. W3 gets one secondary-process mechanism: the managed-launch hook on the phone, the
+spawner and Play services side on the D600, behind an interface agreed first. Changes to shared files
+(`framework/webview-shim/webview_bionic_shim.c`, `framework/package-manager/`) stay region-local and are announced
+between the sessions before merging. Each item has its own branch and needs the user's approval to merge.
+
 ## Acceptance criteria
 
 - **H1 and H2:** a published per-flow parity table for the 100-app sample, Westlake against stock Android, with
