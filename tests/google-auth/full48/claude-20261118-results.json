@@ -118,5 +118,11 @@
       "TextureView map frame import fails and hwui aborts (blocks destination search and fare preview).",
       "The soft keyboard does not open for text fields inside a WebView: OhImeBridge.show finds the WebView editor but throws AssertionError."
     ]
+  },
+  "uberMap20261119": {
+    "cause": "Board test: OH's EGL imports RGBA_8888 and BGRA_8888 native buffers as images but not RGBX_8888 (0x3000) or RGB_888 (0x3003). Uber's map set its TextureView window to RGBX_8888.",
+    "fix": "westlake ffdc31c: the bionic shim records native-image producer windows and gives them RGBA_8888 for RGBX_8888 or RGB_888. Deployed to Uber's runtime only (shim 00e85de5, previous kept as .cur-texfmt1).",
+    "result": "Destination search and fare preview observed; nothing booked. Map tiles not seen.",
+    "minor": "Back from Uber's home closes its main screen and leaves the host's black window; bringing the host forward does not reopen it."
   }
 }

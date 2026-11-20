@@ -269,12 +269,12 @@
             "evidence": "Observed 2026-11-19: after the sign-in Uber showed its signed-in home (Where to?, For you, Account tab), and the Account tab showed the account's profile."
           },
           "destination_search": {
-            "status": "open",
-            "gap": "2026-11-19: opening Where to? crashed Uber. Its search screen draws a map in a TextureView; Westlake's import of the frame as a GPU image failed (\"OH image import failed\") and Android's renderer aborted (\"Invalid GrBackendTexture\", 1200x1920). A Westlake graphics gap, not yet fixed; the check stays open."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19 with the bionic shim's texture-window fix (westlake ffdc31c) on Uber's dedicated host. Before it, opening Where to? crashed Uber: its search screen renders a map into a TextureView set to RGBX_8888, which OH's EGL cannot import, and hwui aborted. With the fix Where to? opened Plan your ride, and typed places returned Uber's suggestions for the pickup and the destination (public places: an airport and a train station, with the destination's distance from the pickup)."
           },
           "fare_preview_without_booking": {
-            "status": "open",
-            "gap": "2026-11-19: opening Where to? crashed Uber. Its search screen draws a map in a TextureView; Westlake's import of the frame as a GPU image failed (\"OH image import failed\") and Android's renderer aborted (\"Invalid GrBackendTexture\", 1200x1920). A Westlake graphics gap, not yet fixed; the check stays open. No fare was previewed and nothing was booked."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19: after the destination was chosen, Uber's Choose a ride sheet listed four ride options with prices and pickup times. No ride was chosen or requested; the agent backed out. The map area behind the sheet stayed blank (map frames now import without an abort, but map tiles were not seen)."
           },
           "restart_persistence": {
             "status": "observed",
@@ -366,9 +366,9 @@
   },
   "counts": {
     "Google": {
-      "observed": 34,
+      "observed": 36,
       "partial": 2,
-      "open": 3
+      "open": 1
     },
     "Facebook": {
       "observed": 10,
