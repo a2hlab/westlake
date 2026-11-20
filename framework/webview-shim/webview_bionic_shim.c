@@ -5834,6 +5834,7 @@ static WlEglInt wl_egl_error(int which)
 
 static struct {
     void *window_buffer;
+    void *native_buffer;   /* the AHardwareBuffer (an OH_NativeBuffer) the window buffer is over */
     WlEglImage image;
     int implementation;
 } wl_egl_imports[256];
@@ -6215,6 +6216,280 @@ int ANativeWindow_unlockAndPost(void *window)
     return result == 0 ? 0 : -EINVAL;
 }
 
+/*
+ * A YUV buffer the driver cannot import. Mesa on the OnePlus 6 makes an image of an RGBA native
+ * buffer but of no NV12, NV21, I420 or YV12 one, and the failure sets no EGL error; a video
+ * decoder's frames are such buffers, so TextureView video aborted in hwui ("Invalid
+ * GrBackendTexture": TickTick's intro video, Kwai, Hailuo, Invitation Maker). The image is made
+ * instead from an RGBA copy of the frame, converted on the CPU. hwui binds the image again for each
+ * new frame in the same buffer (glEGLImageTargetTexture2DOES, below), and the copy is converted
+ * again first. A driver that imports YUV (the D600's Mali) never gets here.
+ */
+typedef struct { int32_t width, height, format, usage, stride; } WlNativeBufferConfig;   /* OH_NativeBuffer_Config */
+typedef struct { uint64_t offset; uint32_t row_stride, column_stride; } WlNativeBufferPlane;
+typedef struct { uint32_t count; WlNativeBufferPlane planes[4]; } WlNativeBufferPlanes;  /* OH_NativeBuffer_Planes */
+enum {
+    WL_NB_RGBA_8888 = 12, WL_NB_NV12 = 24, WL_NB_NV21 = 25, WL_NB_I420 = 28, WL_NB_YV12 = 29,
+    WL_NB_CPU_READ = 1 << 0, WL_NB_CPU_WRITE = 1 << 1, WL_NB_MEM_DMA = 1 << 3, WL_NB_HW_TEXTURE = 1 << 9,
+};
+
+static struct {
+    void *source;   /* the app's YUV buffer, referenced while the copy lives */
+    void *copy;     /* the RGBA buffer the image is made from */
+    WlEglImage image;
+} wl_egl_copies[32];
+static pthread_mutex_t wl_egl_copies_lock = PTHREAD_MUTEX_INITIALIZER;
+static int wl_egl_copies_live;
+
+static uint8_t wl_clamp_byte(int value)
+{
+    return value < 0 ? 0 : value > 255 ? 255 : (uint8_t) value;
+}
+
+/*
+ * The planes of a mapped YUV 4:2:0 buffer. OH_NativeBuffer_MapPlanes says where they are; this
+ * phone's allocator does not support it (it maps the buffer and fails), and keeps a YUV buffer as
+ * one plane of the format's rows: the chroma rows follow the luma rows at stride * height, as the
+ * decoder writes them (its slice height is the buffer's height).
+ */
+static int wl_yuv_planes(void *buffer, const WlNativeBufferConfig *config, uint8_t **base, const uint8_t **y,
+                         const uint8_t **u, const uint8_t **v, uint32_t *y_stride, uint32_t *c_stride, uint32_t *c_step)
+{
+    typedef int32_t (*MapPlanesFn)(void *, void **, WlNativeBufferPlanes *);
+    typedef int32_t (*MapFn)(void *, void **);
+    MapPlanesFn map_planes = (MapPlanesFn) wl_native_buffer_symbol("OH_NativeBuffer_MapPlanes");
+    MapFn map = (MapFn) wl_native_buffer_symbol("OH_NativeBuffer_Map");
+    void *address = NULL;
+    WlNativeBufferPlanes planes;
+    memset(&planes, 0, sizeof(planes));
+    int32_t rc = map_planes != NULL ? map_planes(buffer, &address, &planes) : -1;
+    if (address == NULL && (map == NULL || map(buffer, &address) != 0 || address == NULL)) return -1;
+    *base = (uint8_t *) address;
+    int crcb = config->format == WL_NB_NV21 || config->format == WL_NB_YV12;
+    if (rc == 0 && planes.count >= 3) {
+        /* Which chroma plane comes first in memory, Cb or Cr, is the format's. */
+        const WlNativeBufferPlane *first = &planes.planes[1], *second = &planes.planes[2];
+        if (second->offset < first->offset) {
+            const WlNativeBufferPlane *t = first;
+            first = second;
+            second = t;
+        }
+        *y = *base + planes.planes[0].offset;
+        *u = *base + (crcb ? second : first)->offset;
+        *v = *base + (crcb ? first : second)->offset;
+        *y_stride = planes.planes[0].row_stride;
+        *c_stride = first->row_stride;
+        *c_step = first->column_stride != 0 ? first->column_stride : 1;
+        return 0;
+    }
+    if (rc == 0 && planes.count == 2) {   /* luma, then the chroma samples interleaved */
+        const uint8_t *chroma = *base + planes.planes[1].offset;
+        *y = *base + planes.planes[0].offset;
+        *u = crcb ? chroma + 1 : chroma;
+        *v = crcb ? chroma : chroma + 1;
+        *y_stride = planes.planes[0].row_stride;
+        *c_stride = planes.planes[1].row_stride;
+        *c_step = planes.planes[1].column_stride != 0 ? planes.planes[1].column_stride : 2;
+        return 0;
+    }
+    uint32_t stride = (uint32_t) config->stride, height = (uint32_t) config->height;
+    const uint8_t *chroma = *base + (size_t) stride * height;
+    *y = *base;
+    *y_stride = stride;
+    if (config->format == WL_NB_NV12 || config->format == WL_NB_NV21) {
+        *u = crcb ? chroma + 1 : chroma;
+        *v = crcb ? chroma : chroma + 1;
+        *c_stride = stride;
+        *c_step = 2;
+    } else {
+        const uint8_t *second = chroma + (size_t) (stride / 2) * ((height + 1) / 2);
+        *u = crcb ? second : chroma;
+        *v = crcb ? chroma : second;
+        *c_stride = stride / 2;
+        *c_step = 1;
+    }
+    return 0;
+}
+
+/* The source's frame into the copy (RGBA_8888, the same size): BT.601 below 720 lines, BT.709 from there, video range. */
+static int wl_yuv_convert(void *source, void *copy)
+{
+    typedef void (*GetConfigFn)(void *, WlNativeBufferConfig *);
+    typedef int32_t (*MapFn)(void *, void **);
+    typedef int32_t (*UnmapFn)(void *);
+    GetConfigFn get_config = (GetConfigFn) wl_native_buffer_symbol("OH_NativeBuffer_GetConfig");
+    MapFn map = (MapFn) wl_native_buffer_symbol("OH_NativeBuffer_Map");
+    UnmapFn unmap = (UnmapFn) wl_native_buffer_symbol("OH_NativeBuffer_Unmap");
+    if (get_config == NULL || map == NULL || unmap == NULL) return -1;
+    WlNativeBufferConfig in, out;
+    memset(&in, 0, sizeof(in));
+    memset(&out, 0, sizeof(out));
+    get_config(source, &in);
+    get_config(copy, &out);
+    if (in.width <= 0 || in.height <= 0 || out.width < in.width || out.height < in.height) return -1;
+    uint8_t *base = NULL, *dst = NULL;
+    const uint8_t *y, *u, *v;
+    uint32_t y_stride, c_stride, c_step;
+    if (wl_yuv_planes(source, &in, &base, &y, &u, &v, &y_stride, &c_stride, &c_step) != 0) return -1;
+    if (map(copy, (void **) &dst) != 0 || dst == NULL) {
+        unmap(source);
+        return -1;
+    }
+    int hd = in.height >= 720;
+    const int ky = 298, kvr = hd ? 459 : 409, kug = hd ? 55 : 100, kvg = hd ? 136 : 208, kub = hd ? 541 : 516;
+    for (int32_t row = 0; row < in.height; row++) {
+        const uint8_t *yr = y + (size_t) row * y_stride;
+        const uint8_t *ur = u + (size_t) (row / 2) * c_stride, *vr = v + (size_t) (row / 2) * c_stride;
+        uint8_t *o = dst + (size_t) row * (uint32_t) out.stride;
+        for (int32_t col = 0; col < in.width; col++) {
+            int c = (yr[col] - 16) * ky, d = ur[(col / 2) * c_step] - 128, e = vr[(col / 2) * c_step] - 128;
+            o[0] = wl_clamp_byte((c + kvr * e + 128) >> 8);
+            o[1] = wl_clamp_byte((c - kug * d - kvg * e + 128) >> 8);
+            o[2] = wl_clamp_byte((c + kub * d + 128) >> 8);
+            o[3] = 255;
+            o += 4;
+        }
+    }
+    unmap(copy);
+    unmap(source);
+    return 0;
+}
+
+/* An image of an RGBA copy of a YUV buffer, by the implementation that refused the buffer; NULL when it is not YUV. */
+static WlEglImage wl_egl_copy_image(int implementation, WlEglDisplay display, WlEglContext context,
+                                    const WlEglInt *attribs, void *source, void **copy_window_buffer)
+{
+    typedef void (*GetConfigFn)(void *, WlNativeBufferConfig *);
+    typedef void *(*AllocFn)(const WlNativeBufferConfig *);
+    typedef int32_t (*ReferenceFn)(void *);
+    typedef void *(*WindowBufferFn)(void *);
+    GetConfigFn get_config = (GetConfigFn) wl_native_buffer_symbol("OH_NativeBuffer_GetConfig");
+    AllocFn alloc = (AllocFn) wl_native_buffer_symbol("OH_NativeBuffer_Alloc");
+    ReferenceFn reference = (ReferenceFn) wl_native_buffer_symbol("OH_NativeBuffer_Reference");
+    ReferenceFn unreference = (ReferenceFn) wl_native_buffer_symbol("OH_NativeBuffer_Unreference");
+    WindowBufferFn window_buffer_of =
+            (WindowBufferFn) wl_native_window_symbol("OH_NativeWindow_CreateNativeWindowBufferFromNativeBuffer");
+    if (implementation < 0 || source == NULL || get_config == NULL || alloc == NULL || reference == NULL ||
+        unreference == NULL || window_buffer_of == NULL || wl_egl_implementations[implementation].create_image == NULL) {
+        return NULL;
+    }
+    WlNativeBufferConfig config;
+    memset(&config, 0, sizeof(config));
+    get_config(source, &config);
+    if (config.format != WL_NB_NV12 && config.format != WL_NB_NV21 && config.format != WL_NB_I420 &&
+        config.format != WL_NB_YV12) {
+        return NULL;
+    }
+    WlNativeBufferConfig rgba = { config.width, config.height, WL_NB_RGBA_8888,
+                                  WL_NB_CPU_READ | WL_NB_CPU_WRITE | WL_NB_MEM_DMA | WL_NB_HW_TEXTURE, 0 };
+    void *copy = alloc(&rgba);
+    if (copy == NULL) return NULL;
+    void *window_buffer = wl_yuv_convert(source, copy) == 0 ? window_buffer_of(copy) : NULL;
+    WlEglImage image = window_buffer != NULL ?
+            wl_egl_implementations[implementation].create_image(display, context, WL_EGL_NATIVE_BUFFER_OHOS,
+                                                                window_buffer, attribs) : NULL;
+    int recorded = 0;
+    if (image != NULL) {
+        pthread_mutex_lock(&wl_egl_copies_lock);
+        for (size_t i = 0; i < sizeof(wl_egl_copies) / sizeof(wl_egl_copies[0]); i++) {
+            if (wl_egl_copies[i].image == NULL) {
+                reference(source);
+                wl_egl_copies[i].source = source;
+                wl_egl_copies[i].copy = copy;
+                wl_egl_copies[i].image = image;
+                __atomic_add_fetch(&wl_egl_copies_live, 1, __ATOMIC_RELEASE);
+                recorded = 1;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&wl_egl_copies_lock);
+        if (!recorded && wl_egl_implementations[implementation].destroy_image != NULL) {
+            wl_egl_implementations[implementation].destroy_image(display, image);
+        }
+    }
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-EGL] YUV buffer (OH format %d, %dx%d) the driver cannot import: %s\n", config.format,
+                      config.width, config.height, recorded ? "shown through an RGBA copy" :
+                      image != NULL ? "no free copy slot" : "its RGBA copy failed too");
+    }
+    if (recorded) {
+        *copy_window_buffer = window_buffer;
+        return image;
+    }
+    wl_destroy_window_buffer(window_buffer);
+    unreference(copy);
+    return NULL;
+}
+
+/* The copy made for this image, if any, out of the table (before the image goes: its handle may be reused). */
+static void wl_egl_take_copy(WlEglImage image, void **source, void **copy)
+{
+    *source = *copy = NULL;
+    if (image == NULL || __atomic_load_n(&wl_egl_copies_live, __ATOMIC_ACQUIRE) == 0) return;
+    pthread_mutex_lock(&wl_egl_copies_lock);
+    for (size_t i = 0; i < sizeof(wl_egl_copies) / sizeof(wl_egl_copies[0]); i++) {
+        if (wl_egl_copies[i].image == image) {
+            *source = wl_egl_copies[i].source;
+            *copy = wl_egl_copies[i].copy;
+            memset(&wl_egl_copies[i], 0, sizeof(wl_egl_copies[i]));
+            __atomic_sub_fetch(&wl_egl_copies_live, 1, __ATOMIC_RELEASE);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wl_egl_copies_lock);
+}
+
+/* Its buffers released, after the image. */
+static void wl_egl_drop_copy(void *source, void *copy)
+{
+    typedef int32_t (*UnreferenceFn)(void *);
+    UnreferenceFn unreference = (UnreferenceFn) wl_native_buffer_symbol("OH_NativeBuffer_Unreference");
+    if (unreference != NULL && copy != NULL) unreference(copy);
+    if (unreference != NULL && source != NULL) unreference(source);
+}
+
+/*
+ * glEGLImageTargetTexture2DOES: for an image made from a copy, the copy is converted from its source
+ * first (the frame the buffer holds now); then the call goes to the implementation current on this
+ * thread (the GL function its EGL library gives), which is where the caller's import went before
+ * this definition: libhwui calls it through its PLT, so this preloaded one wins.
+ */
+typedef void (*WlImageTargetFn)(unsigned, void *);
+static WlImageTargetFn wl_image_target_of[WL_EGL_IMPLEMENTATIONS], wl_image_target_next;
+
+void glEGLImageTargetTexture2DOES(unsigned target, void *image)
+{
+    if (image != NULL && __atomic_load_n(&wl_egl_copies_live, __ATOMIC_ACQUIRE) > 0) {
+        pthread_mutex_lock(&wl_egl_copies_lock);
+        for (size_t i = 0; i < sizeof(wl_egl_copies) / sizeof(wl_egl_copies[0]); i++) {
+            if (wl_egl_copies[i].image == image) {
+                wl_yuv_convert(wl_egl_copies[i].source, wl_egl_copies[i].copy);
+                break;
+            }
+        }
+        pthread_mutex_unlock(&wl_egl_copies_lock);
+    }
+    pthread_once(&wl_egl_implementations_once, wl_egl_find_implementations);
+    WlImageTargetFn fn = NULL;
+    for (int i = 0; i < wl_egl_implementation_count && fn == NULL; i++) {
+        if (wl_egl_implementations[i].current_display() == NULL) continue;
+        fn = __atomic_load_n(&wl_image_target_of[i], __ATOMIC_ACQUIRE);
+        if (fn == NULL) {
+            fn = (WlImageTargetFn) wl_egl_entry(wl_egl_implementations[i].library, "glEGLImageTargetTexture2DOES");
+            if (fn != NULL) __atomic_store_n(&wl_image_target_of[i], fn, __ATOMIC_RELEASE);
+        }
+    }
+    if (fn == NULL) {
+        fn = __atomic_load_n(&wl_image_target_next, __ATOMIC_ACQUIRE);
+        if (fn == NULL) {
+            fn = (WlImageTargetFn) dlsym(RTLD_NEXT, "glEGLImageTargetTexture2DOES");
+            if (fn != NULL) __atomic_store_n(&wl_image_target_next, fn, __ATOMIC_RELEASE);
+        }
+    }
+    if (fn != NULL) fn(target, image);
+}
+
 WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
 {
     static void *(*create)(void *);
@@ -6232,6 +6507,7 @@ WlEglClientBuffer eglGetNativeClientBufferANDROID(const void *buffer)
     int full = slot == sizeof(wl_egl_imports) / sizeof(wl_egl_imports[0]);
     if (!full) {
         wl_egl_imports[slot].window_buffer = window_buffer;
+        wl_egl_imports[slot].native_buffer = (void *) buffer;
         wl_egl_imports[slot].image = NULL;
     }
     pthread_mutex_unlock(&wl_egl_imports_lock);
@@ -6267,8 +6543,19 @@ WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigne
         if (image == NULL && k + 1 < count && (code = wl_egl_error(used)) != WL_EGL_BAD_DISPLAY) break;
     }
     if (!ours) return image;
+    void *copy_window_buffer = NULL;
+    if (image == NULL) {
+        /* A YUV buffer the driver refused: an image of an RGBA copy instead (wl_egl_copy_image). */
+        pthread_mutex_lock(&wl_egl_imports_lock);
+        void *source = wl_egl_imports[slot].native_buffer;
+        pthread_mutex_unlock(&wl_egl_imports_lock);
+        if (code == 0 && used >= 0) code = wl_egl_error(used);
+        image = wl_egl_copy_image(used, display, context, attribs, source, &copy_window_buffer);
+    }
     pthread_mutex_lock(&wl_egl_imports_lock);
     if (image != NULL) {
+        /* An image of a copy keeps the copy's window buffer; the client buffer's goes now. */
+        if (copy_window_buffer != NULL) wl_egl_imports[slot].window_buffer = copy_window_buffer;
         wl_egl_imports[slot].image = image;
         wl_egl_imports[slot].implementation = used;
         wl_egl_imports_created++;
@@ -6276,11 +6563,11 @@ WlEglImage eglCreateImageKHR(WlEglDisplay display, WlEglContext context, unsigne
         wl_egl_imports[slot].window_buffer = NULL;
     }
     pthread_mutex_unlock(&wl_egl_imports_lock);
+    if (copy_window_buffer != NULL) wl_destroy_window_buffer(buffer);
     if (image == NULL) {
-        if (code == 0 && used >= 0) code = wl_egl_error(used);
         wl_relocs_log("[WESTLAKE-EGL] OH image import failed: 0x%x\n", (unsigned) code);
         wl_destroy_window_buffer(buffer);
-    } else {
+    } else if (copy_window_buffer == NULL) {
         static int logged;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
             wl_relocs_log("[WESTLAKE-EGL] AHardwareBuffer imported as an OH native buffer image (implementation %d)\n",
@@ -6306,6 +6593,8 @@ unsigned eglDestroyImageKHR(WlEglDisplay display, WlEglImage image)
         }
     }
     pthread_mutex_unlock(&wl_egl_imports_lock);
+    void *copy_source, *copy;
+    wl_egl_take_copy(image, &copy_source, &copy);
     int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
     if (made_by >= 0) {
         order[0] = made_by;
@@ -6319,6 +6608,7 @@ unsigned eglDestroyImageKHR(WlEglDisplay display, WlEglImage image)
         if (!result && k + 1 < count && wl_egl_error(order[k]) != WL_EGL_BAD_DISPLAY) break;
     }
     wl_destroy_window_buffer(window_buffer);
+    wl_egl_drop_copy(copy_source, copy);
     return result;
 }
 
