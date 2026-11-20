@@ -124,5 +124,23 @@
     "fix": "westlake ffdc31c: the bionic shim records native-image producer windows and gives them RGBA_8888 for RGBX_8888 or RGB_888. Deployed to Uber's runtime only (shim 00e85de5, previous kept as .cur-texfmt1).",
     "result": "Destination search and fare preview observed; nothing booked. Map tiles not seen.",
     "minor": "Back from Uber's home closes its main screen and leaves the host's black window; bringing the host forward does not reopen it."
+  },
+  "rollout20261119": {
+    "what": "Framework v25 (westlake 4c7144b links and launch modes, db85941 WebView keyboard, on the branch's v22 base) and the bionic shim with ffdc31c (texture windows RGBA) rolled out on the D600; every runtime had the same base shim, so the swap changed only the fix.",
+    "smokeChecks": {
+      "Maps": "shim only (its framework base differs from v25's; deploy refused, as designed): place search, tiles and place card.",
+      "YouTube": "v25 + shim: signed-in home, search, watch page playing.",
+      "FotMob": "v25 + shim: matches incl. followed teams; signed in (More).",
+      "Gmail": "v25 + shim: signed-in inbox synced.",
+      "Drive": "v25 + shim: signed in; My Drive lists the account's file.",
+      "Spotify": "v25 + shim: signed in; Your Library loads followed artists (home feed error predates v25).",
+      "Uber": "v25 + shim (see uber20261119).",
+      "Wattpad": "v25 + shim (keyboard fix verified on its help site)."
+    },
+    "notV25": [
+      "YouTube's 24 h Play services consent had expired at 17:30 (renewed under the user's standing approval for per-app grants; times only).",
+      "The board lost internet at ~17:35 (DNS ok, TCP timeouts); wpa_cli reassociate restored it in 30 s."
+    ],
+    "pending": "Play services and microG launches stay on v22; a Google sign-in flow should be re-run when they move to v25."
   }
 }
