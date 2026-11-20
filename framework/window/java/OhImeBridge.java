@@ -182,7 +182,8 @@ public final class OhImeBridge {
             } else {
                 sSession = null; // Discard queued edits before detaching.
                 if (previous != null) {
-                    previous.connection.finishComposingText();
+                    final InputConnection old = previous.connection;
+                    onConnectionThread(old, old::finishComposingText);
                     if (!nativeHideKeyboardCapi()) return false;
                 }
                 connection = focusedInputConnection();
@@ -197,9 +198,50 @@ public final class OhImeBridge {
             System.err.println("[" + TAG + "] show -> nativeShowKeyboard=" + r);
             return r;
         } catch (Throwable t) {
-            System.err.println("[" + TAG + "] show failed: " + t);
+            System.err.println("[" + TAG + "] show failed: " + describe(t));
             return false;
         }
+    }
+
+    /**
+     * The thread a connection takes its calls on, when it is not the main thread. A WebView's
+     * connection (Chromium's ThreadedInputConnection) answers only on its own input thread, the
+     * Handler it returns, and Android's input manager calls it there. Called from the main thread it
+     * fails its thread check (AssertionError), and the keyboard never opened for a field in a web
+     * page: Uber's and Facebook's sign-in forms. An EditText's connection has no Handler.
+     */
+    private static Handler connectionHandler(InputConnection ic) {
+        Handler handler = null;
+        try {
+            handler = ic.getHandler();
+        } catch (Throwable ignored) {
+            // A connection that cannot say takes its calls on the main thread.
+        }
+        return handler != null && handler.getLooper() != Looper.getMainLooper() ? handler : null;
+    }
+
+    /**
+     * Runs action on the connection's own thread, without waiting for it there, else here. A failure
+     * is logged, never thrown: on the connection's thread it would end the app.
+     */
+    private static void onConnectionThread(InputConnection ic, final Runnable action) {
+        Runnable guarded = () -> {
+            try {
+                action.run();
+            } catch (Throwable t) {
+                System.err.println("[" + TAG + "] connection call failed: " + describe(t));
+            }
+        };
+        Handler own = connectionHandler(ic);
+        if (own == null || own.getLooper() == Looper.myLooper()) guarded.run();
+        else own.post(guarded);
+    }
+
+    private static String describe(Throwable t) {
+        StringBuilder text = new StringBuilder(String.valueOf(t));
+        StackTraceElement[] frames = t.getStackTrace();
+        for (int i = 0; i < Math.min(3, frames.length); i++) text.append(" at ").append(frames[i]);
+        return text.toString();
     }
 
     /** Hide the OHOS soft keyboard. Called from the IMM adapter. */
@@ -211,7 +253,10 @@ public final class OhImeBridge {
             NativeLoader.ensureLoaded();
             Session previous = sSession;
             sSession = null;
-            if (previous != null) previous.connection.finishComposingText();
+            if (previous != null) {
+                final InputConnection old = previous.connection;
+                onConnectionThread(old, old::finishComposingText);
+            }
             boolean r = nativeHideKeyboardCapi();
             System.err.println("[" + TAG + "] hide -> nativeHideKeyboard=" + r);
             return r;
@@ -346,58 +391,63 @@ public final class OhImeBridge {
         if (session == null) return;
         uiHandler().post(new Runnable() {
             @Override public void run() {
-                try {
-                    if (!session.current()) {
-                        System.err.println("[" + TAG + "] stale edit discarded generation=" + session.generation);
-                        return;
-                    }
-                    InputConnection ic = session.connection;
-                    ic.beginBatchEdit();
-                    try {
-                    if (op == OP_INSERT) {
-                        ic.commitText(text, 1);
-                    } else if (op == OP_DEL_BEFORE) {
-                        CharSequence selected = ic.getSelectedText(0);
-                        if (selected != null && selected.length() > 0) ic.commitText("", 1);
-                        else if (arg > 0) deleteCodePoints(ic, arg, true);
-                    } else if (op == OP_DEL_AFTER) {
-                        CharSequence selected = ic.getSelectedText(0);
-                        if (selected != null && selected.length() > 0) ic.commitText("", 1);
-                        else if (arg > 0) deleteCodePoints(ic, arg, false);
-                    } else if (op == OP_ENTER) {
-                        int action = sImeOptions & EditorInfo.IME_MASK_ACTION;
-                        if (action != EditorInfo.IME_ACTION_NONE
-                                && action != EditorInfo.IME_ACTION_UNSPECIFIED
-                                && ic.performEditorAction(action)) return;
-                        long now = SystemClock.uptimeMillis();
-                        ic.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_DOWN,
-                                KeyEvent.KEYCODE_ENTER, 0));
-                        ic.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_UP,
-                                KeyEvent.KEYCODE_ENTER, 0));
-                    } else if (op == 4) {
-                        if (arg >= 0 && rangeEnd >= arg) ic.setComposingRegion(arg, rangeEnd);
-                        ic.setComposingText(text, 1);
-                    } else if (op == 5) {
-                        ic.finishComposingText();
-                    } else if (op == 6) {
-                        int end = text == null ? rangeEnd : Integer.parseInt(text);
-                        if (arg >= 0 && end >= 0) ic.setSelection(arg, end);
-                    } else if (op == 7) {
-                        ic.performContextMenuAction(arg);
-                    } else if (op == 8) {
-                        ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, arg));
-                        ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, arg));
-                    }
-                    } finally {
-                        ic.endBatchEdit();
-                        updateSnapshot(ic);
-                    }
-                    System.err.println("[" + TAG + "] runOp(" + op + ") done");
-                } catch (Throwable t) {
-                    System.err.println("[" + TAG + "] runOp(" + op + ") failed: " + t);
+                if (!session.current()) {
+                    System.err.println("[" + TAG + "] stale edit discarded generation=" + session.generation);
+                    return;
                 }
+                // The session is checked here; the edit runs on the connection's own thread.
+                final InputConnection connection = session.connection;
+                onConnectionThread(connection, () -> applyOp(connection, op, arg, text, rangeEnd));
             }
         });
+    }
+
+    private static void applyOp(InputConnection ic, int op, int arg, String text, int rangeEnd) {
+        try {
+            ic.beginBatchEdit();
+            try {
+            if (op == OP_INSERT) {
+                ic.commitText(text, 1);
+            } else if (op == OP_DEL_BEFORE) {
+                CharSequence selected = ic.getSelectedText(0);
+                if (selected != null && selected.length() > 0) ic.commitText("", 1);
+                else if (arg > 0) deleteCodePoints(ic, arg, true);
+            } else if (op == OP_DEL_AFTER) {
+                CharSequence selected = ic.getSelectedText(0);
+                if (selected != null && selected.length() > 0) ic.commitText("", 1);
+                else if (arg > 0) deleteCodePoints(ic, arg, false);
+            } else if (op == OP_ENTER) {
+                int action = sImeOptions & EditorInfo.IME_MASK_ACTION;
+                if (action != EditorInfo.IME_ACTION_NONE
+                        && action != EditorInfo.IME_ACTION_UNSPECIFIED
+                        && ic.performEditorAction(action)) return;
+                long now = SystemClock.uptimeMillis();
+                ic.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_DOWN,
+                        KeyEvent.KEYCODE_ENTER, 0));
+                ic.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_UP,
+                        KeyEvent.KEYCODE_ENTER, 0));
+            } else if (op == 4) {
+                if (arg >= 0 && rangeEnd >= arg) ic.setComposingRegion(arg, rangeEnd);
+                ic.setComposingText(text, 1);
+            } else if (op == 5) {
+                ic.finishComposingText();
+            } else if (op == 6) {
+                int end = text == null ? rangeEnd : Integer.parseInt(text);
+                if (arg >= 0 && end >= 0) ic.setSelection(arg, end);
+            } else if (op == 7) {
+                ic.performContextMenuAction(arg);
+            } else if (op == 8) {
+                ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, arg));
+                ic.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, arg));
+            }
+            } finally {
+                ic.endBatchEdit();
+                updateSnapshot(ic);
+            }
+            System.err.println("[" + TAG + "] runOp(" + op + ") done");
+        } catch (Throwable t) {
+            System.err.println("[" + TAG + "] runOp(" + op + ") failed: " + describe(t));
+        }
     }
 
     // Use Unicode extended grapheme boundaries for user-visible characters,
@@ -467,8 +517,13 @@ public final class OhImeBridge {
         runOp(8, code, null);
     }
 
-    private static void updateSnapshot(InputConnection ic) {
+    private static void updateSnapshot(final InputConnection ic) {
         if (ic == null) return;
+        Handler own = connectionHandler(ic);
+        if (own != null && own.getLooper() != Looper.myLooper()) {
+            own.post(() -> updateSnapshot(ic));   // read on the connection's thread; no waiting here
+            return;
+        }
         try {
             CharSequence before = ic.getTextBeforeCursor(8192, 0);
             CharSequence after = ic.getTextAfterCursor(8192, 0);
@@ -492,9 +547,16 @@ public final class OhImeBridge {
                     nativeNotifySelectionCapi(extracted.text.toString(), sCursor, sSelectionEnd);
                 else OhImeMetadata.selection(extracted.text.toString(), sCursor, sSelectionEnd);
             }
-        } catch (RuntimeException ignored) {
+        } catch (Throwable error) {
+            // Never thrown on: this can run on the connection's own thread, where it would end the app.
+            if (!sSnapshotFailureLogged) {
+                sSnapshotFailureLogged = true;
+                System.err.println("[" + TAG + "] snapshot failed: " + describe(error));
+            }
             sBefore = "";
             sAfter = "";
         }
     }
+
+    private static volatile boolean sSnapshotFailureLogged;
 }
