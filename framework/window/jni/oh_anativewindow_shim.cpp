@@ -667,6 +667,37 @@ int aanw_perform(struct ANativeWindow* w, int op, ...) {
             // Private / deprecated ops — hwui 通常不调；安全忽略。
             rc = 0;
             break;
+        case NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER:
+        case NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER2: {
+            // PixelCopy of a window (hwui's Readback::copySurfaceInto) asks for the last queued
+            // buffer and its fence, and closes that fence on every return path unless it is -1.
+            // The OH window gives no buffer back here, so the answer is Android's "nothing
+            // queued" (no buffer, fence -1), written before the error. Left unwritten, the caller
+            // closed whatever its stack held: another thread's descriptor whenever that number was
+            // open (an app taking window screenshots killed Chromium's sockets and the render
+            // thread's own epoll descriptor).
+            AHardwareBuffer** outBuffer = va_arg(ap, AHardwareBuffer**);
+            int* outFence = va_arg(ap, int*);
+            if (outBuffer != nullptr) *outBuffer = nullptr;
+            if (outFence != nullptr) *outFence = -1;
+            if (op == NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER2) {
+                ARect* outCrop = va_arg(ap, ARect*);
+                uint32_t* outTransform = va_arg(ap, uint32_t*);
+                if (outCrop != nullptr) *outCrop = ARect{0, 0, 0, 0};
+                if (outTransform != nullptr) *outTransform = 0;
+            } else {
+                float* outMatrix = va_arg(ap, float*);
+                if (outMatrix != nullptr) {
+                    for (int i = 0; i < 16; i++) outMatrix[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+                }
+            }
+            static std::atomic<bool> warned{false};
+            if (!warned.exchange(true)) {
+                ALOGW("perform op=%d: no last queued buffer from the OH window", op);
+            }
+            rc = -ENOSYS;
+            break;
+        }
         default:
             ALOGW("perform unsupported op=%d", op);
             rc = -ENOSYS;
