@@ -412,6 +412,15 @@ public final class GoogleAuthProxy {
         }
     }
 
+    private static String authorizationSigner(String packageName) {
+        try {
+            return (String) Class.forName("adapter.activity.GoogleAuthorizationOperations")
+                    .getMethod("liveSigner", String.class).invoke(null, packageName);
+        } catch (Exception unavailable) {
+            return null;
+        }
+    }
+
     private static boolean interactiveCaller(String packageName) throws Exception {
         return (Boolean) Class.forName("adapter.activity.RemoteActivities")
                 .getMethod("isInteractiveCaller", String.class).invoke(null, packageName);
@@ -431,13 +440,20 @@ public final class GoogleAuthProxy {
         // account list comes from Play services' accounts provider, which asks for Gmail's accounts by package.
         boolean serving = servingCallFrom(target);
         String signer = serving ? currentSigner(target) : null;
+        // An asynchronous Authorization API request of the target's own counts as serving it while it is
+        // live (its callback, death and deadline end it), with the signer verified when it was made.
+        boolean authorizing = false;
+        if (signer == null) {
+            String live = authorizationSigner(target);
+            if (live != null && live.equals(currentSigner(target))) { signer = live; authorizing = true; }
+        }
         Account[] visible = new Account[0];
         if (signer != null) {
             try { visible = packageAccounts(target, signer); }
             catch (Exception unavailable) { visible = new Account[0]; }
         }
-        event("package_accounts target=" + target + " serving=" + serving + " signer=" + (signer != null)
-                + " count=" + visible.length);
+        event("package_accounts target=" + target + " serving=" + serving + " authorizing=" + authorizing
+                + " signer=" + (signer != null) + " count=" + visible.length);
         if (visible.length > 0) return visible;
         // Otherwise only the target's own live picker, which offers the account for the user to choose.
         if (!interactiveCaller(target)) return new Account[0];

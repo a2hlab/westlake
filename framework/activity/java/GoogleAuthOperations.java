@@ -64,6 +64,8 @@ public final class GoogleAuthOperations {
             IBinder target, int code, Parcel data, int flags) throws RemoteException {
         if (enabled() && code == 101)
             return GoogleAsyncAuthOperations.enter(origin, pid, spawner, channel, target, code, data, flags);
+        if (enabled() && code == 1 && GoogleAuthorizationOperations.SERVICE.equals(target.getInterfaceDescriptor()))
+            return GoogleAuthorizationOperations.enter(origin, channel, target, code, data, flags);
         if (!enabled() || code != 5 || !AUTH.equals(target.getInterfaceDescriptor())) return null;
         Operation operation = new Operation(origin, pid, spawner, channel, CURRENT.get());
         int position = data.dataPosition();
