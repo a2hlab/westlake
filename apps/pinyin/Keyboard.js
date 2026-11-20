@@ -76,8 +76,9 @@ class Keyboard extends ViewPU {
         this.observeComponentCreation2(() => { Row.create(); Row.width('100%'); Row.justifyContent(FlexAlign.Center); }, Row);
         this.key(() => this.data().numbers ? 'ABC' : '123', 'numbers', '11%', '#c3ccd8');
         this.key(() => this.data().chinese ? '中/英' : 'EN/中', 'mode', '15%', '#c3ccd8');
-        this.key("'", "'", '8%'); this.key('空格', 'space', '22%');
-        this.key('，', ',', '8%'); this.key('⌫', 'backspace', '12%', '#c3ccd8');
+        this.key("'", "'", '8%'); this.key('空格', 'space', '16%');
+        this.key('，', ',', '7%'); this.key(() => this.data().chinese ? '。' : '.', '.', '7%');
+        this.key('⌫', 'backspace', '12%', '#c3ccd8');
         this.key(() => this.data().enter === 3 ? '搜索' : '确认', 'enter', '15%', '#a7d0ff');
         Row.pop();
         this.observeComponentCreation2(() => {

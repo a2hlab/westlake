@@ -69,6 +69,11 @@ async function main() {
     t.c.choose(0); await t.c.serial;
     assert.deepEqual(t.calls.filter(x=>x[1]==='setPreviewText').map(x=>x[2]),['n','ni','nih','niha','nihao','你好']);
     console.log('PASS rapid input is serialized');
+
+    t=await setup(); t.c.key('.'); await t.c.serial; assert.deepEqual(t.calls.at(-1),['a','insertText','。']);
+    t.c.key('mode'); await t.type('a@b.c');
+    assert.deepEqual(t.calls.slice(-5).map(x=>x[2]),['a','@','b','.','c']);
+    console.log('PASS period key: 。 in Chinese, . in English (an email address)');
     t=await setup();t.stop();assert.deepEqual(t.calls.at(-1),['decoder','flush']);
     await t.c.destroy();assert.deepEqual(t.calls.at(-1),['decoder','close']);assert.equal(t.c.ready,false);
     console.log('PASS decoder flush on stop and close on destroy');
