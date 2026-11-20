@@ -2135,6 +2135,17 @@ public class AppSchedulerBridge {
             android.content.pm.ActivityInfo activityInfo =
                     buildActivityInfoFromAbility(packageName, abilityName, appInfo, abilityJson);
             resolveAlias(activityInfo);
+            // The ActivityInfo here comes from OH's ability record, which carries no per-activity
+            // theme. An app that themes the activity rather than the application (Seal: MainActivity
+            // has Theme.Seal, the application none) then launched with no theme at all. Take it from
+            // the APK's own manifest, as PackageManager would. Before LaunchActivityItem.obtain: it
+            // launches the activity with a copy of this ActivityInfo (new ActivityInfo(info)), and a
+            // theme set after it reached only the ApplicationInfo the copy shares. A managed launch's
+            // record carries the application's theme, so its first activity got that theme instead of
+            // its own: LINE Webtoon's splash theme (whose postSplashScreenTheme is its AppCompat
+            // theme) became Theme.Translucent.NoTitleBar, and AppCompat refused it; Calculator
+            // inflated its splash layout under a theme without the attribute the layout reads.
+            fillFromManifest(activityInfo);
 
             // §1.2.4.1: build Intent from OH Want JSON (component + action + categories
             // + data + type + flags + extras).
@@ -2263,11 +2274,6 @@ public class AppSchedulerBridge {
             // dispatch — whatever value is here is what mActivityInfo will
             // see in performLaunchActivity → initWindowDecorActionBar.
             android.content.pm.ApplicationInfo aiApp = activityInfo.applicationInfo;
-            // The ActivityInfo here comes from OH's ability record, which carries no per-activity
-            // theme. An app that themes the activity rather than the application (Seal: MainActivity
-            // has Theme.Seal, the application none) then launched with no theme at all. Take it from
-            // the APK's own manifest, as PackageManager would.
-            fillFromManifest(activityInfo);
             int aiIconBefore = activityInfo.icon;
             int aiIconResBefore = activityInfo.getIconResource();  // method, not field
             int appIconBefore = aiApp != null ? aiApp.icon : -1;
