@@ -61,7 +61,10 @@
     "com.google.android.apps.docs/account_selection": "observed"
   },
   "openGaps": [
-    "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker."
+    "Google's interactive recovery: a Play services PendingIntent relayed through the client app is refused (forwarding_peer_not_verified_same_app); needs a PendingIntent broker.",
+    "Uber Back leaves the host black (cause above; needs a host change).",
+    "Spotify home feed fails since 11-18 22:00 (cause open).",
+    "Signed-in YouTube playback stops after 25-45 s per session (cause open; DroidGuard loads in Play services)."
   ],
   "prComments": [
     "https://github.com/a2hlab/westlake/pull/173#issuecomment-6997573345",
@@ -154,5 +157,42 @@
       "microGLog": "No native_consent_expired denials after the renewals; one scope_not_granted (Gmail's extra scope)."
     },
     "finding": "A 24 h grant expiry looks like a Westlake failure from the app side: Gmail and Drive kept showing stored content while every token request was denied. The renewal date belongs in each check."
-  }
+  },
+  "sweep20261119": {
+    "what": "Re-check of the validation apps after Play services and microG moved to v25 and the Play Store was restarted (D600).",
+    "FotMob": "Sign out, Sign in with Google through Play services' chooser: resultCode -1, signed in (see servicesV25_20261119).",
+    "Gmail": "Restart: tokens for 5 of 6 requests (the sixth is outside its grant); new messages synced.",
+    "Drive": "Restart: both token requests got tokens; My Drive lists the account's file.",
+    "Maps": "Restart (guest, as before): tiles; live place search; place card; directions from a typed start to the place with a route preview and travel times.",
+    "Wattpad": "Restart: still signed in; a story opened and its first chapter read. Log out, Log in with Google: Play services' chooser, resultCode -1 to Wattpad, signed in to the Google-linked account.",
+    "Uber": "Back on v25 after a diagnostic build: signed-in home after the restart. Search and fare preview not repeated (the user's own account).",
+    "YouTube": "Restart: signed-in home and account page. Signed-in playback not re-run (open, see video_playback).",
+    "Spotify": "Signed in by the user through Facebook's login, which Spotify then confirmed with an email code; the session survived a restart. A second Facebook login stopped at Facebook's reCAPTCHA, left to the user."
+  },
+  "playStoreRoute20261119": {
+    "found": "Restarting the Play Store launch (running since 11-17, before the account broker) failed: its Application asked Play services for accounts, and Play services refuses an account call forwarded from another process (remote account caller must connect to the auth provider directly). Apps could not reach the Play Store channel for about ten minutes.",
+    "fixed": "The Play Store now connects to microG directly, with the same four settings Play services and the apps use (auth connect, auth spawner, provider APK pin, delegation), as Codex's 11-16 store launch did. It binds, verifies microG and serves its channel again. microG already held a client grant for the Play Store."
+  },
+  "uberFindings20261119": {
+    "mapTiles": "Corrects uberMap20261119: Uber's own map renderer draws tiles. Set location on map showed the world map and, zoomed in, a region with country and city labels. The blank map was the Choose a ride screen, with no device location set; not re-checked.",
+    "backBlackScreen": "Cause found with a diagnostic build (logging only, since removed): Back on Uber's home runs Uber's own RibActivity back handler, which calls finishAfterTransition on its root activity, the task's only activity. On Android the launcher then shows. Here the direct-launch host is not told the task is empty, so its window stays black. Needs a host change (minimize or finish the host ability when the last activity finishes, and move-task-to-back for a launcher root)."
+  },
+  "spotifyHome20261119": {
+    "symptom": "Spotify's home feed shows Something went wrong; sign-in, Library and restart work.",
+    "when": "The home loaded on 11-18 at 20:04 and 21:50 and failed from 22:24 on, before v25.",
+    "ruledOut": [
+      "Spotify's runtime and launch script (unchanged across the break)",
+      "the session (a fresh sign-in fails the same way)",
+      "Play Integrity (Spotify failed before requesting a token)",
+      "a stale Play Store connection (restart did not help)"
+    ],
+    "open": "Cause not found; the failing request is not visible in the logs available."
+  },
+  "inputGaps20261119": [
+    "Westlake's Pinyin keyboard had no period key on any page; fixed in westlake 18508d3 (built and signed, not installed: awaits the user's OK).",
+    "Maps search rows and Wattpad list rows reach the row but do not click from a plain tap; the channel's main-queue click works.",
+    "The keyboard stays up after leaving Maps' search field and covers the place card.",
+    "YouTube's Accounts chip on the You page takes no taps (signed-out playback comparison still blocked).",
+    "Back in Wattpad's reader does nothing; the reader's own back arrow works."
+  ]
 }
