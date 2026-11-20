@@ -131,8 +131,8 @@
       "Maps": "shim only (its framework base differs from v25's; deploy refused, as designed): place search, tiles and place card.",
       "YouTube": "v25 + shim: signed-in home, search, watch page playing.",
       "FotMob": "v25 + shim: matches incl. followed teams; signed in (More).",
-      "Gmail": "v25 + shim: signed-in inbox synced.",
-      "Drive": "v25 + shim: signed in; My Drive lists the account's file.",
+      "Gmail": "v25 + shim: signed-in inbox shown. CORRECTED: this was the stored inbox, not a sync. Gmail's 24 h grant had expired at 11:58 PST, before the rollout, and its token requests were denied (native_consent_expired). See servicesV25_20261119 for the re-check.",
+      "Drive": "v25 + shim: signed in; My Drive lists the account's file. CORRECTED: Drive's 24 h grant had expired at 13:30 PST, so the listing was not shown to come from a fresh token. See servicesV25_20261119.",
       "Spotify": "v25 + shim: signed in; Your Library loads followed artists (home feed error predates v25).",
       "Uber": "v25 + shim (see uber20261119).",
       "Wattpad": "v25 + shim (keyboard fix verified on its help site)."
@@ -141,6 +141,18 @@
       "YouTube's 24 h Play services consent had expired at 17:30 (renewed under the user's standing approval for per-app grants; times only).",
       "The board lost internet at ~17:35 (DNS ok, TCP timeouts); wpa_cli reassociate restored it in 30 s."
     ],
-    "pending": "Play services and microG launches stay on v22; a Google sign-in flow should be re-run when they move to v25."
+    "pending": "Done in servicesV25_20261119. (The earlier text said both services stayed on v22; microG was on its own older package, v4m.)"
+  },
+  "servicesV25_20261119": {
+    "what": "Play services and microG moved to v25 (westlake 4c7144b, db85941) on the D600, then one Google flow per path re-run.",
+    "playServices": "v25 + shim 00e85de5 (the shim is LD_PRELOADed in its processes; base was 3d6375f1). Main and persistent processes up in 40 s; unstable and ui started on demand.",
+    "microG": "v25m: v25's adapter (56e2d93e) packaged on microG's own base framework (558dfeda) with its boot image. Its older shim (ab8282f6) unchanged: the texture fix does not apply to it.",
+    "playServicesPath": "FotMob: Sign out (not the delete option), then Sign in with Google. Play services' account chooser showed the account; choosing it delivered resultCode -1 to FotMob's Credential Manager activity, and FotMob showed its signed-in account.",
+    "microGPath": {
+      "Gmail": "Grant renewed (times only; same account, epoch and 16 scopes) under the user's standing approval for per-app grants. After a restart: 5 of 6 token requests got tokens; the sixth is a scope outside the grant, denied as before. Two messages that arrived while the grant was expired appeared in the inbox.",
+      "Drive": "Grant renewed the same way (28 scopes). After a restart both token requests got tokens and My Drive lists the account's file.",
+      "microGLog": "No native_consent_expired denials after the renewals; one scope_not_granted (Gmail's extra scope)."
+    },
+    "finding": "A 24 h grant expiry looks like a Westlake failure from the app side: Gmail and Drive kept showing stored content while every token request was denied. The renewal date belongs in each check."
   }
 }
