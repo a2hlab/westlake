@@ -66,11 +66,19 @@ final class LocalActivityLaunch {
         ComponentName component = intent.getComponent();
         String own = ActivityThread.currentPackageName();
         if (component == null || own == null || !own.equals(component.getPackageName())) return false;
-        // Cross-task and manifest launch modes still belong to the ability/task launch path.
         int flags = intent.getFlags();
-        if ((flags & Intent.FLAG_ACTIVITY_SINGLE_TOP) == 0
-                || (flags & (Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK
-                        | Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_CLEAR_TASK)) != 0
+        // The manifest launch mode reuses as Android does. singleTop acts as SINGLE_TOP. singleTask and
+        // singleInstance act as CLEAR_TOP | SINGLE_TOP on the activity's existing instance, which a
+        // NEW_TASK start reaches too (Android adds NEW_TASK to every singleTask start). Uber's sign-in
+        // depends on it: its link activity hands Google's redirect to the singleTask sign-in activity
+        // already open, which holds the sign-in's state; a second instance starts the sign-in over.
+        int mode = launchMode(component);
+        boolean taskMode = mode == ActivityInfo.LAUNCH_SINGLE_TASK || mode == ActivityInfo.LAUNCH_SINGLE_INSTANCE;
+        boolean singleTop = (flags & Intent.FLAG_ACTIVITY_SINGLE_TOP) != 0 || mode == ActivityInfo.LAUNCH_SINGLE_TOP;
+        int crossTask = Intent.FLAG_ACTIVITY_MULTIPLE_TASK | Intent.FLAG_ACTIVITY_NEW_DOCUMENT
+                | Intent.FLAG_ACTIVITY_CLEAR_TASK | (taskMode ? 0 : Intent.FLAG_ACTIVITY_NEW_TASK);
+        // Other cross-task starts still belong to the ability/task launch path.
+        if (!(singleTop || taskMode) || (flags & crossTask) != 0
                 || (request != null && request.remote != null)) return false;
         ActivityThread thread = ActivityThread.currentActivityThread();
         if (thread == null) return false;
@@ -79,7 +87,7 @@ final class LocalActivityLaunch {
             Activity activity = thread.getActivity(token);
             if (activity != null && !activity.isFinishing() && !activity.isDestroyed()) live.add(token);
         }
-        boolean clearTop = (flags & Intent.FLAG_ACTIVITY_CLEAR_TOP) != 0;
+        boolean clearTop = taskMode || (flags & Intent.FLAG_ACTIVITY_CLEAR_TOP) != 0;
         int target = -1;
         for (int i = live.size() - 1; i >= 0; i--) {
             if (component.equals(thread.getActivity(live.get(i)).getComponentName())) {
@@ -108,8 +116,18 @@ final class LocalActivityLaunch {
         thread.executeTransaction(transaction);
         // No URI, extras, account data or redirect token in the diagnostic.
         System.err.println("[WL-LOCAL-REUSE] class=" + component.getClassName()
-                + " cleared=" + (live.size() - target - 1));
+                + " cleared=" + (live.size() - target - 1) + " launchMode=" + mode);
         return true;
+    }
+
+    /** The activity's manifest launch mode; LAUNCH_MULTIPLE (standard) when the package manager has none. */
+    private static int launchMode(ComponentName component) {
+        try {
+            return ActivityThread.currentApplication().getPackageManager()
+                    .getActivityInfo(component, 0).launchMode;
+        } catch (Throwable unknown) {
+            return ActivityInfo.LAUNCH_MULTIPLE;
+        }
     }
 
     private static void finishFrom(ActivityThread thread, List<IBinder> tokens, int first) {

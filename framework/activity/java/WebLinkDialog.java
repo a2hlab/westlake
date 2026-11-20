@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.ActivityThread;
 import android.app.Dialog;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Handler;
@@ -34,7 +36,8 @@ import java.util.Locale;
  * resolves no handler for VIEW https on the board. The page opens instead in a WebView, in a
  * full-screen dialog over the activity that started it, and Back closes it. A navigation to an
  * address that is not http or https (an app's own redirect, as at the end of a sign-in) is handed on
- * as VIEW of that address, as a browser hands it on, and closes the dialog. A link that names a
+ * as VIEW of that address, as a browser hands it on, and closes the dialog. So is a navigation to a
+ * web address the app itself claims as a verified link (see appLink). A link that names a
  * package keeps Android's answer when that package is missing: ActivityNotFoundException.
  *
  * Apps that look for a browser before they open a link find one: the package manager answers with
@@ -62,6 +65,26 @@ final class WebLinkDialog {
     private static boolean isWeb(Uri uri) {
         String scheme = uri != null ? uri.getScheme() : null;
         return "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+    }
+
+    /**
+     * VIEW of uri for the app's own activity that claims it as a verified link (an http or https
+     * intent filter with autoVerify), else null. A browser hands a navigation to such a link to the
+     * app that owns it, which is how a web sign-in returns: Uber's Google sign-in ends with a redirect
+     * to https://auth.uber.com/v2/googleauth/rider, which its sign-in activity claims. Loaded as a
+     * page, that address shows Uber's "Sorry, we couldn't find that page" and the sign-in is lost.
+     */
+    static Intent appLink(Activity activity, Uri uri) {
+        Intent view = new Intent(Intent.ACTION_VIEW, uri)
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .setPackage(activity.getPackageName());
+        for (ResolveInfo info : adapter.packagemanager.SourcePackageRegistry.queryActivities(view, null,
+                PackageManager.MATCH_DEFAULT_ONLY | PackageManager.GET_RESOLVED_FILTER)) {
+            if (info.filter != null && info.filter.getAutoVerify() && info.activityInfo != null) {
+                return view.setClassName(info.activityInfo.packageName, info.activityInfo.name);
+            }
+        }
+        return null;
     }
 
     /** Origin of a web document, as displayed above the page. Never include the URL's user data. */
@@ -147,7 +170,20 @@ final class WebLinkDialog {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     Uri next = request.getUrl();
-                    if (isWeb(next)) return false;
+                    if (isWeb(next)) {
+                        Intent link = request.isForMainFrame() ? appLink(activity, next) : null;
+                        if (link == null) return false;
+                        try {
+                            activity.startActivity(link);
+                        } catch (Throwable throwable) {
+                            Log.i(TAG, "App link failed: " + throwable.getClass().getSimpleName());
+                            return false;
+                        }
+                        // The class only: the address can carry a sign-in code.
+                        Log.i(TAG, "App link handed to " + link.getComponent().getClassName());
+                        dialog.dismiss();
+                        return true;
+                    }
                     try {
                         activity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                     } catch (Throwable throwable) {
