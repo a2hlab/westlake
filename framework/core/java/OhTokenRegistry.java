@@ -126,6 +126,25 @@ public final class OhTokenRegistry {
         if (sFinishingHolder == holder) sFinishingHolder = null;
     }
 
+    /**
+     * ADR-0008: the one activity that holds an OH ability token (a managed launch has one ability), or null when
+     * none or more than one does.
+     */
+    public static IBinder soleHolder() {
+        IBinder holder = null;
+        for (IBinder b : sAndroidToOh.keySet()) {
+            if (holder != null) return null;
+            holder = b;
+        }
+        return holder;
+    }
+
+    /** The token passes from {@code holder} to {@code to}, unless holder is finishing (its finish decides). */
+    public static synchronized boolean takeFromWindowless(IBinder holder, IBinder to) {
+        if (holder == null || holder == sFinishingHolder) return false;
+        return transfer(holder, to);
+    }
+
     public static boolean transfer(IBinder from, IBinder to) {
         if (from == null || to == null) return false;
         Long ohTokenAddr = sAndroidToOh.remove(from);

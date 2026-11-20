@@ -396,17 +396,33 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
                 final int resultCode = code;
                 final IBinder finishing = token;
                 adapter.core.OhTokenRegistry.holderFinishing(finishing);
-                new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(new Runnable() {
+                    private int waits;
+
                     @Override public void run() {
-                        adapter.core.OhTokenRegistry.finishingDone(finishing);
                         if (adapter.core.OhTokenRegistry.findOhToken(finishing) == null) {
                             // The activity it started took the token with its window (a splash that never drew:
                             // WindowSessionAdapter.takeTokenFromSplash).
+                            adapter.core.OhTokenRegistry.finishingDone(finishing);
                             System.err.println("[WL-MANAGED] the OH ability went with the next activity's window");
                             scheduleLocalDestroy(finishing);
                             return;
                         }
                         IBinder heir = taskHeir(finishing);
+                        if (heir == null && ActivityTaskManagerAdapter.ownStartQueued() && waits++ < 20) {
+                            // The app started one of its activities after finish() (GitHub's MainActivity finishes
+                            // and then starts its sign-in). Android adds it to the task within startActivity, and the
+                            // task goes on; here its start is queued on this looper behind this decision. Decide
+                            // after it: the activity it creates is the heir, or its window takes the token.
+                            main.post(this);
+                            return;
+                        }
+                        adapter.core.OhTokenRegistry.finishingDone(finishing);
+                        if (waits > 0) {
+                            System.err.println("[WL-MANAGED] the finished activity's ability waited for "
+                                    + waits + " queued start(s) of the app's activities");
+                        }
                         if (heir != null && adapter.core.OhTokenRegistry.transfer(finishing, heir)) {
                             Log.i(TAG, "finishActivity: OH ability 0x" + Long.toHexString(addr)
                                     + " stays with the task's top " + heir);

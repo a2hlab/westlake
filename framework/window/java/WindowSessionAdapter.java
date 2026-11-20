@@ -554,6 +554,15 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
                 }
                 if (held == null) return;
                 long waited = android.os.SystemClock.uptimeMillis() - heldSince;
+                // A base window that waits for the OH ability's main window: the token's activity may have resumed
+                // without a window since this one was added.
+                if (held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION && !mManagedMainConnected
+                        && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))
+                        && adapter.core.OhTokenRegistry.findOhToken(token) == null
+                        && takeTokenFromWindowless(token, waited) != null) {
+                    createHeldBackSession(key, "the token's activity shows no window");
+                    return;
+                }
                 boolean stillComing = held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
                         ? !mManagedMainConnected && adapter.core.OhTokenRegistry.findOhToken(token) == null
                         : activityStillComing(token);
@@ -597,7 +606,8 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             return null;
         }
         IBinder holder = adapter.core.OhTokenRegistry.finishingHolder();
-        if (holder == null || holder == token) return null;
+        if (holder == null) return takeTokenFromWindowless(token, 0L);
+        if (holder == token) return null;
         synchronized (mHeldBack) {
             if (mTokensThatDrew.contains(holder)) return null;
         }
@@ -605,6 +615,64 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         System.err.println("[WL-MANAGED] the finishing splash never drew: the next activity's window is its OH"
                 + " ability's main window");
         return adapter.core.OhTokenRegistry.findOhToken(token);
+    }
+
+    /**
+     * ADR-0008: the token's activity shows no window, and another activity of the task adds the task's first window:
+     * that window is what the task shows, so it is the OH ability's main window. Tantan's SplashAct (the token passed
+     * to it from SplashProxyAct) starts WelcomeAct, stays under it and never adds a window; WelcomeAct's window
+     * waited for a main window that never came. waitedMs: how long that window has waited (0 as it is added).
+     */
+    private Long takeTokenFromWindowless(IBinder token, long waitedMs) {
+        IBinder holder = adapter.core.OhTokenRegistry.soleHolder();
+        if (holder == null || holder == token) return null;
+        synchronized (mHeldBack) {
+            if (mTokensThatDrew.contains(holder)) return null;
+            for (HeldBackWindow held : mHeldBack.values()) {
+                if (held.token == holder && held.windowType == WindowManager.LayoutParams.TYPE_BASE_APPLICATION) {
+                    return null;
+                }
+            }
+        }
+        int lifecycle = windowlessLifecycle(holder);
+        // ActivityLifecycleItem: ON_START 2, ON_RESUME 3, ON_PAUSE 4, ON_STOP 5. Resumed (or paused or stopped since)
+        // without a window: it shows nothing now. Only started: the app's own starts run after the starting
+        // activity's launch transaction (ActivityTaskManagerAdapter.startActivity), so an activity that still has
+        // no window when another one's window has waited a check for it is covered by that one.
+        boolean showsNothing = (lifecycle >= 3 && lifecycle <= 5)
+                || (lifecycle == 2 && waitedMs >= HELD_BACK_FALLBACK_MS);
+        if (!showsNothing || !adapter.core.OhTokenRegistry.takeFromWindowless(holder, token)) {
+            if (waitedMs == 0L) {
+                System.err.println("[WL-MANAGED] the window waits for the OH ability's main window: the token's activity"
+                        + " has no window (lifecycle " + lifecycle + ")");
+            }
+            return null;
+        }
+        System.err.println("[WL-MANAGED] the token's activity shows no window (lifecycle " + lifecycle + "): the next"
+                + " activity's window is its OH ability's main window");
+        return adapter.core.OhTokenRegistry.findOhToken(token);
+    }
+
+    /**
+     * The lifecycle state of the activity behind a token that added no window and is not finishing, or -1 (it added
+     * its window, is finishing or gone, or its state is unreadable).
+     */
+    private static int windowlessLifecycle(IBinder token) {
+        try {
+            android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
+            Object record = thread != null ? thread.getActivityClient(token) : null;
+            android.app.Activity activity = thread != null ? thread.getActivity(token) : null;
+            if (record == null || activity == null || activity.isFinishing()) return -1;
+            java.lang.reflect.Field added = android.app.Activity.class.getDeclaredField("mWindowAdded");
+            added.setAccessible(true);
+            if (added.getBoolean(activity)) return -1;
+            java.lang.reflect.Method state = record.getClass().getDeclaredMethod("getLifecycleState");
+            state.setAccessible(true);
+            return (Integer) state.invoke(record);
+        } catch (Throwable t) {
+            System.err.println("[OH_WSA] activity state unreadable, the token stays: " + t);
+            return -1;
+        }
     }
 
     private void baseWindowAdded(IBinder baseWindow, IBinder token) {
