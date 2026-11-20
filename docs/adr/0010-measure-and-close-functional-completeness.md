@@ -45,6 +45,17 @@ another component's file descriptor:
 The first appeared once in an 11-14 corpus round and was misread as a one-off. Neither was found until a
 kernel trace named the closer.
 
+**The second device shows the same pattern** (OnePlus 6 with OpenHarmony 7.0 and SceneBoard, HK top-1000 round
+o70b against the D600's round hka, 725 apps scored on both; see the PR evidence below):
+- 609 apps reach "drawing" on the phone and 574 on the D600, but apps drawing *cleanly* (no blocker or anomaly
+  after the first frame) are 530 against 529.
+- The phone's lead is mostly apps that draw a frame and then die: 64 against 30.
+- Of the 58 apps clean only on the phone, 41 drew cleanly on the D600 in a later round, so most apparent gains
+  came from framework changes rather than the device.
+- A package-manager stall was a lock-order deadlock between three threads: a class lock held across a
+  permission check, `System.load` and `System.loadLibrary`. Only a thread dump named it.
+- A second GPU stack (Mesa freedreno, no Vulkan) shows gaps the D600's Mali stack hides.
+
 Containers (Waydroid and similar) reach near-full parity by running a whole Android system. That costs
 hundreds of MB to about 1 GB per device and a second world of windows, notifications and permissions. Westlake
 does not take that route, so its completeness has to be built and measured service by service.
@@ -58,27 +69,27 @@ does not take that route, so its completeness has to be built and measured servi
 | H1 | Scripted core flows for a sample of about 100 corpus apps: sign-in, scroll, search, media playback, receive a notification, background job, share, deep link. Results are judged from view-tree assertions and log signatures, with screenshots only as records. | Functional parity becomes a number per flow. |
 | H2 | The same flows, on the same app versions, on stock Android (the Android 15 reference phone). | Separates Westlake gaps from app, server and region behaviour. |
 | H3 | Lifecycle steps in every run: Back from each screen, home and relaunch, rotation, process kill and restore, ten minutes in the background. | Black screens after Back and late windows are found by default. |
-| H4 | Crash forensics by default: <ul><li>Chromium's FATAL line from the app log;</li><li>native frames symbolized against the crash dump's maps;</li><li>the Play services call trace (`WESTLAKE_PLAY_TRACE`: service ids and callback status);</li><li>an automatic descriptor-ownership trace on a rerun after any "Bad file descriptor" or `POLL_ERROR` abort;</li><li>repeat runs that put a number on flakiness.</li></ul> | Root causes arrive with the failure instead of after hours of manual tracing. |
-| H5 | Failures attributed as Westlake gap, policy, region or human step: <ul><li>uncertified-device refusals by service id;</li><li>region locks;</li><li>CAPTCHAs.</li></ul> | The gap map lists only what Westlake can fix. |
+| H4 | Crash forensics by default: <ul><li>Chromium's FATAL line from the app log;</li><li>native frames symbolized against the crash dump's maps;</li><li>the Play services call trace (`WESTLAKE_PLAY_TRACE`: service ids and callback status);</li><li>an automatic descriptor-ownership trace on a rerun after any "Bad file descriptor" or `POLL_ERROR` abort;</li><li>a thread dump of every launch that stalls, which finds lock-order deadlocks;</li><li>repeat runs that put a number on flakiness.</li></ul> | Root causes arrive with the failure instead of after hours of manual tracing. |
+| H5 | Failures attributed as Westlake gap, policy, region or human step: <ul><li>uncertified-device refusals by service id;</li><li>region locks;</li><li>CAPTCHAs.</li></ul> Host-screen references per device: SceneBoard's starting window is plain white, the D600's host screen is black. | The gap map lists only what Westlake can fix. Without per-device references, plain white or black app screens are misread on one device or the other. |
 | H6 | Resource metrics: memory per app, CPU while hidden, wakeups, cold-start time, frame pacing. | Regressions in cost are seen, not stumbled on. |
 | H7 | A bounded crawler driven by the view tree, counting reachable screens and crash-free depth against H2's baseline. | Covers features beyond the scripted flows across the whole corpus. |
 | H8 | Fixtures: <ul><li>managed test accounts;</li><li>automatic renewal of per-app Google grants;</li><li>a Hong Kong network profile;</li><li>a human-step state that routes real touch to the app automatically.</li></ul> | Sign-in and region-dependent flows become repeatable. |
-| H9 | A regression gate per build: a pinned subset of flows must pass before a build is deployed, with bisection when it fails. | A missing fix, like the absent input-descriptor fix, is caught at deploy. |
+| H9 | A regression gate per build: a pinned subset of flows must pass before a build is deployed, with bisection when it fails. The gate runs on both GPU stacks: Mali with Vulkan, and Mesa without. | A missing fix, like the absent input-descriptor fix, is caught at deploy. Mesa-only failures stay invisible on the D600. |
 
 ### 2. Close the runtime gaps in this order (westlake)
 
 | # | Area | Work | Evidence |
 |---|---|---|---|
-| W1 | Descriptor and ABI safety net | <ul><li>Make fdsan real in the Bionic shim: owner tags, with a report naming the caller of any foreign close.</li><li>Rule: every perform, query or ioctl answer writes its output parameters, even on error, and stubs are scanned for violations.</li></ul> | The two descriptor bugs above. |
-| W2 | Activities, tasks and windows | <ul><li>Android tasks and back stack mapped onto OH abilities, so finishing an activity brings the previous window to the front.</li><li>A frame requested whenever a window becomes visible.</li><li>Results passed between apps.</li><li>Task switching.</li></ul> | Back black screen in two apps; late windows in three of eight batch-2 apps. |
-| W3 | Process model | ADR-0002 completed: <ul><li>components in their declared processes;</li><li>isolated processes (browser renderers);</li><li>providers and receivers across processes;</li><li>death notification and restart.</li></ul> | Play services' processes are folded; WebView renders in-process. |
-| W4 | Graphics | <ul><li>Hidden and covered windows stop drawing.</li><li>PixelCopy of a window returns a picture, from OH's last flushed buffer.</li><li>Surface ordering.</li></ul> | The hidden Play Store uses about one CPU. PixelCopy now fails cleanly but returns nothing. |
+| W1 | Cross-component safety net | <ul><li>Make fdsan real in the Bionic shim: owner tags, with a report naming the caller of any foreign close.</li><li>Rule: every perform, query or ioctl answer writes its output parameters, even on error, and stubs are scanned for violations.</li><li>No framework lock is held across a call that can load a library or re-enter the package manager.</li></ul> | The two descriptor bugs above; the package-manager deadlock on the phone. |
+| W2 | Activities, tasks and windows | <ul><li>Android tasks and back stack mapped onto OH abilities, so finishing an activity brings the previous window to the front.</li><li>A frame requested whenever a window becomes visible.</li><li>Results passed between apps.</li><li>Task switching.</li><li>On the managed launch: the manifest's activity theme is applied before `ActivityInfo` is copied, the OH ability hands over between activities, and an app that finishes its only activity at start-up keeps its process, as on Android.</li></ul> | Back black screen in two apps; late windows in three of eight batch-2 apps. On the phone: about 20 `InflateException` failures from the theme order, and hand-off failures in two apps (fixes on `managed-session-handoff`); 4 apps that finish their only activity lose the process. |
+| W3 | Process model | ADR-0002 completed, on the managed launch too: <ul><li>components in their declared processes;</li><li>isolated processes (browser renderers);</li><li>providers and receivers across processes;</li><li>death notification and restart.</li></ul> | Play services' processes are folded; WebView renders in-process. On the phone, Firefox (a crash-helper service in its own process) and Didi (waits for its privacy process) fail without secondary processes. |
+| W4 | Graphics | <ul><li>Hidden and covered windows stop drawing.</li><li>PixelCopy of a window returns a picture, from OH's last flushed buffer.</li><li>Surface ordering.</li><li>Second GPU stack (Mesa freedreno, no Vulkan): `eglPresentationTimeANDROID` for Unity's frame pacing; Mesa's `discard_framebuffer` bug (its own driconf workaround is `ignore_discard_framebuffer`); YUV (NV12/NV21) native buffers for TextureView video.</li></ul> | The hidden Play Store uses about one CPU. PixelCopy now fails cleanly but returns nothing. On the phone: 4 Unity apps fault in frame pacing (1 more probable), 4 hit the Mesa bug, and 5 abort on TextureView video. |
 | W5 | Input | <ul><li>Real touch reaches every app window without a manual forwarder.</li><li>An accessibility bridge.</li><li>Autofill mapped to OH.</li></ul> | A user could not tap a CAPTCHA until the forwarder was started. |
 | W6 | Background execution | ADR-0007: <ul><li>jobs and alarms that start a stopped app;</li><li>push delivered to an app that isn't running;</li><li>boot and package broadcasts;</li><li>foreground services; doze.</li></ul> | Not exercised yet. H1 adds the flows. |
 | W7 | Identity and isolation | ADR-0003 and ADR-0004: <ul><li>one OH identity per Android app;</li><li>verified identity enforced by default;</li><li>Android user 0 semantics;</li><li>permission answers by protection level.</li></ul> | Checks answer "granted" where a rule says denied. |
 | W8 | Packages and intents | ADR-0006: <ul><li>installs, split installs and updates through the Play Store.</li></ul> Also: <ul><li>share and deep links between Westlake apps and OH apps;</li><li>`content://` URIs across apps.</li></ul> | Install sessions work only in part; sharing between apps is not built. |
 | W9 | Google services within policy | <ul><li>The chosen account stays visible to the app after the picker closes.</li><li>Grants accept every client id an app uses.</li><li>Tokens renew silently.</li><li>Downloadable modules load in client apps.</li><li>The Play Store answers integrity requests, whatever the verdict.</li></ul> | Play services sees no accounts for an app outside its picker. A grant holds one client id. Strava's two integrity requests were never answered. |
-| W10 | Media and hardware (non-DRM) | <ul><li>Hardware decode through OH's codec service.</li><li>Media sessions through OH's AVSession.</li><li>Camera; Bluetooth; NFC; telephony state.</li></ul> | Camera and Bluetooth are not bridged on the reference board. |
+| W10 | Media and hardware (non-DRM) | <ul><li>Hardware decode through OH's codec service.</li><li>Media sessions through OH's AVSession.</li><li>Camera; Bluetooth; NFC; telephony state.</li></ul> | Camera and Bluetooth are not bridged on the reference board. `media.camera` was null for the 124 apps in the phone round that asked for it, and Camera1 reports no cameras. |
 
 Where an Android system component can run unmodified as a Westlake-hosted service, as Play services and the
 Play Store already do, prefer that to reimplementing it. Candidates: the download, media and contacts
@@ -134,5 +145,7 @@ Alternatives considered:
   [7b10fc6](https://github.com/a2hlab/westlake/commit/7b10fc6b6dc6939458df87ea2531420147429621),
   [79657ff](https://github.com/a2hlab/westlake/commit/79657ffbec644ad8bb7ad1b54d5d2d945122197a),
   [326a747](https://github.com/a2hlab/westlake/commit/326a747b2fbbcd1cbe921ac990bb3c56f93ee876).
+- OnePlus 6 evidence (OpenHarmony 7.0, round o70b against the D600's hka):
+  [PR #177 comment](https://github.com/a2hlab/westlake/pull/177#issuecomment-7053253281).
 - SurfaceView ordering fix and remaining surface work:
   [6b80c26](https://github.com/a2hlab/westlake/commit/6b80c2667758b180e78bd7c7027b4d460260c57c).
