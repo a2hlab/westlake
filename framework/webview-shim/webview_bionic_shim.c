@@ -5930,6 +5930,8 @@ static void wl_find_anw_get_oh(void)
     wl_anw_get_oh = (WlAnwGetOh) fn;
 }
 
+static int32_t wl_texture_window_format(void *window, int32_t host);
+
 void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, const WlEglInt *attribs)
 {
     pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
@@ -5952,6 +5954,14 @@ void *eglCreateWindowSurface(WlEglDisplay display, void *config, void *window, c
         static int logged;
         if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
             wl_relocs_log("[WESTLAKE-EGL] window surface over the adapter's OH window %p: %p\n", oh, surface);
+        }
+        /* A texture consumer's window keeps a format it can import, whatever the surface's config chose. */
+        typedef int32_t (*HandleOpt)(void *, int, ...);
+        HandleOpt opt = surface != NULL ? (HandleOpt) wl_native_window_symbol("OH_NativeWindow_NativeWindowHandleOpt") : NULL;
+        int32_t current = -1;
+        if (opt != NULL && opt(oh, 2 /* GET_FORMAT */, &current) == 0 && current >= 0) {
+            int32_t wanted = wl_texture_window_format(oh, current);
+            if (wanted != current) opt(oh, 3 /* SET_FORMAT */, wanted);
         }
     }
     return surface;
@@ -6026,6 +6036,89 @@ static struct {
 } wl_window_sizes[16];
 static pthread_mutex_t wl_window_sizes_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/*
+ * Windows whose buffers a texture consumer imports: the producer windows of OH native images, behind
+ * SurfaceTexture and so TextureView. OH's EGL makes an image of an RGBA_8888 or BGRA_8888 buffer but
+ * not of RGBX_8888 or RGB_888 (board test: eglCreateImageKHR returns no image, error 0x3000 and
+ * 0x3003), where Android's imports RGBX. Uber's map renders its TextureView through an EGL window
+ * surface it sets to RGBX_8888 (setBuffersGeometry(0, 0, 2)); hwui could not import the first frame
+ * and aborted ("Invalid GrBackendTexture"), ending Uber at its destination search. Such a window
+ * gets RGBA_8888 instead: the same layout, its X byte read as alpha, which an opaque TextureView
+ * (the default) does not blend.
+ */
+static struct { void *image, *window; } wl_texture_windows[32];
+static pthread_mutex_t wl_texture_windows_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void *OH_NativeImage_AcquireNativeWindow(void *image)
+{
+    typedef void *(*Acquire)(void *);
+    static Acquire acquire;
+    if (acquire == NULL) acquire = (Acquire) westlake_native_image_symbol("OH_NativeImage_AcquireNativeWindow");
+    void *window = acquire != NULL ? acquire(image) : NULL;
+    if (window == NULL) return NULL;
+    int recorded = 0;
+    pthread_mutex_lock(&wl_texture_windows_lock);
+    int free_slot = -1;
+    for (int i = 0; i < (int) (sizeof(wl_texture_windows) / sizeof(wl_texture_windows[0])); i++) {
+        if (wl_texture_windows[i].image == image) {
+            wl_texture_windows[i].window = window;
+            recorded = 1;
+            break;
+        }
+        if (wl_texture_windows[i].image == NULL && free_slot < 0) free_slot = i;
+    }
+    if (!recorded && free_slot >= 0) {
+        wl_texture_windows[free_slot].image = image;
+        wl_texture_windows[free_slot].window = window;
+        recorded = 1;
+    }
+    pthread_mutex_unlock(&wl_texture_windows_lock);
+    if (!recorded) wl_relocs_log("[WESTLAKE-WINDOW] texture window table full: window %p not recorded\n", window);
+    return window;
+}
+
+void OH_NativeImage_Destroy(void **image)
+{
+    typedef void (*Destroy)(void **);
+    static Destroy destroy;
+    if (destroy == NULL) destroy = (Destroy) westlake_native_image_symbol("OH_NativeImage_Destroy");
+    if (image != NULL && *image != NULL) {
+        pthread_mutex_lock(&wl_texture_windows_lock);
+        for (int i = 0; i < (int) (sizeof(wl_texture_windows) / sizeof(wl_texture_windows[0])); i++) {
+            if (wl_texture_windows[i].image == *image) {
+                wl_texture_windows[i].image = NULL;
+                wl_texture_windows[i].window = NULL;
+            }
+        }
+        pthread_mutex_unlock(&wl_texture_windows_lock);
+    }
+    if (destroy != NULL) destroy(image);
+}
+
+static int wl_is_texture_window(void *window)
+{
+    int found = 0;
+    if (window == NULL) return 0;
+    pthread_mutex_lock(&wl_texture_windows_lock);
+    for (int i = 0; i < (int) (sizeof(wl_texture_windows) / sizeof(wl_texture_windows[0])) && !found; i++) {
+        found = wl_texture_windows[i].window == window;
+    }
+    pthread_mutex_unlock(&wl_texture_windows_lock);
+    return found;
+}
+
+/* The format a texture consumer can import for one an app chose: RGBA_8888 for RGBX_8888 and RGB_888. */
+static int32_t wl_texture_window_format(void *window, int32_t host)
+{
+    if ((host != 11 && host != 13) || !wl_is_texture_window(window)) return host;
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        wl_relocs_log("[WESTLAKE-WINDOW] texture window %p: OH format %d becomes RGBA_8888 (12), which OH's "
+                      "EGL imports\n", window, host);
+    }
+    return 12;
+}
+
 int32_t ANativeWindow_setBuffersGeometry(void *window, int32_t width, int32_t height, int32_t format)
 {
     pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
@@ -6040,7 +6133,7 @@ int32_t ANativeWindow_setBuffersGeometry(void *window, int32_t width, int32_t he
         return next != NULL ? next(window, width, height, format) : -EINVAL;
     }
     int32_t result = 0;
-    int32_t host = format != 0 ? wl_host_window_format(format) : -1;
+    int32_t host = format != 0 ? wl_texture_window_format(oh, wl_host_window_format(format)) : -1;
     if (host >= 0) result = opt(oh, WL_WINDOW_SET_FORMAT, host);   /* 0, or one OH lacks: the window's own */
     if (result != 0) return result;
     if (width < 0 || height < 0 || (width == 0) != (height == 0)) return -EINVAL;
