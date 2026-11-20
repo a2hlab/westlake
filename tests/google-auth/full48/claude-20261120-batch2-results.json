@@ -3,7 +3,7 @@
   "batch": "two-path batch 2",
   "date": "2026-11-20",
   "board": "D600 (DAYU200 profile), OpenHarmony 6.1",
-  "approval": "User 2026-11-20: sign-ups with the Google test account in the 8 named apps and with the Facebook test account in the 5 that offer it, test defaults, stop at phone verification, payment, ID or age checks and CAPTCHAs; one new dedicated host per app.",
+  "approval": "User 2026-11-20: sign-ups with the Google test account in the 8 named apps and with the Facebook test account in the 5 that offer it, test defaults, stop at phone verification, payment, ID or age checks and CAPTCHAs; one new dedicated host per app. User 2026-11-20 (PST): WEBTOON Facebook sign-up approved as well.",
   "scopeChanges": {
     "com.spotify.music": "Batch 1: Facebook account_session and restart_persistence skipped by the user (2026-11-20). Not passes.",
     "com.ubercab": "Batch 1: Back black-screen host fix skipped by the user (2026-11-20). Not a pass."
@@ -104,11 +104,17 @@
         "google_sign_in": {
           "status": "failed",
           "gap": "After the credential reached the app, WEBTOON showed 'Login with your Google account failed.' WEBTOON made no further Play services call; its own login step (server) refused or failed. Cause open (not observable without the app's network trace).",
-          "rerun": "Rerun on 2026-11-21 board time (HKT) with both fixes: same \"Login with your Google account failed.\" after Play services returned RESULT_OK to androidx.credentials HiddenActivity. Not the descriptor bugs; open."
+          "rerun": "Rerun on 2026-11-21 board time (HKT) with both fixes: same \"Login with your Google account failed.\" after Play services returned RESULT_OK to androidx.credentials HiddenActivity. Not the descriptor bugs; open.",
+          "analysis": "WEBTOON's handler for the Credential Manager result (GoogleLoginActivity) parses the Google ID token credential and then calls the Authorization API (Identity.getAuthorizationClient(activity).authorize: email and profile scopes, offline access, the chosen account); the dialog comes from that call's failure listener. Whether the request reaches Play services is not established yet. Play services logged WL-AUTH-PROXY package_accounts count=0 for WEBTOON, but in the same second as the broker issued the picker's tokens, so it belongs to the picker flow."
         },
         "facebook_sign_in": {
-          "status": "not_run_not_approved",
-          "gap": "WEBTOON offers Continue with Facebook, but the approved Facebook sign-ups were Duolingo, JOOX, Strava, Viu and Trip.com. Needs the user's OK."
+          "status": "observed",
+          "evidence": "On 2026-11-21 board time (HKT) with both fixes: Continue with Facebook -> FacebookLoginActivity -> FacebookActivity -> CustomTabMainActivity -> Facebook's web login; Facebook showed a reCAPTCHA (\"I'm not a robot\"), which the user solved on the board; NAVER's NeoIdTokenLoginActivity returned RESULT_OK to LoginActivity; SignUpActivity took the test defaults (birthday 1 Jan 1990, nickname) and Agree & Sign up; interest onboarding skipped; MainActivity (home) and the MY tab rendered.",
+          "note": "Launches use isolated touch, so a finger on the board reaches no app until touchfwd is pointed at that app's mailbox; it was started for the reCAPTCHA and stopped afterwards."
+        },
+        "restart_persistence_facebook": {
+          "status": "observed",
+          "evidence": "After a full process restart WEBTOON went SplashActivity -> MainActivity; signed out it goes SplashActivity -> LoginActivity."
         }
       },
       "otherGaps": [
@@ -257,6 +263,7 @@
     },
     "facebook": {
       "observed_end_to_end": [
+        "com.naver.linewebtoon",
         "ctrip.english"
       ],
       "server_accepted_token": [
@@ -279,7 +286,8 @@
       "Play services picker label/icon for Canva unresolved",
       "appwidget pin answers (requestPinAppWidget) give no result",
       "Permission checks answer granted where a rule says denied",
-      "Roll the two fixed libraries into Play services, microG, the Store and the batch-1 apps (each needs a restart)"
+      "Bridge PixelCopy fix for the other bridge variants (Play services and Store 2a319bac, Gmail 0215db8c)",
+      "microG runtime with 876034c built (a6ded102, same verified object; relink reproduced 225d2050 first) but not deployed yet"
     ],
     "environment": [
       "Board timezone set to Asia/Hong_Kong for HK apps",
@@ -289,7 +297,8 @@
     "westlake_fixes_done": [
       "f46ae1b: PixelCopy readback fence (the in-app browser aborts and RenderThread POLL_ERROR)",
       "runtime rebuilt with 876034c (input receiver descriptor double close); the deployed runtime lacked it"
-    ]
+    ],
+    "rollout": "Runtime cef91a38 runs in Play services, the Store and Gmail (2026-11-21 board time); Duolingo's Google sign-in verified through the restarted Play services."
   },
   "westlakeFixes": {
     "f46ae1b": "Window shim: perform(NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER/_2) now writes no buffer and fence -1 before its error. hwui's PixelCopy readback (Readback::copySurfaceInto) closes that fence on every return path, so the unwritten value closed whatever its stack held: another thread's descriptor when that number was open. Root cause of Duolingo's in-app browser aborts ([FATAL:scoped_file.cc(43)] and [FATAL:udp_socket_posix.cc(276)] Bad file descriptor) and of its RenderThread Looper POLL_ERROR. Found with a kernel trace of fd_install and every close with its user-space caller; the fixed run had no descriptor closed by anyone but its owner across about a million traced events.",
