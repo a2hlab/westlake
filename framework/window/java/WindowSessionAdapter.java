@@ -620,8 +620,9 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
     /**
      * ADR-0008: the token's activity shows no window, and another activity of the task adds the task's first window:
      * that window is what the task shows, so it is the OH ability's main window. Tantan's SplashAct (the token passed
-     * to it from SplashProxyAct) starts WelcomeAct, stays under it and never adds a window; WelcomeAct's window
-     * waited for a main window that never came. waitedMs: how long that window has waited (0 as it is added).
+     * to it from SplashProxyAct) starts WelcomeAct and never adds a window (it finishes during its own launch);
+     * WelcomeAct's window waited for a main window that never came. waitedMs: how long that window has waited (0 as
+     * it is added).
      */
     private Long takeTokenFromWindowless(IBinder token, long waitedMs) {
         IBinder holder = adapter.core.OhTokenRegistry.soleHolder();
@@ -638,8 +639,10 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
         // ActivityLifecycleItem: ON_START 2, ON_RESUME 3, ON_PAUSE 4, ON_STOP 5. Resumed (or paused or stopped since)
         // without a window: it shows nothing now. Only started: the app's own starts run after the starting
         // activity's launch transaction (ActivityTaskManagerAdapter.startActivity), so an activity that still has
-        // no window when another one's window has waited a check for it is covered by that one.
-        boolean showsNothing = (lifecycle >= 3 && lifecycle <= 5)
+        // no window when another one's window has waited a check for it is covered by that one. Finishing without a
+        // window, and not through the managed finish (takeFromWindowless leaves that one to its finish decision): it
+        // got the token after its own finish(), which only scheduled a local destroy, so nothing else hands it on.
+        boolean showsNothing = lifecycle == WINDOWLESS_FINISHING || (lifecycle >= 3 && lifecycle <= 5)
                 || (lifecycle == 2 && waitedMs >= HELD_BACK_FALLBACK_MS);
         if (!showsNothing || !adapter.core.OhTokenRegistry.takeFromWindowless(holder, token)) {
             if (waitedMs == 0L) {
@@ -648,24 +651,30 @@ public class WindowSessionAdapter extends IWindowSession.Stub {
             }
             return null;
         }
-        System.err.println("[WL-MANAGED] the token's activity shows no window (lifecycle " + lifecycle + "): the next"
+        System.err.println("[WL-MANAGED] the token's activity shows no window ("
+                + (lifecycle == WINDOWLESS_FINISHING ? "finishing" : "lifecycle " + lifecycle) + "): the next"
                 + " activity's window is its OH ability's main window");
         return adapter.core.OhTokenRegistry.findOhToken(token);
     }
 
+    /** windowlessLifecycle: the activity added no window and is finishing or destroyed. */
+    private static final int WINDOWLESS_FINISHING = -2;
+
     /**
-     * The lifecycle state of the activity behind a token that added no window and is not finishing, or -1 (it added
-     * its window, is finishing or gone, or its state is unreadable).
+     * The lifecycle state of the activity behind a token that added no window, WINDOWLESS_FINISHING when it is
+     * finishing or destroyed, or -1 (it added its window, it has no activity record, or its state is unreadable). No
+     * record is not taken for gone: a new ability's token is mapped before its launch transaction creates the activity.
      */
     private static int windowlessLifecycle(IBinder token) {
         try {
             android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
             Object record = thread != null ? thread.getActivityClient(token) : null;
             android.app.Activity activity = thread != null ? thread.getActivity(token) : null;
-            if (record == null || activity == null || activity.isFinishing()) return -1;
+            if (record == null || activity == null) return -1;
             java.lang.reflect.Field added = android.app.Activity.class.getDeclaredField("mWindowAdded");
             added.setAccessible(true);
             if (added.getBoolean(activity)) return -1;
+            if (activity.isFinishing() || activity.isDestroyed()) return WINDOWLESS_FINISHING;
             java.lang.reflect.Method state = record.getClass().getDeclaredMethod("getLifecycleState");
             state.setAccessible(true);
             return (Integer) state.invoke(record);

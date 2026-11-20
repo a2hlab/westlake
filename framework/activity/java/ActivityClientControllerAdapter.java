@@ -451,26 +451,38 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
         return true;
     }
 
-    /** Another live activity of the app's task to carry its OH ability: the task's top, else any other. */
+    /**
+     * Another live activity of the app's task to carry its OH ability: the task's top, else any other; never one that
+     * is finishing or destroyed. Tantan's SplashAct finished during its own launch, while SplashProxyAct still held the
+     * token (so its finish only scheduled a local destroy), and taskPosition() puts any activity it is asked about back
+     * in the task list: SplashProxyAct's token went to SplashAct, was destroyed with it, and WelcomeAct's window waited
+     * for a main window that never came.
+     */
     private static IBinder taskHeir(IBinder finishing) {
+        android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
         java.util.List<IBinder> remaining = taskTokens();
         for (int i = remaining.size() - 1; i >= 0; i--) {
-            if (remaining.get(i) != finishing) return remaining.get(i);
+            IBinder candidate = remaining.get(i);
+            if (candidate != finishing && carriesTask(thread, candidate)) return candidate;
         }
         try {
-            android.app.ActivityThread thread = android.app.ActivityThread.currentActivityThread();
             java.lang.reflect.Field field = android.app.ActivityThread.class.getDeclaredField("mActivities");
             field.setAccessible(true);
             java.util.Map<?, ?> activities = (java.util.Map<?, ?>) field.get(thread);
             for (Object key : activities.keySet().toArray()) {
                 IBinder candidate = (IBinder) key;
-                android.app.Activity activity = thread.getActivity(candidate);
-                if (candidate != finishing && activity != null && !activity.isFinishing()) return candidate;
+                if (candidate != finishing && carriesTask(thread, candidate)) return candidate;
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
             Log.w(TAG, "taskHeir: " + e);
         }
         return null;
+    }
+
+    /** An activity that can carry the task's OH ability: created, and neither finishing nor destroyed. */
+    private static boolean carriesTask(android.app.ActivityThread thread, IBinder token) {
+        android.app.Activity activity = thread != null ? thread.getActivity(token) : null;
+        return activity != null && !activity.isFinishing() && !activity.isDestroyed();
     }
 
     private static void scheduleLocalDestroy(final IBinder token) {
