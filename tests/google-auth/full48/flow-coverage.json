@@ -261,24 +261,24 @@
         ],
         "checks": {
           "sign_in": {
-            "status": "partial",
-            "evidence": "On the earlier shared host, Google accepted basic profile and email consent in web sign-in, then Uber displayed “Sorry, we could not find that page”. On the current dedicated host the signed rider app displayed its welcome page. The trip-link window disappeared before a Google tap, and the normal launch displayed the Uber logo before the board returned to Gmail. Rider sign-in remains partial."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19 on the D600 (framework v24 on Uber's dedicated host). Uber's \"Continue with Google\" opened Google's web sign-in in Westlake's in-app browser; the test account was entered through a masked helper and Google's consent approved. Google's redirect to the sign-in link Uber claims (https://auth.uber.com/v2/googleauth/rider, a verified link) now reaches Uber's own sign-in activity: before westlake 4c7144b it loaded as a page (\"Sorry, we couldn't find that page\", as in the earlier record), and then a second sign-in activity replaced the singleTask one holding the sign-in. Uber accepted the Google identity (name filled in from Google). The phone number the user supplied belonged to the user's existing Uber account; with the user's approval Uber connected the Google login to it, asked for the user's SMS and email codes, and signed in."
           },
           "account_session": {
-            "status": "open",
-            "gap": "No authenticated rider session was observed."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19: after the sign-in Uber showed its signed-in home (Where to?, For you, Account tab), and the Account tab showed the account's profile."
           },
           "destination_search": {
             "status": "open",
-            "gap": "Uber opened onboarding for a link with fixed endpoints. The user did not exercise in-app destination search."
+            "gap": "2026-11-19: opening Where to? crashed Uber. Its search screen draws a map in a TextureView; Westlake's import of the frame as a GPU image failed (\"OH image import failed\") and Android's renderer aborted (\"Invalid GrBackendTexture\", 1200x1920). A Westlake graphics gap, not yet fixed; the check stays open."
           },
           "fare_preview_without_booking": {
             "status": "open",
-            "gap": "No fare preview was displayed."
+            "gap": "2026-11-19: opening Where to? crashed Uber. Its search screen draws a map in a TextureView; Westlake's import of the frame as a GPU image failed (\"OH image import failed\") and Android's renderer aborted (\"Invalid GrBackendTexture\", 1200x1920). A Westlake graphics gap, not yet fixed; the check stays open. No fare was previewed and nothing was booked."
           },
           "restart_persistence": {
-            "status": "open",
-            "gap": "No authenticated rider session was available for a restart test."
+            "status": "observed",
+            "evidence": "Observed 2026-11-19: Uber's app process ended and Uber was started again (a new process); it opened signed in on its home."
           }
         }
       }
@@ -366,9 +366,9 @@
   },
   "counts": {
     "Google": {
-      "observed": 31,
-      "partial": 3,
-      "open": 5
+      "observed": 34,
+      "partial": 2,
+      "open": 3
     },
     "Facebook": {
       "observed": 10,

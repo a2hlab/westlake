@@ -110,5 +110,13 @@
     "wattpad": "New Facebook-linked Wattpad account created with the test defaults; profile shows the Facebook name, picture and link; after a full restart Wattpad reopened signed in to it.",
     "spotify": "Facebook signed in and its redirect returned to Spotify in-process; Spotify refused a Facebook sign-up (\"Signing up with Facebook isn't available right now\"). Session and restart checks need a Facebook-linked Spotify account or a scope change. Spotify was signed back in with Google.",
     "pcLink": "At 15:14 PST the PC's shared hdc server lost the D600's USB session (the OnePlus had dropped into Qualcomm crash-dump mode moments earlier); it recovered on its own by 15:22 without a restart, and the D600 did not reboot."
+  },
+  "uber20261119": {
+    "fixes": "westlake 4c7144b: the in-app browser hands a navigation to an address the app claims as a verified link to that app's activity; direct-launch activity starts honour the manifest launch mode (singleTop, singleTask, singleInstance).",
+    "signIn": "Google web sign-in returned to Uber; the user's own number matched an existing Uber account, which the user chose to use; Uber connected the Google login and signed in after the user's SMS and email codes. A later \"Continue with Google\" on Uber's welcome-back page got Uber's \"Server error\" before the phone was verified.",
+    "gaps": [
+      "TextureView map frame import fails and hwui aborts (blocks destination search and fare preview).",
+      "The soft keyboard does not open for text fields inside a WebView: OhImeBridge.show finds the WebView editor but throws AssertionError."
+    ]
   }
 }
