@@ -10,7 +10,7 @@
   },
   "stack": {
     "framework": "v25 (adapter 56e2d93e, framework.jar 625f7c16)",
-    "libraries": "texture-window shim 00e85de5, network compat 6e265ecb, runtime 8e5d7304 (same as batch-1 Wattpad)",
+    "libraries": "texture-window shim 00e85de5, network compat 6e265ecb, runtime 8e5d7304 and bridge 2d6b36a0 on 2026-11-20; from 2026-11-21 board time (HKT) runtime cef91a38 (8e5d7304 + westlake 876034c) and bridge aa511619 (2d6b36a0 + westlake f46ae1b) for the reruns below",
     "playServices": "official Play services on v25 with remote-host routes for the 8 new hosts (restart 2026-11-20)",
     "accountBroker": "microG on v25m, one delegated grant per app (signer-pinned, server client ID, identity scopes, 24 h native consent)",
     "hosts": "one dedicated host per app (org.westlake.apk.<package>), built from westlake-two-path-next with the window handoff",
@@ -42,8 +42,9 @@
           "evidence": "Course choice, source, level, reason, daily goal, reminder prompt (declined) and the course download all worked."
         },
         "facebook_sign_in": {
-          "status": "blocked",
-          "gap": "Facebook -> FacebookActivity (no Facebook app) -> CustomTabMainActivity -> Facebook's web login (m.facebook.com) rendered in Westlake's in-app web view. Focusing the email field crashed the app twice with SIGTRAP inside the in-process Chromium (Chrome_InProcRendererThread; once ThreadPoolForeground), before any credential was submitted. Same crash class as FotMob's earlier Chrome-thread trap; cause open."
+          "status": "observed_server_accepted",
+          "evidence": "With both fixes (2026-11-21 board time (HKT)): Facebook -> FacebookActivity -> CustomTabMainActivity -> Facebook's web login in Westlake's in-app browser. The fields took focus and typed input without a crash; login, \"save login info\" (Not now) and the consent page (name, profile picture, email; continued) returned to Duolingo, whose server answered \"There is no Duolingo profile for that Facebook account\". Same end point as Google: creating the profile needs the first lesson, which crashes in the Rive runtime.",
+          "previous": "2026-11-20: the email field's focus crashed the app twice (SIGTRAP in the in-process Chromium). Cause found and fixed (westlake f46ae1b; see westlakeFixes)."
         }
       },
       "otherGaps": [
@@ -102,7 +103,12 @@
         },
         "google_sign_in": {
           "status": "failed",
-          "gap": "After the credential reached the app, WEBTOON showed 'Login with your Google account failed.' WEBTOON made no further Play services call; its own login step (server) refused or failed. Cause open (not observable without the app's network trace)."
+          "gap": "After the credential reached the app, WEBTOON showed 'Login with your Google account failed.' WEBTOON made no further Play services call; its own login step (server) refused or failed. Cause open (not observable without the app's network trace).",
+          "rerun": "Rerun on 2026-11-21 board time (HKT) with both fixes: same \"Login with your Google account failed.\" after Play services returned RESULT_OK to androidx.credentials HiddenActivity. Not the descriptor bugs; open."
+        },
+        "facebook_sign_in": {
+          "status": "not_run_not_approved",
+          "gap": "WEBTOON offers Continue with Facebook, but the approved Facebook sign-ups were Duolingo, JOOX, Strava, Viu and Trip.com. Needs the user's OK."
         }
       },
       "otherGaps": [
@@ -149,11 +155,12 @@
         },
         "google_sign_in": {
           "status": "failed",
-          "gap": "Both times Strava then started SplashActivity, which routed back to the welcome carousel (not signed in). No exception, network error, toast or AccountManager call was logged; Strava also binds Play Integrity (express) through the Play Store. Cause open; an app/server-side check failing on this uncertified board is a hypothesis, not established."
+          "gap": "Both times Strava then started SplashActivity, which routed back to the welcome carousel (not signed in). No exception, network error, toast or AccountManager call was logged; Strava also binds Play Integrity (express) through the Play Store. Cause open; an app/server-side check failing on this uncertified board is a hypothesis, not established.",
+          "rerun": "Rerun on 2026-11-21 board time (HKT) with both fixes: the sign-up/log-in window now attached at once; the account pick returned RESULT_OK to LogInOrSignUpActivity, a progress dialog showed, then SplashActivity -> welcome carousel again. Unchanged, so not the descriptor bugs; cause still open (Strava logs nothing in release)."
         },
         "facebook_sign_in": {
-          "status": "not_run",
-          "gap": "Join for free started LogInOrSignUpActivity, but its window stayed unattached (0x0 Compose root) while the welcome carousel stayed on screen; not retried this session."
+          "status": "not_offered",
+          "evidence": "On 2026-11-21 board time (HKT) (fixed libraries) both Join for free (Create an Account) and Log In (Log In to Strava) rendered and offer only Continue with Google and email: no Facebook option in this build and region."
         }
       },
       "otherGaps": [
@@ -205,12 +212,22 @@
           "evidence": "Sign In -> Continue with Google -> 'Choose an account to continue to Trip.com' -> test account: the broker issued OAuth and ID tokens, granted the session, and RESULT_OK reached LoginMainActivity."
         },
         "google_sign_in": {
-          "status": "failed",
-          "gap": "Trip.com's next page showed 'There seems to be a problem with your Internet connection. Please try again.(-503)', also after Retry. The connections Westlake logged in that window were only Trip.com's local anti-tamper probes (127.0.0.1:27042/9317, refused as on a clean phone). Cause open."
+          "status": "observed",
+          "evidence": "Correction of 2026-11-20's \"failed\": after a full restart on 2026-11-21 board time (HKT) the Account tab showed a signed-in member, and Manage my account showed the test Google address as the linked email and Google as the linked sign-in (Unlink). The sign-up had completed; the \"(-503) Internet connection\" page came from a later call.",
+          "gap": "A React Native page after the login return shows \"Internet connection ... (-503)\"; it does not undo the login. Cause open."
         },
         "facebook_sign_in": {
-          "status": "not_run",
-          "gap": "Not tried this session (Trip.com's login page fails with -503 after the Google return)."
+          "status": "observed",
+          "evidence": "After signing the Google-created account out: Continue with Facebook -> FacebookActivity -> CustomTabMainActivity -> Facebook's web login in the in-app browser; typed login; Facebook's \"Running security checks\" page passed by itself (no challenge shown, nothing solved); save login info (Not now); consent (name, profile picture, email; continued). RESULT_OK reached LoginMainActivity. A new Trip.com account was signed in (new-user offers), with Facebook as its linked sign-in (Unlink) and Google not linked.",
+          "gap": "The React Native page after the return showed \"Internet connection ... (-403)\" (same pattern as Google's -503); the login stands."
+        },
+        "restart_persistence_google": {
+          "status": "observed",
+          "evidence": "Signed-in state found after a full process restart (2026-11-21 board time (HKT))."
+        },
+        "restart_persistence_facebook": {
+          "status": "observed",
+          "evidence": "The Facebook-created account was still signed in after a full process restart (2026-11-21 board time (HKT))."
         }
       }
     }
@@ -218,15 +235,15 @@
   "summary": {
     "google": {
       "observed_end_to_end": [
-        "com.canva.editor"
+        "com.canva.editor",
+        "ctrip.english"
       ],
       "server_accepted_token": [
         "com.duolingo"
       ],
       "tokens_delivered_app_rejected": [
         "com.naver.linewebtoon",
-        "com.strava",
-        "ctrip.english"
+        "com.strava"
       ],
       "blocked_uncertified_consent": [
         "com.tencent.ibg.joox"
@@ -239,32 +256,43 @@
       ]
     },
     "facebook": {
-      "blocked_webview_renderer_crash": [
+      "observed_end_to_end": [
+        "ctrip.english"
+      ],
+      "server_accepted_token": [
         "com.duolingo"
       ],
-      "not_run": [
-        "com.tencent.ibg.joox",
-        "com.strava",
-        "ctrip.english"
+      "not_offered": [
+        "com.strava"
+      ],
+      "not_run_region_locked": [
+        "com.tencent.ibg.joox"
       ],
       "region_locked": [
         "com.viu.phone"
       ]
     },
     "westlake_fixes_needed": [
-      "In-process Chromium renderer SIGTRAP when a web login field gets focus (blocks Facebook web login)",
       "Grant model holds one server client ID per app; apps use project-number or alternate IDs (found by trial)",
       "Window/frame lag: new activity windows (Strava, WEBTOON) attach or present late; captures show the previous window",
       "Rive runtime crash at Duolingo's first lesson (librive-android.so)",
       "Play services picker label/icon for Canva unresolved",
       "appwidget pin answers (requestPinAppWidget) give no result",
-      "RenderThread Looper POLL_ERROR abort (intermittent)",
-      "Permission checks answer granted where a rule says denied"
+      "Permission checks answer granted where a rule says denied",
+      "Roll the two fixed libraries into Play services, microG, the Store and the batch-1 apps (each needs a restart)"
     ],
     "environment": [
       "Board timezone set to Asia/Hong_Kong for HK apps",
       "JOOX and Viu need a Hong Kong network exit",
       "Board is uncertified (honest): Google refuses interactive consent for extra scopes"
+    ],
+    "westlake_fixes_done": [
+      "f46ae1b: PixelCopy readback fence (the in-app browser aborts and RenderThread POLL_ERROR)",
+      "runtime rebuilt with 876034c (input receiver descriptor double close); the deployed runtime lacked it"
     ]
+  },
+  "westlakeFixes": {
+    "f46ae1b": "Window shim: perform(NATIVE_WINDOW_GET_LAST_QUEUED_BUFFER/_2) now writes no buffer and fence -1 before its error. hwui's PixelCopy readback (Readback::copySurfaceInto) closes that fence on every return path, so the unwritten value closed whatever its stack held: another thread's descriptor when that number was open. Root cause of Duolingo's in-app browser aborts ([FATAL:scoped_file.cc(43)] and [FATAL:udp_socket_posix.cc(276)] Bad file descriptor) and of its RenderThread Looper POLL_ERROR. Found with a kernel trace of fd_install and every close with its user-space caller; the fixed run had no descriptor closed by anyone but its owner across about a million traced events.",
+    "876034c-deployment": "The runtime deployed for this stack (8e5d7304) was built from a worktree without westlake 876034c (the input receiver keeps its own duplicate of the channel descriptor), so each window teardown closed one descriptor number twice. Rebuilt byte-for-byte from the recorded command with only that change: cef91a38."
   }
 }
