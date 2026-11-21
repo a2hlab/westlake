@@ -122,7 +122,6 @@ public final class AppProcesses {
         return info.processName != null && !info.processName.isEmpty() ? info.processName : info.packageName;
     }
 
-    /** Whether a component of this app declared for process runs here. Everything does when this is off. */
     /**
      * Whether a component whose process cannot start runs in the caller's process instead (the default, as
      * before) or fails as on Android (WESTLAKE_APP_PROCESS_FALLBACK=fail: a bind reports its binding dead).
@@ -131,6 +130,7 @@ public final class AppProcesses {
         return !"fail".equals(System.getenv("WESTLAKE_APP_PROCESS_FALLBACK"));
     }
 
+    /** Whether a component of this app declared for process runs here. Everything does when this is off. */
     public static boolean runsHere(String process) {
         String self = sSelf;
         return !enabled() || self == null || process == null || process.equals(self);
