@@ -977,8 +977,35 @@ public class AppSpawnXInit {
      */
     public static volatile String sSpawnName;
 
+    /**
+     * Whether this is one of a managed launch's app processes (westlake ADR-0008 + ADR-0002): a process the app's
+     * launched process started for another of its processes, through AppProcesses' spawner, which resends the
+     * app's own appspawn-x request under that process's name. OH's application manager did not spawn it and
+     * never binds it: its attachApplication to OH went unanswered, so the process never bound its application or
+     * served (Microsoft Authenticator's main thread waited for its :auth process). OH's spawns of the app are the
+     * launched process, named after the package.
+     */
+    static boolean managedAppProcess(String procName) {
+        String launched = System.getenv("ASX_LAUNCH_PKG");
+        return "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))
+                && "1".equals(System.getenv("WESTLAKE_APP_PROCESSES"))
+                && procName != null && launched != null && !procName.equals(launched);
+    }
+
     public static void initChild(String procName, String targetClass, int targetSdkVersion) {
         sSpawnName = procName;
+        // Such a process binds itself, as a direct launch does (the local activity manager, then
+        // AppSchedulerBridge.directLaunchNoBms, which binds the application under its own name and starts no
+        // activity in another process of the app). It opens no windows, so the direct launch's window paths stay
+        // unused; every check of ASX_DIRECT_LAUNCH, Java or native, now agrees.
+        if (managedAppProcess(procName)) {
+            try {
+                android.system.Os.setenv("ASX_DIRECT_LAUNCH", "1", true);
+                System.err.println("[WL-PROC] " + procName + ": an app process of a managed launch, bound here");
+            } catch (Throwable t) {
+                System.err.println("[WL-PROC] " + procName + ": could not arm the direct bind: " + t);
+            }
+        }
         // [FIX-AII 2026-05-24] CHILD ENTRY PING — direct nativeHiLog before
         // anything else. Required to diagnose pre-Java-entry crashes:
         // Netflix/Amazon/Maps/Spotify/Zoom all SEGV at boot-framework.oat+0xa3ee42
