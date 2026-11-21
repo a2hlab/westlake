@@ -112,6 +112,11 @@ final class GoogleAsyncAuthOperations {
         } catch (Exception denied) {
             GoogleAuthDelegation.event("async_signin_read_denied=true " + GoogleAuthDelegation.failure(denied));
         }
+        // An app's own live Authorization API request (experiment), when no sign-in operation claims the read.
+        if (!answer.getBoolean("handled")) {
+            Bundle authorization = GoogleAuthorizationOperations.read(method, account, input);
+            if (authorization.getBoolean("handled")) return authorization;
+        }
         return answer;
     }
 
