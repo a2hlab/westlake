@@ -242,7 +242,13 @@ public final class LocalIntentSenders {
                         android.os.Process.myUid(), record.immutable, record.key.type);
             }
         }
-        return PlayServicesChannel.remoteSenderInfo(sender);
+        ActivityManager.PendingIntentInfo remote = PlayServicesChannel.remoteSenderInfo(sender);
+        // Android's activity manager answers a sender it does not know with an empty record, never null:
+        // PendingIntent.getCreatorPackage, getCreatorUid and isImmutable dereference the answer. Play
+        // services' :persistent died on that NullPointerException in its GCM scheduler when the process that
+        // made a sender had gone and could not be asked.
+        return remote != null ? remote
+                : new ActivityManager.PendingIntentInfo(null, -1, false, ActivityManager.INTENT_SENDER_UNKNOWN);
     }
 
     /** IActivityManager.getIntentForIntentSender. */
