@@ -6631,12 +6631,38 @@ static void *westlake_egl_by_handle(const char *name)
 typedef void *(*WestlakeEglProcFn)(const char *);
 static WestlakeEglProcFn westlake_egl_get_proc;
 
+/*
+ * eglPresentationTimeANDROID for a driver that has none: it reports success and sets nothing. Every
+ * Android driver has EGL_ANDROID_presentation_time. Mesa on the OnePlus 6 does not, and OH's
+ * eglGetProcAddress answers the name with NULL (its libEGL.so exports one, but a lookup asks the
+ * driver). Swappy (Android Frame Pacing, in Unity's player) needs the name: without it Swappy keeps no
+ * EGL functions at all, and its swap then calls eglSwapBuffers through a NULL table, so a Unity game
+ * that turns frame pacing on faulted at its first frame (SIGSEGV in SwappyGL::swap, on
+ * UnityGfxDeviceW). The time is a hint for the compositor, which then shows the frame at the next
+ * vsync. Swappy also needs it to succeed: when it fails, Swappy skips the swap.
+ */
+static unsigned int westlake_egl_presentation_time(WlEglDisplay display, void *surface, int64_t time)
+{
+    (void) display;
+    (void) surface;
+    (void) time;
+    return 1;   /* EGL_TRUE */
+}
+
 static void *westlake_egl_get_proc_address(const char *name)
 {
     void *own = name != NULL ? westlake_egl_by_handle(name) : NULL;
     if (own != NULL) return own;
     WestlakeEglProcFn next = __atomic_load_n(&westlake_egl_get_proc, __ATOMIC_ACQUIRE);
-    return next != NULL ? next(name) : NULL;
+    void *found = next != NULL ? next(name) : NULL;
+    if (found == NULL && name != NULL && strcmp(name, "eglPresentationTimeANDROID") == 0) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] eglPresentationTimeANDROID: the driver has none, this library's\n");
+        }
+        return (void *) &westlake_egl_presentation_time;
+    }
+    return found;
 }
 
 /*
