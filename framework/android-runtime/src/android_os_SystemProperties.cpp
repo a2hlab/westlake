@@ -85,23 +85,24 @@ static const AdapterPropFallback kAdapterPropFallbacks[] = {
     { "ro.build.version.preview_sdk_fingerprint", "REL" },
     { "ro.build.version.release_or_preview_display", "14" },
     { "ro.product.first_api_level",   "34" },
-    { "ro.build.version.incremental", "oh-adapter" },
+    { "ro.build.version.incremental", "eng.20261121" },
     { "ro.build.version.security_patch", "2024-01-01" },
     { "ro.build.version.base_os",     "" },
-    // Build product / model — used by Build static fields. Empty string is
-    // safe but feels nicer to populate.
-    { "ro.product.brand",             "OpenHarmony" },
-    { "ro.product.manufacturer",      "OpenHarmony" },
+    // Build product / model, read by Build's static fields and reported in Google check-ins: an Android 14
+    // device made by HopeRun (the DAYU200 board, rk3568), never an OpenHarmony identity (user decision
+    // 2026-11-21). Not a certified model, and nothing here claims to be one.
+    { "ro.product.brand",             "HopeRun" },
+    { "ro.product.manufacturer",      "HopeRun" },
     { "ro.product.model",             "DAYU200" },
     { "ro.product.device",            "rk3568" },
     { "ro.product.name",              "rk3568" },
-    { "ro.build.fingerprint",         "OpenHarmony/rk3568/rk3568:14/oh-adapter:user/release-keys" },
+    { "ro.build.fingerprint",         "HopeRun/rk3568/rk3568:14/UP1A.231005.007/eng.20261121:user/release-keys" },
     { "ro.build.tags",                "release-keys" },
     { "ro.build.type",                "user" },
-    { "ro.build.user",                "oh-adapter" },
-    { "ro.build.host",                "oh-adapter" },
-    { "ro.build.id",                  "oh-adapter" },
-    { "ro.build.display.id",          "oh-adapter" },
+    { "ro.build.user",                "hoperun" },
+    { "ro.build.host",                "hoperun" },
+    { "ro.build.id",                  "UP1A.231005.007" },
+    { "ro.build.display.id",          "UP1A.231005.007" },
     { "ro.serialno",                  "" },
     // Hardware
     { "ro.hardware",                  "rk3568" },
