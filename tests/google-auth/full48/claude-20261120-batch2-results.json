@@ -217,7 +217,9 @@
         },
         "google_sign_in": {
           "status": "failed",
-          "gap": "Continue with Google sent GIS's PendingIntent; Play services' AssistedSignInActivity (ASSISTED_SIGNIN, One Tap) closed with RESULT_CANCELED after about 2 s without showing UI, twice (also once on the sheet's own auto-prompt). No account query, broker request or denial was logged, so the decision is inside Play services (no eligible One Tap credential, a cooldown, or a server refusal); cause open. Dropbox did not fall back to the button flow that worked for Duolingo (GoogleSignInActivity)."
+          "gap": "Continue with Google sent GIS's PendingIntent; Play services' AssistedSignInActivity (ASSISTED_SIGNIN, One Tap) closed with RESULT_CANCELED after about 2 s without showing UI, twice (also once on the sheet's own auto-prompt). No account query, broker request or denial was logged, so the decision is inside Play services (no eligible One Tap credential, a cooldown, or a server refusal); cause open. Dropbox did not fall back to the button flow that worked for Duolingo (GoogleSignInActivity).",
+          "cause": "Found with Play services' private log (2026-11-21 board time): One Tap (AssistedSignIn) fails because Play services' passkey service FIDO2_ZERO_PARTY_API (service 180) is refused by the uncertified gate (SERVICE_INVALID), which fails the whole flow. The activity also leaked its windows, which then stayed on screen.",
+          "after_180": "With 180 added (user-approved, labelled): the One Tap sheet now opens, both for Dropbox's automatic prompt and for Continue with Google, but it offers only 'Sign in another way: use passkey from a different device', not the Google account. Still refused on the board at that time: AccountDataService, ChromeSync (80), FacsCache (202), GmsCoreLogger (299), WorkAccount (120) and others. Which of them keeps the account out of the sheet is not established. Status unchanged: failed."
         }
       }
     },
