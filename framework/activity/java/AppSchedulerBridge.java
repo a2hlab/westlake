@@ -173,6 +173,10 @@ public class AppSchedulerBridge {
                             }
                         }
                         ensureBindApplication(activityThread, bundleName, ohConfigKv);
+                        // A Play host launched as a managed app (its own OH bundle) serves its socket once bound,
+                        // as a direct launch does in directLaunchNoBms; without it the managed Play services process
+                        // served only its other processes' sockets and every client was refused.
+                        if (sBindAppDone) PlayServicesChannel.startHostIfAsked();
                     } finally {
                         sManagedBind.countDown();
                     }
