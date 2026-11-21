@@ -5753,6 +5753,7 @@ typedef struct {
     int (*dup_fence)(WlEglDisplay, void *);
     void *(*create_window_surface)(WlEglDisplay, void *, void *, const WlEglInt *);
     const char *(*query_string)(WlEglDisplay, WlEglInt);
+    unsigned (*get_config_attrib)(WlEglDisplay, void *, WlEglInt, WlEglInt *);
 } WlEglImplementation;
 static WlEglImplementation wl_egl_implementations[WL_EGL_IMPLEMENTATIONS];
 static int wl_egl_implementation_count;
@@ -5794,6 +5795,8 @@ static void wl_egl_add_implementation(void *library)
     e->create_window_surface = (void *(*)(WlEglDisplay, void *, void *, const WlEglInt *))
             wl_egl_entry(library, "eglCreateWindowSurface");
     e->query_string = (const char *(*)(WlEglDisplay, WlEglInt)) wl_egl_entry(library, "eglQueryString");
+    e->get_config_attrib = (unsigned (*)(WlEglDisplay, void *, WlEglInt, WlEglInt *))
+            wl_egl_entry(library, "eglGetConfigAttrib");
     Dl_info info;
     wl_relocs_log("[WESTLAKE-EGL] implementation %d: %s\n", wl_egl_implementation_count - 1,
                   dladdr(current, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
@@ -6678,6 +6681,72 @@ const char *eglQueryString(WlEglDisplay display, WlEglInt name)
 }
 
 /*
+ * eglGetConfigAttrib, with a config's native visual in Android's numbering. The native visual is
+ * the window format the config renders to, and apps hand it to ANativeWindow_setBuffersGeometry
+ * before they create a window surface, as the NDK's documentation recommends (Unity, SDL,
+ * Chromium). Android's EGL answers in Android's numbering (HAL_PIXEL_FORMAT_*), and so does the
+ * D600 board's driver. Mesa on the OnePlus 6 answers in OH's (GRAPHIC_PIXEL_FMT_*), where RGB_565
+ * is 3, which is RGB_888 in Android's: Unity games with a 16-bit display buffer set their window to
+ * RGB_888, Mesa could not import its buffers ("failed to create DRI image from FD"), their default
+ * framebuffer had none, and their first draw with depth test faulted in freedreno's
+ * batch_draw_tracking (8 games in the OnePlus round, among them Pikmin Bloom and Hungry Shark).
+ * A visual whose number is one of OH's window formats and whose channel sizes are that format's is
+ * answered in Android's numbering. Every other answer, and every caller that is not an Android
+ * library, gets the implementation's.
+ */
+#define WL_EGL_NATIVE_VISUAL_ID 0x302E
+#define WL_EGL_ALPHA_SIZE 0x3021
+#define WL_EGL_BLUE_SIZE 0x3022
+#define WL_EGL_GREEN_SIZE 0x3023
+#define WL_EGL_RED_SIZE 0x3024
+
+static WlEglInt wl_android_visual(WlEglImplementation *e, WlEglDisplay display, void *config, WlEglInt visual)
+{
+    static const struct { WlEglInt oh, android, red, green, blue, alpha; } kVisuals[] = {
+        {12, 1, 8, 8, 8, 8},   /* RGBA_8888 */
+        {11, 2, 8, 8, 8, 0},   /* RGBX_8888 */
+        {3, 4, 5, 6, 5, 0},    /* RGB_565 */
+        {20, 5, 8, 8, 8, 8},   /* BGRA_8888 */
+    };
+    for (size_t i = 0; i < sizeof(kVisuals) / sizeof(kVisuals[0]); i++) {
+        if (kVisuals[i].oh != visual) continue;
+        WlEglInt red = -1, green = -1, blue = -1, alpha = -1;
+        if (!e->get_config_attrib(display, config, WL_EGL_RED_SIZE, &red) ||
+            !e->get_config_attrib(display, config, WL_EGL_GREEN_SIZE, &green) ||
+            !e->get_config_attrib(display, config, WL_EGL_BLUE_SIZE, &blue) ||
+            !e->get_config_attrib(display, config, WL_EGL_ALPHA_SIZE, &alpha) ||
+            red != kVisuals[i].red || green != kVisuals[i].green || blue != kVisuals[i].blue ||
+            alpha != kVisuals[i].alpha) {
+            return visual;
+        }
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            wl_relocs_log("[WESTLAKE-EGL] native visual %d in OH's numbering: Android's %d\n", visual,
+                          kVisuals[i].android);
+        }
+        return kVisuals[i].android;
+    }
+    return visual;
+}
+
+unsigned eglGetConfigAttrib(WlEglDisplay display, void *config, WlEglInt attribute, WlEglInt *value)
+{
+    int order[WL_EGL_IMPLEMENTATIONS], count = wl_egl_order(display, order);
+    for (int k = 0; k < count; k++) {
+        WlEglImplementation *e = &wl_egl_implementations[order[k]];
+        if (e->get_config_attrib == NULL) continue;
+        unsigned ok = e->get_config_attrib(display, config, attribute, value);
+        if (!ok && k + 1 < count && wl_egl_error(order[k]) == WL_EGL_BAD_DISPLAY) continue;
+        if (ok && attribute == WL_EGL_NATIVE_VISUAL_ID && value != NULL &&
+            caller_is_android_dso(__builtin_return_address(0), NULL)) {
+            *value = wl_android_visual(e, display, config, *value);
+        }
+        return ok;
+    }
+    return 0;   /* EGL_FALSE */
+}
+
+/*
  * eglTerminate. hwui renders the whole process through the default display and keeps it
  * initialized for the life of the process; Android's EGL loader counts initializations, so an app's
  * own eglTerminate (GLSurfaceView, a renderer through EGL14) never tears that display down there.
@@ -6853,6 +6922,7 @@ static void *westlake_egl_by_handle(const char *name)
     if (strcmp(name, "eglCreateWindowSurface") == 0) return (void *) &eglCreateWindowSurface;
     if (strcmp(name, "eglTerminate") == 0) return (void *) &eglTerminate;
     if (strcmp(name, "eglQueryString") == 0) return (void *) &eglQueryString;
+    if (strcmp(name, "eglGetConfigAttrib") == 0) return (void *) &eglGetConfigAttrib;
     return NULL;
 }
 
@@ -6860,8 +6930,8 @@ static void *westlake_egl_by_handle(const char *name)
  * eglGetProcAddress, as an Android library gets it by handle. Cocos's EGL loader takes
  * eglGetProcAddress from its handle to libEGL.so and every other entry point from that, core ones
  * included, so its eglCreateWindowSurface was OH's: given the adapter's AOSP-shaped window it failed
- * ("Create window surface failed"), and the engine faulted on the missing surface. The two entry
- * points above come from this library; every other name from the implementation the handle named.
+ * ("Create window surface failed"), and the engine faulted on the missing surface. The entry points
+ * above come from this library; every other name from the implementation the handle named.
  */
 typedef void *(*WestlakeEglProcFn)(const char *);
 static WestlakeEglProcFn westlake_egl_get_proc;
