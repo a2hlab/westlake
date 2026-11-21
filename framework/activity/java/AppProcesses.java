@@ -123,6 +123,14 @@ public final class AppProcesses {
     }
 
     /** Whether a component of this app declared for process runs here. Everything does when this is off. */
+    /**
+     * Whether a component whose process cannot start runs in the caller's process instead (the default, as
+     * before) or fails as on Android (WESTLAKE_APP_PROCESS_FALLBACK=fail: a bind reports its binding dead).
+     */
+    public static boolean fallsBackToCaller() {
+        return !"fail".equals(System.getenv("WESTLAKE_APP_PROCESS_FALLBACK"));
+    }
+
     public static boolean runsHere(String process) {
         String self = sSelf;
         return !enabled() || self == null || process == null || process.equals(self);

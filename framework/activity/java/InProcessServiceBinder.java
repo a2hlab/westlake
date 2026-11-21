@@ -134,12 +134,15 @@ public class InProcessServiceBinder implements Runnable {
 
     @Override
     public void run() {
-        // A service declared for another of the app's processes runs there (ADR-0002); here only if that
-        // process cannot start, as before.
+        // A service declared for another of the app's processes runs there (ADR-0002). If that process cannot
+        // start, the service runs here as before, unless the launch asks for Android's behaviour instead
+        // (AppProcesses.fallsBackToCaller): run here, a service written for its own process can block the
+        // caller's main thread (Firefox's crash helper did on the managed launch).
         String process = declaredProcess(mComp);
         if (!AppProcesses.runsHere(process)) {
+            Runnable unavailable = AppProcesses.fallsBackToCaller() ? this::runHere : this::bindingDied;
             PlayServicesChannel.bindOwnProcess(process, mService, android.content.Context.BIND_AUTO_CREATE, mComp,
-                    mConnection, () -> new Handler(Looper.getMainLooper()).post(this::runHere));
+                    mConnection, () -> new Handler(Looper.getMainLooper()).post(unavailable));
             return;
         }
         runHere();
@@ -152,6 +155,16 @@ public class InProcessServiceBinder implements Runnable {
             return app == null ? null : AppProcesses.processOf(app.getPackageManager().getServiceInfo(comp, 0));
         } catch (Throwable t) {
             return null;
+        }
+    }
+
+    /** The service's process could not start: the connection learns so (onBindingDied), as on Android. */
+    private void bindingDied() {
+        Log.w(TAG, "process for " + mComp.flattenToShortString() + " unavailable; binding reported dead");
+        try {
+            mConnection.connected(mComp, null, true);
+        } catch (android.os.RemoteException | RuntimeException e) {
+            Log.w(TAG, "binding death not delivered for " + mComp.flattenToShortString() + ": " + e);
         }
     }
 
