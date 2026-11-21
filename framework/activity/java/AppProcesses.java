@@ -35,9 +35,11 @@ import java.util.Set;
  * launched as starts it the first time one of its components is needed: it sends its own appspawn-x
  * the request that spawned it (the launcher leaves it at WESTLAKE_SPAWN_REQUEST, and the zygote's
  * socket at WESTLAKE_SPAWN_SOCKET) under the other process's name, as Android's activity manager
- * starts a process on demand. The child is forked from the same zygote, so it has the app's runtime,
- * data and identity; it binds the same Application under its own name, starts no activity, and
- * serves its components on a socket of its own (socketOf), as a host does (PlayServicesChannel).
+ * starts a process on demand (a launch path that creates processes another way, such as the managed launch
+ * through OH's AppMgr, installs its own Spawner instead). The child is forked from the same zygote, so it
+ * has the app's runtime, data and identity; it binds the same Application under its own name, starts no
+ * activity, and serves its components on a socket of its own (socketOf), as a host does
+ * (PlayServicesChannel).
  * Calls for its components reach it there: from the app's other processes, and from other apps,
  * which connect to it with their own identity, as on Android.
  *
@@ -172,7 +174,7 @@ public final class AppProcesses {
                 throw new IOException(process + " failed to start; not tried again yet");
             }
             PlayServicesChannel.serveLaunchedProcess();
-            int pid = spawn(process);
+            int pid = spawner().spawn(sPackage, process);
             sStarted.put(process, pid);
             long deadline = System.currentTimeMillis() + START_TIMEOUT_MS;
             while (!serving(socket)) {
@@ -231,7 +233,38 @@ public final class AppProcesses {
     }
 
     /** Asks this app's appspawn-x for process: the request that spawned this app, under that name. */
-    private static int spawn(String process) throws IOException {
+    /**
+     * How this app's other processes are created (ADR-0002; ADR-0010 W3). The child must carry the app's own
+     * identity from the spawn path itself (the same zygote message, or the OH process record of the same
+     * bundle), never from anything this process asserts. The name is one this app declares (ensure checks).
+     */
+    public interface Spawner {
+        /** Starts process for packageName and answers its pid; it serves on socketOf(process) once up. */
+        int spawn(String packageName, String process) throws IOException;
+    }
+
+    /** The direct launch's spawner: this process's own appspawn-x request, renamed (see spawnFromRequest). */
+    private static final Spawner APPSPAWN_REQUEST = (packageName, process) -> spawnFromRequest(process);
+    private static volatile Spawner sSpawner;
+
+    /**
+     * A launch path that starts processes another way (the managed launch, through OH's AppMgr) installs its
+     * spawner once, before any component of another process is needed.
+     */
+    public static void setSpawner(Spawner spawner) {
+        if (spawner == null) throw new NullPointerException("spawner");
+        synchronized (AppProcesses.class) {
+            if (sSpawner != null) throw new IllegalStateException("spawner already set");
+            sSpawner = spawner;
+        }
+    }
+
+    static Spawner spawner() {
+        Spawner installed = sSpawner;
+        return installed != null ? installed : APPSPAWN_REQUEST;
+    }
+
+    private static int spawnFromRequest(String process) throws IOException {
         String socket = System.getenv(SPAWN_SOCKET);
         String requestPath = System.getenv(SPAWN_REQUEST);
         if (socket == null || requestPath == null) {
