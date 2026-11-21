@@ -232,7 +232,6 @@ public final class AppProcesses {
         }
     }
 
-    /** Asks this app's appspawn-x for process: the request that spawned this app, under that name. */
     /**
      * How this app's other processes are created (ADR-0002; ADR-0010 W3). The child must carry the app's own
      * identity from the spawn path itself (the same zygote message, or the OH process record of the same
@@ -264,6 +263,7 @@ public final class AppProcesses {
         return installed != null ? installed : APPSPAWN_REQUEST;
     }
 
+    /** Asks this app's appspawn-x for process: the request that spawned this app, under that name. */
     private static int spawnFromRequest(String process) throws IOException {
         String socket = System.getenv(SPAWN_SOCKET);
         String requestPath = System.getenv(SPAWN_REQUEST);
