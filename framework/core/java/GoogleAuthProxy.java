@@ -551,6 +551,49 @@ public final class GoogleAuthProxy {
         } catch (RuntimeException ignored) { /* Diagnostics must not change auth behavior. */ }
     }
 
+    private static final GoogleBrokerSelfTokens SELF_TOKENS = new GoogleBrokerSelfTokens();
+
+    /**
+     * Play services' own approved account-management tokens (GoogleBrokerSelfTokens), read from its token cache
+     * (peekAuthToken, and EXP:/SCOPES: beside it) and answered from the broker's client path under Play services'
+     * own client grant. Null for anything else, which stays withheld.
+     */
+    private static String selfToken(String method, Account account, String input) {
+        if (!"1".equals(System.getenv(GoogleBrokerSelfTokens.FLAG)) || provider() || account == null || input == null
+                || !"com.google".equals(account.type)
+                || !"com.google.android.gms".equals(ActivityThread.currentPackageName())) return null;
+        boolean token = "peekAuthToken".equals(method);
+        boolean expiry = !token && input.startsWith("EXP:");
+        if (!token && !expiry && !input.startsWith("SCOPES:")) return null;
+        String key = token ? input : input.substring(expiry ? 4 : 7);
+        try {
+            android.content.pm.PackageInfo own = ActivityThread.currentApplication().getPackageManager()
+                    .getPackageInfo("com.google.android.gms", android.content.pm.PackageManager.GET_SIGNATURES);
+            if (own == null || own.signatures == null || own.signatures.length != 1) return null;
+            String service = GoogleBrokerSelfTokens.allowedService(key, digest(own.signatures[0].toByteArray(), "SHA-1"));
+            if (service == null) return null;
+            long now = System.currentTimeMillis() / 1000L;
+            if (!token) return expiry ? SELF_TOKENS.expiry(account.name, service, now) : SELF_TOKENS.scopes(account.name, service, now);
+            String cached = SELF_TOKENS.cachedToken(account.name, service, now);
+            if (cached != null) return cached;
+            Parcel reply = call(TOKEN, data -> {
+                data.writeTypedObject(account, 0); data.writeString(service); data.writeBoolean(false);
+            });
+            Bundle result;
+            try { result = reply.readBundle(GoogleAuthProxy.class.getClassLoader()); }
+            finally { reply.recycle(); }
+            String issued = result == null ? null : result.getString(AccountManager.KEY_AUTHTOKEN);
+            boolean present = issued != null && !issued.isEmpty();
+            if (present) SELF_TOKENS.put(account.name, service, issued, now);
+            event("self_token=true request=" + GoogleBrokerSelfTokens.label(service) + " token_present=" + present
+                    + (present || result == null ? "" : " error_code=" + result.getInt(AccountManager.KEY_ERROR_CODE, 0)));
+            return present ? issued : null;
+        } catch (Exception unavailable) {
+            event("self_token=false failed=" + unavailable.getClass().getSimpleName());
+            return null;
+        }
+    }
+
     /** Adapter entry point. Never falls through to the official reusable-credential store. */
     static Object answer(String method, Object[] args) {
         if (AccountManagerStub.callerPid() != android.os.Process.myPid()) {
@@ -582,6 +625,8 @@ public final class GoogleAuthProxy {
                         String value = GoogleAuthDelegation.read(method, (Account) args[0], (String) args[1]);
                         if (value != null) return value;
                     }
+                    String selfIssued = selfToken(method, (Account) args[0], (String) args[1]);
+                    if (selfIssued != null) return selfIssued;
                     event("client_credential_read=" + method + " result=withheld"); return null;
                 case "getAuthenticatorTypes":
                     return new AuthenticatorDescription[] {new AuthenticatorDescription("com.google", "com.google.android.gms", 0, 0, 0, 0, true)};
@@ -655,6 +700,7 @@ public final class GoogleAuthProxy {
                 case "invalidateAuthToken": {
                     if (!"com.google".equals(args[0])) return null;
                     if (GoogleAuthDelegation.enabled()) GoogleAuthDelegation.invalidate((String) args[1]);
+                    if (SELF_TOKENS.invalidate((String) args[1])) event("self_token_invalidated=true");
                     Parcel reply = call(INVALIDATE, data -> data.writeString((String) args[1]));
                     try { event("client_invalidation cache_removed=" + reply.readBoolean()); }
                     finally { reply.recycle(); }
