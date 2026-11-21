@@ -3359,16 +3359,95 @@ unsigned long long strtoull_l(const char *text, char **end, int base, locale_t l
 }
 
 /*
- * Bionic's fdsan (API 29), answered as fdsan disabled: musl tracks no fd owners, so tags are made
- * and read as Bionic makes them and nothing is enforced. ANDROID_FDSAN_ERROR_LEVEL_DISABLED is a
- * real Bionic state. TP-Link's libfdsan-lib.so finds these by name in "libc.so" (musl here, which
- * has none -- see dlsym below) and called the null it got back.
+ * Bionic's fdsan (API 29): owner tags per file descriptor, as Bionic keeps them.
+ *
+ * Off unless WESTLAKE_FDSAN is "warn" or "fatal": then tags are kept per descriptor, and an exchange or a
+ * close by a party that does not own the descriptor is reported on stderr with both owners and the
+ * caller's library and offset. That is the shape of a double close: one component closing a descriptor
+ * number that another still owns (hwui closed a garbage fence number that Chromium's sockets owned).
+ * The first eight reports per process are printed; "fatal" aborts at the first, as Bionic's fatal level.
+ * As in Bionic, the close still happens and an app's own android_fdsan_set_error_level is honoured.
+ * Off, nothing is tracked and the answers are those of Bionic's disabled level, as before. TP-Link's
+ * libfdsan-lib.so finds these by name in "libc.so" (musl here, which has none -- see dlsym below).
  */
+#define WL_FDSAN_PAGE_BITS 10
+#define WL_FDSAN_PAGE_SIZE (1u << WL_FDSAN_PAGE_BITS)
+#define WL_FDSAN_PAGES 64u                          /* descriptors 0..65535 */
+#define WL_FDSAN_REPORTS 8
+
+static uint64_t *wl_fdsan_pages[WL_FDSAN_PAGES];   /* each page mmap'd once, never freed */
+static int wl_fdsan_tracking = -1;                 /* -1 unread, 0 off, 1 on */
+static int wl_fdsan_level = 0;                     /* Bionic's levels: 0 disabled, 2 warn always, 3 fatal */
+static int wl_fdsan_reports;
+
+static int wl_fdsan_enabled(void)
+{
+    int tracking = __atomic_load_n(&wl_fdsan_tracking, __ATOMIC_ACQUIRE);
+    if (tracking >= 0) return tracking;
+    const char *value = getenv("WESTLAKE_FDSAN");
+    int level = value == NULL ? 0 : strcmp(value, "fatal") == 0 ? 3 : strcmp(value, "warn") == 0 ? 2 : 0;
+    __atomic_store_n(&wl_fdsan_level, level, __ATOMIC_RELEASE);
+    tracking = level != 0;
+    __atomic_store_n(&wl_fdsan_tracking, tracking, __ATOMIC_RELEASE);
+    return tracking;
+}
+
+static uint64_t *wl_fdsan_entry(int fd)
+{
+    if (fd < 0 || (unsigned)fd >> WL_FDSAN_PAGE_BITS >= WL_FDSAN_PAGES) return NULL;
+    unsigned page = (unsigned)fd >> WL_FDSAN_PAGE_BITS;
+    uint64_t *entries = __atomic_load_n(&wl_fdsan_pages[page], __ATOMIC_ACQUIRE);
+    if (entries == NULL) {
+        /* mmap, not malloc: closes also happen in forked children and other fragile places. */
+        void *fresh = mmap(NULL, WL_FDSAN_PAGE_SIZE * sizeof(uint64_t), PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (fresh == MAP_FAILED) return NULL;
+        uint64_t *expected = NULL;
+        if (__atomic_compare_exchange_n(&wl_fdsan_pages[page], &expected, (uint64_t *)fresh, 0,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            entries = (uint64_t *)fresh;
+        } else {
+            munmap(fresh, WL_FDSAN_PAGE_SIZE * sizeof(uint64_t));
+            entries = expected;
+        }
+    }
+    return &entries[(unsigned)fd & (WL_FDSAN_PAGE_SIZE - 1)];
+}
+
+const char *android_fdsan_get_tag_type(uint64_t tag);
+uint64_t android_fdsan_get_tag_value(uint64_t tag);
+
+static void wl_fdsan_report(const char *what, int fd, uint64_t expected, uint64_t actual, void *caller)
+{
+    int level = __atomic_load_n(&wl_fdsan_level, __ATOMIC_ACQUIRE);
+    if (level == 0) return;
+    if (__atomic_fetch_add(&wl_fdsan_reports, 1, __ATOMIC_RELAXED) < WL_FDSAN_REPORTS || level >= 3) {
+        Dl_info info;
+        const char *library = "?";
+        unsigned long long offset = 0;
+        if (caller != NULL && dladdr(caller, &info) != 0 && info.dli_fname != NULL) {
+            library = info.dli_fname;
+            offset = (unsigned long long)((uintptr_t)caller - (uintptr_t)info.dli_fbase);
+        }
+        char line[640];
+        int length = snprintf(line, sizeof(line),
+                "[WL-FDSAN] %s fd %d: expected owner %s 0x%llx, actual owner %s 0x%llx; caller %s+0x%llx\n",
+                what, fd, android_fdsan_get_tag_type(expected),
+                (unsigned long long)android_fdsan_get_tag_value(expected), android_fdsan_get_tag_type(actual),
+                (unsigned long long)android_fdsan_get_tag_value(actual), library, offset);
+        if (length > 0) (void)!write(2, line, (size_t)length < sizeof(line) ? (size_t)length : sizeof(line) - 1);
+    }
+    if (level >= 3) abort();
+}
+
 void android_fdsan_exchange_owner_tag(int fd, uint64_t expected_tag, uint64_t new_tag)
 {
-    (void)fd;
-    (void)expected_tag;
-    (void)new_tag;
+    if (!wl_fdsan_enabled()) return;
+    uint64_t *entry = wl_fdsan_entry(fd);
+    if (entry == NULL) return;
+    uint64_t current = expected_tag;
+    if (!__atomic_compare_exchange_n(entry, &current, new_tag, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+        wl_fdsan_report("ownership exchange of", fd, expected_tag, current, __builtin_return_address(0));
 }
 
 uint64_t android_fdsan_create_owner_tag(int type, uint64_t tag)
@@ -3379,8 +3458,9 @@ uint64_t android_fdsan_create_owner_tag(int type, uint64_t tag)
 
 uint64_t android_fdsan_get_owner_tag(int fd)
 {
-    (void)fd;
-    return 0;
+    if (!wl_fdsan_enabled()) return 0;
+    uint64_t *entry = wl_fdsan_entry(fd);
+    return entry == NULL ? 0 : __atomic_load_n(entry, __ATOMIC_SEQ_CST);
 }
 
 const char *android_fdsan_get_tag_type(uint64_t tag)
@@ -3404,25 +3484,37 @@ uint64_t android_fdsan_get_tag_value(uint64_t tag)
 
 int android_fdsan_close_with_tag(int fd, uint64_t tag)
 {
-    (void)tag;
+    if (wl_fdsan_enabled()) {
+        uint64_t *entry = wl_fdsan_entry(fd);
+        uint64_t current = tag;
+        if (entry != NULL && !__atomic_compare_exchange_n(entry, &current, 0, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+            wl_fdsan_report("close of", fd, tag, current, __builtin_return_address(0));
+            /* The number is closed either way. Unlike Bionic, forget its owner too: then the real owner's
+             * later close of the reused number is reported instead of silently closing someone else's. */
+            __atomic_store_n(entry, 0, __ATOMIC_SEQ_CST);
+        }
+    }
     return close(fd);
 }
 
 int android_fdsan_get_error_level(void)
 {
-    return 0;   /* ANDROID_FDSAN_ERROR_LEVEL_DISABLED */
+    return wl_fdsan_enabled() ? __atomic_load_n(&wl_fdsan_level, __ATOMIC_ACQUIRE) : 0;
 }
 
 int android_fdsan_set_error_level(int new_level)
 {
-    (void)new_level;
-    return 0;   /* the previous level: disabled, and it stays so */
+    if (!wl_fdsan_enabled()) return 0;   /* disabled, and it stays so: nothing is tracked */
+    /* Bionic's levels: 0 disabled, 1 warn once, 2 warn always, 3 fatal; warn once reports like warn always. */
+    int level = new_level < 0 ? 0 : new_level > 3 ? 3 : new_level == 1 ? 2 : new_level;
+    return __atomic_exchange_n(&wl_fdsan_level, level, __ATOMIC_ACQ_REL);
 }
 
 int android_fdsan_set_error_level_from_property(int default_level)
 {
+    /* No debug.fdsan property here: WESTLAKE_FDSAN chose the level, so the default changes nothing. */
     (void)default_level;
-    return 0;
+    return android_fdsan_get_error_level();
 }
 
 /*
