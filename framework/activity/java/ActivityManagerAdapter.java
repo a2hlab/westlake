@@ -1528,7 +1528,8 @@ public class ActivityManagerAdapter extends IActivityManager.Stub {
     public ActivityManager.PendingIntentInfo getInfoForIntentSender(
             IIntentSender sender) throws RemoteException {
         logStub("getInfoForIntentSender", "OH WantAgent (partial mapping)");
-        return null;
+        // Never null, as on Android (see LocalIntentSenders.info).
+        return LocalIntentSenders.info(sender);
     }
 
     // [STUB] registerIntentSenderCancelListenerEx
