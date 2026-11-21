@@ -3388,8 +3388,14 @@ static int wl_fdsan_enabled(void)
     int level = value == NULL ? 0 : strcmp(value, "fatal") == 0 ? 3 : strcmp(value, "warn") == 0 ? 2 : 0;
     __atomic_store_n(&wl_fdsan_level, level, __ATOMIC_RELEASE);
     tracking = level != 0;
-    __atomic_store_n(&wl_fdsan_tracking, tracking, __ATOMIC_RELEASE);
-    return tracking;
+    int previous = -1;
+    if (__atomic_compare_exchange_n(&wl_fdsan_tracking, &previous, tracking, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+            && tracking) {
+        /* Once per process, at the first fdsan call: shows the names are bound here and tracking runs. */
+        static const char kOn[] = "[WL-FDSAN] tracking file descriptor owners\n";
+        (void)!write(2, kOn, sizeof(kOn) - 1);
+    }
+    return __atomic_load_n(&wl_fdsan_tracking, __ATOMIC_ACQUIRE);
 }
 
 static uint64_t *wl_fdsan_entry(int fd)

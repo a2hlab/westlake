@@ -16,6 +16,6 @@ cp "$here/fdsan_host_test.c" "$work/"
 ${CC:-cc} -O2 -Wall -Wextra -Werror -o "$work/fdsan_test" "$work/fdsan_host_test.c" -ldl
 "$work/fdsan_test"
 WESTLAKE_FDSAN=warn "$work/fdsan_test" on 2> "$work/reports"
-test "$(grep -c '^\[WL-FDSAN\] ' "$work/reports")" -eq 4
+test "$(grep -c "^\[WL-FDSAN\] .*fd [0-9]" "$work/reports")" -eq 4
 if WESTLAKE_FDSAN=fatal "$work/fdsan_test" on 2>/dev/null; then echo "fatal level did not abort"; exit 1; fi
 echo FDSAN_HOST_TEST_PASS
