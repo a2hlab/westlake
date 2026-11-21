@@ -102,12 +102,20 @@
           "evidence": "The broker issued two OAuth tokens and an ID token for WEBTOON's server client ID (google_server_app_id) and granted the session."
         },
         "google_sign_in": {
-          "status": "failed",
+          "status": "observed_with_experiments",
           "gap": "After the credential reached the app, WEBTOON showed 'Login with your Google account failed.' WEBTOON made no further Play services call; its own login step (server) refused or failed. Cause open (not observable without the app's network trace).",
           "rerun": "Rerun on 2026-11-21 board time (HKT) with both fixes: same \"Login with your Google account failed.\" after Play services returned RESULT_OK to androidx.credentials HiddenActivity. Not the descriptor bugs; open.",
           "analysis": "WEBTOON's handler for the Credential Manager result (GoogleLoginActivity) parses the Google ID token credential and then calls the Authorization API (Identity.getAuthorizationClient(activity).authorize: email and profile scopes, offline access, the chosen account); the dialog comes from that call's failure listener. Whether the request reaches Play services is not established yet. Play services logged WL-AUTH-PROXY package_accounts count=0 for WEBTOON, but in the same second as the broker issued the picker's tokens, so it belongs to the picker flow.",
           "cause": "Found with WESTLAKE_PLAY_TRACE=1 (2026-11-21 board time): after the ID token reaches WEBTOON, its Authorization API call asks Play services for service 219 and gets status 9 (SERVICE_INVALID). Play services refuses the service to uncertified devices; 219 is not on the approved exception list (212, 213, 91, 44, 5, 29). The sign-in service 212 answered status 0. Uncertified-device policy, not a Westlake gap, unless the user approves adding 219.",
-          "after_219": "With 219 added to the eligibility list (363a071, framework v27 on Play services, 2026-11-21 board time): service 219 answers status 0 and WEBTOON calls IAuthorizationService.authorize, which calls back. The login still fails. During the authorize step Play services asked for WEBTOON's accounts twice and got none (WL-AUTH-PROXY package_accounts count=0), and no token request reached the broker. Next gap: the chosen account is visible to an app only while its picker is open or while Play services serves its synchronous call. The asynchronous Authorization API needs the same mediation as the legacy asynchronous sign-in (GoogleAsyncAuthOperations), including the server auth code."
+          "after_219": "With 219 added to the eligibility list (363a071, framework v27 on Play services, 2026-11-21 board time): service 219 answers status 0 and WEBTOON calls IAuthorizationService.authorize, which calls back. The login still fails. During the authorize step Play services asked for WEBTOON's accounts twice and got none (WL-AUTH-PROXY package_accounts count=0), and no token request reached the broker. Next gap: the chosen account is visible to an app only while its picker is open or while Play services serves its synchronous call. The asynchronous Authorization API needs the same mediation as the legacy asynchronous sign-in (GoogleAsyncAuthOperations), including the server auth code.",
+          "after_experiments": "Observed on 2026-11-21 board time (HKT) with four user-approved experiments on Play services (framework v34): the Google sign-in completed, WEBTOON's sign-up took the test defaults (birthday 1 Jan 1990, nickname; marketing emails left unchecked), and MainActivity and the MY tab rendered. The chain that had to be cleared, in order: (1) service 219 refused by the uncertified gate (added, 363a071); (2) Play services saw no account for WEBTOON during the asynchronous authorize call (lease for the app's own live request, WESTLAKE_GOOGLE_ASYNC_AUTHORIZATION); (3) the Sign in with Google credential named the account by its numeric ID, because Play services' own account-details sync (MdiSync, service 215) is refused on the uncertified board and its sign-in UI falls back to partial data; Play services then refused that account (internal code 28433); the request now names the granted account when the ID is exactly that account's Google ID (WESTLAKE_GOOGLE_AUTHORIZATION_ACCOUNT_ID); (4) the server auth code for the request was withheld in Play services' :persistent, which made Play services ask for re-authentication (updateCredentials, unsupported); it is now delegated for the live request only, pinned to the app, signer, named account and server client ID (WESTLAKE_GOOGLE_AUTHORIZATION_TOKENS). Also on during the pass: Play services' own tokens for four account-management scopes (WESTLAKE_GOOGLE_BROKER_SELF_TOKENS) and 215 on the exception list; both were on, and whether the pass needs either was not tested.",
+          "experiments": [
+            "WESTLAKE_GOOGLE_ASYNC_AUTHORIZATION",
+            "WESTLAKE_GOOGLE_AUTHORIZATION_ACCOUNT_ID",
+            "WESTLAKE_GOOGLE_AUTHORIZATION_TOKENS",
+            "WESTLAKE_GOOGLE_BROKER_SELF_TOKENS",
+            "uncertified exceptions 219 and 215 (user-approved)"
+          ]
         },
         "facebook_sign_in": {
           "status": "observed",
@@ -117,6 +125,10 @@
         "restart_persistence_facebook": {
           "status": "observed",
           "evidence": "After a full process restart WEBTOON went SplashActivity -> MainActivity; signed out it goes SplashActivity -> LoginActivity."
+        },
+        "restart_persistence_google": {
+          "status": "observed_with_experiments",
+          "evidence": "After a full WEBTOON restart: SplashActivity then MainActivity; the MY tab's More page loaded the account's coin balance (0 purchased, 0 free), which WEBTOON shows only to a logged-in account."
         }
       },
       "otherGaps": [
@@ -251,7 +263,6 @@
         "com.duolingo"
       ],
       "tokens_delivered_app_rejected": [
-        "com.naver.linewebtoon",
         "com.strava"
       ],
       "blocked_uncertified_consent": [
@@ -262,6 +273,9 @@
       ],
       "region_locked": [
         "com.viu.phone"
+      ],
+      "observed_end_to_end_with_experiments": [
+        "com.naver.linewebtoon"
       ]
     },
     "facebook": {
@@ -290,7 +304,10 @@
       "appwidget pin answers (requestPinAppWidget) give no result",
       "Permission checks answer granted where a rule says denied",
       "Bridge PixelCopy fix for the other bridge variants (Play services and Store 2a319bac, Gmail 0215db8c)",
-      "microG runtime with 876034c built (a6ded102, same verified object; relink reproduced 225d2050 first) but not deployed yet"
+      "microG runtime with 876034c built (a6ded102, same verified object; relink reproduced 225d2050 first) but not deployed yet",
+      "Asynchronous Authorization API mediation (lease, account-ID naming, token reads) is an experiment on branch two-path/async-authorization; needs review before merge",
+      "Play services' own account-details sync (MdiSync) needs People API tokens Play services does not get; credential ids carry numeric account IDs on the uncertified board",
+      "PendingIntent.getCreatorPackage NPEs when the activity-manager stub returns no PendingIntentInfo (seen once in Play services :persistent)"
     ],
     "environment": [
       "Board timezone set to Asia/Hong_Kong for HK apps",
