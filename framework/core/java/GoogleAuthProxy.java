@@ -553,6 +553,44 @@ public final class GoogleAuthProxy {
 
     private static final GoogleBrokerSelfTokens SELF_TOKENS = new GoogleBrokerSelfTokens();
 
+    private static boolean selfTokensEnabled() {
+        return "1".equals(System.getenv(GoogleBrokerSelfTokens.FLAG)) && !provider()
+                && "com.google.android.gms".equals(ActivityThread.currentPackageName());
+    }
+
+    /**
+     * Account details Play services stores for itself (setUserData) once its approved account-state requests
+     * succeed: held in this process only, never written to the broker's account store, never logged. Keys
+     * that could stand for a credential (token caches, EXP:/SCOPES:, passwords, the account ID the broker
+     * answers) are not held; such writes are dropped, as are oversized values.
+     */
+    private static final java.util.Map<String, String> OWN_USER_DATA = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int OWN_USER_DATA_MAX = 64;
+
+    private static String ownUserDataSlot(Account account, String key) {
+        return account == null || key == null ? "" : account.type + '\n' + account.name + '\n' + key;
+    }
+
+    static boolean ownUserDataKey(String key) {
+        if (key == null || key.length() > 128 || !key.matches("[A-Za-z0-9_.-]+") || "GoogleUserId".equals(key)) return false;
+        String lower = key.toLowerCase(java.util.Locale.ROOT);
+        return !lower.contains("password") && !lower.contains("token") && !lower.contains("credential")
+                && !lower.contains("secret");
+    }
+
+    private static void rememberOwnUserData(Account account, String key, String value) {
+        boolean held = account != null && "com.google".equals(account.type) && ownUserDataKey(key)
+                && (value == null || value.length() <= 4096);
+        if (held) {
+            String slot = ownUserDataSlot(account, key);
+            if (value == null) OWN_USER_DATA.remove(slot);
+            else if (OWN_USER_DATA.size() < OWN_USER_DATA_MAX || OWN_USER_DATA.containsKey(slot)) OWN_USER_DATA.put(slot, value);
+            else held = false;
+        }
+        event("own_user_data_write key=" + (key != null && key.matches("[A-Za-z0-9_.-]{1,64}") ? key
+                : "other_len_" + (key == null ? 0 : key.length())) + " held=" + held + " value_present=" + (value != null));
+    }
+
     /**
      * Play services' own approved account-management tokens (GoogleBrokerSelfTokens), read from its token cache
      * (peekAuthToken, and EXP:/SCOPES: beside it) and answered from the broker's client path under Play services'
@@ -627,6 +665,10 @@ public final class GoogleAuthProxy {
                     }
                     String selfIssued = selfToken(method, (Account) args[0], (String) args[1]);
                     if (selfIssued != null) return selfIssued;
+                    if ("getUserData".equals(method) && selfTokensEnabled()) {
+                        String stored = OWN_USER_DATA.get(ownUserDataSlot((Account) args[0], (String) args[1]));
+                        if (stored != null) return stored;
+                    }
                     event("client_credential_read=" + method + " result=withheld"); return null;
                 case "getAuthenticatorTypes":
                     return new AuthenticatorDescription[] {new AuthenticatorDescription("com.google", "com.google.android.gms", 0, 0, 0, 0, true)};
@@ -706,6 +748,13 @@ public final class GoogleAuthProxy {
                     finally { reply.recycle(); }
                     return null;
                 }
+                case "setUserData":
+                    if (!selfTokensEnabled()) {
+                        event("client_method=" + method + " unsupported=true");
+                        throw new SecurityException("unsupported proxy account operation: " + method);
+                    }
+                    rememberOwnUserData((Account) args[0], (String) args[1], (String) args[2]);
+                    return null;
                 case "registerAccountListener":
                 case "unregisterAccountListener": return null;
                 default:
