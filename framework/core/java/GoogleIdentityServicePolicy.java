@@ -10,8 +10,10 @@ public final class GoogleIdentityServicePolicy {
     // MdiSync (215) is Play services' own account-details sync. Without it the sign-in UI builds the
     // credential from partial data, naming the account by its numeric ID, which the Authorization API
     // then refuses as an account the app cannot see.
+    // The FIDO2 zero-party API (180) is One Tap's passkey check: refused, it fails the whole Credential
+    // Manager bottom sheet (Dropbox) before any account is offered.
     // Eligibility does not grant accounts, tokens, scopes, or an integrity verdict.
-    static final java.util.List<String> REQUIRED = java.util.List.of("212", "213", "91", "44", "5", "29", "219", "215");
+    static final java.util.List<String> REQUIRED = java.util.List.of("212", "213", "91", "44", "5", "29", "219", "215", "180");
     // Default service exceptions in the tested 244034029 build; the value lives in Phenotype preferences.
     private static final String DEFAULT = "151,130,40,25,257,185,51,218";
     private GoogleIdentityServicePolicy() {}
