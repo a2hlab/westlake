@@ -174,10 +174,11 @@
           "evidence": "Join for free -> Sign up with Google, and separately Log In -> Google: Play services' picker offered the test account; the broker issued an OAuth token, an ID token and a server auth code for Strava's server client ID, granted the session, and RESULT_OK reached LogInOrSignUpActivity both times."
         },
         "google_sign_in": {
-          "status": "failed",
+          "status": "blocked_play_integrity",
           "gap": "Both times Strava then started SplashActivity, which routed back to the welcome carousel (not signed in). No exception, network error, toast or AccountManager call was logged; Strava also binds Play Integrity (express) through the Play Store. Cause open; an app/server-side check failing on this uncertified board is a hypothesis, not established.",
           "rerun": "Rerun on 2026-11-21 board time (HKT) with both fixes: the sign-up/log-in window now attached at once; the account pick returned RESULT_OK to LogInOrSignUpActivity, a progress dialog showed, then SplashActivity -> welcome carousel again. Unchanged, so not the descriptor bugs; cause still open (Strava logs nothing in release).",
-          "trace": "With WESTLAKE_PLAY_TRACE=1 (2026-11-21 board time): after RESULT_OK reaches LogInOrSignUpActivity, Strava makes no further Play services service request, so no gate refusal. It had sent two Play Integrity requests to the Play Store (IExpressIntegrityService code 2, one-way). The Store bound ExpressIntegrityService but no callback ever reached Strava. Strava then went Splash -> welcome. Lead: the Store does not answer express integrity requests. Even an answer would carry failing verdicts on this uncertified board."
+          "trace": "With WESTLAKE_PLAY_TRACE=1 (2026-11-21 board time): after RESULT_OK reaches LogInOrSignUpActivity, Strava makes no further Play services service request, so no gate refusal. It had sent two Play Integrity requests to the Play Store (IExpressIntegrityService code 2, one-way). The Store bound ExpressIntegrityService but no callback ever reached Strava. Strava then went Splash -> welcome. Lead: the Store does not answer express integrity requests. Even an answer would carry failing verdicts on this uncertified board.",
+          "integrity": "Rerun on 2026-11-21 board time (HKT) with the Store traced and its log captured privately. The Store now answers Strava's two express-integrity warm-up requests: it generates a key attestation record and asks play-fe for intermediate integrity, then calls Strava back twice (IExpressIntegrityServiceCallback code 2). On the way it asks Play services for service 370, PLAY_INTEGRITY_API, and the uncertified gate refuses it (status 9). After the account pick (RESULT_OK), Strava requests no integrity token, reads the advertising ID, and restarts at Splash, landing on the welcome carousel logged out. Its preferences show no saved login. The earlier 'Store never answers' was not reproduced. The block is the Play Integrity restriction, which ADR-0010 keeps out of scope. Allowing 370 would only produce an honest failing device-integrity verdict on this uncertified board, so it was not tried."
         },
         "facebook_sign_in": {
           "status": "not_offered",
@@ -262,9 +263,7 @@
       "server_accepted_token": [
         "com.duolingo"
       ],
-      "tokens_delivered_app_rejected": [
-        "com.strava"
-      ],
+      "tokens_delivered_app_rejected": [],
       "blocked_uncertified_consent": [
         "com.tencent.ibg.joox"
       ],
@@ -276,6 +275,9 @@
       ],
       "observed_end_to_end_with_experiments": [
         "com.naver.linewebtoon"
+      ],
+      "blocked_play_integrity": [
+        "com.strava"
       ]
     },
     "facebook": {
