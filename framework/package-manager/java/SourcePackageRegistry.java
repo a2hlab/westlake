@@ -404,7 +404,32 @@ public final class SourcePackageRegistry {
         return out;
     }
 
-    public static synchronized PackageInfo packageInfo(String packageName, long flags) {
+    /**
+     * The permission checks run outside this class's lock. The first one in a process loads the permission
+     * helper (PermissionManagerAdapter.Native: System.load, which takes the Runtime's lock), and an app thread
+     * inside System.loadLibrary holds that lock while the library it loads asks the package manager, which takes
+     * this one: the permission-check-trace thread, in here, waited for the Runtime while the app's loading thread
+     * waited for this class, and the main thread behind both (a game in the HK round on the OnePlus 6).
+     */
+    public static PackageInfo packageInfo(String packageName, long flags) {
+        String[] requested = new String[0];
+        int uid;
+        synchronized (SourcePackageRegistry.class) {
+            if (!contains(packageName)) return null;
+            if ((flags & PackageManager.GET_PERMISSIONS) != 0 && parsed.requestedPermissions != null) {
+                requested = parsed.requestedPermissions.toArray(new String[0]);
+            }
+            uid = location.uid;
+        }
+        Set<String> granted = new HashSet<>();
+        for (String permission : requested) {
+            if (PermissionManagerAdapter.checkProcessPermission(permission, -1, uid)
+                    == PackageManager.PERMISSION_GRANTED) granted.add(permission);
+        }
+        return packageInfo(packageName, flags, granted);
+    }
+
+    private static synchronized PackageInfo packageInfo(String packageName, long flags, Set<String> granted) {
         if (!contains(packageName)) return null;
         flags = withDirectBootMatchDefaults(flags);
         if ((flags & (PackageManager.GET_SIGNATURES | PackageManager.GET_SIGNING_CERTIFICATES)) != 0
@@ -414,13 +439,6 @@ public final class SourcePackageRegistry {
                 certificatesCollected = true;
             } catch (PackageParser.PackageParserException failure) {
                 throw new SecurityException("Original APK certificate verification failed", failure);
-            }
-        }
-        Set<String> granted = new HashSet<>();
-        if ((flags & PackageManager.GET_PERMISSIONS) != 0) {
-            for (String permission : parsed.requestedPermissions) {
-                if (PermissionManagerAdapter.checkProcessPermission(permission, -1, location.uid)
-                        == PackageManager.PERMISSION_GRANTED) granted.add(permission);
             }
         }
         PackageInfo value = PackageParser.generatePackageInfo(parsed, null, (int) flags,
