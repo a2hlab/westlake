@@ -88,6 +88,14 @@ public final class OhTrustBridge {
         // Select a boundary-specific default name so Chromium's standard
         // TrustManagerFactory.getDefaultAlgorithm() cannot be shadowed.
         Security.setProperty("ssl.TrustManagerFactory.algorithm", ALGORITHM);
+        // The default algorithm in a provider of its own too, last in the list. An app that replaces Bouncy Castle
+        // (Security.removeProvider("BC"), then a full BC of its own under that name) took OH-PKIX away with the
+        // platform BC while ssl.TrustManagerFactory.algorithm still named it: Keeper's OkHttp asked for the default
+        // algorithm and got NoSuchAlgorithmException ("OH-PKIX TrustManagerFactory not available"). Every lookup
+        // BC answers is unchanged (BC comes first); this provider answers only once BC no longer does.
+        Provider own = new Provider("WestlakeTrust", 1.0, "OpenHarmony-backed trust managers") {};
+        own.put("TrustManagerFactory." + ALGORITHM, factory);
+        Security.addProvider(own);
         installed = true;
         System.err.println("[WESTLAKE-TLS] TrustManagerFactory." + ALGORITHM
                 + " installed via " + provider.getName());
