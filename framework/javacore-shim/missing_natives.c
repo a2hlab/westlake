@@ -706,6 +706,7 @@ int wl_register_surface_canvas(JNIEnv* env);
 int wl_register_sqlite_collations(JNIEnv* env);
 int wl_register_notification_switch(JNIEnv* env);
 int wl_register_location(JNIEnv* env);
+int wl_register_hwbinder(JNIEnv* env, int* helpers);
 int wl_install_android_app_seccomp(void);
 int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
@@ -1743,6 +1744,13 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
     {
         char line[96];
         snprintf(line, sizeof(line), "[WL-NATIVES] bound NativeActivity+InputQueue=%d/22\n", wl_register_native_activity(env));
+        note(line);
+    }
+    {
+        char line[96];
+        int helpers = 0;
+        int hw = wl_register_hwbinder(env, &helpers);
+        snprintf(line, sizeof(line), "[WL-NATIVES] bound HwBinder=%d/9 HIDL helpers=%d/6 (no hwservicemanager)\n", hw, helpers);
         note(line);
     }
     wl_register_media(env, vm);
