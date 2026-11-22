@@ -60,7 +60,10 @@ final class LaunchModes {
             int flags = intent.getFlags();
             String target = info.targetActivity != null ? info.targetActivity : info.name;
             List<IBinder> task = liveTask();
-            if (task.isEmpty()) return false;
+            if (task.isEmpty()) {
+                noInstance(target, mode, flags);
+                return false;
+            }
 
             if ((flags & Intent.FLAG_ACTIVITY_NEW_TASK) != 0 && (flags & Intent.FLAG_ACTIVITY_CLEAR_TASK) != 0) {
                 System.err.println(TAG + target + ": NEW_TASK|CLEAR_TASK, the task's " + task.size()
@@ -85,7 +88,10 @@ final class LaunchModes {
                     break;
                 }
             }
-            if (index < 0) return false;
+            if (index < 0) {
+                noInstance(target, mode, flags);
+                return false;
+            }
             boolean top = index == task.size() - 1;
             List<IBinder> above = new ArrayList<>(task.subList(index + 1, task.size()));
             IBinder instance = task.get(index);
@@ -116,6 +122,32 @@ final class LaunchModes {
             System.err.println(TAG + "decision failed, the start makes a new instance: " + t);
             return false;
         }
+    }
+
+    private static final java.util.Map<String, Integer> sNoInstanceLogged = new java.util.HashMap<>();
+
+    /**
+     * Why a single-task or single-top start found no instance to reuse: each activity of the task with its state.
+     * Logged for the first three such starts of an activity, so a start loop shows its cause without flooding.
+     */
+    private static void noInstance(String target, int mode, int flags) {
+        boolean single = mode == ActivityInfo.LAUNCH_SINGLE_TASK || mode == ActivityInfo.LAUNCH_SINGLE_INSTANCE
+                || mode == ActivityInfo.LAUNCH_SINGLE_INSTANCE_PER_TASK || mode == ActivityInfo.LAUNCH_SINGLE_TOP
+                || (flags & (Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)) != 0;
+        if (!single) return;
+        synchronized (sNoInstanceLogged) {
+            int count = sNoInstanceLogged.getOrDefault(target, 0);
+            if (count >= 3) return;
+            sNoInstanceLogged.put(target, count + 1);
+        }
+        StringBuilder states = new StringBuilder();
+        for (IBinder token : ActivityClientControllerAdapter.taskTokens()) {
+            Activity activity = activityOf(token);
+            states.append(' ').append(activity == null ? "(no activity)" : activity.getClass().getSimpleName()
+                    + (activity.isDestroyed() ? ":destroyed" : activity.isFinishing() ? ":finishing" : ":live"));
+        }
+        System.err.println(TAG + target + " (" + modeName(mode) + ", flags 0x" + Integer.toHexString(flags)
+                + "): no instance to reuse; task:" + (states.length() == 0 ? " empty" : states.toString()));
     }
 
     /** The launch mode the manifest declares for the activity (an alias's own, as Android reads it). */
