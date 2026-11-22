@@ -62,9 +62,11 @@ public class WlSettingsProvider extends android.content.ContentProvider {
      * (DatabaseHelper, with AOSP's defaults.xml), and as a device past its setup wizard holds them.
      * Apps read some of these with getInt(resolver, name), which throws when the setting is unset:
      * ByteDance's video engine reads screen_brightness that way as every video starts, and Prime Video
-     * the global boot_count as it starts a session. Settings for hardware the runtime does not report
-     * (Bluetooth, a notification LED) stay unset, and so do the settings apps read to judge the device
-     * itself (adb_enabled, development_settings_enabled).
+     * the global boot_count as it starts a session. Others read a string and use it unchecked: Asphalt 8
+     * hands the global device_name (the model, as DatabaseHelper.getDefaultDeviceName writes it) to its
+     * native code, which took its length and faulted on the null. Settings for hardware the runtime
+     * does not report (Bluetooth, a notification LED) stay unset, and so do the settings apps read to
+     * judge the device itself (adb_enabled, development_settings_enabled).
      */
     private static final java.util.Map<String, String> SYSTEM = new java.util.HashMap<>();
     private static final java.util.Map<String, String> GLOBAL = new java.util.HashMap<>();
@@ -88,6 +90,7 @@ public class WlSettingsProvider extends android.content.ContentProvider {
         GLOBAL.put("mode_ringer", "2");                     // AudioManager.RINGER_MODE_NORMAL
         GLOBAL.put("device_provisioned", "1");              // set by the setup wizard
         GLOBAL.put("boot_count", "1");                      // counted by the system at each boot
+        GLOBAL.put("device_name", android.os.Build.MODEL);  // def_device_name_simple: the model
         SECURE.put("user_setup_complete", "1");             // set by the setup wizard
     }
 
