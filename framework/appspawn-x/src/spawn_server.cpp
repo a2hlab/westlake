@@ -436,9 +436,9 @@ void SpawnServer::closeSocket() {
         close(listenFd_);
         listenFd_ = -1;
     }
-    // The child is an app process, not a spawner: Android's default SIGCHLD and SIGTERM (zygote's child resets
-    // SIGCHLD too), so the app's own waitpid on a process it started gets that process's status, not this
-    // spawner's reaper. And none of the spawner's signal pipe.
+    // The child is an app process, not a spawner: none of the spawner's signal pipe, and Android's default
+    // SIGTERM. SIGCHLD back to its default too, as zygote's child does; the bionic shim already does that in
+    // each forked child (the Dart ECHILD fix), so this only makes it independent of the shim.
     signal(SIGCHLD, SIG_DFL);
     signal(SIGTERM, SIG_DFL);
     gSignalWriteFd = -1;
