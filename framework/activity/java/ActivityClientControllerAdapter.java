@@ -261,6 +261,15 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
                     activityField.setAccessible(true);
                     final android.app.Activity activity =
                             (android.app.Activity) activityField.get(record);
+                    if (activity != null && handleSplashScreenExit) {
+                        // The activity has a splash screen exit listener: it gets its view after
+                        // its first frame, as from the system's starting window.
+                        try {
+                            SplashScreenHandoff.onResumed(token, activity);
+                        } catch (Throwable t) {
+                            Log.e(TAG, "activityResumed: splash screen hand-off failed", t);
+                        }
+                    }
                     if (activity != null && activity.getWindow() != null) {
                         final android.view.View decor = activity.getWindow().getDecorView();
                         if (decor != null) {
