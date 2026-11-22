@@ -11,6 +11,7 @@
 #include "spawn_msg.h"
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -58,6 +59,19 @@ private:
     // ADR-0008 managed launch: the OH bundle whose processes OH's application manager asks this spawner
     // for (WESTLAKE_SPAWN_MANAGED_BUNDLE), or empty when only the launcher may ask.
     std::string managedBundle_;
+
+    // The processes this spawner started and still runs (pid -> process name), and the app's main process: the
+    // one started while none of the others ran. When it exits, the rest of the app's processes are ended, as
+    // Android ends an app's processes with it; SIGTERM ends them all and the spawner. The signal handlers only
+    // write the reaped pid (0 for SIGTERM) to signalPipe_, which the event loop reads.
+    std::map<int, std::string> children_;
+    int mainChild_ = -1;
+    int signalPipe_[2] = {-1, -1};
+
+    // Reads the pids the signal handlers wrote and acts on them.
+    void onSignalsPending();
+    // Ends every process this spawner started (SIGKILL), naming why.
+    void endChildren(const std::string& why);
 
     // Handle a single client connection
     void handleConnection(int clientFd);

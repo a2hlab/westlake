@@ -1047,8 +1047,23 @@ static void wl_name_java_method(void* ctx) {
 // ---------------------------------------------------------------------------
 // run  –  child process main entry point (does not return)
 // ---------------------------------------------------------------------------
+// An app's processes end with the spawner that started them (PR_SET_PDEATHSIG): before, a stopped or killed
+// spawner left them running, reparented to init. The spawner forks on its main thread, which lives as long as
+// it does. A uid or gid change clears the setting, so it is set again after applyDac, and a spawner that died
+// in between leaves this process reparented already: it exits then.
+static void endWithSpawner(pid_t spawner, const char* when) {
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0) != 0) {
+        LOGW("prctl(PR_SET_PDEATHSIG) %s failed: %s", when, strerror(errno));
+    } else if (getppid() != spawner) {
+        LOGE("spawner %d is gone (%s); this process ends too", static_cast<int>(spawner), when);
+        _exit(16);
+    }
+}
+
 [[noreturn]] void ChildMain::run(const SpawnMsg& msg, AppSpawnXRuntime* runtime) {
     pid_t myPid = getpid();
+    const pid_t spawnerPid = getppid();
+    endWithSpawner(spawnerPid, "at the child's start");
     LOGI("Child process started, pid=%d uid=%d bundle=%s",
          myPid, msg.uid, msg.bundleName.c_str());
 
@@ -1277,6 +1292,7 @@ static void wl_name_java_method(void* ctx) {
         LOGE("applyDac failed, ret=%d – aborting child", ret);
         _exit(10);
     }
+    endWithSpawner(spawnerPid, "after the uid change");
 
     // Step 3: Set up filesystem sandbox
     ret = applySandbox(msg);

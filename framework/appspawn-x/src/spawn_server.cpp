@@ -35,6 +35,24 @@
 
 namespace appspawnx {
 
+// The write end of the spawner's signal pipe (SpawnServer::signalPipe_), for the handlers below: they pass on the
+// pids they reap (0 for SIGTERM) and the event loop acts on them, outside the handler. -1 until the loop runs.
+static volatile int gSignalWriteFd = -1;
+
+static void passOn(int32_t value) {
+    int fd = gSignalWriteFd;
+    if (fd >= 0) {
+        ssize_t ignored = write(fd, &value, sizeof(value));   // non-blocking; a full pipe drops the value
+        (void)ignored;
+    }
+}
+
+static void sigtermHandler(int /*sig*/) {
+    int savedErrno = errno;
+    passOn(0);
+    errno = savedErrno;
+}
+
 // ---------------------------------------------------------------------------
 // SIGCHLD handler – reap zombie child processes
 // ---------------------------------------------------------------------------
@@ -55,9 +73,10 @@ static void sigchldHandler(int /*sig*/) {
             fprintf(stderr, "[WESTLAKE-REAP] child %d status=0x%x\n", wl_p, wl_st);
         }
         fflush(stderr);
+        passOn(static_cast<int32_t>(wl_p));
     }
-    while (waitpid(-1, nullptr, WNOHANG) > 0) {
-        // Continue reaping
+    for (pid_t late; (late = waitpid(-1, nullptr, WNOHANG)) > 0; ) {
+        passOn(static_cast<int32_t>(late));   // one that exited after the loop above
     }
     errno = savedErrno;
 }
@@ -289,13 +308,30 @@ void SpawnServer::run() {
         return;
     }
 
-    struct pollfd pfd;
-    pfd.fd = listenFd_;
-    pfd.events = POLLIN;
+    // The signal handlers pass on what they saw through a pipe the loop also watches (onSignalsPending).
+    if (pipe2(signalPipe_, O_CLOEXEC | O_NONBLOCK) == 0) {
+        gSignalWriteFd = signalPipe_[1];
+        struct sigaction term{};
+        term.sa_handler = sigtermHandler;
+        sigemptyset(&term.sa_mask);
+        term.sa_flags = SA_RESTART;
+        if (sigaction(SIGTERM, &term, nullptr) != 0) {
+            LOGW("sigaction(SIGTERM) failed: %s; a stop leaves this spawner's processes running", strerror(errno));
+        }
+    } else {
+        LOGW("pipe2 failed: %s; the spawner does not end an app's other processes", strerror(errno));
+        signalPipe_[0] = signalPipe_[1] = -1;
+    }
+
+    struct pollfd pfd[2];
+    pfd[0].fd = listenFd_;
+    pfd[0].events = POLLIN;
+    pfd[1].fd = signalPipe_[0];
+    pfd[1].events = POLLIN;
 
     while (true) {
-        // Wait for incoming connections
-        int nready = poll(&pfd, 1, -1 /* block indefinitely */);
+        // Wait for incoming connections, and for what the signal handlers pass on
+        int nready = poll(pfd, signalPipe_[0] >= 0 ? 2 : 1, -1 /* block indefinitely */);
 
         if (nready < 0) {
             if (errno == EINTR) {
@@ -311,7 +347,11 @@ void SpawnServer::run() {
             continue;
         }
 
-        if (pfd.revents & POLLIN) {
+        if (signalPipe_[0] >= 0 && (pfd[1].revents & POLLIN)) {
+            onSignalsPending();
+        }
+
+        if (pfd[0].revents & POLLIN) {
             // Accept the incoming connection
             struct sockaddr_un clientAddr;
             socklen_t clientLen = sizeof(clientAddr);
@@ -336,13 +376,56 @@ void SpawnServer::run() {
             close(clientFd);
         }
 
-        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            LOGE("Listen socket error (revents=0x%x)", pfd.revents);
+        if (pfd[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            LOGE("Listen socket error (revents=0x%x)", pfd[0].revents);
             break;
         }
     }
 
     LOGE("Event loop terminated");
+}
+
+// ---------------------------------------------------------------------------
+// The processes this spawner started: an app's processes end with its main process, and all of them with the
+// spawner when it is stopped (SIGTERM). Before, a process the app started through this spawner (ADR-0002) kept
+// running when OH's application manager ended the app's main process (it ends only the processes it spawned),
+// and every one of them kept running, reparented to init, when a round stopped the spawner.
+// ---------------------------------------------------------------------------
+void SpawnServer::onSignalsPending() {
+    int32_t values[64];
+    for (;;) {
+        ssize_t got = read(signalPipe_[0], values, sizeof(values));
+        if (got <= 0) return;   // drained (EAGAIN), or closed
+        for (size_t i = 0; i < static_cast<size_t>(got) / sizeof(int32_t); ++i) {
+            int32_t pid = values[i];
+            if (pid == 0) {
+                endChildren("the spawner was stopped (SIGTERM)");
+                LOGI("[WESTLAKE-SPAWN] spawner on %s exits after SIGTERM", socketPath_.c_str());
+                _exit(0);
+            }
+            auto it = children_.find(pid);
+            if (it == children_.end()) continue;
+            std::string name = it->second;
+            children_.erase(it);
+            if (pid == mainChild_) {
+                mainChild_ = -1;
+                if (!children_.empty()) endChildren("the app's main process " + name + " (" + std::to_string(pid) + ") exited");
+            }
+        }
+    }
+}
+
+void SpawnServer::endChildren(const std::string& why) {
+    if (children_.empty()) return;
+    std::string names;
+    for (const auto& [pid, name] : children_) {
+        kill(pid, SIGKILL);
+        names += " " + name + "(" + std::to_string(pid) + ")";
+    }
+    LOGI("[WESTLAKE-SPAWN] %s: ending %zu process(es):%s", why.c_str(), children_.size(), names.c_str());
+    fprintf(stderr, "[WESTLAKE-SPAWN] %s: ending %zu process(es):%s\n", why.c_str(), children_.size(), names.c_str());
+    fflush(stderr);
+    // Their reaps arrive through SIGCHLD and remove them from children_.
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +436,18 @@ void SpawnServer::closeSocket() {
         close(listenFd_);
         listenFd_ = -1;
     }
+    // The child is an app process, not a spawner: Android's default SIGCHLD and SIGTERM (zygote's child resets
+    // SIGCHLD too), so the app's own waitpid on a process it started gets that process's status, not this
+    // spawner's reaper. And none of the spawner's signal pipe.
+    signal(SIGCHLD, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+    gSignalWriteFd = -1;
+    for (int& fd : signalPipe_) {
+        if (fd >= 0) close(fd);
+        fd = -1;
+    }
+    children_.clear();
+    mainChild_ = -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -909,6 +1004,11 @@ void SpawnServer::handleConnection(int clientFd) {
     } else if (spawnHandler_) {
         pid = spawnHandler_(msg);
         rc = (pid > 0) ? 0 : -1;
+        if (pid > 0) {
+            // The first process started while none of this spawner's others runs is the app's main process.
+            if (mainChild_ < 0) mainChild_ = pid;
+            children_[pid] = msg.procName;
+        }
         if (pid > 0 && (fromLauncher || fromAppMgr) && isBinary) {
             launchRequest_ = buffer;
             launchUid_ = msg.uid;
