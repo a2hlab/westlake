@@ -13,7 +13,14 @@ import java.util.List;
 public final class OhImeMetadata {
     private OhImeMetadata() {}
     private static final class Native {
-        static { System.load(System.getenv("WESTLAKE_IME_METADATA_PATH")); }
+        /* The natives are liboh_adapter_bridge.so's (oh_ime_metadata.cpp), which OHEnvironment loads for the boot
+         * classes. Only a stage that still names a library of its own (WESTLAKE_IME_METADATA_PATH, the September
+         * stages' liboh_ime_metadata.so) loads one: unset, System.load(null) failed this class's initialization, and
+         * every call here answered "unavailable" (no current or enabled input method, no picker, no selection). */
+        static {
+            String path = System.getenv("WESTLAKE_IME_METADATA_PATH");
+            if (path != null && !path.isEmpty()) System.load(path);
+        }
         static void load() {}
     }
     private static native String[] nativeCurrent();
