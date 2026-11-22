@@ -710,6 +710,7 @@ int wl_install_android_app_seccomp(void);
 int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
+int wl_register_syncfence(JNIEnv* env);
 int wl_register_image_reader(JNIEnv* env);
 int wl_register_native_activity(JNIEnv* env);
 
@@ -1721,6 +1722,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         wl_register_socket_binder(env);
         int ex = wl_register_extractor(env);
         int vc = wl_register_video_codec(env);
+        wl_register_syncfence(env);   /* logs its own line */
         int ir = wl_register_image_reader(env);
         int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
                    + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))

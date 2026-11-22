@@ -6,7 +6,8 @@
 # imagereader_natives.c (ImageReader over an OH consumer surface), nativeactivity_natives.c (NativeActivity and InputQueue),
 # seccomp_natives.c (Android's app seccomp filter, opt-in with WESTLAKE_ANDROID_SECCOMP=1),
 # plus expat_natives.cpp (AOSP's SAX parser natives over a static, hidden expat) and
-# videocodec_natives.cpp (MediaCodec video and audio over OH's decoders): platform natives
+# videocodec_natives.cpp (MediaCodec video and audio over OH's decoders) and syncfence_natives.cpp
+# (android.hardware.SyncFence over the sync file itself): platform natives
 # the staged runtime declares but never registers, bound onto the boot classes from JNI_OnLoad.
 set -e
 SRC=$1; SDK=$2; OUT=$3
@@ -21,6 +22,9 @@ done
 # MediaCodec video and audio decoding over OH's decoders, wrapping the bridge's MP3-only natives.
 ${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni \
   -c $HERE/framework/javacore-shim/videocodec_natives.cpp -o $OBJ/videocodec_natives.o
+# android.hardware.SyncFence over the sync file itself (API 33+; Flutter's HardwareBuffer frames).
+${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni \
+  -c $HERE/framework/javacore-shim/syncfence_natives.cpp -o $OBJ/syncfence_natives.o
 ${CC/clang /clang++ } -std=c++17 -fvisibility=hidden -Wall -Werror -I$HERE/framework/javacore-shim/expat-compat \
   -I$SRC/libcore/luni/src/main/native -I$SRC/libnativehelper/include -I$SRC/libnativehelper/header_only_include \
   -I$SRC/libnativehelper/include_platform_header_only -I$SRC/libnativehelper/include_jni -I$SRC/expat/expat/lib \
@@ -41,5 +45,5 @@ done
 ${CC/clang /clang++ } -shared -fuse-ld=lld -Wl,-soname,libwl_missing_natives.so -Wl,-z,defs \
   $OBJ/missing_natives.o $OBJ/media_natives.o $OBJ/extractor_natives.o $OBJ/text_natives.o $OBJ/audiorecord_natives.o $OBJ/audioports_natives.o $OBJ/ojluni_nio_natives.o \
   $OBJ/localsocket_natives.o $OBJ/canvas_natives.o $OBJ/sqlite_natives.o $OBJ/notification_natives.o $OBJ/location_natives.o $OBJ/socketbinder_natives.o $OBJ/oj_*.o \
-  $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/seccomp_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
+  $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/seccomp_natives.o $OBJ/videocodec_natives.o $OBJ/syncfence_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
 echo "built $OUT/libwl_missing_natives.so"
