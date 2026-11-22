@@ -5842,7 +5842,8 @@ static void wl_egl_add_implementation(void *library)
 static void wl_egl_find_implementations(void)
 {
     /* First what the process binds to: eglGetCurrentDisplay, which this library does not define, in
-     * the global scope. Then the driver the runtime links, then OH's libEGL.so. */
+     * the global scope. Then the driver the runtime links, then OH's libEGL.so, then the driver
+     * behind it. */
     Dl_info info;
     void *first = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
     if (first != NULL && dladdr(first, &info) != 0 && info.dli_fname != NULL) {
@@ -5850,7 +5851,23 @@ static void wl_egl_find_implementations(void)
     }
     wl_egl_add_implementation(dlopen("libGLES_mali.z.so", RTLD_NOW | RTLD_NOLOAD));
     void *board = dlopen("libEGL.so", RTLD_NOW | RTLD_NOLOAD);
-    wl_egl_add_implementation(board != NULL ? board : dlopen("libEGL.so", RTLD_NOW));
+    if (board == NULL) board = dlopen("libEGL.so", RTLD_NOW);
+    wl_egl_add_implementation(board);
+    /*
+     * The driver behind OH's libEGL.so. OH's eglGetProcAddress answers a core name from the driver
+     * (EglWrapperLoader::GetProcAddrFromDriver), below its wrapper, so a library that takes every EGL
+     * entry point from eglGetProcAddress (Cocos Creator's eglw) works on the driver's display, and the
+     * calls this library answers itself (eglQueryString, eglCreateWindowSurface) must reach the
+     * driver with it. On the D600 the driver is the Mali library, listed above; on the OnePlus 6 it is
+     * Mesa's libEGL_mesa.so, which nothing above names: OH's libEGL.so refused the display ("invalid
+     * display pointer"), eglQueryString came back NULL and Cocos took its length (Flotsam Shelter,
+     * Starutopia). Listed last, it answers only what the others refuse with EGL_BAD_DISPLAY.
+     */
+    void *(*proc)(const char *) = board != NULL ? (void *(*)(const char *)) dlsym(board, "eglGetProcAddress") : NULL;
+    void *driver = proc != NULL ? proc("eglGetCurrentDisplay") : NULL;
+    if (driver != NULL && dladdr(driver, &info) != 0 && info.dli_fname != NULL) {
+        wl_egl_add_implementation(dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD));
+    }
 }
 
 /* The implementations to try for a call on this display, in order; returns how many. */
