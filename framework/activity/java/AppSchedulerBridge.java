@@ -717,8 +717,8 @@ public class AppSchedulerBridge {
             // A source package's <uses-library> list comes from its PackageParser result.
             if (sourcePackage) {
                 try {
-                    org.json.JSONArray names = new org.json.JSONArray(
-                            adapter.packagemanager.SourcePackageRegistry.usesLibraries());
+                    org.json.JSONArray names = new org.json.JSONArray(withImplicitLibraries(
+                            adapter.packagemanager.SourcePackageRegistry.usesLibraries(), appInfo.targetSdkVersion));
                     if (names.length() > 0) {
                         appInfo.sharedLibraryFiles = sharedLibraryJars(names);
                         appInfo.sharedLibraryInfos = sharedLibraryInfos(appInfo.sharedLibraryFiles);
@@ -2883,6 +2883,22 @@ public class AppSchedulerBridge {
 
     private void logOhOnly(String method, String reason) {
         Log.d(TAG, "[OH_ONLY] " + method + " - " + reason);
+    }
+
+    /**
+     * The <uses-library> names plus the ones Android's package parser adds for an old target
+     * (PackageSharedLibraryUpdater): org.apache.http.legacy below API 28, as OrgApacheHttpLegacyUpdater does,
+     * since the library left the boot class path in Android 9. Teen Patti targets 26, declares no library and
+     * builds a DefaultHttpClient: NoClassDefFoundError (org/apache/http/impl/client/DefaultHttpClient).
+     */
+    static java.util.List<String> withImplicitLibraries(java.util.List<String> declared, int targetSdk) {
+        java.util.ArrayList<String> names = new java.util.ArrayList<>(declared);
+        if (targetSdk < android.os.Build.VERSION_CODES.P && !names.contains("org.apache.http.legacy")) {
+            names.add("org.apache.http.legacy");
+            System.err.println("[B43-BIND] uses-library org.apache.http.legacy: implicit below API 28 (target "
+                    + targetSdk + ")");
+        }
+        return names;
     }
 
     /**
