@@ -5723,7 +5723,8 @@ static void *wl_choreographer_symbol(const char *name)
  * aborted with "Invalid GrBackendTexture" (Telegram, a video camera app). libhwui calls both
  * through its PLT, so these preloaded definitions win: the client buffer becomes an OH window
  * buffer over the same native buffer, and an image of it is created with the OH target. The window
- * buffer lives as long as the image.
+ * buffer lives as long as the image. Engines that ask eglGetProcAddress for these by name (Tencent's
+ * PAG) get them too (see eglGetProcAddress).
  */
 typedef void *WlEglDisplay;
 typedef void *WlEglContext;
@@ -6923,6 +6924,10 @@ static void *westlake_egl_by_handle(const char *name)
     if (strcmp(name, "eglTerminate") == 0) return (void *) &eglTerminate;
     if (strcmp(name, "eglQueryString") == 0) return (void *) &eglQueryString;
     if (strcmp(name, "eglGetConfigAttrib") == 0) return (void *) &eglGetConfigAttrib;
+    /* The AHardwareBuffer import (see eglGetNativeClientBufferANDROID), which engines ask for by name. */
+    if (strcmp(name, "eglGetNativeClientBufferANDROID") == 0) return (void *) &eglGetNativeClientBufferANDROID;
+    if (strcmp(name, "eglCreateImageKHR") == 0) return (void *) &eglCreateImageKHR;
+    if (strcmp(name, "eglDestroyImageKHR") == 0) return (void *) &eglDestroyImageKHR;
     return NULL;
 }
 
@@ -6954,11 +6959,12 @@ static unsigned int westlake_egl_presentation_time(WlEglDisplay display, void *s
     return 1;   /* EGL_TRUE */
 }
 
-static void *westlake_egl_get_proc_address(const char *name)
+/* A name an Android library asks of an implementation's eglGetProcAddress (next): this library's
+ * entry points above, the stand-in where the implementation has none, every other name next's. */
+static void *westlake_egl_proc_from(WestlakeEglProcFn next, const char *name)
 {
     void *own = name != NULL ? westlake_egl_by_handle(name) : NULL;
     if (own != NULL) return own;
-    WestlakeEglProcFn next = __atomic_load_n(&westlake_egl_get_proc, __ATOMIC_ACQUIRE);
     void *found = next != NULL ? next(name) : NULL;
     if (found == NULL && name != NULL && strcmp(name, "eglPresentationTimeANDROID") == 0) {
         static int logged;
@@ -6966,6 +6972,66 @@ static void *westlake_egl_get_proc_address(const char *name)
             wl_relocs_log("[WESTLAKE-EGL] eglPresentationTimeANDROID: the driver has none, this library's\n");
         }
         return (void *) &westlake_egl_presentation_time;
+    }
+    return found;
+}
+
+static void *westlake_egl_get_proc_address(const char *name)
+{
+    return westlake_egl_proc_from(__atomic_load_n(&westlake_egl_get_proc, __ATOMIC_ACQUIRE), name);
+}
+
+/* The eglGetProcAddress an import of it bound to before this library defined one: the next in the
+ * global scope, or failing that the implementation the process binds to. */
+static WestlakeEglProcFn westlake_egl_next_proc(void)
+{
+    static WestlakeEglProcFn next;
+    WestlakeEglProcFn found = __atomic_load_n(&next, __ATOMIC_ACQUIRE);
+    if (found != NULL) return found;
+    found = (WestlakeEglProcFn) dlsym(RTLD_NEXT, "eglGetProcAddress");
+    if (found == NULL) {
+        pthread_once(&wl_egl_implementations_once, wl_egl_find_implementations);
+        if (wl_egl_implementation_count > 0) {
+            found = (WestlakeEglProcFn) wl_egl_entry(wl_egl_implementations[0].library, "eglGetProcAddress");
+        }
+    }
+    if (found == NULL) return NULL;
+    WestlakeEglProcFn expected = NULL;
+    if (!__atomic_compare_exchange_n(&next, &expected, found, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        return expected;
+    }
+    Dl_info info;
+    wl_relocs_log("[WESTLAKE-EGL] eglGetProcAddress imports go on to %s\n",
+                  dladdr((void *) found, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?");
+    return found;
+}
+
+/*
+ * eglGetProcAddress, imported. Tencent's PAG (tgfx) imports it and asks it by name for the
+ * AHardwareBuffer import (eglGetNativeClientBufferANDROID, eglCreateImageKHR, eglDestroyImageKHR),
+ * so it had the driver's, which do not take Westlake's AHardwareBuffer, an OH native buffer: on the
+ * D600 the Mali driver made no image, tgfx logged "HardwareRenderTargetProxy::onMakeTexture() Failed
+ * to create the render target!" and used the missing texture (SIGSEGV on tgfx_JNIEnviron, three
+ * apps). An Android library's import answers as a lookup by handle does, over the definition the
+ * import bound to before; every other caller (the WebView, and the runtime's libhwui, GL bindings and
+ * bridge, which import it too) gets that definition's answer unchanged.
+ */
+void *eglGetProcAddress(const char *name)
+{
+    WestlakeEglProcFn next = westlake_egl_next_proc();
+    void *caller = __builtin_return_address(0);
+    const char *path = NULL;
+    if (name == NULL || !caller_is_android_dso(caller, &path) || caller_is_webview(caller, NULL)) {
+        return next != NULL ? next(name) : NULL;
+    }
+    void *found = westlake_egl_proc_from(next, name);
+    if (found == (void *) &eglGetNativeClientBufferANDROID) {
+        static int logged;
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+            const char *base = strrchr(path, '/');
+            wl_relocs_log("[WESTLAKE-EGL] eglGetProcAddress(eglGetNativeClientBufferANDROID) imported by %s: "
+                          "this library's AHardwareBuffer import\n", base != NULL ? base + 1 : path);
+        }
     }
     return found;
 }
