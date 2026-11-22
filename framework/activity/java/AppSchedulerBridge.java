@@ -615,6 +615,10 @@ public class AppSchedulerBridge {
             // in same dex — root cause TBD; inlining unblocks Phase 1).
             DisplaySnapshot disp = getDisplaySnapshot();
             android.content.res.Configuration cfg = buildConfiguration(ohConfigKv, disp);
+            // The app's own languages (LocaleManager.setApplicationLocales, kept in its data directory) over the
+            // system's, as Android applies an app's per-app languages to its configuration from its start.
+            adapter.core.AppLocales.init(appInfo.packageName, appInfo.dataDir);
+            adapter.core.AppLocales.overlay(cfg);
 
             // 3. Construct ActivityThread.AppBindData (package-private inner class).
             Class<?> appBindDataCls = Class.forName(

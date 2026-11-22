@@ -359,21 +359,26 @@ public final class LocalServiceBinders {
      * null-check the manager, so the missing binder took the whole binding down before any
      * activity started. AndroidX does the same through AppLocalesMetadataHolderService.
      *
-     * Per-app locale overrides are stored by the real service and read back later; nothing here
-     * stores anything, so a set is accepted and a get reports no override. That is a truthful
-     * answer for a board with no per-app locale database, not a placeholder -- an app that sets
-     * an override and reads it back will see it absent, which is the same as a user never having
-     * chosen one.
+     * An app's own languages (setApplicationLocales, AppCompat's in-app language setting) are kept
+     * and applied by AppLocales, as the real service and ATMS do. A locale config override
+     * (setOverrideLocaleConfig) is still accepted and not recorded.
      */
     private static Object locale(String method, Object[] args) {
         switch (method) {
             case "getSystemLocales":
                 return Resources.getSystem().getConfiguration().getLocales();
             case "getApplicationLocales":
-                return android.os.LocaleList.getEmptyLocaleList();
+                // (String appPackageName, int userId): the app's own languages (AppLocales).
+                return AppLocales.get(args != null && args.length > 0 ? (String) args[0] : null);
+            case "setApplicationLocales":
+                // (String appPackageName, int userId, LocaleList locales, boolean fromDelegate): kept and applied.
+                if (args != null && args.length > 2) {
+                    AppLocales.set((String) args[0], (android.os.LocaleList) args[2]);
+                }
+                return DEFAULT;
             default:
-                // setApplicationLocales / setOverrideLocaleConfig accepted and dropped;
-                // getOverrideLocaleConfig answers null -- no override was ever recorded.
+                // setOverrideLocaleConfig accepted and dropped; getOverrideLocaleConfig answers null --
+                // no override was ever recorded.
                 return DEFAULT;
         }
     }
