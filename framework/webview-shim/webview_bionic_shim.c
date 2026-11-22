@@ -6981,19 +6981,26 @@ static void *westlake_egl_get_proc_address(const char *name)
     return westlake_egl_proc_from(__atomic_load_n(&westlake_egl_get_proc, __ATOMIC_ACQUIRE), name);
 }
 
+void *eglGetProcAddress(const char *name);
+
 /* The eglGetProcAddress an import of it bound to before this library defined one: the next in the
- * global scope, or failing that the implementation the process binds to. */
+ * global scope, or failing that the implementation the process binds to. Never this definition: a
+ * lookup that came back to it (a load order where RTLD_NEXT starts before this library, a re-export)
+ * would call itself forever. */
 static WestlakeEglProcFn westlake_egl_next_proc(void)
 {
     static WestlakeEglProcFn next;
     WestlakeEglProcFn found = __atomic_load_n(&next, __ATOMIC_ACQUIRE);
     if (found != NULL) return found;
+    WestlakeEglProcFn self = (WestlakeEglProcFn) &eglGetProcAddress;
     found = (WestlakeEglProcFn) dlsym(RTLD_NEXT, "eglGetProcAddress");
+    if (found == self) found = NULL;
     if (found == NULL) {
         pthread_once(&wl_egl_implementations_once, wl_egl_find_implementations);
         if (wl_egl_implementation_count > 0) {
             found = (WestlakeEglProcFn) wl_egl_entry(wl_egl_implementations[0].library, "eglGetProcAddress");
         }
+        if (found == self) found = NULL;
     }
     if (found == NULL) return NULL;
     WestlakeEglProcFn expected = NULL;
