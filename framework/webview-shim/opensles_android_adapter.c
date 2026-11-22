@@ -29,6 +29,12 @@
  *    refused Godot's own SL_IID_ENGINE (Ball2Box: "res != 0" at audio_driver_opensl.cpp:120, no
  *    audio). Every ID handed to OH is first swapped for OH's own by its contents.
  *
+ * 5. Android's playback rate, SL_IID_PLAYBACKRATE. Android's player offers it (a buffer-queue player
+ *    plays PCM at 500 to 2000 per mille by changing its track's sample rate); OH's has no rate
+ *    interface and refuses the ID. My Singing Monsters asked for it, ignored the refusal and called
+ *    SetRate(1000) through what it got back: SIGSEGV on its GLThread, on the phone and on the D600.
+ *    It is answered here, kept out of the interface lists OH sees, at the one rate OH's player plays:
+ *    GetRateRange reports 1000 to 1000, and SetRate takes 1000 and refuses any other rate.
  * Mindustry's audio engine (SoLoud) was refused a player, ignored the refusal, and called through
  * the null interface -- a SIGSEGV at address 0 on its main thread.
  *
@@ -69,12 +75,23 @@ typedef const struct APlayItf_ *const *APlayItf;
 typedef const struct AVolumeItf_ *const *AVolumeItf;
 typedef const struct ASbqItf_ *const *ASbqItf;
 typedef const struct AConfigItf_ *const *AConfigItf;
+typedef const struct ARateItf_ *const *ARateItf;
+typedef int16_t a_permille;
 
 struct AConfigItf_ {
     a_result (*SetConfiguration)(AConfigItf, const SLchar *, const void *, a_u32);
     a_result (*GetConfiguration)(AConfigItf, const SLchar *, a_u32 *, void *);
     a_result (*AcquireJavaProxy)(AConfigItf, a_u32, void **);
     a_result (*ReleaseJavaProxy)(AConfigItf, a_u32);
+};
+
+struct ARateItf_ {
+    a_result (*SetRate)(ARateItf, a_permille);
+    a_result (*GetRate)(ARateItf, a_permille *);
+    a_result (*SetPropertyConstraints)(ARateItf, a_u32);
+    a_result (*GetProperties)(ARateItf, a_u32 *);
+    a_result (*GetCapabilitiesOfRate)(ARateItf, a_permille, a_u32 *);
+    a_result (*GetRateRange)(ARateItf, uint8_t, a_permille *, a_permille *, a_permille *, a_u32 *);
 };
 
 typedef void (*AObjectCallback)(AObjectItf caller, const void *context, a_u32 event, a_result result,
@@ -184,7 +201,7 @@ static void sles_log(const char *text)
 static struct {
     SLresult (*create_engine)(SLObjectItf *, SLuint32, const SLEngineOption *, SLuint32,
                               const SLInterfaceID *, const SLboolean *);
-    SLInterfaceID engine, play, volume, oh_bq, std_bq;
+    SLInterfaceID engine, play, volume, oh_bq, std_bq, rate;
     void *lib;
 } oh;
 
@@ -198,12 +215,13 @@ static int oh_resolve(void)
     oh.create_engine = (__typeof__(oh.create_engine)) dlsym(lib, "slCreateEngine");
     const SLInterfaceID *e = dlsym(lib, "SL_IID_ENGINE"), *p = dlsym(lib, "SL_IID_PLAY"),
                         *v = dlsym(lib, "SL_IID_VOLUME"), *q = dlsym(lib, "SL_IID_OH_BUFFERQUEUE"),
-                        *s = dlsym(lib, "SL_IID_BUFFERQUEUE");
+                        *s = dlsym(lib, "SL_IID_BUFFERQUEUE"), *rt = dlsym(lib, "SL_IID_PLAYBACKRATE");
     ok = oh.create_engine && e && q;
     if (!ok) { sles_log("OH OpenSL ES symbols missing"); return 0; }
     oh.lib = lib;
     oh.engine = *e; oh.oh_bq = *q;
     oh.play = p ? *p : NULL; oh.volume = v ? *v : NULL; oh.std_bq = s ? *s : NULL;
+    oh.rate = rt ? *rt : NULL;
     return ok;
 }
 
@@ -399,6 +417,7 @@ typedef struct {
     int kind;
     a_i32 stream_type, recording_preset, performance_mode;
 } ConfigW;
+typedef struct { const struct ARateItf_ *itf; } RateW;   /* first: ARateItf points here */
 
 struct Obj {
     const struct AObjectItf_ *itf;   /* first: AObjectItf points here */
@@ -408,6 +427,7 @@ struct Obj {
     VolumeW *volume;
     SbqAdapter *sbq;
     ConfigW *config;
+    RateW *rate;
     int kind;
     AObjectCallback cb;
     void *ctx;
@@ -451,7 +471,7 @@ static SLuint32 widen_interfaces(OhInterfaceList *out, a_u32 n, const SLInterfac
     if (n > 32) n = 32;
     for (a_u32 i = 0; i < n; i++) {
         /* Answered here, not by OH, which would refuse an ID it does not know. */
-        if (ids != NULL && iid_is(ids[i], SL_IID_ANDROIDCONFIGURATION)) continue;
+        if (ids != NULL && (iid_is(ids[i], SL_IID_ANDROIDCONFIGURATION) || iid_is(ids[i], oh.rate))) continue;
         out->ids[m] = ids != NULL && iid_is_android_queue(ids[i]) ? oh.oh_bq : (ids ? canon_iid(ids[i]) : NULL);
         out->required[m] = required != NULL ? (SLboolean) required[i] : SL_BOOLEAN_FALSE;
         m++;
@@ -619,6 +639,7 @@ static void o_destroy(AObjectItf s)
     free(w->play);
     free(w->volume);
     free(w->config);
+    free(w->rate);
     free(w);
 }
 
@@ -670,6 +691,69 @@ static a_result c_release_proxy(AConfigItf self, a_u32 type)
 { (void) self; (void) type; return SL_RESULT_FEATURE_UNSUPPORTED; }
 
 static const struct AConfigItf_ config_vtable = { c_set, c_get, c_acquire_proxy, c_release_proxy };
+
+/* ------------------------------------------------------------ playback rate ---------------- */
+
+/* Normal speed, the one rate OH's player plays (note 5 above); in per mille. */
+#define A_RATE_NORMAL 1000
+
+static a_result r_set_rate(ARateItf self, a_permille rate)
+{
+    (void) self;
+    if (rate == A_RATE_NORMAL) return SL_RESULT_SUCCESS;
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) {
+        SLES_LOGF("playback rate %d refused: OH's player plays at %d only", (int) rate, A_RATE_NORMAL);
+    }
+    return SL_RESULT_PARAMETER_INVALID;
+}
+
+static a_result r_get_rate(ARateItf self, a_permille *rate)
+{
+    (void) self;
+    if (rate == NULL) return SL_RESULT_PARAMETER_INVALID;
+    *rate = A_RATE_NORMAL;
+    return SL_RESULT_SUCCESS;
+}
+
+/* Android's buffer-queue player has one property: its rate changes pitch (no pitch correction). */
+static a_result r_set_constraints(ARateItf self, a_u32 constraints)
+{
+    (void) self;
+    return (constraints & SL_RATEPROP_NOPITCHCORAUDIO) != 0 ? SL_RESULT_SUCCESS : SL_RESULT_FEATURE_UNSUPPORTED;
+}
+
+static a_result r_get_properties(ARateItf self, a_u32 *properties)
+{
+    (void) self;
+    if (properties == NULL) return SL_RESULT_PARAMETER_INVALID;
+    *properties = SL_RATEPROP_NOPITCHCORAUDIO;
+    return SL_RESULT_SUCCESS;
+}
+
+static a_result r_get_capabilities(ARateItf self, a_permille rate, a_u32 *capabilities)
+{
+    (void) self;
+    if (capabilities == NULL || rate != A_RATE_NORMAL) return SL_RESULT_PARAMETER_INVALID;
+    *capabilities = SL_RATEPROP_NOPITCHCORAUDIO;
+    return SL_RESULT_SUCCESS;
+}
+
+static a_result r_get_range(ARateItf self, uint8_t index, a_permille *min, a_permille *max, a_permille *step,
+                            a_u32 *capabilities)
+{
+    (void) self;
+    if (min == NULL || max == NULL || step == NULL || capabilities == NULL || index > 0) {
+        return SL_RESULT_PARAMETER_INVALID;
+    }
+    *min = *max = A_RATE_NORMAL;
+    *step = 0;
+    *capabilities = SL_RATEPROP_NOPITCHCORAUDIO;
+    return SL_RESULT_SUCCESS;
+}
+
+static const struct ARateItf_ rate_vtable = {
+    r_set_rate, r_get_rate, r_set_constraints, r_get_properties, r_get_capabilities, r_get_range};
 
 static a_result o_get_interface(AObjectItf s, const SLInterfaceID iid, void *out)
 {
@@ -741,6 +825,15 @@ static a_result o_get_interface(AObjectItf s, const SLInterfaceID iid, void *out
             }
         }
         *(ASbqItf *) out = (ASbqItf) &w->sbq->itf;
+        return SL_RESULT_SUCCESS;
+    }
+    if (iid_is(iid, oh.rate)) {
+        if (w->kind != OBJ_PLAYER) return SL_RESULT_FEATURE_UNSUPPORTED;
+        if (w->rate == NULL) {
+            if ((w->rate = calloc(1, sizeof(*w->rate))) == NULL) return SL_RESULT_MEMORY_FAILURE;
+            w->rate->itf = &rate_vtable;
+        }
+        *(ARateItf *) out = (ARateItf) &w->rate->itf;
         return SL_RESULT_SUCCESS;
     }
     /* Not wrapped: hand OH's interface back, and say so -- its methods take OH-width types. */
