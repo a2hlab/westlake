@@ -2149,9 +2149,21 @@ public class AppSchedulerBridge {
                 intent = original;
             }
 
+            // Launch modes and task flags: ActivityStarter's decision, which a start in this process has no
+            // system server to make. A reused instance gets the intent, and nothing is launched (LaunchModes).
+            if (launchRequest == null && ohTokenAddr == 0L) {
+                String referrer = extractReferrer(wantJson);
+                if (LaunchModes.reuse(applicationThread, packageName, activityInfo, intent,
+                        referrer != null ? referrer : packageName)) {
+                    return;
+                }
+            }
+
             // §1.2.4.3: token map. Create/get Android IBinder for this OH token,
             // store mapping for reverse callback (finishActivity / pause / stop).
             IBinder token = OhTokenRegistry.acquireAndroidToken(abilityRecordId, ohTokenAddr);
+            // The task holds its activities in the order they start, as ATMS adds a started activity to its task.
+            ActivityClientControllerAdapter.joinTask(token);
             if (pending != null) ActivityResults.bind(token, pending.request);
 
             System.err.println("[B47-SLA] intent.component=" + intent.getComponent()

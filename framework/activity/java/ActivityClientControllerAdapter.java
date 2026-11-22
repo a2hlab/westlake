@@ -567,6 +567,11 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
         sTask.removeIf(ref -> ref.get() == null || ref.get() == token);
     }
 
+    /** Records a started activity in the task, after the ones already in it (LaunchModes reads the order). */
+    public static synchronized void joinTask(IBinder token) {
+        if (token != null) taskPosition(token);
+    }
+
     /** The task's live activity tokens, root first. */
     public static synchronized java.util.List<IBinder> taskTokens() {
         java.util.ArrayList<IBinder> live = new java.util.ArrayList<>(sTask.size());
