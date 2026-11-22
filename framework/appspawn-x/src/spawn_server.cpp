@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <map>
+#include <mutex>
 #include <poll.h>
 #include <pwd.h>
 #include <signal.h>
@@ -1270,6 +1271,77 @@ static std::vector<uint8_t> askSpawner(const std::string& socketPath, const std:
     return answer;
 }
 
+// An installed managed app also registers how its spawner starts: <registry>/<bundle>.start, a script only root
+// may write (the registry directory is root's alone too). When the bundle's spawner does not answer (it was
+// stopped, or the board rebooted since the app was installed), the router runs that script once and waits for
+// the registered socket, so OH's own entry points (the home screen, aa start, recents) start an installed app
+// without the launcher. Without a script, a spawn for a bundle whose spawner is gone fails as before.
+static std::mutex gManagedStartLock;
+constexpr int kManagedStartWaitTenths = 300;   // 30 s: a spawner preloads its runtime before it listens
+
+static bool socketAccepts(const std::string& socketPath) {
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return false;
+    struct sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
+    bool accepted = connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
+    close(fd);
+    return accepted;
+}
+
+// The bundle's start script, when one is registered as only root may register it.
+static std::string managedStartScriptFor(const std::string& bundle) {
+    if (managedSpawnerFor(bundle).empty()) return "";   // also checks the bundle name
+    std::string path = std::string(kManagedRegistryDir) + "/" + bundle + ".start";
+    struct stat st{};
+    if (lstat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0 || (st.st_mode & 022) != 0) {
+        return "";
+    }
+    return path;
+}
+
+// Starts the bundle's spawner from its start script; true once its registered socket accepts connections.
+static bool startManagedSpawner(const std::string& bundle) {
+    std::string script = managedStartScriptFor(bundle);
+    if (script.empty()) return false;
+    std::lock_guard<std::mutex> lock(gManagedStartLock);
+    std::string spawner = managedSpawnerFor(bundle);
+    if (!spawner.empty() && socketAccepts(spawner)) return true;   // another request started it meanwhile
+    LOGI("[WESTLAKE-ROUTER] %s has no running spawner: starting it with %s", bundle.c_str(), script.c_str());
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOGE("[WESTLAKE-ROUTER] cannot start %s's spawner: %s", bundle.c_str(), strerror(errno));
+        return false;
+    }
+    if (pid == 0) {
+        // The script starts the spawner in the background and returns. It gets a fresh session and environment,
+        // and none of the router's descriptors: the router's library path is its own runtime's.
+        setsid();
+        for (int fd = 3; fd < 1024; ++fd) close(fd);
+        const char* argv[] = {"/system/bin/sh", script.c_str(), nullptr};
+        const char* envp[] = {"PATH=/system/bin:/vendor/bin", nullptr};
+        execve(argv[0], const_cast<char* const*>(argv), const_cast<char* const*>(envp));
+        _exit(127);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        LOGE("[WESTLAKE-ROUTER] %s's start script failed (status 0x%x)", bundle.c_str(), static_cast<unsigned>(status));
+        return false;
+    }
+    for (int i = 0; i < kManagedStartWaitTenths; ++i) {
+        spawner = managedSpawnerFor(bundle);
+        if (!spawner.empty() && socketAccepts(spawner)) {
+            LOGI("[WESTLAKE-ROUTER] %s's spawner listens on %s after %d ms", bundle.c_str(), spawner.c_str(), i * 100);
+            return true;
+        }
+        usleep(100 * 1000);
+    }
+    LOGE("[WESTLAKE-ROUTER] %s's spawner did not listen within %d s", bundle.c_str(), kManagedStartWaitTenths / 10);
+    return false;
+}
+
 static void routeConnection(int client) {
     struct ucred peer{};
     socklen_t length = sizeof(peer);
@@ -1304,8 +1376,16 @@ static void routeConnection(int client) {
             }
             offset += tlv->tlvLen;
         }
-        std::string spawner = header.msgType == static_cast<uint32_t>(MSG_APP_SPAWN) ? managedSpawnerFor(bundle) : "";
+        bool spawn = header.msgType == static_cast<uint32_t>(MSG_APP_SPAWN);
+        std::string spawner = spawn ? managedSpawnerFor(bundle) : "";
         std::vector<uint8_t> answer = spawner.empty() ? std::vector<uint8_t>() : askSpawner(spawner, request);
+        // An installed app whose spawner is gone (its socket refuses connections): start it from its registered
+        // script and ask again. A spawner that is there but did not answer is not asked twice for one process.
+        if (spawn && answer.size() < sizeof(OhAppSpawnMsgHeader) + sizeof(int32_t) * 2 && !spawner.empty() &&
+            !socketAccepts(spawner) && startManagedSpawner(bundle)) {
+            spawner = managedSpawnerFor(bundle);
+            answer = spawner.empty() ? std::vector<uint8_t>() : askSpawner(spawner, request);
+        }
         if (answer.size() < sizeof(OhAppSpawnMsgHeader) + sizeof(int32_t) * 2) {
             LOGE("[WESTLAKE-ROUTER] no spawner answered for %s (type %u, spawner %s)", bundle.c_str(),
                  header.msgType, spawner.empty() ? "none registered" : spawner.c_str());
