@@ -5297,6 +5297,42 @@ void westlake_mozglue_abort(void)
 }
 __asm__(".symver westlake_mozglue_abort, abort@libmozglue.so");
 
+/*
+ * The libc table (libc_table.txt, libc_table.S): Bionic's libc and libdl functions this library does
+ * not define, each as name@WL_LIBC_TABLE, for code that resolves names itself in the module it takes
+ * for libc. Alibaba SecurityGuard (libsgmainso) took this library for libc, as it defines malloc and
+ * __errno, looked a name up in its symbol table, found none and called symbol 0: pc at this library's
+ * base, x1 at .dynsym's first entry (Youku, a Qookka game; both Alipay apps on the phones). Musl's
+ * function fills a slot on the first call through it; the caller is told once per name.
+ */
+extern void *westlake_libc_table_slots[];
+extern const char *const westlake_libc_table_names[];
+extern const uint64_t westlake_libc_table_size;
+
+static long westlake_libc_table_missing(void)
+{
+    errno = ENOSYS;
+    return -1;
+}
+
+__attribute__((visibility("hidden"))) void *westlake_libc_table_resolve(void **slot, void *caller);
+
+__attribute__((visibility("hidden"))) void *westlake_libc_table_resolve(void **slot, void *caller)
+{
+    size_t index = (size_t) (slot - westlake_libc_table_slots);
+    if (index >= westlake_libc_table_size) return (void *) westlake_libc_table_missing;
+    const char *name = westlake_libc_table_names[index];
+    void *target = dlsym(RTLD_NEXT, name);
+    Dl_info info;
+    const char *from = dladdr(caller, &info) != 0 && info.dli_fname != NULL ? info.dli_fname : "?";
+    fprintf(stderr, "[WESTLAKE-LIBC-TABLE] %s, looked up by name in this library, called from %s+%#lx: %s\n",
+            name, from, (unsigned long) ((uintptr_t) caller - (uintptr_t) (from[0] != '?' ? info.dli_fbase : 0)),
+            target != NULL ? "musl's" : "no such function, ENOSYS");
+    if (target == NULL) target = (void *) westlake_libc_table_missing;
+    __atomic_store_n(slot, target, __ATOMIC_RELEASE);
+    return target;
+}
+
 WESTLAKE_ALOOPER_FORWARD(int, android_res_nquery,
                          (uint64_t network, const char *name, int ns_class, int ns_type, uint32_t flags),
                          (network, name, ns_class, ns_type, flags))

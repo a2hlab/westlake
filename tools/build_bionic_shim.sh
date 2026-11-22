@@ -21,12 +21,50 @@ $CC -I$W/../../third_party/jni -c $W/android_ndk_config.c -o $O/nc.o
 # Bionic's fts(3), which musl lacks (OpenBSD's code: its fts_set leaves a parameter unused).
 $CC -Wno-unused-parameter -c $W/bionic_fts.c -o $O/ft.o
 $SDK/llvm/bin/clang --target=aarch64-linux-ohos --sysroot=$SDK/sysroot -fPIC -c $W/webview_setjmp_arm64.S -o $O/j.o
+# libc_table.S from libc_table.txt: each listed libc or libdl function as name@WL_LIBC_TABLE, a
+# trampoline through a slot that westlake_libc_table_resolve fills with musl's function on the first
+# call (the lazy path keeps the argument registers, x8 and q0-q7). Only code that looks the name up
+# in this library's symbol table itself reaches one: no ordinary import binds to a non-default version.
+grep -v -e '^#' -e '^$' $W/libc_table.txt | awk '
+BEGIN {
+  print "\t.text\n\t.p2align 2\n\t.type\twestlake_libc_table_lazy, %function\nwestlake_libc_table_lazy:"
+  print "\tstp\tx29, x30, [sp, #-224]!\n\tmov\tx29, sp\n\tstp\tx0, x1, [sp, #16]\n\tstp\tx2, x3, [sp, #32]"
+  print "\tstp\tx4, x5, [sp, #48]\n\tstp\tx6, x7, [sp, #64]\n\tstp\tx8, x17, [sp, #80]\n\tstp\tq0, q1, [sp, #96]"
+  print "\tstp\tq2, q3, [sp, #128]\n\tstp\tq4, q5, [sp, #160]\n\tstp\tq6, q7, [sp, #192]"
+  print "\tmov\tx0, x17\n\tmov\tx1, x30\n\tbl\twestlake_libc_table_resolve\n\tmov\tx16, x0"
+  print "\tldp\tq6, q7, [sp, #192]\n\tldp\tq4, q5, [sp, #160]\n\tldp\tq2, q3, [sp, #128]\n\tldp\tq0, q1, [sp, #96]"
+  print "\tldp\tx8, x17, [sp, #80]\n\tldp\tx6, x7, [sp, #64]\n\tldp\tx4, x5, [sp, #48]\n\tldp\tx2, x3, [sp, #32]"
+  print "\tldp\tx0, x1, [sp, #16]\n\tldp\tx29, x30, [sp], #224\n\tbr\tx16"
+  print "\t.size\twestlake_libc_table_lazy, .-westlake_libc_table_lazy"
+}
+{
+  name[n] = $1
+  printf "\t.p2align 2\n\t.globl\twestlake_libc_table_%s\n\t.type\twestlake_libc_table_%s, %%function\n", $1, $1
+  printf "westlake_libc_table_%s:\n\tadrp\tx17, westlake_libc_table_slots+%d\n", $1, 8 * n
+  printf "\tadd\tx17, x17, :lo12:westlake_libc_table_slots+%d\n\tldr\tx16, [x17]\n", 8 * n
+  printf "\tcbz\tx16, westlake_libc_table_lazy\n\tbr\tx16\n"
+  printf "\t.size\twestlake_libc_table_%s, .-westlake_libc_table_%s\n", $1, $1
+  printf "\t.symver\twestlake_libc_table_%s, %s@WL_LIBC_TABLE\n", $1, $1
+  n++
+}
+END {
+  print "\t.bss\n\t.p2align 3\n\t.globl\twestlake_libc_table_slots\n\t.hidden\twestlake_libc_table_slots"
+  printf "westlake_libc_table_slots:\n\t.zero\t%d\n", 8 * n
+  print "\t.section\t.rodata.str1.1,\"aMS\",@progbits,1"
+  for (i = 0; i < n; i++) printf ".Lwestlake_libc_table_name%d:\n\t.asciz\t\"%s\"\n", i, name[i]
+  print "\t.section\t.data.rel.ro,\"aw\"\n\t.p2align 3\n\t.globl\twestlake_libc_table_names\n\t.hidden\twestlake_libc_table_names"
+  print "westlake_libc_table_names:"
+  for (i = 0; i < n; i++) printf "\t.xword\t.Lwestlake_libc_table_name%d\n", i
+  print "\t.globl\twestlake_libc_table_size\n\t.hidden\twestlake_libc_table_size"
+  printf "westlake_libc_table_size:\n\t.xword\t%d\n", n
+}' > $O/libc_table.S
+$SDK/llvm/bin/clang --target=aarch64-linux-ohos --sysroot=$SDK/sysroot -fPIC -c $O/libc_table.S -o $O/lt.o
 # -nostdlib with explicit crt objects: the shim must not pull a second libc++ or its init order.
 # libOpenSLES stays NEEDED (--no-as-needed): an app's dlopen of libOpenSLES.so is answered with this
 # library, whose lookups then fall through to OH's.
 $SDK/llvm/bin/clang --target=aarch64-linux-ohos --sysroot=$SDK/sysroot -fuse-ld=lld -nostdlib -shared -Wl,-z,defs \
   -Wl,--build-id=sha1 -Wl,-soname,libwebview_bionic_shim.so -Wl,--version-script=$W/webview_bionic_shim.map \
-  $CRT/crti.o $RT/clang_rt.crtbegin.o $O/s.o $O/sl.o $O/aa.o $O/ar.o $O/nc.o $O/ft.o $O/j.o -Wl,--no-as-needed -lOpenSLES -Wl,--as-needed \
+  $CRT/crti.o $RT/clang_rt.crtbegin.o $O/s.o $O/sl.o $O/aa.o $O/ar.o $O/nc.o $O/ft.o $O/j.o $O/lt.o -Wl,--no-as-needed -lOpenSLES -Wl,--as-needed \
   -ldl -lc $RT/libclang_rt.builtins.a $RT/clang_rt.crtend.o $CRT/crtn.o -o $O/libwebview_bionic_shim.so
 # libaaudio.so: a name for DT_NEEDED with no code of its own (libaaudio_stub.c).
 $CC -c $W/libaaudio_stub.c -o $O/as.o

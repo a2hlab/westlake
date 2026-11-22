@@ -53,6 +53,15 @@ libmozglue.so {
 };
 
 /*
+ * The libc and libdl functions this library does not define (libc_table.txt), for code that looks a
+ * name up in the module it takes for libc instead of importing it: Alibaba SecurityGuard found this
+ * library that way (it defines malloc and __errno) and called symbol 0, its base, for each name it
+ * lacked. Defined only as non-default versions, so no ordinary import binds to them.
+ */
+WL_LIBC_TABLE {
+};
+
+/*
  * libnativewindow.so's version, for the buffer and dataspace calls its importers ask for by
  * name@LIBNATIVEWINDOW: Maps' and YouTube's libgoogle3.so, TensorFlow Lite's GPU delegate, two
  * games' frame-rate layer. A versioned import does not bind to a definition under another version,
