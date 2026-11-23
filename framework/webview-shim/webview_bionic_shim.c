@@ -1809,6 +1809,24 @@ static int westlake_shim_maps_library(const char *name)
     return 0;
 }
 
+/* Whether a loader line of this kind (0: by name, 1: by path) has not told of this library yet: a small
+ * table of the names told per kind (a full table just stops telling). */
+static int westlake_tell_once(int kind, const char *name)
+{
+    static pthread_mutex_t told_lock = PTHREAD_MUTEX_INITIALIZER;
+    static char told[2][64][64];
+    static int told_count[2];
+    int new_name = 1;
+    pthread_mutex_lock(&told_lock);
+    for (int i = 0; i < told_count[kind] && new_name; ++i) {
+        new_name = strncmp(told[kind][i], name, sizeof(told[kind][i]) - 1) != 0;
+    }
+    if (new_name && told_count[kind] < 64) snprintf(told[kind][told_count[kind]++], sizeof(told[0][0]), "%s", name);
+    else if (told_count[kind] >= 64) new_name = 0;
+    pthread_mutex_unlock(&told_lock);
+    return new_name;
+}
+
 /*
  * One of the app's own libraries, dlopened by bare name from Android code: the copy the process already
  * has, else a new one in the caller's namespace. On Android one classloader namespace holds all of an
@@ -1864,19 +1882,56 @@ static void *westlake_open_app_lib(const char *name, int flags, void *caller)
     } else if (handle == NULL) {
         return NULL;   /* the default namespace by name, as before */
     }
-    /* Once per library: a small table of the names already told (a full table just stops telling). */
-    static pthread_mutex_t told_lock = PTHREAD_MUTEX_INITIALIZER;
-    static char told[64][64];
-    static int told_count;
-    int new_name = 1;
-    pthread_mutex_lock(&told_lock);
-    for (int i = 0; i < told_count && new_name; ++i) new_name = strncmp(told[i], name, sizeof(told[i]) - 1) != 0;
-    if (new_name && told_count < 64) snprintf(told[told_count++], sizeof(told[0]), "%s", name);
-    else if (told_count >= 64) new_name = 0;
-    pthread_mutex_unlock(&told_lock);
-    if (new_name) {
+    if (westlake_tell_once(0, name)) {
         fprintf(stderr, "[WESTLAKE-LOADER] %s dlopen'ed by name from %s: %s%s\n", name,
                 caller_path != NULL ? caller_path : "?", where, handle != NULL ? "" : ", failed; default as before");
+    }
+    return handle;
+}
+
+/*
+ * An APK library dlopened by path from Android code: the copy already loaded, in either namespace.
+ * The same holds as for a name: on Android a library already loaded is the one a dlopen gets, whatever
+ * path names it, and here each namespace finds a loaded library by inode only among its own. A
+ * routed library goes to the Android namespace and every other path to the default one, so a copy the
+ * other namespace held was loaded a second time. Hollywood Merge: Unity's libmain opened libil2cpp.so
+ * and ran its JNI_OnLoad; libunity opened it again by a path of its own making, which the other
+ * namespace answered, and il2cpp started without a JavaVM ("IL2CPP: Java VM not initialized").
+ * The file must be the one in the APK's library directory (device and inode), and the probes use that
+ * directory's path, which both namespaces may open. They load nothing: with no copy loaded, the
+ * dlopen goes on as before.
+ */
+static void *westlake_loaded_app_lib_at(const char *file, int flags, void *caller)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    const char *base = file != NULL ? strrchr(file, '/') : NULL;
+    if (dir == NULL || dir[0] == '\0' || base == NULL || base[1] == '\0' || westlake_shim_maps_library(base + 1)) {
+        return NULL;
+    }
+    base++;
+    char path[512];
+    int length = snprintf(path, sizeof(path), "%s/%s", dir, base);
+    struct stat staged, named;
+    if (length <= 0 || (size_t) length >= sizeof(path) || stat(path, &staged) != 0 || stat(file, &named) != 0 ||
+        staged.st_dev != named.st_dev || staged.st_ino != named.st_ino) {
+        return NULL;
+    }
+    const char *caller_path = NULL;
+    if (!caller_is_android_dso(caller, &caller_path)) return NULL;
+    const char *where = "the copy in the default namespace";
+    void *handle = westlake_real_dlopen_fn(NULL, path, flags | RTLD_NOLOAD);
+    if (handle == NULL) {
+        typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+        DlnsGetFn get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+        Dl_namespace android;
+        memset(&android, 0, sizeof(android));
+        if (get == NULL || get("westlake_android_app", &android) != 0) return NULL;   /* not before ART makes it */
+        where = "the copy in the app's namespace";
+        handle = westlake_real_dlopen_ns_fn(&android, path, flags | RTLD_NOLOAD);
+    }
+    if (handle != NULL && westlake_tell_once(1, base)) {
+        fprintf(stderr, "[WESTLAKE-LOADER] %s dlopen'ed by path from %s: %s\n", file,
+                caller_path != NULL ? caller_path : "?", where);
     }
     return handle;
 }
@@ -2391,6 +2446,12 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
      * failed there before the redirect further down opened them; the clean-up after the fourth
      * faulted in dlopen_impl, holding the loader lock, and OH's dumper timed out.
      */
+    if (actual_filename != NULL && strchr(actual_filename, '/') != NULL && !(flags & RTLD_NOLOAD)) {
+        void *loaded = westlake_loaded_app_lib_at(actual_filename, flags, caller);
+        if (loaded != NULL) {
+            return loaded;
+        }
+    }
     if (basename != NULL && basename == filename && actual_filename == filename &&
         !(flags & RTLD_NOLOAD) && caller_is_android_dso(caller, NULL)) {
         void *routed = westlake_open_routed_lib(filename, flags);
