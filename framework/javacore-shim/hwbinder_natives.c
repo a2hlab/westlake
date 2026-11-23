@@ -7,7 +7,8 @@
  * These natives let the classes initialize and answer as such a device: getService throws NoSuchElementException,
  * what libhidl's getService gives for a service it cannot find; registering or calling a service throws
  * RemoteException; the thread-pool and property calls do nothing. HwParcel, HwRemoteBinder and HwBlob get native_init
- * and their native_setup, so their classes initialize too; their other natives stay unregistered. Each method is
+ * and their native_setup, so their classes initialize too; their other natives stay unregistered. HidlSupport says
+ * HIDL is not supported and has no pid to share (Alipay HK asks isHidlSupported). Each method is
  * registered by itself, so a signature that differs in this framework leaves only that one out.
  */
 #include <jni.h>
@@ -110,6 +111,22 @@ static void hw_transact(JNIEnv* env, jobject self, jint code, jobject request, j
     hw_throw(env, "android/os/RemoteException", "this device has no HIDL services");
 }
 
+/* android.os.HidlSupport: no HIDL here (libhidl's isHidlSupported is false without hwservicemanager), and no pid to
+ * share (getPidIfSharable is NO_PID, -1, on user builds). */
+static jboolean hidl_supported(JNIEnv* env, jclass cls)
+{
+    (void) env;
+    (void) cls;
+    return JNI_FALSE;
+}
+
+static jint hidl_pid_if_sharable(JNIEnv* env, jclass cls)
+{
+    (void) env;
+    (void) cls;
+    return -1;
+}
+
 static int bind_each(JNIEnv* env, const char* name, const JNINativeMethod* methods, int count)
 {
     jclass cls = (*env)->FindClass(env, name);
@@ -129,7 +146,7 @@ static int bind_each(JNIEnv* env, const char* name, const JNINativeMethod* metho
     return bound;
 }
 
-/* HwBinder's natives bound (of 9); *helpers gets those of HwParcel, HwRemoteBinder and HwBlob (of 6). */
+/* HwBinder's natives bound (of 9); *helpers gets those of HwParcel, HwRemoteBinder, HwBlob and HidlSupport (of 8). */
 int wl_register_hwbinder(JNIEnv* env, int* helpers)
 {
     static const JNINativeMethod binder[] = {
@@ -155,7 +172,11 @@ int wl_register_hwbinder(JNIEnv* env, int* helpers)
         {"native_init", "()J", (void*) hw_native_init},
         {"native_setup", "(I)V", (void*) hw_setup_size},
     };
+    static const JNINativeMethod support[] = {
+        {"isHidlSupported", "()Z", (void*) hidl_supported},
+        {"getPidIfSharable", "()I", (void*) hidl_pid_if_sharable},
+    };
     *helpers = bind_each(env, "android/os/HwParcel", parcel, 2) + bind_each(env, "android/os/HwRemoteBinder", remote, 2)
-               + bind_each(env, "android/os/HwBlob", blob, 2);
+               + bind_each(env, "android/os/HwBlob", blob, 2) + bind_each(env, "android/os/HidlSupport", support, 2);
     return bind_each(env, "android/os/HwBinder", binder, (int) (sizeof(binder) / sizeof(binder[0])));
 }

@@ -1750,7 +1750,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         char line[96];
         int helpers = 0;
         int hw = wl_register_hwbinder(env, &helpers);
-        snprintf(line, sizeof(line), "[WL-NATIVES] bound HwBinder=%d/9 HIDL helpers=%d/6 (no hwservicemanager)\n", hw, helpers);
+        snprintf(line, sizeof(line), "[WL-NATIVES] bound HwBinder=%d/9 HIDL helpers=%d/8 (no hwservicemanager)\n", hw, helpers);
         note(line);
     }
     wl_register_media(env, vm);
