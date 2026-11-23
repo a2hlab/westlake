@@ -254,12 +254,27 @@ public final class LocalServiceBinders {
      */
     private static IBinder accountService() throws ClassNotFoundException {
         if (GoogleAuthProxy.client()) return new AccountManagerStub();
-        if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
+        if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) {
+            // One account manager per app: Play services' other processes use its launched process's.
+            IBinder home = playServicesOwnService("homeService", "account");
+            return home != null ? home : new AccountManagerStub();
+        }
         if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
             IBinder remote = playServicesHostService("account");
             if (remote != null) return remote;
         }
         return proxy("account", "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+    }
+
+    /** PlayServicesChannel.homeService: the launched process's service, in another process of the same app. */
+    private static IBinder playServicesOwnService(String method, String name) {
+        try {
+            return (IBinder) Class.forName("adapter.activity.PlayServicesChannel")
+                    .getMethod(method, String.class).invoke(null, name);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            System.err.println("[" + TAG + "] " + name + " from the launched process unavailable: " + e);
+            return null;
+        }
     }
 
     /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */
