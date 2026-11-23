@@ -21,7 +21,12 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <jni.h>
+#include <mutex>
+#include <string>
+#include <unistd.h>
+#include <unordered_map>
 
 // OH parameter store API (libbegetutil.z.so).  Forward-declared to avoid
 // pulling in syspara/parameter.h's deeper dependencies.
@@ -116,6 +121,76 @@ static const char* lookup_adapter_fallback(const char* key) {
     return nullptr;
 }
 
+// The device profile: $ANDROID_ROOT/build.prop (WESTLAKE_DEVICE_PROFILE names another path), made by
+// tools/make_device_profile.py from facts the device's owner gave. It is the Android identity Westlake presents
+// for this device, the same to every app and to Google Play services, whatever OS runs below. While it exists, an
+// identity property comes from it or stays unset: never OH's parameters, never the table above, which describe
+// another device. The CPU ABI lists are the process's architecture, not identity, and keep the table. The Bionic
+// shim reads the same file by the same rule (webview_bionic_shim.c, read_android_property): keep the two in step.
+struct DeviceProfile {
+    bool present = false;
+    std::unordered_map<std::string, std::string> values;
+};
+
+static const DeviceProfile& device_profile() {
+    static DeviceProfile profile;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        std::string path;
+        const char* configured = getenv("WESTLAKE_DEVICE_PROFILE");
+        const char* root = getenv("ANDROID_ROOT");
+        if (configured != nullptr && configured[0] != '\0') {
+            path = configured;
+        } else if (root != nullptr && root[0] != '\0') {
+            path = std::string(root) + "/build.prop";
+        } else {
+            return;
+        }
+        int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (fd < 0) return;
+        std::string text;
+        char chunk[4096];
+        ssize_t n;
+        while ((n = read(fd, chunk, sizeof(chunk))) > 0) text.append(chunk, static_cast<size_t>(n));
+        close(fd);
+        profile.present = true;
+        size_t start = 0;
+        while (start < text.size()) {
+            size_t end = text.find('\n', start);
+            if (end == std::string::npos) end = text.size();
+            std::string line = text.substr(start, end - start);
+            start = end + 1;
+            size_t first = line.find_first_not_of(" \t");
+            size_t last = line.find_last_not_of(" \t\r");
+            if (first == std::string::npos) continue;
+            line = line.substr(first, last - first + 1);
+            size_t eq = line.find('=');
+            if (line[0] == '#' || eq == std::string::npos || eq == 0) continue;
+            profile.values[line.substr(0, eq)] = line.substr(eq + 1);
+        }
+    });
+    return profile;
+}
+
+// Whether a property is part of the device's identity (see the device profile above).
+static bool is_identity_property(const char* key) {
+    static const char* const kPrefixes[] = {
+        "ro.product.", "ro.build.", "ro.boot.", "ro.bootimage.", "ro.system.", "ro.system_ext.", "ro.vendor.",
+        "ro.odm.", "ro.vendor_dlkm.", "ro.odm_dlkm.", "ro.soc.", "ro.board.",
+    };
+    static const char* const kExact[] = {
+        "ro.hardware", "ro.bootloader", "ro.revision", "ro.debuggable", "ro.secure", "gsm.version.baseband",
+    };
+    if (strncmp(key, "ro.product.cpu.", 15) == 0) return false;
+    for (const char* prefix : kPrefixes) {
+        if (strncmp(key, prefix, strlen(prefix)) == 0) return true;
+    }
+    for (const char* name : kExact) {
+        if (strcmp(key, name) == 0) return true;
+    }
+    return false;
+}
+
 // Look up `key` in OH parameter store, falling back to the adapter's hardcoded
 // table for Android-specific keys OH does not provide.  Returns true if hit;
 // on hit, `out` holds a heap copy that caller must `free()`.
@@ -123,6 +198,17 @@ static bool oh_get_parameter(JNIEnv* env, jstring keyJ, char** out) {
     if (keyJ == nullptr) return false;
     const char* key = env->GetStringUTFChars(keyJ, nullptr);
     if (key == nullptr) return false;
+    const DeviceProfile& profile = device_profile();
+    if (profile.present) {
+        auto it = profile.values.find(key);
+        bool identity = is_identity_property(key);
+        if (it != profile.values.end() || identity) {
+            env->ReleaseStringUTFChars(keyJ, key);
+            if (it == profile.values.end()) return false;   // an identity property the profile does not list
+            *out = strdup(it->second.c_str());
+            return *out != nullptr;
+        }
+    }
     char buf[kSpValueMax + 1] = {0};
     // Pass an empty default so we can distinguish "miss" from a real empty value.
     int rc = GetParameter(key, "", buf, kSpValueMax);
