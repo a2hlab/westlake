@@ -1716,22 +1716,28 @@ static int westlake_shim_maps_library(const char *name)
 }
 
 /*
- * One of the app's own libraries, dlopened by bare name from Android code, opened in ART's Android
- * namespace by its path in the APK's library directory. On Android such a dlopen resolves in the
- * caller's classloader namespace. A plain dlopen from this shim lands in the default namespace instead,
- * and loads a second copy of whatever the Android namespace already holds there.
+ * One of the app's own libraries, dlopened by bare name from Android code: the copy the process already
+ * has, else a new one in the caller's namespace. On Android one classloader namespace holds all of an
+ * app's libraries, and such a dlopen resolves there. This shim's own dlopen otherwise opens the name
+ * in the default namespace, whatever namespace the caller lives in.
  *
- * WeChat's mars opened libcronet_wrapper.so by name, and its NEEDED libcronet.119.0.6045.214.so loaded
- * again in the default namespace beside the copy Java had loaded. The second copy's JNI_OnLoad never
- * ran, so base::android::AttachCurrentThread() read a NULL JavaVM: SIGSEGV on a mars thread, and :push
- * ended before it served in about half the runs. Both copies were in the process map.
- *
- * Opened by path, OH's loader finds a copy Java already loaded there by its inode (a library loaded by
- * path has no short name, so a bare-name open can miss it). Only for a name the APK ships and this shim
- * maps nowhere else, asked for by Android code; the launcher's routed libraries keep their own path
- * above. Each library is logged once, so a round shows which apps changed placement.
+ * Westlake spreads an app's libraries over two namespaces. The launcher's routed libraries, with what
+ * their DT_NEEDED pulls in, live in ART's Android namespace. Java loads the others by path into the
+ * default namespace. OH's loader finds a loaded copy by its inode only inside one namespace (a library
+ * loaded by path has no short name to share), so opening the file in the other namespace loads it a
+ * second time. Nothing has set up the second copy's state: Java ran JNI_OnLoad and its init calls
+ * on the first.
+ *   - Opened in the default namespace always (the old behavior), a library that a routed library asks
+ *     for went where that library's own dependencies (its libc++_shared.so) do not live.
+ *   - Opened in the Android namespace always (round o82x), libraries Java had already loaded loaded
+ *     again. Flutter's libdartjni.so: Klook read a NULL JavaVM from the new copy (SIGSEGV at 0 in
+ *     libdartjni.so). libalog.so, from libkeva.so: CapCut crashed the same way.
+ * So a copy already loaded in either namespace is the one returned; the probe loads nothing. Only a
+ * library not loaded yet is opened, by its path, in the namespace OH's dlopen would have used without
+ * this shim in between: the caller's. dlopen is dlopen_impl with its own return address, and the
+ * caller's return address is passed here instead. Each library is logged once, with where it went.
  */
-static void *westlake_open_app_lib_in_android_ns(const char *name, int flags, void *caller)
+static void *westlake_open_app_lib(const char *name, int flags, void *caller)
 {
     const char *dir = getenv("ASX_NATIVE_LIB_DIR");
     if (dir == NULL || dir[0] == '\0' || name == NULL || name[0] == '\0' || strchr(name, '/') != NULL ||
@@ -1744,11 +1750,26 @@ static void *westlake_open_app_lib_in_android_ns(const char *name, int flags, vo
     const char *caller_path = NULL;
     if (!caller_is_android_dso(caller, &caller_path)) return NULL;
     typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    typedef void *(*DlopenImplFn)(const char *, int, const char *, const void *, const void *);
     DlnsGetFn get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    static DlopenImplFn impl;
+    if (impl == NULL) impl = (DlopenImplFn) dlsym(RTLD_DEFAULT, "dlopen_impl");
     Dl_namespace android;
     memset(&android, 0, sizeof(android));
-    if (get == NULL || get("westlake_android_app", &android) != 0) return NULL;   /* ART has not made it yet */
-    void *handle = westlake_real_dlopen_ns_fn(&android, path, flags);
+    int have_android = get != NULL && get("westlake_android_app", &android) == 0;   /* not before ART makes it */
+    const char *where = "the copy in the default namespace";
+    /* This shim lives in the default namespace, so its dlopen probes there. */
+    void *handle = westlake_real_dlopen_fn(NULL, path, flags | RTLD_NOLOAD);
+    if (handle == NULL && have_android) {
+        where = "the copy in the app's namespace";
+        handle = westlake_real_dlopen_ns_fn(&android, path, flags | RTLD_NOLOAD);
+    }
+    if (handle == NULL && impl != NULL) {
+        where = "loaded in the caller's namespace";
+        handle = impl(path, flags, NULL, caller, NULL);
+    } else if (handle == NULL) {
+        return NULL;   /* the default namespace by name, as before */
+    }
     /* Once per library: a small table of the names already told (a full table just stops telling). */
     static pthread_mutex_t told_lock = PTHREAD_MUTEX_INITIALIZER;
     static char told[64][64];
@@ -1760,8 +1781,8 @@ static void *westlake_open_app_lib_in_android_ns(const char *name, int flags, vo
     else if (told_count >= 64) new_name = 0;
     pthread_mutex_unlock(&told_lock);
     if (new_name) {
-        fprintf(stderr, "[WESTLAKE-LOADER] %s dlopen'ed by name from %s: the app's namespace (was default)%s\n", name,
-                caller_path != NULL ? caller_path : "?", handle != NULL ? "" : ", failed there; default as before");
+        fprintf(stderr, "[WESTLAKE-LOADER] %s dlopen'ed by name from %s: %s%s\n", name,
+                caller_path != NULL ? caller_path : "?", where, handle != NULL ? "" : ", failed; default as before");
     }
     return handle;
 }
@@ -2304,7 +2325,7 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
         if (routed != NULL) {
             return routed;
         }
-        void *app = westlake_open_app_lib_in_android_ns(filename, flags, caller);
+        void *app = westlake_open_app_lib(filename, flags, caller);
         if (app != NULL) {
             return app;
         }
