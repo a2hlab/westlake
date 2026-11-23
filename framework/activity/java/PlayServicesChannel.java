@@ -1239,6 +1239,36 @@ public final class PlayServicesChannel {
      * A system service of the Play services process, for a client that is a host too: the Play Store's
      * account manager is the one there (LocalServiceBinders asks for it by name). Null if unreachable.
      */
+    /**
+     * A service of this app's launched process, for another of its processes (ADR-0002). Play services' account
+     * manager is the launched process's: each process had its own, so an account its UI process added (add-account
+     * runs there) stayed unknown to the launched process, which answers the Play Store and other apps, until a
+     * restart. Null in the launched process, or if it cannot be reached.
+     */
+    public static IBinder homeService(String name) {
+        if (!AppProcesses.isSecondary()) return null;
+        Channel home = ownProcess(AppProcesses.home());
+        IBinder root = home == null ? null : root(home);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeString(name);
+            root.transact(SERVICE, data, reply, 0);
+            reply.readException();
+            IBinder service = reply.readStrongBinder();
+            System.err.println(TAG + "service " + name + " from " + AppProcesses.home() + ": "
+                    + (service != null ? "connected" : "refused"));
+            return service;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "service " + name + " from " + AppProcesses.home() + " failed: " + e);
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
     public static IBinder remoteService(String name) {
         IBinder root = root(SERVICES);
         if (root == null) return null;
@@ -2200,6 +2230,10 @@ public final class PlayServicesChannel {
      */
     private static IBinder hostService(String name) {
         if (!isHost() || !"account".equals(name)) return null;
+        // This app's other processes (ADR-0002): one account manager per app, as Android's one system service.
+        if (Binder.getCallingUid() == Process.myUid() && !AppProcesses.isSecondary()) {
+            return android.os.ServiceManager.getService(name);
+        }
         String[] callers = application().getPackageManager().getPackagesForUid(Binder.getCallingUid());
         if (callers == null || !Arrays.asList(callers).contains(PLAY_STORE)) {
             System.err.println(TAG + "service " + name + " refused to uid " + Binder.getCallingUid());
