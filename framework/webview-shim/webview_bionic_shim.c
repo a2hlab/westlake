@@ -3032,11 +3032,100 @@ static const struct {
     { "persist.sys.timezone", "persist.time.timezone" },
 };
 
-/* A property by its Android name: OH's store, under that name and then under the name OH keeps it by,
- * then (with_table) the table above, the order the runtime's SystemProperties uses for Java. Returns
- * the value's length, 0 when nothing answers. */
+/*
+ * The device profile: $ANDROID_ROOT/build.prop (WESTLAKE_DEVICE_PROFILE names another path), made by
+ * tools/make_device_profile.py from facts the device's owner gave. It is the Android identity Westlake
+ * presents for this device, the same to every app and to Google Play services, whatever OS runs below.
+ * While it exists, an identity property comes from it or stays unset: never the host OS's parameters,
+ * never the table above, which describe another device. The CPU ABI lists are the process's architecture,
+ * not identity, and keep the table. The runtime's SystemProperties reads the same file by the same rule
+ * (android_os_SystemProperties.cpp): keep the two in step.
+ */
+#define WESTLAKE_PROFILE_MAX 1024
+static struct { const char *name; const char *value; } g_profile[WESTLAKE_PROFILE_MAX];
+static size_t g_profile_count;
+static int g_profile_present;
+static pthread_once_t g_profile_once = PTHREAD_ONCE_INIT;
+
+static void load_device_profile(void)
+{
+    char path[320];
+    const char *configured = getenv("WESTLAKE_DEVICE_PROFILE");
+    const char *root = westlake_android_root();
+    if (configured != NULL && configured[0] != '\0') {
+        snprintf(path, sizeof(path), "%s", configured);
+    } else if (root != NULL) {
+        snprintf(path, sizeof(path), "%s/build.prop", root);
+    } else {
+        return;
+    }
+    int fd = (int)syscall(SYS_openat, AT_FDCWD, path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return;
+    size_t capacity = 1 << 16, used = 0;
+    char *text = malloc(capacity + 1);
+    ssize_t n = 0;
+    while (text != NULL && used < capacity && (n = read(fd, text + used, capacity - used)) > 0) used += (size_t)n;
+    close(fd);
+    if (text == NULL) return;
+    text[used] = '\0';
+    g_profile_present = 1;
+    char *save = NULL;
+    for (char *line = strtok_r(text, "\n", &save); line != NULL && g_profile_count < WESTLAKE_PROFILE_MAX;
+         line = strtok_r(NULL, "\n", &save)) {
+        while (*line == ' ' || *line == '\t') line++;
+        size_t length = strlen(line);
+        while (length > 0 && (line[length - 1] == '\r' || line[length - 1] == ' ' || line[length - 1] == '\t')) {
+            line[--length] = '\0';
+        }
+        char *eq = strchr(line, '=');
+        if (line[0] == '#' || eq == NULL || eq == line) continue;
+        *eq = '\0';
+        g_profile[g_profile_count].name = line;          /* the text stays for the process's life */
+        g_profile[g_profile_count].value = eq + 1;
+        g_profile_count++;
+    }
+    fprintf(stderr, "[WESTLAKE-DEVICE-PROFILE] %s: %zu properties\n", path, g_profile_count);
+}
+
+/* Whether a property is part of the device's identity (see the device profile above). */
+static int is_identity_property(const char *name)
+{
+    static const char *const prefixes[] = {
+        "ro.product.", "ro.build.", "ro.boot.", "ro.bootimage.", "ro.system.", "ro.system_ext.", "ro.vendor.",
+        "ro.odm.", "ro.vendor_dlkm.", "ro.odm_dlkm.", "ro.soc.", "ro.board.",
+    };
+    static const char *const exact[] = {
+        "ro.hardware", "ro.bootloader", "ro.revision", "ro.debuggable", "ro.secure", "gsm.version.baseband",
+    };
+    if (strncmp(name, "ro.product.cpu.", 15) == 0) return 0;
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
+        if (strncmp(name, prefixes[i], strlen(prefixes[i])) == 0) return 1;
+    }
+    for (size_t i = 0; i < sizeof(exact) / sizeof(exact[0]); ++i) {
+        if (strcmp(name, exact[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+/* A property by its Android name: the device profile for an identity property while the profile
+ * exists; else OH's store, under that name and then under the name OH keeps it by, then (with_table)
+ * the table above, the order the runtime's SystemProperties uses for Java. Returns the value's
+ * length, 0 when nothing answers. */
 static int read_android_property(const char *name, char *value, int with_table)
 {
+    pthread_once(&g_profile_once, load_device_profile);
+    if (g_profile_present) {
+        for (size_t i = 0; i < g_profile_count; ++i) {
+            if (strcmp(name, g_profile[i].name) == 0) {
+                snprintf(value, WEBVIEW_PROP_VALUE_MAX, "%s", g_profile[i].value);
+                return (int)strlen(value);
+            }
+        }
+        if (is_identity_property(name)) {
+            value[0] = '\0';
+            return 0;
+        }
+    }
     int length = read_oh_property(name, value, WEBVIEW_PROP_VALUE_MAX);
     for (size_t i = 0; length == 0 && i < sizeof(g_oh_property_aliases) / sizeof(g_oh_property_aliases[0]); ++i) {
         if (strcmp(name, g_oh_property_aliases[i].android) == 0) {
