@@ -1206,6 +1206,16 @@ public class AppSpawnXInit {
 
             // 5. Find and invoke target class main()
             // This is equivalent to RuntimeInit.findStaticMain()
+            // The Android identity this process presents, as an app reads it: Build's fields, made from
+            // SystemProperties in this process (the device profile, else the runtime's own table). It shows
+            // that Java code sees the profile, which the Bionic shim's own load line cannot. Never the serial.
+            try {
+                System.err.println("[WESTLAKE-BUILD] " + android.os.Build.MANUFACTURER + "/" + android.os.Build.MODEL
+                        + "/" + android.os.Build.DEVICE + " fingerprint=" + android.os.Build.FINGERPRINT
+                        + " sdk=" + android.os.Build.VERSION.SDK_INT + " release=" + android.os.Build.VERSION.RELEASE);
+            } catch (Throwable t) {
+                System.err.println("[WESTLAKE-BUILD] unreadable: " + t);
+            }
             appLog("J_before_invokeStaticMain target=" + targetClass);
             Log.i(TAG, "Launching " + targetClass + ".main()");
             invokeStaticMain(targetClass);
