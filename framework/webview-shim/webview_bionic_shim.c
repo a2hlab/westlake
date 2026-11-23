@@ -1698,6 +1698,75 @@ static void *westlake_open_routed_lib(const char *path, int flags)
 }
 
 /*
+ * Names this shim answers itself when Android code dlopens them (the C runtime, the NDK's platform
+ * libraries, EGL and GLES, OpenSL ES): never taken from an app's own library directory below.
+ */
+static int westlake_shim_maps_library(const char *name)
+{
+    static const char *const mapped[] = {
+        "libc.so", "libdl.so", "libm.so", "liblog.so", "libz.so", "libstdc++.so", "libandroid.so",
+        "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so", "libGLESv3.so", "libOpenSLES.so", "libOpenMAXAL.so",
+        "libvulkan.so", "libjnigraphics.so", "libnativewindow.so", "libaaudio.so", "libmediandk.so",
+        "libcamera2ndk.so", "libsync.so", "libbinder_ndk.so", "libneuralnetworks.so", "libicu.so", "libamidi.so",
+    };
+    for (size_t i = 0; i < sizeof(mapped) / sizeof(mapped[0]); ++i) {
+        if (strcmp(name, mapped[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+/*
+ * One of the app's own libraries, dlopened by bare name from Android code, opened in ART's Android
+ * namespace by its path in the APK's library directory. On Android such a dlopen resolves in the
+ * caller's classloader namespace. A plain dlopen from this shim lands in the default namespace instead,
+ * and loads a second copy of whatever the Android namespace already holds there.
+ *
+ * WeChat's mars opened libcronet_wrapper.so by name, and its NEEDED libcronet.119.0.6045.214.so loaded
+ * again in the default namespace beside the copy Java had loaded. The second copy's JNI_OnLoad never
+ * ran, so base::android::AttachCurrentThread() read a NULL JavaVM: SIGSEGV on a mars thread, and :push
+ * ended before it served in about half the runs. Both copies were in the process map.
+ *
+ * Opened by path, OH's loader finds a copy Java already loaded there by its inode (a library loaded by
+ * path has no short name, so a bare-name open can miss it). Only for a name the APK ships and this shim
+ * maps nowhere else, asked for by Android code; the launcher's routed libraries keep their own path
+ * above. Each library is logged once, so a round shows which apps changed placement.
+ */
+static void *westlake_open_app_lib_in_android_ns(const char *name, int flags, void *caller)
+{
+    const char *dir = getenv("ASX_NATIVE_LIB_DIR");
+    if (dir == NULL || dir[0] == '\0' || name == NULL || name[0] == '\0' || strchr(name, '/') != NULL ||
+        westlake_shim_maps_library(name)) {
+        return NULL;
+    }
+    char path[512];
+    int length = snprintf(path, sizeof(path), "%s/%s", dir, name);
+    if (length <= 0 || (size_t) length >= sizeof(path) || access(path, F_OK) != 0) return NULL;
+    const char *caller_path = NULL;
+    if (!caller_is_android_dso(caller, &caller_path)) return NULL;
+    typedef int (*DlnsGetFn)(const char *, Dl_namespace *);
+    DlnsGetFn get = (DlnsGetFn) dlsym(RTLD_DEFAULT, "dlns_get");
+    Dl_namespace android;
+    memset(&android, 0, sizeof(android));
+    if (get == NULL || get("westlake_android_app", &android) != 0) return NULL;   /* ART has not made it yet */
+    void *handle = westlake_real_dlopen_ns_fn(&android, path, flags);
+    /* Once per library: a small table of the names already told (a full table just stops telling). */
+    static pthread_mutex_t told_lock = PTHREAD_MUTEX_INITIALIZER;
+    static char told[64][64];
+    static int told_count;
+    int new_name = 1;
+    pthread_mutex_lock(&told_lock);
+    for (int i = 0; i < told_count && new_name; ++i) new_name = strncmp(told[i], name, sizeof(told[i]) - 1) != 0;
+    if (new_name && told_count < 64) snprintf(told[told_count++], sizeof(told[0]), "%s", name);
+    else if (told_count >= 64) new_name = 0;
+    pthread_mutex_unlock(&told_lock);
+    if (new_name) {
+        fprintf(stderr, "[WESTLAKE-LOADER] %s dlopen'ed by name from %s: the app's namespace (was default)%s\n", name,
+                caller_path != NULL ? caller_path : "?", handle != NULL ? "" : ", failed there; default as before");
+    }
+    return handle;
+}
+
+/*
  * OH's dlopen into a namespace. ART's loader opens the libraries the launcher routes to the Android
  * namespace through it (looked up with dlsym(RTLD_DEFAULT), which finds this one), not through
  * dlopen: Threads' libc++_shared.so went that way, so the redirect above is applied here too.
@@ -2234,6 +2303,10 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
         void *routed = westlake_open_routed_lib(filename, flags);
         if (routed != NULL) {
             return routed;
+        }
+        void *app = westlake_open_app_lib_in_android_ns(filename, flags, caller);
+        if (app != NULL) {
+            return app;
         }
     }
     static char suffixed[512];
