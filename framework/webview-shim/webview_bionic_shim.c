@@ -3375,7 +3375,13 @@ const struct prop_info *__system_property_find(const char *name)
      * apps). An app's own libraries find what __system_property_get and enumeration answer: their
      * libandroid has ASharedMemory_* (this library's).
      */
-    if (read_android_property(name, value, !caller_is_webview(__builtin_return_address(0), NULL)) == 0) {
+    /*
+     * Nor OH's parameter for the API level: the D600 sets ro.build.version.sdk=35 as a board parameter
+     * since it reports its real Android 15 (11-22), the WebView found it there, and 21 of the round's
+     * first 110 apps died the same way again (null called on CrBrowserMain).
+     */
+    int webview = caller_is_webview(__builtin_return_address(0), NULL);
+    if ((webview && strcmp(name, "ro.build.version.sdk") == 0) || read_android_property(name, value, !webview) == 0) {
         const char *caller = NULL;
         if (caller_is_android_dso(__builtin_return_address(0), &caller) &&
             westlake_first_ask(&g_absent_properties, name)) {
