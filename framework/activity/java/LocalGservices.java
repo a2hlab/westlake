@@ -60,6 +60,7 @@ final class LocalGservices extends ContentProvider {
         sHolder = holder;
         sProvider = provider;
         ensureChangeReceiver();
+        provider.mirrorToPlayServicesDatabase();
         return holder;
     }
 
@@ -129,22 +130,85 @@ final class LocalGservices extends ContentProvider {
      * LocalBroadcasts); this process then reads the table again and tells its own readers.
      */
     private static synchronized void ensureChangeReceiver() {
-        if (sChangeReceiver || sProvider == null) return;
+        if (sChangeReceiver) return;
         final android.app.Application app = ActivityThread.currentApplication();
         if (app == null) return;
         try {
             app.registerReceiver(new android.content.BroadcastReceiver() {
                 @Override
                 public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    // Play services' readers cache values and drop them when the table's URI changes; in this
+                    // process the change was made elsewhere, so it is announced here.
                     LocalGservices provider = sProvider;
-                    if (provider != null && provider.reloadIfChanged()) {
-                        context.getContentResolver().notifyChange(Uri.parse("content://" + AUTHORITY), null);
-                    }
+                    if (provider != null) provider.reloadIfChanged();
+                    context.getContentResolver().notifyChange(Uri.parse("content://" + AUTHORITY), null);
                 }
             }, new android.content.IntentFilter(GSERVICES_CHANGED), android.content.Context.RECEIVER_NOT_EXPORTED);
             sChangeReceiver = true;
         } catch (RuntimeException e) {
             Log.w(TAG, "no change receiver: " + e.getClass().getName());
+        }
+    }
+
+    /**
+     * Every Play services process reads the table and caches it, also the ones that never use this provider
+     * (Android 15's Play services reads its own database, below). Called as a host process starts serving; it
+     * waits for the process's Application.
+     */
+    static void watchChanges() {
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+            private int mTries;
+            @Override
+            public void run() {
+                ensureChangeReceiver();
+                if (!sChangeReceiver && ++mTries < 30) new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 1000);
+            }
+        });
+    }
+
+    /**
+     * Android 15's Play services serves this table itself (its GservicesProvider takes the authority from v35
+     * resources, in its persistent process), and every one of its processes reads the table straight from its
+     * database, gservices.db, not through the provider (GservicesReaderQueryDelegate). Westlake answers the
+     * authority here, so that database stayed empty: Play services read no Android ID and no server settings, and
+     * its add-account check reported "a problem communicating with Google servers". The same table is written
+     * there too: tables main and overrides, (name, value), as Play services' GservicesDatabaseHelper made them.
+     * Nothing is written to a database Play services has not made itself (version 0), or outside Play services.
+     */
+    private synchronized void mirrorToPlayServicesDatabase() {
+        android.app.Application app = ActivityThread.currentApplication();
+        if (app == null || !"com.google.android.gms".equals(app.getPackageName())) return;
+        File path = app.getDatabasePath("gservices.db");
+        if (!path.isFile()) return;
+        android.database.sqlite.SQLiteDatabase db = null;
+        try {
+            db = android.database.sqlite.SQLiteDatabase.openDatabase(path.getPath(), null,
+                    android.database.sqlite.SQLiteDatabase.OPEN_READWRITE);
+            if (db.getVersion() == 0) return;
+            db.beginTransaction();
+            try {
+                copy(db, "main", mValues);
+                copy(db, "overrides", mOverrides);
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+            trace("mirrored " + mValues.size() + " values and " + mOverrides.size() + " overrides to gservices.db");
+        } catch (RuntimeException e) {
+            Log.w(TAG, "gservices.db not updated: " + e.getClass().getName());
+        } finally {
+            if (db != null) db.close();
+        }
+    }
+
+    private static void copy(android.database.sqlite.SQLiteDatabase db, String table, Properties from) {
+        db.delete(table, null, null);
+        ContentValues row = new ContentValues();
+        for (String key : from.stringPropertyNames()) {
+            row.clear();
+            row.put("name", key);
+            row.put("value", from.getProperty(key));
+            db.insert(table, null, row);
         }
     }
 
@@ -252,6 +316,7 @@ final class LocalGservices extends ContentProvider {
             save(mValues, file("values.properties"));
         }
         mStamp = stamp();
+        mirrorToPlayServicesDatabase();
         Log.i(TAG, "stored " + count + " values (" + (table != null ? table : "authority") + ")");
         // Readers cache values until told otherwise, so without this they keep what they read first:
         // an Android ID of 0, read before check-in finished.
