@@ -369,7 +369,8 @@ final class LocalAccounts {
                 // The outcome only, never the token.
                 System.err.println("[WL-ACCOUNTS] getAuthToken " + tokenType + " for " + who + " uid="
                         + request.getInt(AccountManager.KEY_CALLER_UID) + ": "
-                        + (token != null ? "token" : value == null ? "no result" : "no token, keys " + value.keySet()));
+                        + (token != null ? "token" : value == null ? "no result"
+                                : "no token, keys " + new TreeSet<>(value.keySet())));   // the names, never the values
                 if (caller != null) caller.onResult(value);
             }
 
