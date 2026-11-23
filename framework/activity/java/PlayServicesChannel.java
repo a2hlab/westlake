@@ -1715,6 +1715,7 @@ public final class PlayServicesChannel {
         try {
             int listener = SocketBinder.listen(name);
             System.err.println(TAG + "serving on " + name);
+            LocalGservices.watchChanges();
             while (true) {
                 int fd = SocketBinder.accept(listener);
                 Root root = new Root(SocketBinder.peerPid(fd));
