@@ -3694,18 +3694,21 @@ void android_set_abort_message(const char *message)
     (void) written;
 }
 
+/* How many SIGSEGVs the witness tells (WESTLAKE_SEGV_WITNESS; 0 when it does not take SIGSEGV). */
+static int g_segv_witness_budget;
+
 static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *context)
 {
     static int witnessed;
     const ucontext_t *uc = (const ucontext_t *) context;
     if (signal_number == SIGSEGV) {
         /* Witnessed before ART's own handling of the faults it takes on purpose, so those are left out
-         * first, and at most eight others are told (a protector may fault on purpose too). */
+         * first, and at most g_segv_witness_budget others are told (a protector may fault on purpose too). */
         static int segv_witnessed;
         if (westlake_runtime_code((uint64_t) uc->uc_mcontext.pc)) return false;
-        if (__atomic_add_fetch(&segv_witnessed, 1, __ATOMIC_RELAXED) > 8) return false;
+        if (__atomic_add_fetch(&segv_witnessed, 1, __ATOMIC_RELAXED) > g_segv_witness_budget) return false;
     }
-    if (__atomic_add_fetch(&witnessed, 1, __ATOMIC_RELAXED) > 16) return false;
+    if (__atomic_add_fetch(&witnessed, 1, __ATOMIC_RELAXED) > 16 + g_segv_witness_budget) return false;
     char thread[17] = "";
     prctl(PR_GET_NAME, thread, 0, 0, 0);
     char line[1800];
@@ -3817,10 +3820,16 @@ __attribute__((constructor)) static void westlake_install_signal_witness(void)
      * SIGSEGV on request (WESTLAKE_SEGV_WITNESS=1, a launcher --runtime-env): when OH's dumper times out
      * (WeChat on wc_srvinit, Zoom on its main thread, 1688 on launcher-0), no crash site is left
      * anywhere, and this line names it. Off by default: every fault ART takes on purpose then also
-     * reads /proc/self/maps here before ART handles it.
+     * reads /proc/self/maps here before ART handles it. 1 tells eight faults; a larger number tells that
+     * many (at most 4096): WeChat's :push process takes dozens of SIGSEGVs on purpose (its wc_srvinit
+     * threads) before the one in a mars thread that ends it, and eight were spent on those.
      */
     const char *segv = getenv("WESTLAKE_SEGV_WITNESS");
-    if (segv != NULL && strcmp(segv, "1") == 0) add(SIGSEGV, &action);
+    if (segv != NULL && segv[0] >= '1' && segv[0] <= '9') {
+        long budget = strtol(segv, NULL, 10);
+        g_segv_witness_budget = budget == 1 ? 8 : budget > 4096 ? 4096 : (int) budget;
+        add(SIGSEGV, &action);
+    }
 }
 
 /*
