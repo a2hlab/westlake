@@ -174,13 +174,19 @@ public final class AppProcesses {
             PlayServicesChannel.serveLaunchedProcess();
             int pid = spawn(process);
             sStarted.put(process, pid);
-            long deadline = System.currentTimeMillis() + START_TIMEOUT_MS;
+            long started = System.currentTimeMillis();
+            long deadline = started + START_TIMEOUT_MS;
             while (!serving(socket)) {
                 String failure = !spawnedAlive(pid) ? " ended before it served"
                         : System.currentTimeMillis() > deadline ? " did not serve on " + socket : null;
                 if (failure != null) {
                     sFailed.put(process, System.currentTimeMillis() + RETRY_AFTER_MS);
                     int parent = parentOf(pid);
+                    // What the checks saw. "Ended" is either: the signal found no process, or the pid's parent
+                    // is not this app's zygote (a dead child's pid, another program's by now).
+                    System.err.println(TAG + process + " (pid " + pid + ")" + failure + ": alive " + alive(pid)
+                            + ", parent " + parent + ", own parent " + parentOf(Os.getpid()) + ", after "
+                            + (System.currentTimeMillis() - started) + " ms");
                     if (spawnedAlive(pid) && parent > 0 && parent == parentOf(Os.getpid())) kill(pid);
                     throw new IOException(process + " (pid " + pid + ")" + failure);
                 }
