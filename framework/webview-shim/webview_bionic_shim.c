@@ -3515,10 +3515,10 @@ const char *_ctype_ = g_bionic_ctype;
  * A witness for signals that can end the process without a crash dump. OH's dumper writes none for a
  * SIGILL that FFRT's handler takes (Instagram and Threads died that way, right after a numeric-host
  * getaddrinfo), so nothing said where the instruction was. First in musl's signal chain for SIGILL,
- * SIGTRAP and SIGBUS, this prints the signal, thread, pc and x30 to stderr and lets the chain go on:
- * it never handles the signal, so a library probing the CPU with an illegal instruction still
- * catches its own. The harness places pc and x30 with the process map the run samples. Only
- * async-signal-safe calls; at most 16 lines per process.
+ * SIGTRAP, SIGBUS and SIGABRT, this prints the signal, thread, pc and x30 to stderr, then the callers
+ * up the frame-pointer chain, and lets the chain go on: it never handles the signal, so a library
+ * probing the CPU with an illegal instruction still catches its own. The harness places pc and x30
+ * with the process map the run samples. Only async-signal-safe calls; at most 16 lines per process.
  */
 #include <sys/prctl.h>
 #include <ucontext.h>
@@ -3674,11 +3674,12 @@ static char *westlake_frames(char *out, char *limit, uint64_t fp, uint64_t most)
 
 /*
  * Bionic keeps the message a library sets just before it calls abort(); Westlake prints it, then the
- * callers up the frame-pointer chain. The SIGABRT that follows reaches no witness, and ART's report of
- * it lists no frames. libc++abi's "terminating due to uncaught exception of type X" names the type but
- * not the throw, and its frames climb through the terminate handler and __cxa_throw to the code that
- * threw it (Friday Night Funkin': St16invalid_argument right after it opened an AAudio stream). The
- * same holds for "Pure virtual function called!" and the -fno-exceptions length_error.
+ * callers up the frame-pointer chain. ART's report of the SIGABRT that follows lists no frames (its
+ * native stack dump is not built); the signal witness prints them again from the signal's context.
+ * libc++abi's "terminating due to uncaught exception of type X" names the type but not the throw, and
+ * its frames climb through the terminate handler and __cxa_throw to the code that threw it (Friday
+ * Night Funkin': St16invalid_argument right after it opened an AAudio stream). The same holds for
+ * "Pure virtual function called!" and the -fno-exceptions length_error of a newer libc++.
  */
 void android_set_abort_message(const char *message)
 {
@@ -3782,10 +3783,10 @@ static bool westlake_signal_witness(int signal_number, siginfo_t *info, void *co
     ssize_t written = write(2, line, (size_t) (out - line));
     (void) written;
     if (uc != NULL) {
-        char frames[1600];
+        char frames[2400];
         char *end = westlake_text(frames, "[WESTLAKE-SIGNAL-FRAMES] tid=", 40);
         end = westlake_hex(end, (uint64_t) gettid());
-        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29], 10);
+        end = westlake_frames(end, frames + sizeof(frames) - 2, (uint64_t) uc->uc_mcontext.regs[29], 16);
         *end++ = '\n';
         written = write(2, frames, (size_t) (end - frames));
         (void) written;
@@ -3805,6 +3806,13 @@ __attribute__((constructor)) static void westlake_install_signal_witness(void)
     add(SIGILL, &action);
     add(SIGTRAP, &action);
     add(SIGBUS, &action);
+    /*
+     * SIGABRT: a library that calls abort() without setting a message (Youku's libfulltrace: libc++'s
+     * length_error built without exceptions) leaves no line of its own. ART's report of the signal has
+     * no frames, and on a kernel with 48-bit addresses OH's dump cuts every caller to 39 bits ("Not
+     * mapped"). Read from the signal's context, the chain starts in the function that called abort.
+     */
+    add(SIGABRT, &action);
     /*
      * SIGSEGV on request (WESTLAKE_SEGV_WITNESS=1, a launcher --runtime-env): when OH's dumper times out
      * (WeChat on wc_srvinit, Zoom on its main thread, 1688 on launcher-0), no crash site is left
