@@ -90,24 +90,151 @@ static int in_apk(const char *path)
  * bionic old-action to OH's sigaction untranslated, musl wrote 152 bytes into it, and the
  * clobbered stack crashed the app four seconds in.
  */
+static int android_dso_path(const char *path)
+{
+    return strstr(path, "libwebviewchromium.so") != NULL ||
+           strstr(path, "/data/local/tmp/asx/lib/") != NULL ||
+           in_app_library_dir(path) ||
+           in_apk(path) ||
+           strncmp(path, "/data/data/", 11) == 0 ||
+           strncmp(path, "/data/user/", 11) == 0;
+}
+
+static int unregistered_caller_is_android(uintptr_t address, const char **caller_path);
+
 static int caller_is_android_dso(void *return_address, const char **caller_path)
 {
     Dl_info caller = {0};
     if (dladdr(return_address, &caller) == 0 || caller.dli_fname == NULL) {
-        return 0;
+        return unregistered_caller_is_android((uintptr_t) return_address, caller_path);
     }
-    if (strstr(caller.dli_fname, "libwebviewchromium.so") == NULL &&
-        strstr(caller.dli_fname, "/data/local/tmp/asx/lib/") == NULL &&
-        !in_app_library_dir(caller.dli_fname) &&
-        !in_apk(caller.dli_fname) &&
-        strncmp(caller.dli_fname, "/data/data/", 11) != 0 &&
-        strncmp(caller.dli_fname, "/data/user/", 11) != 0) {
+    if (!android_dso_path(caller.dli_fname)) {
         return 0;
     }
     if (caller_path != NULL) {
         *caller_path = caller.dli_fname;
     }
     return 1;
+}
+
+/*
+ * Code the loader does not know, which dladdr cannot name: an app that maps libraries with its own
+ * ELF loader runs them outside musl's list. Alipay's JS runtime loads its V8 with UC's linker
+ * ("LoadJSEngineSo with USE_UC_LINKER"), and V8's calls into this library were taken for OH's:
+ * sysconf(39), bionic's _SC_PAGESIZE, reached musl untranslated, musl answered 1000 (its
+ * _SC_BC_STRING_MAX), and V8 stopped on its first page check ("address % CommitPageSize()",
+ * SIGTRAP on crv-worker). Such code is judged by the file its mapping comes from, as a library the
+ * loader knows is judged by its name; anonymous memory keeps OH's ABI, as before.
+ *
+ * The verdict is kept per mapping, since the callers include getenv and dlsym. The cache is taken
+ * with a flag that never waits: a caller that finds it busy (another thread, or a signal handler on
+ * this one) reads the map itself.
+ */
+static uint64_t westlake_parse_hex(const char **cursor, const char *end);
+
+/* The mapping holding address, from /proc/self/maps with raw open/read: its bounds and its path
+ * ("" for anonymous memory). 0 when no mapping holds it or the map cannot be read. */
+static int westlake_mapping_of(uintptr_t address, uintptr_t *start_out, uintptr_t *stop_out,
+                               char *path, size_t size)
+{
+    int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    char buffer[4096];
+    char line[512];
+    size_t used = 0;
+    int found = 0;
+    while (!found) {
+        ssize_t got = read(fd, buffer, sizeof(buffer));
+        if (got <= 0) break;
+        for (ssize_t i = 0; i < got && !found; ++i) {
+            if (buffer[i] != '\n') {
+                if (used < sizeof(line) - 1) line[used++] = buffer[i];
+                continue;
+            }
+            const char *cursor = line, *end = line + used;
+            used = 0;
+            uint64_t start = westlake_parse_hex(&cursor, end);
+            if (cursor >= end || *cursor != '-') continue;
+            ++cursor;
+            uint64_t stop = westlake_parse_hex(&cursor, end);
+            if (address < start || address >= stop) continue;
+            /* "start-stop perms offset dev inode path": four fields, then the path. */
+            for (int field = 0; field < 4 && cursor < end; ++field) {
+                while (cursor < end && *cursor == ' ') ++cursor;
+                while (cursor < end && *cursor != ' ') ++cursor;
+            }
+            while (cursor < end && *cursor == ' ') ++cursor;
+            size_t n = 0;
+            while (cursor < end && n + 1 < size) path[n++] = *cursor++;
+            path[n] = '\0';
+            *start_out = (uintptr_t) start;
+            *stop_out = (uintptr_t) stop;
+            found = 1;
+        }
+    }
+    close(fd);
+    return found;
+}
+
+typedef struct {
+    uintptr_t start;
+    uintptr_t stop;
+    int android;
+    char path[192];
+} WestlakeMappedCaller;
+
+static WestlakeMappedCaller g_mapped_callers[16];
+static unsigned g_mapped_caller_count;
+static unsigned g_mapped_caller_next;
+static char g_mapped_caller_busy;
+static __thread char g_mapped_caller_path[192];
+
+static int unregistered_caller_is_android(uintptr_t address, const char **caller_path)
+{
+    const size_t slots = sizeof(g_mapped_callers) / sizeof(g_mapped_callers[0]);
+    int android = -1;
+    if (!__atomic_test_and_set(&g_mapped_caller_busy, __ATOMIC_ACQUIRE)) {
+        for (unsigned i = 0; i < g_mapped_caller_count; i++) {
+            const WestlakeMappedCaller *entry = &g_mapped_callers[i];
+            if (address >= entry->start && address < entry->stop) {
+                android = entry->android;
+                if (android) memcpy(g_mapped_caller_path, entry->path, sizeof(g_mapped_caller_path));
+                break;
+            }
+        }
+        __atomic_clear(&g_mapped_caller_busy, __ATOMIC_RELEASE);
+    }
+    if (android < 0) {
+        uintptr_t start = 0, stop = 0;
+        char path[sizeof(g_mapped_callers[0].path)];
+        if (!westlake_mapping_of(address, &start, &stop, path, sizeof(path))) return 0;
+        android = path[0] != '\0' && android_dso_path(path);
+        if (android) memcpy(g_mapped_caller_path, path, sizeof(g_mapped_caller_path));
+        if (!__atomic_test_and_set(&g_mapped_caller_busy, __ATOMIC_ACQUIRE)) {
+            int known = 0;
+            for (unsigned i = 0; i < g_mapped_caller_count && !known; i++) {
+                known = g_mapped_callers[i].start == start && g_mapped_callers[i].stop == stop;
+            }
+            if (!known) {
+                unsigned slot = g_mapped_caller_count < slots ? g_mapped_caller_count++
+                                                              : g_mapped_caller_next++ % slots;
+                WestlakeMappedCaller *entry = &g_mapped_callers[slot];
+                entry->start = start;
+                entry->stop = stop;
+                entry->android = android;
+                memcpy(entry->path, path, sizeof(entry->path));
+            }
+            __atomic_clear(&g_mapped_caller_busy, __ATOMIC_RELEASE);
+            if (!known && android) {
+                fprintf(stderr, "[WESTLAKE-WEBVIEW-BIONIC] caller the loader does not know, mapped from %s: "
+                        "Android code\n", path);
+            }
+        }
+    }
+    if (android && caller_path != NULL) {
+        *caller_path = g_mapped_caller_path;
+    }
+    return android;
 }
 
 static int caller_uses_bionic_signal_abi(void *return_address,
