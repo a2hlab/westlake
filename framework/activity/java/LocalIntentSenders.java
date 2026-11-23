@@ -140,6 +140,10 @@ public final class LocalIntentSenders {
             reply.writeString(record.key.packageName);
             reply.writeBoolean(record.immutable);
             reply.writeInt(record.key.type);
+            // Which of the app's processes holds the record, and the record's handle there. Only that app's
+            // own verified processes can use them (PREPARE_OWN_SENDER); to any other holder they are names.
+            reply.writeString(record.process);
+            reply.writeString(record.handle);
             return true;
         }
     }
@@ -149,6 +153,8 @@ public final class LocalIntentSenders {
         final String packageName;
         final boolean immutable;
         final int type;
+        /** The process of that app that made the sender and the sender's handle there; null if not said. */
+        String process, handle;
 
         Facts(String packageName, boolean immutable, int type) {
             this.packageName = packageName;
@@ -170,7 +176,10 @@ public final class LocalIntentSenders {
             String packageName = reply.readString();
             boolean immutable = reply.readBoolean();
             int type = reply.readInt();
-            return packageName == null ? null : new Facts(packageName, immutable, type);
+            if (packageName == null) return null;
+            Facts facts = new Facts(packageName, immutable, type);
+            if (reply.dataAvail() > 0) { facts.process = reply.readString(); facts.handle = reply.readString(); }
+            return facts;
         } catch (RemoteException | RuntimeException e) {
             return null;
         } finally {
@@ -183,6 +192,9 @@ public final class LocalIntentSenders {
         final Key key;
         final Binder binder = new SenderBinder(this);
         final boolean immutable;
+        /** Names this record to the app's other processes (PREPARE_OWN_SENDER), with the process that made it. */
+        final String handle = java.util.UUID.randomUUID().toString();
+        final String process = AppProcesses.self();
         Intent[] intents;
         // Cancelled, replaced or used up: like the activity manager's record, it still answers what
         // it was (PendingIntent asks before it sends) and sends nothing.
@@ -356,6 +368,28 @@ public final class LocalIntentSenders {
         synchronized (LocalIntentSenders.class) { local = find(sender); }
         if (local != null) return prepareActivity(local, fillIn, mask, values);
         if (sender == null) return null;
+        // A sender of this app that came back through another app (Play services' account sign-in: its main
+        // process makes it, the account manager hands it to the app that asked, and that app starts Play
+        // services' redirect activity with it). The stored intent may not cross that app, so this process asks
+        // the process that made the sender, over this app's own verified channel to it.
+        if (!adapter.core.SocketBinder.isSameAppObject(sender.asBinder())) {
+            Facts facts = ask(sender);
+            String own = ActivityThread.currentPackageName();
+            if (facts != null && own != null && own.equals(facts.packageName) && facts.process != null
+                    && facts.handle != null) {
+                try {
+                    Intent intent = facts.process.equals(AppProcesses.self())
+                            ? prepareOwn(facts.handle, fillIn, mask, values)
+                            : PlayServicesChannel.prepareOwnSender(facts.process, facts.handle, fillIn, mask, values);
+                    RemoteActivities.event("pending_activity_prepared_by_maker process=" + facts.process
+                            + " found=" + (intent != null));
+                    return intent;
+                } catch (RemoteException | RuntimeException error) {
+                    RemoteActivities.event("pending_activity_rejected_by_maker type=" + error.getClass().getSimpleName());
+                    return null;
+                }
+            }
+        }
         Parcel data = Parcel.obtain(), reply = Parcel.obtain();
         try {
             data.writeInterfaceToken(SENDER_DESCRIPTOR); data.writeTypedObject(fillIn, 0);
@@ -369,6 +403,14 @@ public final class LocalIntentSenders {
             RemoteActivities.event("pending_activity_rejected type=" + error.getClass().getSimpleName());
             return null;
         } finally { data.recycle(); reply.recycle(); }
+    }
+
+    /** PREPARE_OWN_SENDER, in the process that made the sender: the intent of this process's record with that handle. */
+    static synchronized Intent prepareOwn(String handle, Intent fillIn, int mask, int values) {
+        if (handle == null) return null;
+        for (Record record : sByKey.values())
+            if (handle.equals(record.handle)) return prepareActivity(record, fillIn, mask, values);
+        return null;
     }
 
     /** Only the creator's namespace may prepare a capability for execution. Never return it to its holder. */

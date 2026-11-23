@@ -110,6 +110,12 @@ public final class PlayServicesChannel {
     private static final int READ_DELEGATED_AUTH = 24;
     private static final int START_PENDING_ACTIVITY = 25;
     private static final int START_CREATOR_ACTIVITY = 26;
+    /**
+     * From another process of this app to the process that made one of its activity PendingIntents: the intent
+     * that sender starts, named by the handle the sender gives with its facts. Only for a sender that reached the
+     * asking process through another app, so that the stored intent never crosses that app (LocalIntentSenders).
+     */
+    private static final int PREPARE_OWN_SENDER = 27;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -492,6 +498,26 @@ public final class PlayServicesChannel {
             data.writeBoolean(wantsResult); data.writeStrongBinder(callback);
             if (!host.transact(START_PENDING_ACTIVITY, data, reply, 0)) return null;
             reply.readException(); return reply.readStrongBinder();
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    /**
+     * Asks the process of this app that made an activity sender for the intent it starts (PREPARE_OWN_SENDER), over
+     * this app's own verified channel to that process. Null if that process cannot say.
+     */
+    static Intent prepareOwnSender(String process, String handle, Intent fillIn, int mask, int values)
+            throws RemoteException {
+        Channel creator = ownProcess(process);
+        IBinder root = creator == null ? null : root(creator);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeString(handle); data.writeTypedObject(fillIn, 0); data.writeInt(mask); data.writeInt(values);
+            if (!root.transact(PREPARE_OWN_SENDER, data, reply, 0)) return null;
+            reply.readException();
+            Intent intent = reply.readTypedObject(Intent.CREATOR);
+            if (intent != null) intent.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
+            return intent;
         } finally { data.recycle(); reply.recycle(); }
     }
 
@@ -1767,6 +1793,14 @@ public final class PlayServicesChannel {
                     boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
                     reply.writeStrongBinder(PendingActivityLaunch.accept(sender, fillIn, mask, values,
                             caller, wantsResult, callback, mVerifiedInfo, mPeerPid, mVerifiedSpawner, Binder.getCallingUid()));
+                    return true;
+                }
+                case PREPARE_OWN_SENDER: {
+                    if (!mIdentityEnforced || !mOwnApplication || !RemoteActivities.enabled())
+                        throw new SecurityException("own sender preparation requires a verified process of this app");
+                    String handle = data.readString(); Intent fillIn = data.readTypedObject(Intent.CREATOR);
+                    int mask = data.readInt(), values = data.readInt();
+                    reply.writeTypedObject(LocalIntentSenders.prepareOwn(handle, fillIn, mask, values), 0);
                     return true;
                 }
                 case START_CREATOR_ACTIVITY: {
