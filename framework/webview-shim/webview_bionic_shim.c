@@ -1809,13 +1809,13 @@ static int westlake_shim_maps_library(const char *name)
     return 0;
 }
 
-/* Whether a loader line of this kind (0: by name, 1: by path) has not told of this library yet: a small
- * table of the names told per kind (a full table just stops telling). */
+/* Whether a loader line of this kind (0: by name, 1: by path, 2: a system path OH lacks) has not told of
+ * this library yet: a small table of the names told per kind (a full table just stops telling). */
 static int westlake_tell_once(int kind, const char *name)
 {
     static pthread_mutex_t told_lock = PTHREAD_MUTEX_INITIALIZER;
-    static char told[2][64][64];
-    static int told_count[2];
+    static char told[3][64][64];
+    static int told_count[3];
     int new_name = 1;
     pthread_mutex_lock(&told_lock);
     for (int i = 0; i < told_count[kind] && new_name; ++i) {
@@ -1934,6 +1934,31 @@ static void *westlake_loaded_app_lib_at(const char *file, int flags, void *calle
                 caller_path != NULL ? caller_path : "?", where);
     }
     return handle;
+}
+
+/*
+ * An Android system library named by its path, which OH does not have there: the library by its name,
+ * the one Android code gets through DT_NEEDED. WeChat dlopens /system/lib64/libandroid.so in a
+ * call_once of libwechatnormsg.so and aborts when that fails (every run whose main process lived about
+ * 20 s); hiyagame and Alipay ask for /system/lib64/libmediandk.so, NetEase games for liblog.so. Only
+ * names this shim maps, only from Android code, and only paths OH lacks: OH's own libraries keep theirs.
+ */
+static const char *westlake_absent_system_lib(const char *path, void *caller)
+{
+    int system = path != NULL && strncmp(path, "/system/lib64/", 14) == 0;
+    if (path == NULL || (!system && strncmp(path, "/apex/", 6) != 0)) return NULL;
+    const char *base = strrchr(path, '/') + 1;
+    if (base[0] == '\0' || (system && base != path + 14) || !westlake_shim_maps_library(base) ||
+        access(path, F_OK) == 0) {
+        return NULL;
+    }
+    const char *caller_path = NULL;
+    if (!caller_is_android_dso(caller, &caller_path)) return NULL;
+    if (westlake_tell_once(2, base)) {
+        fprintf(stderr, "[WESTLAKE-LOADER] %s is not on OH: %s opened by name for %s\n", path, base,
+                caller_path != NULL ? caller_path : "?");
+    }
+    return base;
 }
 
 /*
@@ -2273,6 +2298,8 @@ static void *westlake_dlopen(const char *filename, int flags, void *caller)
     }
 
     if (westlake_names_running_libc(filename)) filename = "libc.so";
+    const char *system_name = westlake_absent_system_lib(filename, caller);
+    if (system_name != NULL) filename = system_name;
     const char *actual_filename = filename;
     const char *basename = filename != NULL ? strrchr(filename, '/') : NULL;
     basename = basename != NULL ? basename + 1 : filename;
