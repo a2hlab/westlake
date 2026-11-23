@@ -1063,11 +1063,39 @@ void ANativeWindow_release(void *window)
     }
 }
 
+/*
+ * The OHNativeWindow behind a window an app holds.  ANativeWindow_fromSurface
+ * hands an app the bridge's adapter, an AOSP-shaped ANativeWindow around an
+ * OHNativeWindow, and OH's NativeWindowHandleOpt refuses the adapter: it reads
+ * a surface and a magic at an OHNativeWindow's offsets and finds neither.  So
+ * getWidth, getHeight and getFormat answered 0 for every window an app got
+ * from a Surface: rive_native sized its renderer's tile board 0x0 from them
+ * and crashed on its first flush, reading NULL - 0x70 in
+ * IntersectionBoard::addRectangle.  The bridge's oh_anw_get_oh unwraps, as the
+ * bionic shim's EGL, setBuffersGeometry and lock paths already do; a window
+ * that is not the adapter's goes to OH unchanged.
+ */
+typedef void *(*WlAnwGetOh)(void *);
+static WlAnwGetOh wl_anw_get_oh;
+static pthread_once_t wl_anw_get_oh_once = PTHREAD_ONCE_INIT;
+
+static void wl_find_anw_get_oh(void)
+{
+    wl_anw_get_oh = (WlAnwGetOh)bridge_symbol("oh_anw_get_oh");
+}
+
+static WlOHNativeWindow *wl_oh_window(void *window)
+{
+    pthread_once(&wl_anw_get_oh_once, wl_find_anw_get_oh);
+    void *oh = wl_anw_get_oh != NULL && window != NULL ? wl_anw_get_oh(window) : NULL;
+    return (WlOHNativeWindow *)(oh != NULL ? oh : window);
+}
+
 int32_t ANativeWindow_getFormat(void *window)
 {
     int32_t format = 0;
     if (window == NULL || NativeWindowHandleOpt(
-            (WlOHNativeWindow *)window, WL_OH_GET_FORMAT, &format) != 0) {
+            wl_oh_window(window), WL_OH_GET_FORMAT, &format) != 0) {
         return 0;
     }
     return wl_oh_to_android_format(format);
@@ -1078,7 +1106,7 @@ int32_t ANativeWindow_getWidth(void *window)
     int32_t width = 0;
     int32_t height = 0;
     if (window == NULL || NativeWindowHandleOpt(
-            (WlOHNativeWindow *)window, WL_OH_GET_BUFFER_GEOMETRY,
+            wl_oh_window(window), WL_OH_GET_BUFFER_GEOMETRY,
             &height, &width) != 0) {
         return 0;
     }
@@ -1090,7 +1118,7 @@ int32_t ANativeWindow_getHeight(void *window)
     int32_t width = 0;
     int32_t height = 0;
     if (window == NULL || NativeWindowHandleOpt(
-            (WlOHNativeWindow *)window, WL_OH_GET_BUFFER_GEOMETRY,
+            wl_oh_window(window), WL_OH_GET_BUFFER_GEOMETRY,
             &height, &width) != 0) {
         return 0;
     }
