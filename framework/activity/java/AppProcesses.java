@@ -174,13 +174,22 @@ public final class AppProcesses {
             PlayServicesChannel.serveLaunchedProcess();
             int pid = spawn(process);
             sStarted.put(process, pid);
-            long deadline = System.currentTimeMillis() + START_TIMEOUT_MS;
+            long started = System.currentTimeMillis();
+            long deadline = started + START_TIMEOUT_MS;
             while (!serving(socket)) {
-                String failure = !spawnedAlive(pid) ? " ended before it served"
+                // Ended: only when the signal says the process is gone. WeChat's and both Alipays' :push were
+                // judged ended while still starting (they served seconds later, on both devices), and their
+                // services ran in the main process meanwhile: a second network kernel, half set up, and
+                // WeChat's main process died of it. A live child whose /proc entry reads another parent, or
+                // none, is waited for until the deadline; the kill below still asks for this app's parent.
+                String failure = !alive(pid) ? " ended before it served"
                         : System.currentTimeMillis() > deadline ? " did not serve on " + socket : null;
                 if (failure != null) {
                     sFailed.put(process, System.currentTimeMillis() + RETRY_AFTER_MS);
                     int parent = parentOf(pid);
+                    System.err.println(TAG + process + " (pid " + pid + ")" + failure + ": alive " + alive(pid)
+                            + ", parent " + parent + ", own parent " + parentOf(Os.getpid()) + ", after "
+                            + (System.currentTimeMillis() - started) + " ms");
                     if (spawnedAlive(pid) && parent > 0 && parent == parentOf(Os.getpid())) kill(pid);
                     throw new IOException(process + " (pid " + pid + ")" + failure);
                 }
