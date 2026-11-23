@@ -529,9 +529,85 @@ __attribute__((visibility("hidden"))) int wl_needs_section_repair(const char *pa
 }
 
 /*
+ * The gaps between a library's LOAD segments, laid out as Android's linker leaves them. Bionic reserves
+ * the library's whole span as anonymous PROT_NONE memory and maps each segment into it, so a gap reads
+ * "---p 00000000 00:00 0" in /proc/self/maps. OH's loader first maps the whole span from the file,
+ * read-only, so a gap reads "r--p <its file offset> ... <library>". A protector that unpacks code
+ * into the gap (AppSealing's libloader.so, in its first constructor) takes the first line with file
+ * offset 0 after its library's line for that region: on OH that was the library's .bss, which it
+ * remapped, and its copy into the real gap faulted (SEGV_ACCERR in memcpy; percent.aos.cooptd and
+ * millie.millieshelf on both devices). Each gap becomes a LOAD with no file bytes, which OH's loader
+ * maps as anonymous zero pages named like a .bss: "rw-p 00000000 00:00 0 [anon:<library>.bss]",
+ * the form every library's .bss already has on OH (so no new kind of maps line), and file offset 0
+ * as on Android; readable and writable where Android leaves it inaccessible.
+ *
+ * The program header slot is one OH's loader has no use for: PT_NULL, a PT_NOTE that is not a GNU
+ * property note (it reads those for BTI), or a PT_GNU_STACK of size 0 (it reads only the size). A gap
+ * with no such slot left keeps OH's layout. Returns the number of gaps changed; *left gets the number
+ * that kept OH's layout.
+ */
+#ifndef NT_GNU_PROPERTY_TYPE_0
+#define NT_GNU_PROPERTY_TYPE_0 5
+#endif
+static int wl_spare_phdr(const unsigned char *data, size_t size, const Elf64_Phdr *ph, int pass)
+{
+    if (pass == 0) return ph->p_type == PT_NULL;
+    if (pass == 2) return ph->p_type == PT_GNU_STACK && ph->p_memsz == 0;
+    if (ph->p_type != PT_NOTE) return 0;
+    /* A note OH's loader cannot read gives it no BTI either. */
+    if (ph->p_offset > size || ph->p_filesz < sizeof(Elf64_Nhdr) || ph->p_filesz > size - ph->p_offset) return 1;
+    return ((const Elf64_Nhdr *) (data + ph->p_offset))->n_type != NT_GNU_PROPERTY_TYPE_0;
+}
+
+static int wl_map_segment_gaps(unsigned char *data, size_t size, int *left)
+{
+    Elf64_Ehdr *eh = (Elf64_Ehdr *) data;
+    *left = 0;
+    if (eh->e_phentsize != sizeof(Elf64_Phdr) || eh->e_phoff > size || eh->e_phnum > 64 ||
+        (uint64_t) eh->e_phnum * sizeof(Elf64_Phdr) > size - eh->e_phoff) {
+        return 0;
+    }
+    Elf64_Phdr *ph = (Elf64_Phdr *) (data + eh->e_phoff);
+    uint64_t page = (uint64_t) sysconf(_SC_PAGESIZE);
+    if (page == 0 || (page & (page - 1)) != 0) return 0;
+    int loads[64], count = 0, spare[64], spares = 0;
+    for (int i = 0; i < eh->e_phnum; ++i) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        int at = count++;
+        while (at > 0 && ph[loads[at - 1]].p_vaddr > ph[i].p_vaddr) {
+            loads[at] = loads[at - 1];
+            --at;
+        }
+        loads[at] = i;
+    }
+    for (int pass = 0; pass < 3; ++pass) {
+        for (int i = 0; i < eh->e_phnum; ++i) {
+            if (wl_spare_phdr(data, size, &ph[i], pass)) spare[spares++] = i;
+        }
+    }
+    int changed = 0;
+    uint64_t reach = 0; /* the end of the segments so far: one segment may lie inside another */
+    for (int k = 0; k + 1 < count; ++k) {
+        const Elf64_Phdr *low = &ph[loads[k]], *high = &ph[loads[k + 1]];
+        uint64_t low_end = (low->p_vaddr + low->p_memsz + page - 1) & ~(page - 1);
+        if (low_end > reach) reach = low_end;
+        uint64_t start = reach, end = high->p_vaddr & ~(page - 1);
+        if (end <= start) continue;
+        if (changed >= spares) {
+            ++*left;
+            continue;
+        }
+        ph[spare[changed++]] = (Elf64_Phdr) {PT_LOAD, PF_R | PF_W, 0, start, start, 0, end - start, page};
+    }
+    return changed;
+}
+
+/*
  * Writes path's copy into target, with the Android RELR tags renumbered to the standard ones when
  * retag is set, null init and fini entries dropped, IFUNC relocations resolved and scrambled section
- * headers repaired. An existing copy as large and as new as path is kept.
+ * headers repaired; the copy of a library with scrambled section headers (a protector) also maps
+ * the gaps between its segments as Android does (wl_map_segment_gaps). An existing copy as large
+ * and as new as path is kept.
  */
 __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *path, const char *target, int retag)
 {
@@ -571,6 +647,11 @@ __attribute__((visibility("hidden"))) int wl_write_loadable_copy(const char *pat
     if (wl_bad_section_headers(data, (size_t) src.st_size)) {
         wl_repair_section_headers(data, (size_t) src.st_size);
         wl_relocs_log("[WESTLAKE-RELOCS] %s: scrambled section headers rewritten for the loader\n", path);
+        int left = 0, gaps = wl_map_segment_gaps(data, (size_t) src.st_size, &left);
+        if (gaps > 0 || left > 0) {
+            wl_relocs_log("[WESTLAKE-RELOCS] %s: %d segment gap(s) mapped as anonymous memory at file offset 0, "
+                          "as Android reserves them; %d kept (no free program header)\n", path, gaps, left);
+        }
     }
     char tmp[800];
     snprintf(tmp, sizeof(tmp), "%s.tmp%d", target, (int) getpid());
