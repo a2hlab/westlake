@@ -35,10 +35,17 @@ final class LocalGservices extends ContentProvider {
     private static final String TAG = "WL_Gservices";
     private static final String[] COLUMNS = {"key", "value"};
     private static ContentProviderHolder sHolder;
+    private static LocalGservices sProvider;
 
     private final Properties mValues = new Properties();
     private final Properties mOverrides = new Properties();
     private final java.util.Set<String> mPolicyTraced = new java.util.HashSet<>();
+    /** The tables' files as this process last read them; another process of the app may have written since. */
+    private long mStamp = -1;
+    private static boolean sChangeReceiver;
+    private static final String GSERVICES_CHANGED = "com.google.gservices.intent.action.GSERVICES_CHANGED";
+    private static final boolean TRACE = "1".equals(System.getenv("WESTLAKE_GSERVICES_TRACE"));
+    private int mTraced;
 
     /** The holder getContentProvider answers with. Null if Services Framework isn't known here. */
     static synchronized ContentProviderHolder holder() {
@@ -51,6 +58,8 @@ final class LocalGservices extends ContentProvider {
         holder.provider = provider.getIContentProvider();
         holder.noReleaseNeeded = true;
         sHolder = holder;
+        sProvider = provider;
+        ensureChangeReceiver();
         return holder;
     }
 
@@ -80,9 +89,68 @@ final class LocalGservices extends ContentProvider {
 
     @Override
     public boolean onCreate() {
-        load(mValues, file("values.properties"));
-        load(mOverrides, file("overrides.properties"));
+        reloadIfChanged();
         return true;
+    }
+
+    private static long stamp() {
+        File values = file("values.properties");
+        File overrides = file("overrides.properties");
+        return values.lastModified() * 31 + values.length() + overrides.lastModified() * 17 + overrides.length();
+    }
+
+    /**
+     * Reads the tables again if they changed on disk since this process read them: with the app in several
+     * processes (ADR-0002) each has its own copy, and check-in writes from Play services' main process. Its UI
+     * process kept the table it read first, without the Android ID check-in had stored, and add-account stopped
+     * at "Something went wrong". True if this reread a table read before.
+     */
+    private synchronized boolean reloadIfChanged() {
+        long now = stamp();
+        if (now == mStamp) return false;
+        Properties values = new Properties();
+        Properties overrides = new Properties();
+        load(values, file("values.properties"));
+        load(overrides, file("overrides.properties"));
+        mValues.clear();
+        mValues.putAll(values);
+        mOverrides.clear();
+        mOverrides.putAll(overrides);
+        boolean first = mStamp == -1;
+        mStamp = now;
+        trace((first ? "loaded " : "reloaded ") + mValues.size() + " values, android_id present="
+                + (mValues.getProperty("android_id") != null));
+        return !first;
+    }
+
+    /**
+     * Readers cache what they read until the table's URI changes. A write in another process of the app reaches
+     * this one as its GSERVICES_CHANGED broadcast (update below, delivered across the app's processes by
+     * LocalBroadcasts); this process then reads the table again and tells its own readers.
+     */
+    private static synchronized void ensureChangeReceiver() {
+        if (sChangeReceiver || sProvider == null) return;
+        final android.app.Application app = ActivityThread.currentApplication();
+        if (app == null) return;
+        try {
+            app.registerReceiver(new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    LocalGservices provider = sProvider;
+                    if (provider != null && provider.reloadIfChanged()) {
+                        context.getContentResolver().notifyChange(Uri.parse("content://" + AUTHORITY), null);
+                    }
+                }
+            }, new android.content.IntentFilter(GSERVICES_CHANGED), android.content.Context.RECEIVER_NOT_EXPORTED);
+            sChangeReceiver = true;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "no change receiver: " + e.getClass().getName());
+        }
+    }
+
+    /** Diagnosis only (WESTLAKE_GSERVICES_TRACE=1): whether keys are present, never their values. */
+    private void trace(String message) {
+        if (TRACE && mTraced++ < 60) System.err.println("[WL-GSERVICES] " + AppProcesses.self() + " " + message);
     }
 
     /** A key's value as readers see it: an override wins over the table. */
@@ -125,8 +193,18 @@ final class LocalGservices extends ContentProvider {
     /** By key from selection arguments; under /prefix, each argument is a prefix; no arguments, all. */
     @Override
     public synchronized Cursor query(Uri uri, String[] projection, String selection, String[] arguments, String order) {
+        reloadIfChanged();
+        ensureChangeReceiver();
         MatrixCursor cursor = new MatrixCursor(COLUMNS);
         boolean prefix = "prefix".equals(uri.getLastPathSegment());
+        if (TRACE && arguments != null) {
+            for (String argument : arguments) {
+                if (argument != null && "android_id".startsWith(argument)) {
+                    trace("query android_id" + (prefix ? " (prefix)" : "") + " present="
+                            + (mValues.getProperty("android_id") != null || mOverrides.getProperty("android_id") != null));
+                }
+            }
+        }
         if (arguments == null || arguments.length == 0) {
             for (String key : keys()) {
                 cursor.addRow(new Object[] {key, value(key)});
@@ -173,6 +251,7 @@ final class LocalGservices extends ContentProvider {
             apply(mValues, values);
             save(mValues, file("values.properties"));
         }
+        mStamp = stamp();
         Log.i(TAG, "stored " + count + " values (" + (table != null ? table : "authority") + ")");
         // Readers cache values until told otherwise, so without this they keep what they read first:
         // an Android ID of 0, read before check-in finished.
