@@ -1,0 +1,41 @@
+# Key info for a Westlake device profile (tools/make_device_profile.py <this file> build.prop).
+#
+# Facts about the device whose identity Westlake presents to apps and to Google Play services, one per line,
+# key=value. The person who owns the device decides them; nothing here is guessed. make_device_profile.py
+# refuses to run while a required fact is missing, and writes an optional one only when it is given. The
+# build.prop it makes goes into the runtime's ANDROID_ROOT (runtime data), where Westlake's runtime and its
+# Bionic shim read it before anything else; an identity property it does not list stays unset.
+#
+# Required
+brand=                 # ro.product.brand, e.g. the maker's brand name
+manufacturer=          # ro.product.manufacturer
+model=                 # ro.product.model, the name the device is sold under
+device=                # ro.product.device, the device's code name
+name=                  # ro.product.name, the product's code name
+board=                 # ro.product.board
+platform=              # ro.board.platform, the SoC platform name
+hardware=              # ro.hardware and ro.boot.hardware
+soc_manufacturer=      # ro.soc.manufacturer
+soc_model=             # ro.soc.model
+android_release=       # ro.build.version.release, the Android version Westlake reports, e.g. 15
+android_sdk=           # ro.build.version.sdk, its API level, e.g. 35
+build_id=              # ro.build.id
+build_incremental=     # ro.build.version.incremental
+build_type=            # user, userdebug or eng
+build_tags=            # release-keys, test-keys or dev-keys
+build_date_utc=        # the build's time, seconds since 1970 (date -u +%s)
+security_patch=        # YYYY-MM-DD
+#
+# Optional (leave out what you do not know)
+# first_api_level=     # ro.product.first_api_level, the API level the device first shipped with
+# build_user=          # ro.build.user
+# build_host=          # ro.build.host
+# characteristics=     # ro.build.characteristics, e.g. tablet or default
+# bootloader=          # ro.bootloader
+# baseband=            # gsm.version.baseband (a device without a modem has none)
+# hardware_revision=   # ro.revision
+# hardware_sku=        # ro.boot.hardware.sku
+# verified_boot_state= # green, yellow, orange (unlocked) or red: the device's real state
+# flash_locked=        # 1 or 0: the device's real bootloader lock
+# locale=              # ro.product.locale, e.g. en-US
+# partitions=          # default: system system_ext vendor odm product bootimage
