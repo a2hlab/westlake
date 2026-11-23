@@ -65,13 +65,16 @@ typedef struct { uint32_t planeCount; NativeBufferPlane planes[4]; } NativeBuffe
 /* OH's NATIVEBUFFER_PIXEL_FMT_* (buffer_common.h) and usage bits (native_buffer.h). */
 enum { OH_FMT_RGB_565 = 3, OH_FMT_RGBX_8888 = 11, OH_FMT_RGBA_8888 = 12, OH_FMT_YCBCR_420_SP = 24,
        OH_FMT_YCRCB_420_SP = 25, OH_FMT_YCBCR_420_P = 28, OH_FMT_YCRCB_420_P = 29 };
-enum { OH_USAGE_CPU_READ = 1 << 0, OH_USAGE_MEM_DMA = 1 << 3, OH_USAGE_CPU_READ_OFTEN = 1 << 16 };
+enum { OH_USAGE_CPU_READ = 1 << 0, OH_USAGE_CPU_WRITE = 1 << 1, OH_USAGE_MEM_DMA = 1 << 3,
+       OH_USAGE_HW_RENDER = 1 << 8, OH_USAGE_HW_TEXTURE = 1 << 9, OH_USAGE_CPU_READ_OFTEN = 1 << 16 };
 /* OH_NativeWindow_NativeWindowHandleOpt codes (external_window.h). */
 enum { OH_SET_BUFFER_GEOMETRY = 0, OH_SET_FORMAT = 3, OH_SET_USAGE = 5 };
 
 /* Android's formats: PixelFormat / ImageFormat / HardwareBuffer. */
 enum { A_RGBA_8888 = 1, A_RGBX_8888 = 2, A_RGB_565 = 4, A_NV21 = 0x11, A_PRIVATE = 0x22,
        A_YUV_420_888 = 0x23 };
+/* HardwareBuffer's usage bits, as ImageReader.newInstance takes them. */
+enum { A_USAGE_CPU_WRITE_MASK = 0xf0, A_USAGE_GPU_SAMPLED_IMAGE = 1 << 8, A_USAGE_GPU_COLOR_OUTPUT = 1 << 9 };
 /* ImageReader's ACQUIRE_* codes. */
 enum { ACQUIRE_SUCCESS = 0, ACQUIRE_NO_BUFS = 1, ACQUIRE_MAX_IMAGES = 2 };
 
@@ -197,6 +200,24 @@ static int oh_format_for(int halFormat)
     }
 }
 
+/*
+ * OH's buffer usage for a reader: CPU reads and DMA memory as before (the planes ImageReader hands out), plus
+ * the GPU's part, which was dropped. The GPU bits mean the opposite on the two sides: Android's
+ * GPU_SAMPLED_IMAGE (1 << 8: the GPU reads) is OH's HW_TEXTURE (1 << 9), and Android's GPU_COLOR_OUTPUT
+ * (1 << 9: the GPU writes) is OH's HW_RENDER (1 << 8). A PRIVATE reader stands between two GPU users, so it
+ * gets both: Flutter's texture SurfaceProducer is one, where a GPU producer (Rive's renderer, through EGL)
+ * draws into the reader's surface and Flutter samples the images.
+ */
+static uint64_t oh_usage_for(jlong usage, int halFormat)
+{
+    uint64_t ohUsage = OH_USAGE_CPU_READ | OH_USAGE_CPU_READ_OFTEN | OH_USAGE_MEM_DMA;
+    if (usage & A_USAGE_CPU_WRITE_MASK) ohUsage |= OH_USAGE_CPU_WRITE;
+    if (usage & A_USAGE_GPU_SAMPLED_IMAGE) ohUsage |= OH_USAGE_HW_TEXTURE;
+    if (usage & A_USAGE_GPU_COLOR_OUTPUT) ohUsage |= OH_USAGE_HW_RENDER;
+    if (halFormat == A_PRIVATE) ohUsage |= OH_USAGE_HW_RENDER | OH_USAGE_HW_TEXTURE;
+    return ohUsage;
+}
+
 static bool oh_format_is_yuv(int format)
 {
     return format == OH_FMT_YCBCR_420_SP || format == OH_FMT_YCRCB_420_SP
@@ -234,7 +255,7 @@ static void ir_init(JNIEnv* env, jobject thiz, jobject weakSelf, jint w, jint h,
     Reader* r;
     OnFrameAvailableListener listener;
     int format = oh_format_for(halFormat);
-    (void) usage;
+    uint64_t ohUsage = oh_usage_for(usage, halFormat);
     (void) dataSpace;
     if (!load_oh()) {
         throw_named(env, "java/lang/UnsupportedOperationException", "no consumer surface on this device");
@@ -259,12 +280,10 @@ static void ir_init(JNIEnv* env, jobject thiz, jobject weakSelf, jint w, jint h,
         return;
     }
     if (oh.setDefaultSize != NULL) oh.setDefaultSize(r->image, w, h);
-    if (oh.setDefaultUsage != NULL)
-        oh.setDefaultUsage(r->image, OH_USAGE_CPU_READ | OH_USAGE_CPU_READ_OFTEN | OH_USAGE_MEM_DMA);
+    if (oh.setDefaultUsage != NULL) oh.setDefaultUsage(r->image, ohUsage);
     if (oh.windowOpt != NULL) {
         oh.windowOpt(r->window, OH_SET_BUFFER_GEOMETRY, (int32_t) w, (int32_t) h);
-        oh.windowOpt(r->window, OH_SET_USAGE,
-                     (uint64_t) (OH_USAGE_CPU_READ | OH_USAGE_CPU_READ_OFTEN | OH_USAGE_MEM_DMA));
+        oh.windowOpt(r->window, OH_SET_USAGE, ohUsage);
         if (format >= 0) oh.windowOpt(r->window, OH_SET_FORMAT, (int32_t) format);
     }
     r->weakSelf = (*env)->NewGlobalRef(env, weakSelf);
@@ -272,7 +291,8 @@ static void ir_init(JNIEnv* env, jobject thiz, jobject weakSelf, jint w, jint h,
     listener.onFrameAvailable = on_frame;
     oh.setListener(r->image, listener);
     (*env)->SetLongField(env, thiz, g_nativeContext, (jlong) (intptr_t) r);
-    ilog("[WL-IMAGEREADER] reader %dx%d format %#x max %d -> window %p", w, h, halFormat, maxImages,
+    ilog("[WL-IMAGEREADER] reader %dx%d format %#x max %d usage %#llx -> OH usage %#llx -> window %p", w, h,
+         halFormat, maxImages, (unsigned long long) usage, (unsigned long long) ohUsage,
          (void*) r->window);
 }
 
