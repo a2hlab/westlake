@@ -110,6 +110,12 @@ public final class PlayServicesChannel {
     private static final int READ_DELEGATED_AUTH = 24;
     private static final int START_PENDING_ACTIVITY = 25;
     private static final int START_CREATOR_ACTIVITY = 26;
+    /**
+     * From one process of this app to another: a broadcast it sent, for the receivers registered there
+     * (LocalBroadcasts.deliverRegistered). On Android the activity manager delivers an app's broadcast to the
+     * receivers registered in each of its processes; here each process holds its own registrations.
+     */
+    private static final int DELIVER_REGISTERED = 28;
     /** From the host to a client's callback: a broadcast for that app, such as a push message. */
     private static final int DELIVER_BROADCAST = 1;
     /** From the host to a client's callback: send one of that app's own PendingIntents. */
@@ -337,6 +343,47 @@ public final class PlayServicesChannel {
             data.recycle();
             reply.recycle();
         }
+    }
+
+    /** One thread, so that the app's other processes get its broadcasts in the order it sent them. */
+    private static final java.util.concurrent.ExecutorService REGISTERED_DELIVERY =
+            java.util.concurrent.Executors.newSingleThreadExecutor(task -> {
+                Thread thread = new Thread(task, "wl-registered-broadcasts"); thread.setDaemon(true); return thread;
+            });
+
+    /**
+     * A broadcast this process sent, for the receivers registered in the app's other running processes
+     * (DELIVER_REGISTERED); except names the process it came from, which has delivered it already. A process
+     * other than the launched one sends it to the launched one, which passes it on to the rest.
+     */
+    static void deliverToRunningProcesses(final Intent intent, final int resultCode, final String resultData,
+            final android.os.Bundle map, final String except) {
+        final List<String> targets = AppProcesses.runningOthers();
+        if (except != null) targets.remove(except);
+        if (targets.isEmpty()) return;
+        final String self = AppProcesses.self();
+        final boolean passOn = AppProcesses.isSecondary();
+        final Intent sent = new Intent(intent);
+        REGISTERED_DELIVERY.execute(() -> {
+            for (String process : targets) {
+                Parcel data = Parcel.obtain();
+                Parcel reply = Parcel.obtain();
+                try {
+                    IBinder root = root(processChannel(AppProcesses.socketOf(process)));
+                    if (root == null) continue;
+                    data.writeTypedObject(sent, 0); data.writeInt(resultCode); data.writeString(resultData);
+                    data.writeBundle(map); data.writeString(self); data.writeBoolean(passOn);
+                    root.transact(DELIVER_REGISTERED, data, reply, 0);
+                    reply.readException();
+                } catch (RemoteException | RuntimeException e) {
+                    System.err.println(TAG + sent.getAction() + " for the receivers registered in " + process
+                            + " failed: " + e);
+                } finally {
+                    data.recycle();
+                    reply.recycle();
+                }
+            }
+        });
     }
 
     /** A broadcast for this app's manifest receiver declared for another of its processes, delivered there. */
@@ -1994,6 +2041,17 @@ public final class PlayServicesChannel {
                         throw new SecurityException("only this app's own processes deliver to its receivers");
                     }
                     ManifestReceivers.deliverHere(intent);
+                    return true;
+                }
+                case DELIVER_REGISTERED: {
+                    Intent intent = data.readTypedObject(Intent.CREATOR);
+                    int resultCode = data.readInt(); String resultData = data.readString();
+                    android.os.Bundle map = data.readBundle(); String from = data.readString(); boolean passOn = data.readBoolean();
+                    if (Binder.getCallingUid() != Process.myUid()) {
+                        throw new SecurityException("only this app's own processes deliver to its registered receivers");
+                    }
+                    LocalBroadcasts.deliverRegistered(intent, resultCode, resultData, map);
+                    if (passOn) deliverToRunningProcesses(intent, resultCode, resultData, map, from);
                     return true;
                 }
                 case ENSURE_PROCESS: {

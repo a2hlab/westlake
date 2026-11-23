@@ -79,6 +79,28 @@ public final class LocalBroadcasts {
         return battery;
     }
 
+    /** A broadcast for the receivers registered in this process, from another process of the app (DELIVER_REGISTERED). */
+    static int deliverRegistered(Intent intent, int resultCode, String resultData, Bundle map) {
+        return deliverRegistered(intent, resultCode, resultData, map, false, android.os.UserHandle.myUserId());
+    }
+
+    private static int deliverRegistered(Intent intent, int resultCode, String resultData, Bundle map,
+            boolean ordered, int userId) {
+        Application app = ActivityThread.currentApplication();
+        int delivered = 0;
+        for (Registration r : sRegistrations) {
+            int match = r.filter.match(app != null ? app.getContentResolver() : null, intent, true, TAG);
+            if (match < 0) continue;
+            try {
+                r.receiver.performReceive(new Intent(intent), resultCode, resultData, map, ordered, false, userId);
+                delivered++;
+            } catch (Throwable t) {
+                Log.w(TAG, "delivery of " + intent.getAction() + " failed", t);
+            }
+        }
+        return delivered;
+    }
+
     /**
      * sendBroadcast / sendOrderedBroadcast from the app: each of its registered receivers whose
      * filter matches gets it, then the manifest receivers it reaches, then the ordered broadcast's
@@ -96,16 +118,12 @@ public final class LocalBroadcasts {
         if (intent.getComponent() != null) forUs = intent.getComponent().getPackageName().equals(own);
         int delivered = 0;
         if (forUs && intent.getComponent() == null) {
-            for (Registration r : sRegistrations) {
-                int match = r.filter.match(app != null ? app.getContentResolver() : null, intent, true, TAG);
-                if (match < 0) continue;
-                try {
-                    r.receiver.performReceive(new Intent(intent), resultCode, resultData, map, ordered, false, userId);
-                    delivered++;
-                } catch (Throwable t) {
-                    Log.w(TAG, "delivery of " + intent.getAction() + " failed", t);
-                }
-            }
+            delivered += deliverRegistered(intent, resultCode, resultData, map, ordered, userId);
+            // The receivers registered in the app's other processes (ADR-0002) get it too, as the activity
+            // manager delivers it to every process of the app: Play services' add-account screen, in its UI
+            // process, waits for the check-in its main process completes (CHECKIN_COMPLETE). Not an ordered
+            // broadcast: its receivers take it in turn and pass on a result, which this does not carry across.
+            if (!ordered) PlayServicesChannel.deliverToRunningProcesses(intent, resultCode, resultData, map, null);
         }
         List<ResolveInfo> manifest = forUs ? ManifestReceivers.receiversFor(intent, resolvedType)
                 : Collections.<ResolveInfo>emptyList();

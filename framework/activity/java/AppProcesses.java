@@ -149,6 +149,25 @@ public final class AppProcesses {
         return name != null ? name : System.getenv(PLAY_STORE_SERVE);
     }
 
+    /**
+     * The app's other processes running now, for a broadcast to the receivers registered in them: seen from the
+     * launched process, those it started that are still alive; seen from another process, the launched one alone,
+     * which knows the rest. Starts nothing: a registered receiver lives only as long as its process.
+     */
+    static java.util.List<String> runningOthers() {
+        java.util.List<String> others = new java.util.ArrayList<>();
+        if (!enabled() || sSelf == null) return others;
+        if (sSecondary) {
+            if (sHome != null && !sHome.equals(sSelf)) others.add(sHome);
+            return others;
+        }
+        synchronized (AppProcesses.class) {
+            for (Map.Entry<String, Integer> started : sStarted.entrySet())
+                if (!started.getKey().equals(sSelf) && alive(started.getValue())) others.add(started.getKey());
+        }
+        return others;
+    }
+
     /** Whether process is one this app declares (and so one a caller may ask this app to start). */
     public static boolean declares(String process) {
         return process != null && sDeclared.contains(process);
