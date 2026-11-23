@@ -1897,10 +1897,24 @@ static void *westlake_open_app_lib(const char *name, int flags, void *caller)
  * other namespace held was loaded a second time. Hollywood Merge: Unity's libmain opened libil2cpp.so
  * and ran its JNI_OnLoad; libunity opened it again by a path of its own making, which the other
  * namespace answered, and il2cpp started without a JavaVM ("IL2CPP: Java VM not initialized").
+ * ART's native loader asks the same way for the libraries Java loads that the launcher does not route,
+ * so Java gets a copy native code opened first: CapCut's libkeva.so dlopens libalog.so by name, which
+ * opens in libkeva's namespace, and Java's System.loadLibrary("alog") then loaded a second copy in the
+ * default namespace (ART runs JNI_OnLoad on the copy it gets, as on Android).
  * The file must be the one in the APK's library directory (device and inode), and the probes use that
  * directory's path, which both namespaces may open. They load nothing: with no copy loaded, the
  * dlopen goes on as before.
  */
+static int caller_is_art_loader(void *caller, const char **caller_path)
+{
+    Dl_info info = {0};
+    if (dladdr(caller, &info) == 0 || info.dli_fname == NULL) return 0;
+    const char *base = strrchr(info.dli_fname, '/');
+    if (base == NULL || strcmp(base + 1, "libart.so") != 0) return 0;
+    if (caller_path != NULL) *caller_path = info.dli_fname;
+    return 1;
+}
+
 static void *westlake_loaded_app_lib_at(const char *file, int flags, void *caller)
 {
     const char *dir = getenv("ASX_NATIVE_LIB_DIR");
@@ -1917,7 +1931,7 @@ static void *westlake_loaded_app_lib_at(const char *file, int flags, void *calle
         return NULL;
     }
     const char *caller_path = NULL;
-    if (!caller_is_android_dso(caller, &caller_path)) return NULL;
+    if (!caller_is_android_dso(caller, &caller_path) && !caller_is_art_loader(caller, &caller_path)) return NULL;
     const char *where = "the copy in the default namespace";
     void *handle = westlake_real_dlopen_fn(NULL, path, flags | RTLD_NOLOAD);
     if (handle == NULL) {
