@@ -109,6 +109,12 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "statsmanager":
+                    // statsd with nothing collected: configurations and callbacks taken and never used, no data,
+                    // no metadata, no experiment ids (empty arrays). Android always runs statsd; StatsManager
+                    // uses the service without a null check.
+                    binder = proxy(name, "android.os.IStatsManagerService", (method, args) -> DEFAULT);
+                    break;
                 case "rollback":
                     // RollbackManager: no rollback available, committed or pending (empty lists).
                     binder = proxy(name, "android.content.rollback.IRollbackManager", (method, args) -> DEFAULT);

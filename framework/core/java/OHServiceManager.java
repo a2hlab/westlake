@@ -210,6 +210,9 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // caller of another uid, which a provider served to an app over a Play channel has:
             // without it every such query died with a NullPointerException in the provider's process.
             case "permission_checker":
+            // statsd, which Android always runs. Play services' metrics init (run as the system user) calls
+            // StatsManager.removeConfig, which uses the service without a null check: null killed its main process.
+            case "statsmanager":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.
