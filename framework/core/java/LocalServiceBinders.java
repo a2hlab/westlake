@@ -237,9 +237,10 @@ public final class LocalServiceBinders {
 
     /**
      * The account service. In the Play services host, LocalAccounts as a real IAccountManager.Stub, which
-     * answers other processes too. In the Play Store host, that Stub through its channel: on Android the
-     * Play Store's account manager is the system's, which holds the Google account. Elsewhere, the plain
-     * answers: no accounts.
+     * answers other processes too. In the Play Store host and in every app connected to Play services, that
+     * Stub through its channel: on Android every app's account manager is the system's, which holds the
+     * Google account and answers each app with the accounts visible to it. The host hands it to an app whose
+     * identity it verified (PlayServicesChannel.hostService). Elsewhere, the plain answers: no accounts.
      */
     private static IBinder accountService() throws ClassNotFoundException {
         if (GoogleAuthProxy.client()) return new AccountManagerStub();
@@ -248,7 +249,8 @@ public final class LocalServiceBinders {
             IBinder home = playServicesOwnService("homeService", "account");
             return home != null ? home : new AccountManagerStub();
         }
-        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
+        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null
+                || System.getenv("WESTLAKE_PLAY_SERVICES_CONNECT") != null) {
             IBinder remote = playServicesHostService("account");
             if (remote != null) return remote;
         }
