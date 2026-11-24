@@ -10,8 +10,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -37,8 +40,10 @@ import java.util.Set;
  */
 final class ComponentStates {
     private static final String FILE = "westlake-component-states.properties";
+    /** Held while one process reads, changes and saves the file, so two processes never save over each other. */
+    private static final String LOCK = FILE + ".lock";
     private static Properties states = new Properties();
-    private static long stamp = Long.MIN_VALUE;
+    private static String stamp = null;
     private static FrameworkPackageUserState userState = FrameworkPackageUserState.DEFAULT;
 
     private ComponentStates() {}
@@ -49,16 +54,26 @@ final class ComponentStates {
         return dir == null ? null : new File(dir, FILE);
     }
 
-    private static long stampOf(File file) {
-        return file == null || !file.isFile() ? 0 : file.lastModified() * 31 + file.length();
+    /**
+     * Which version of the file this is: every save renames a new file over the old one, so the inode changes, and
+     * the nanosecond modification time and the size cover the rest. "" when there is no file.
+     */
+    private static String stampOf(File file) {
+        if (file == null) return "";
+        try {
+            android.system.StructStat stat = android.system.Os.stat(file.getPath());
+            return stat.st_ino + ":" + stat.st_mtim.tv_sec + "." + stat.st_mtim.tv_nsec + ":" + stat.st_size;
+        } catch (android.system.ErrnoException missing) {
+            return "";
+        }
     }
 
     /** Reads the file again when another process of the app changed it. */
     private static void reloadIfChanged(File file) {
-        long now = stampOf(file);
-        if (now == stamp) return;
+        String now = stampOf(file);
+        if (now.equals(stamp)) return;
         Properties loaded = new Properties();
-        if (now != 0) {
+        if (!now.isEmpty()) {
             try (FileInputStream in = new FileInputStream(file)) {
                 loaded.load(in);
             } catch (IOException | IllegalArgumentException failure) {
@@ -190,36 +205,46 @@ final class ComponentStates {
         int changed = 0;
         int ignored = 0;
         synchronized (ComponentStates.class) {
-            reloadIfChanged(file);
-            Properties next = new Properties();
-            next.putAll(states);
-            for (PackageManager.ComponentEnabledSetting setting : settings) {
-                if (!setting.isComponent()) {
-                    ignored++;
-                    continue;
-                }
-                String name = setting.getClassName();
-                String before = next.getProperty(name);
-                switch (setting.getEnabledState()) {
-                    case PackageManager.COMPONENT_ENABLED_STATE_ENABLED:
-                    case PackageManager.COMPONENT_ENABLED_STATE_DISABLED:
-                        next.setProperty(name, Integer.toString(setting.getEnabledState()));
-                        break;
-                    case PackageManager.COMPONENT_ENABLED_STATE_DEFAULT:
-                        next.remove(name);
-                        break;
-                    default:
-                        System.err.println("[WESTLAKE-PM] setComponentEnabledSetting: component " + own + "/" + name
-                                + " requested an invalid new component state: " + setting.getEnabledState());
+            // One process at a time from reading to saving: each saves the whole set, so without the lock two
+            // processes changing states at once (Play services' processes do at start) would drop each other's.
+            try (RandomAccessFile lockFile = new RandomAccessFile(new File(file.getParentFile(), LOCK), "rw");
+                 FileChannel channel = lockFile.getChannel();
+                 FileLock held = channel.lock()) {
+                stamp = null;   // read the file as it is now, whatever was cached
+                reloadIfChanged(file);
+                Properties next = new Properties();
+                next.putAll(states);
+                for (PackageManager.ComponentEnabledSetting setting : settings) {
+                    if (!setting.isComponent()) {
+                        ignored++;
                         continue;
+                    }
+                    String name = setting.getClassName();
+                    String before = next.getProperty(name);
+                    switch (setting.getEnabledState()) {
+                        case PackageManager.COMPONENT_ENABLED_STATE_ENABLED:
+                        case PackageManager.COMPONENT_ENABLED_STATE_DISABLED:
+                            next.setProperty(name, Integer.toString(setting.getEnabledState()));
+                            break;
+                        case PackageManager.COMPONENT_ENABLED_STATE_DEFAULT:
+                            next.remove(name);
+                            break;
+                        default:
+                            System.err.println("[WESTLAKE-PM] setComponentEnabledSetting: component " + own + "/"
+                                    + name + " requested an invalid new component state: "
+                                    + setting.getEnabledState());
+                            continue;
+                    }
+                    if (!java.util.Objects.equals(before, next.getProperty(name))) changed++;
                 }
-                if (!java.util.Objects.equals(before, next.getProperty(name))) changed++;
-            }
-            if (changed > 0) {
-                save(next, file);
-                states = next;
-                stamp = stampOf(file);
-                userState = null;
+                if (changed > 0) {
+                    save(next, file);
+                    states = next;
+                    stamp = stampOf(file);
+                    userState = null;
+                }
+            } catch (IOException failure) {
+                throw new IllegalStateException("component states not saved: no lock", failure);
             }
         }
         if (changed > 0 || ignored > 0) {
