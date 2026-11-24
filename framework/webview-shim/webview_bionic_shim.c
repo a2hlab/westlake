@@ -7564,6 +7564,17 @@ static int westlake_bionic_libc_name(const char *name)
     return 0;
 }
 
+/* Code no file backs: no loaded library holds the address, and its mapping has no path (not even
+ * an [anon:...] name). JIT caches and loader-named regions are not it. */
+static int westlake_caller_is_anonymous(void *address)
+{
+    Dl_info info = {0};
+    if (dladdr(address, &info) != 0 && info.dli_fname != NULL) return 0;
+    uintptr_t start = 0, stop = 0;
+    char path[2];
+    return westlake_mapping_of((uintptr_t) address, &start, &stop, path, sizeof(path)) && path[0] == '\0';
+}
+
 static void *westlake_libandroid_by_handle(WestlakeDlsymFn real, void *handle, const char *name)
 {
     static void *runtime_probe;   /* AAssetManager_fromJava, as the runtime's libandroid.so defines it */
@@ -7682,21 +7693,36 @@ void *dlsym(void *handle, const char *name)
      * and got NULL from each. When the handle's search reaches libc (it finds malloc) and the
      * caller is Android code, such a name gets the definition that code's own import of it binds
      * to, this library's for most of them. Other names, handles and callers go on as before.
+     *
+     * Code in anonymous memory has no import to follow: a packer's decrypted body, which runs from
+     * memory it mapped itself, asks the same handles. Android answers it from libc all the same, so
+     * such a caller gets the definition this library's own code binds to, the libc Westlake gives
+     * Android code. A caller in a file OH loaded keeps musl's answer.
      */
     if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && by_ra != NULL &&
         westlake_bionic_libc_name(name)) {
         void *found = real(handle, name);
         if (found != NULL) return found;
         void *caller = __builtin_return_address(0);
-        if (caller_is_android_dso(caller, NULL) && real(handle, "malloc") != NULL) {
-            found = by_ra(RTLD_DEFAULT, name, caller);
-            if (found == NULL) found = westlake_dlsym_caller_group(by_ra, name, caller);
+        int anonymous = 0;
+        if (real(handle, "malloc") != NULL) {
+            if (caller_is_android_dso(caller, NULL)) {
+                found = by_ra(RTLD_DEFAULT, name, caller);
+                if (found == NULL) found = westlake_dlsym_caller_group(by_ra, name, caller);
+            } else if (westlake_caller_is_anonymous(caller)) {
+                void *self = (void *) westlake_bionic_libc_name;
+                anonymous = 1;
+                found = by_ra(RTLD_DEFAULT, name, self);
+                if (found == NULL) found = westlake_dlsym_caller_group(by_ra, name, self);
+            }
         }
         if (found == NULL) return real(handle, name);   /* NULL, and dlerror names this lookup again */
         (void) dlerror();   /* the failed lookup's error does not stand */
         static int logged;
         if (__atomic_fetch_add(&logged, 1, __ATOMIC_RELAXED) < 32) {
-            wl_relocs_log("[WESTLAKE-LOADER] %s by handle: Bionic's libc name, as the caller binds it\n", name);
+            wl_relocs_log(anonymous
+                    ? "[WESTLAKE-LOADER] %s by handle from anonymous code: Bionic's libc name, as Westlake's libc binds it\n"
+                    : "[WESTLAKE-LOADER] %s by handle: Bionic's libc name, as the caller binds it\n", name);
         }
         return found;
     }
