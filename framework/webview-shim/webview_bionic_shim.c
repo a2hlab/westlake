@@ -7548,6 +7548,22 @@ static int westlake_ndk_android_name(const char *name)
     return (name[0] == 'A' && name[1] >= 'A' && name[1] <= 'Z') || strncmp(name, "android_", 8) == 0;
 }
 
+#include "bionic_libc_names.h"
+
+/* A name Bionic's libc.so exports to apps (bionic_libc_names.h, from Android 15's libc.map.txt). */
+static int westlake_bionic_libc_name(const char *name)
+{
+    size_t low = 0, high = sizeof(westlake_bionic_libc_names) / sizeof(westlake_bionic_libc_names[0]);
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        int order = strcmp(name, westlake_bionic_libc_names[middle]);
+        if (order == 0) return 1;
+        if (order < 0) high = middle;
+        else low = middle + 1;
+    }
+    return 0;
+}
+
 static void *westlake_libandroid_by_handle(WestlakeDlsymFn real, void *handle, const char *name)
 {
     static void *runtime_probe;   /* AAssetManager_fromJava, as the runtime's libandroid.so defines it */
@@ -7647,7 +7663,8 @@ void *dlsym(void *handle, const char *name)
             found = westlake_libandroid_by_handle(real, handle, name);
             if (found != NULL) (void) dlerror();   /* the failed lookup's error does not stand */
         }
-        return found;
+        /* Bionic's own android_* names (android_set_abort_message, ...) go on to the libc lookup below. */
+        if (found != NULL || !westlake_bionic_libc_name(name)) return found;
     }
     /* RTLD_DEFAULT through __dlsym with the caller's return address: the same lookup, then Bionic's
      * second place to look when it fails. */
@@ -7656,6 +7673,32 @@ void *dlsym(void *handle, const char *name)
         void *caller = __builtin_return_address(0);
         void *found = by_ra(RTLD_DEFAULT, name, caller);
         return found != NULL ? found : westlake_dlsym_caller_group(by_ra, name, caller);
+    }
+    /*
+     * A name Bionic's libc.so exports, asked of a library's handle. Android's dlsym searches the
+     * library and its dependencies, and libc.so is among every app library's, so any such handle
+     * finds the name. Here the search ends in musl, which lacks Bionic's own names: Bangcle's
+     * loader (fdzq) asked libandroid, liblog, libz and libc in turn for __errno, __sF and _ctype_
+     * and got NULL from each. When the handle's search reaches libc (it finds malloc) and the
+     * caller is Android code, such a name gets the definition that code's own import of it binds
+     * to, this library's for most of them. Other names, handles and callers go on as before.
+     */
+    if (handle != RTLD_DEFAULT && handle != RTLD_NEXT && name != NULL && by_ra != NULL &&
+        westlake_bionic_libc_name(name)) {
+        void *found = real(handle, name);
+        if (found != NULL) return found;
+        void *caller = __builtin_return_address(0);
+        if (caller_is_android_dso(caller, NULL) && real(handle, "malloc") != NULL) {
+            found = by_ra(RTLD_DEFAULT, name, caller);
+            if (found == NULL) found = westlake_dlsym_caller_group(by_ra, name, caller);
+        }
+        if (found == NULL) return real(handle, name);   /* NULL, and dlerror names this lookup again */
+        (void) dlerror();   /* the failed lookup's error does not stand */
+        static int logged;
+        if (__atomic_fetch_add(&logged, 1, __ATOMIC_RELAXED) < 32) {
+            wl_relocs_log("[WESTLAKE-LOADER] %s by handle: Bionic's libc name, as the caller binds it\n", name);
+        }
+        return found;
     }
     __attribute__((musttail)) return real(handle, name);
 }
