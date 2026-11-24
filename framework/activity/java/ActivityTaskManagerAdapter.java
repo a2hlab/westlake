@@ -445,7 +445,8 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
                             android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
             if (own.isEmpty()) return ActivityManager.START_CANCELED;
             android.content.pm.ActivityInfo info = own.get(0).activityInfo;
-            if (!info.enabled || !AppProcesses.runsHere(AppProcesses.activityProcessOf(info)))
+            if (!adapter.packagemanager.SourcePackageRegistry.isEnabled(info)
+                    || !AppProcesses.runsHere(AppProcesses.activityProcessOf(info)))
                 return ActivityManager.START_CANCELED;
             RemoteActivities.event("pending_activity_prepared process=" + AppProcesses.self() + " class=" + info.name);
             return startActivity(caller, ActivityThread.currentPackageName(), null, prepared,

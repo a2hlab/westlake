@@ -129,7 +129,9 @@ public final class RemoteActivities {
         if (!enabled() || intent == null) return allowed;
         for (ResolveInfo match : SourcePackageRegistry.queryActivities(intent, type, flags)) {
             ActivityInfo info = match.activityInfo;
-            if (info == null || !info.enabled || info.applicationInfo == null || !info.applicationInfo.enabled) continue;
+            // Enabled as the package manager decides it: the app's run-time state over its manifest.
+            if (info == null || info.applicationInfo == null
+                    || !adapter.packagemanager.SourcePackageRegistry.isEnabled(info)) continue;
             // Permission-bearing foreign activities need a trusted grant service, not permissions
             // self-reported in HELLO or the shared native uid. Fail closed until that exists.
             if (!sameApp && (!info.exported || (info.permission != null && !info.permission.isEmpty()))) continue;

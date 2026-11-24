@@ -2181,22 +2181,32 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
     }
 
 
+    // The app's own component states, kept as Android keeps them (ComponentStates).
     @Override
-    public void setComponentEnabledSetting(android.content.ComponentName arg0, int arg1, int arg2, int arg3, java.lang.String arg4) throws android.os.RemoteException {
-        logStub("setComponentEnabledSetting", "");
+    public void setComponentEnabledSetting(android.content.ComponentName component, int newState, int flags, int userId,
+            java.lang.String callingPackage) throws android.os.RemoteException {
+        if (component == null) return;
+        ComponentStates.apply(java.util.Collections.singletonList(
+                new android.content.pm.PackageManager.ComponentEnabledSetting(component, newState, flags)));
     }
 
 
     @Override
-    public void setComponentEnabledSettings(java.util.List<android.content.pm.PackageManager.ComponentEnabledSetting> arg0, int arg1, java.lang.String arg2) throws android.os.RemoteException {
-        logStub("setComponentEnabledSettings", "");
+    public void setComponentEnabledSettings(java.util.List<android.content.pm.PackageManager.ComponentEnabledSetting> settings,
+            int userId, java.lang.String callingPackage) throws android.os.RemoteException {
+        if (settings == null || settings.isEmpty()) return;
+        ComponentStates.apply(settings);
     }
 
 
     @Override
-    public int getComponentEnabledSetting(android.content.ComponentName arg0, int arg1) throws android.os.RemoteException {
-        logStub("getComponentEnabledSetting", "");
-        return 0;
+    public int getComponentEnabledSetting(android.content.ComponentName component, int userId)
+            throws android.os.RemoteException {
+        if (component == null) return android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
+        if (component.getPackageName().equals(SourcePackageRegistry.packageName())) return ComponentStates.get(component);
+        // Another package's states are kept in its own process; this one knows only their manifests.
+        logStub("getComponentEnabledSetting", component.getPackageName());
+        return android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT;
     }
 
 
