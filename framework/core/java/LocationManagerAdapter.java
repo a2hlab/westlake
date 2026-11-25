@@ -133,6 +133,21 @@ public final class LocationManagerAdapter {
         return state() >= 0;
     }
 
+    /**
+     * The location features PackageManager claims (Google Play filters apps against them): android.hardware.location
+     * where OH's location service answers, and android.hardware.location.gps only where Westlake's requests may use
+     * GNSS (not with WESTLAKE_LOCATION_GNSS=0). No android.hardware.location.network: whether OH has a network
+     * location service is not asked here, and this board has none (see powerScene).
+     */
+    public static java.util.List<String> claimedFeatures() {
+        java.util.List<String> features = new java.util.ArrayList<>();
+        if (available()) {
+            features.add("android.hardware.location");
+            if (GNSS) features.add("android.hardware.location.gps");
+        }
+        return features;
+    }
+
     private static boolean locationOn() {
         return state() == 1;
     }

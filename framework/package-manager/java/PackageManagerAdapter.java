@@ -1235,6 +1235,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         }
         // As PackageManagerService answers: claimed, at the version asked for or a later one.
         Integer claimed = name != null ? CLAIMED_FEATURES.get(name) : null;
+        if (claimed == null && name != null && adapter.core.LocationManagerAdapter.claimedFeatures().contains(name)) {
+            claimed = 0;
+        }
         return claimed != null && claimed >= version;
     }
 
@@ -1254,7 +1257,9 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
      * backed by a working service. faketouch comes with the touchscreen, as Android's touchscreen.xml
      * declares both. The microphone is AudioRecord over OH's audio capturer (the host holds OH's microphone
      * permission). Google Play filters apps against this list, implied features included: faketouch for
-     * every app, and the microphone for any app requesting RECORD_AUDIO.
+     * every app, and the microphone for any app requesting RECORD_AUDIO. Location is claimed apart from this list,
+     * where OH's location service answers (LocationManagerAdapter.claimedFeatures): any app requesting a location
+     * permission needs android.hardware.location on Play, 255 of 982 HK corpus apps.
      */
     private static final java.util.Map<String, Integer> CLAIMED_FEATURES = new java.util.LinkedHashMap<>();
     static {
@@ -2322,6 +2327,11 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         for (String camera : adapter.core.OhCameraService.claimedFeatures()) {
             android.content.pm.FeatureInfo info = new android.content.pm.FeatureInfo();
             info.name = camera;
+            features.add(info);
+        }
+        for (String name : adapter.core.LocationManagerAdapter.claimedFeatures()) {
+            android.content.pm.FeatureInfo info = new android.content.pm.FeatureInfo();
+            info.name = name;
             features.add(info);
         }
         if (getSideloadedWebViewPackageInfo() != null) {
