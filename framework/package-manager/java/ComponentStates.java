@@ -42,6 +42,31 @@ final class ComponentStates {
     private static final String FILE = "westlake-component-states.properties";
     /** Held while one process reads, changes and saves the file, so two processes never save over each other. */
     private static final String LOCK = FILE + ".lock";
+
+    /**
+     * The lock file's lock, taken without blocking and asked for again until it comes (at most 20 s). A blocking
+     * lock (fcntl F_SETLKW) fails with EDEADLK when the kernel finds a cycle between the lock owners, and it counts
+     * a whole process as one owner: while one thread here held this lock, another thread waited for a lock that
+     * Play services' other process held (its databases lock with fcntl too), and that process waited for this one.
+     * The kernel failed the wait ("Resource deadlock would occur") although the holder was about to release it, and
+     * Play services' main process died on the exception (OnePlus 6, 11-24). A lock that does not wait never fails so.
+     */
+    private static FileLock acquire(FileChannel channel) throws IOException {
+        long deadline = System.nanoTime() + 20_000_000_000L;
+        long pause = 2;
+        while (true) {
+            FileLock held = channel.tryLock();
+            if (held != null) return held;
+            if (System.nanoTime() > deadline) throw new IOException("component states lock still held after 20 s");
+            try {
+                Thread.sleep(pause);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted waiting for the component states lock", e);
+            }
+            pause = Math.min(pause * 2, 50);
+        }
+    }
     private static Properties states = new Properties();
     private static String stamp = null;
     private static FrameworkPackageUserState userState = FrameworkPackageUserState.DEFAULT;
@@ -209,7 +234,7 @@ final class ComponentStates {
             // processes changing states at once (Play services' processes do at start) would drop each other's.
             try (RandomAccessFile lockFile = new RandomAccessFile(new File(file.getParentFile(), LOCK), "rw");
                  FileChannel channel = lockFile.getChannel();
-                 FileLock held = channel.lock()) {
+                 FileLock held = acquire(channel)) {
                 stamp = null;   // read the file as it is now, whatever was cached
                 reloadIfChanged(file);
                 Properties next = new Properties();
