@@ -60,6 +60,25 @@ final class LocalAccounts {
 
     private LocalAccounts() {}
 
+    /**
+     * The app's own account authenticator, as Android's RegisteredServicesCache finds it: a service of this package
+     * answering android.accounts.AccountAuthenticator. Play services names its GoogleAccountAuthenticatorService,
+     * microG its GoogleLoginService; the fixed names stay as the fallback when the package manager answers nothing.
+     */
+    private static ComponentName authenticatorOf(android.content.Context app) {
+        try {
+            Intent probe = new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT).setPackage(app.getPackageName());
+            for (android.content.pm.ResolveInfo r : app.getPackageManager().queryIntentServices(probe, 0)) {
+                if (r.serviceInfo != null && app.getPackageName().equals(r.serviceInfo.packageName)) {
+                    return new ComponentName(r.serviceInfo.packageName, r.serviceInfo.name);
+                }
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "authenticator lookup failed: " + e.getClass().getName());
+        }
+        return new ComponentName(app.getPackageName(), GoogleAuthProxy.provider() ? MICROG_AUTHENTICATOR : AUTHENTICATOR);
+    }
+
     private static File file() {
         File dir = new File(ActivityThread.currentApplication().getDataDir(), "westlake-accounts");
         dir.mkdirs();
@@ -800,7 +819,7 @@ final class LocalAccounts {
             }
         };
         Intent intent = new Intent(AccountManager.ACTION_AUTHENTICATOR_INTENT)
-                .setComponent(new ComponentName(app.getPackageName(), (GoogleAuthProxy.provider() ? MICROG_AUTHENTICATOR : AUTHENTICATOR)));
+                .setComponent(authenticatorOf(app));
         boolean bound = app.bindService(intent, new ServiceConnection() {
             @Override
             public void onServiceConnected(ComponentName name, IBinder binder) {
