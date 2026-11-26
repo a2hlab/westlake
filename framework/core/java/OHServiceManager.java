@@ -199,6 +199,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             case "launcherapps":
             // VpnService fetches it itself (prepare, establish); a null one threw in socks5's onCreate.
             case "vpn_management":
+            // Android's camera service over OH's cameras (OhCameraService).
+            case "media.camera":
             // TileService.requestListeningState reaches it through StatusBarManager (Chrono's timer).
             case "statusbar":
             // Adobe Reader casts RestrictionsManager non-null in Application.onCreate.

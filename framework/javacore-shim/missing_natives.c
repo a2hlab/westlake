@@ -712,6 +712,7 @@ int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
 int wl_register_image_reader(JNIEnv* env);
 int wl_register_camera_metadata(JNIEnv* env);
+int wl_register_oh_cameras(JNIEnv* env);
 int wl_register_native_activity(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
@@ -1724,6 +1725,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int vc = wl_register_video_codec(env);
         int ir = wl_register_image_reader(env);
         wl_register_camera_metadata(env);   /* logs its own line */
+        wl_register_oh_cameras(env);
         int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
                    + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
                    + bind(env, "android/os/PerformanceHintManager", kPerformanceHint,
