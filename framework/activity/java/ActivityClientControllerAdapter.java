@@ -428,6 +428,10 @@ public final class ActivityClientControllerAdapter extends IActivityClientContro
                                     + " stays with the task's top " + heir);
                             System.err.println("[WL-MANAGED] the OH ability stays with the task's next activity");
                             scheduleLocalDestroy(finishing);
+                        } else if (AppSchedulerBridge.returnSpareAbility(addr)) {
+                            System.err.println("[WL-MANAGED] the windowless host's last activity finished: its OH"
+                                    + " ability stays, unused, so that OH keeps the process");
+                            scheduleLocalDestroy(finishing);
                         } else {
                             int rc = nativeTerminateAbilityByTokenAddr(addr, resultCode);
                             System.err.println("[WL-MANAGED] the task's last activity finished: OH ability ends, rc=" + rc);

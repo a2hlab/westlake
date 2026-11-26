@@ -2071,6 +2071,7 @@ public class AppSchedulerBridge {
                     + spare[0] + ")");
             scheduleLaunchAbility(null, intent.getComponent().getPackageName(), name, (int) spare[0], null, null,
                     spare[1], request);
+            ActivityTaskManagerAdapter.raiseOwnMission("an activity another app started");
             return;
         }
         scheduleLaunchAbility(null, intent.getComponent().getPackageName(), name,
@@ -2087,13 +2088,34 @@ public class AppSchedulerBridge {
     private static long[] sSpareAbility;
 
     private static synchronized void keepSpareAbility(int recordId, long token) {
+        // A want for the ability an activity already holds (raiseOwnMission's start) leaves it lent.
+        if (sLentAbility != null && sLentAbility[1] == token) return;
         if (sSpareAbility == null) sSpareAbility = new long[] {recordId, token};
     }
 
     private static synchronized long[] takeSpareAbility() {
         long[] spare = sSpareAbility;
         sSpareAbility = null;
+        if (spare != null) sLentAbility = spare;
         return spare;
+    }
+
+    // The spare ability while an activity holds it.
+    private static long[] sLentAbility;
+
+    /**
+     * The windowless host's activity that held its spare OH ability finished, and no other activity of the host is
+     * left: the ability stays, unused again, instead of ending. Ending the app's last ability made OH terminate the
+     * process ("ability is the last", ScheduleTerminateApplication about 19 s later): Play services died right after
+     * the account it had just added. True if the token was the spare one.
+     */
+    static synchronized boolean returnSpareAbility(long token) {
+        if (!"1".equals(System.getenv("WESTLAKE_NO_ACTIVITY")) || sLentAbility == null || sLentAbility[1] != token) {
+            return false;
+        }
+        if (sSpareAbility == null) sSpareAbility = sLentAbility;
+        sLentAbility = null;
+        return true;
     }
 
     private static void scheduleLaunchAbility(Object appThread, String bundleName, String abilityName,

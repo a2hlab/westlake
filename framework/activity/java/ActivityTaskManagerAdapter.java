@@ -84,6 +84,27 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     private static native long nativeGetOHAbilityManagerService();
     // 2026-05-19: signature extended with callerOhTokenAddr — see same
     // comment in adapter.activity.ActivityManagerAdapter.nativeStartAbility.
+    /**
+     * Under the managed launch (ADR-0008), brings this app's OH mission to the front by starting its bundle's ability,
+     * as tapping its icon would; OH answers with a new want for the ability, which a windowless host does not show.
+     * Android raises an app's task when another app starts one of its activities and when such an activity returns
+     * its result; OH raises a mission only for a start through its own ability manager, and Westlake's starts between
+     * apps go over the apps' own channels, so without this the started page stayed under its caller (Play services'
+     * sign-in under the Play Store) and the caller stayed under the finished page's empty mission.
+     */
+    static void raiseOwnMission(String why) {
+        if (!"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) return;
+        String bundle = System.getenv("ASX_LAUNCH_PKG");
+        String ability = System.getenv("ASX_LAUNCH_ACTIVITY");
+        if (bundle == null || ability == null) return;
+        try {
+            int rc = nativeStartAbility(bundle, ability, null, null, null, 0L);
+            System.err.println("[WL-MANAGED] the app's OH mission to the front (" + why + "): rc=" + rc);
+        } catch (Throwable t) {
+            System.err.println("[WL-MANAGED] the app's OH mission to the front (" + why + ") failed: " + t);
+        }
+    }
+
     static native int nativeStartAbility(String bundleName, String abilityName,
             String action, String uri, String extraJson, long callerOhTokenAddr);
     private static native int nativeStartAbilityInMission(String bundleName, String abilityName,

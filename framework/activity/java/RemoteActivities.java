@@ -423,6 +423,7 @@ public final class RemoteActivities {
             main().post(() -> {
                 if (data != null) data.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
                 event("result_received result_code=" + result);
+                ActivityTaskManagerAdapter.raiseOwnMission("the activity it started in another app returned");
                 if (request != null) ActivityResults.sendNow(request.resultTo, request.resultWho,
                         request.requestCode, result, data);
             });
