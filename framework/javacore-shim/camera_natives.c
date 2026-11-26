@@ -268,15 +268,17 @@ static jlong CameraDevice_open(JNIEnv *env, jclass clazz, jstring ohId)
         if (c->cameras[i].cameraId != NULL && strcmp(c->cameras[i].cameraId, id) == 0) c->dev = &c->cameras[i];
     }
     if (id != NULL) (*env)->ReleaseStringUTFChars(env, ohId, id);
-    if (c->dev == NULL || g.getCapability(g.manager, c->dev, &c->capability) != CAMERA_OK
-            || CALL(CreateInputFn, "OH_CameraManager_CreateCameraInput", g.manager, c->dev, &c->input) != CAMERA_OK
-            || (rc = CALL(InputFn, "OH_CameraInput_Open", c->input)) != CAMERA_OK) {
-        fprintf(stderr, "[WL-CAMERA] opening the camera failed: %d\n", (int) rc);
+    if (rc == CAMERA_OK && c->dev == NULL) rc = CAMERA_INVALID_ARGUMENT;
+    if (rc == CAMERA_OK) rc = g.getCapability(g.manager, c->dev, &c->capability);
+    if (rc == CAMERA_OK) rc = CALL(CreateInputFn, "OH_CameraManager_CreateCameraInput", g.manager, c->dev, &c->input);
+    if (rc == CAMERA_OK) rc = CALL(InputFn, "OH_CameraInput_Open", c->input);
+    if (rc != CAMERA_OK) {
+        fprintf(stderr, "[WL-CAMERA] opening the camera failed: OH %d\n", (int) rc);
         if (c->input != NULL) CALL(InputFn, "OH_CameraInput_Release", c->input);
         if (c->capability != NULL && g.deleteCapability != NULL) g.deleteCapability(g.manager, c->capability);
         if (c->cameras != NULL && g.deleteCameras != NULL) g.deleteCameras(g.manager, c->cameras, c->count);
         free(c);
-        return 0;
+        return -(jlong) rc;   /* OH's error, negated: a handle is never negative */
     }
     return (jlong) (intptr_t) c;
 }

@@ -69,14 +69,33 @@ final class OhCameraDevice {
         mCamera = camera;
         mCharacteristics = characteristics;
         mCallbacks = callbacks;
-        mHandle = nativeOpen(camera.ohId);
-        if (mHandle == 0) {
-            throw new ServiceSpecificException(ICameraService.ERROR_CAMERA_IN_USE, "OH could not open camera " + camera.ohId);
+        long handle = nativeOpen(camera.ohId);
+        if (handle <= 0) {
+            int oh = (int) -handle;
+            throw new ServiceSpecificException(openError(oh), "OH could not open camera " + camera.ohId + " (" + oh + ")");
         }
+        mHandle = handle;
         HandlerThread thread = new HandlerThread("wl-camera-" + camera.ohId);
         thread.start();
         mHandler = new Handler(thread.getLooper());
         System.err.println("[WL-CAMERA] camera " + camera.ohId + " opened");
+    }
+
+    /**
+     * Android's camera service error for OH's open failure: another client or a preempting one is CAMERA_IN_USE, a
+     * camera OH does not let this app use (its permission, a disabled device, any other refusal) is DISABLED, as
+     * Android's service answers a camera policy or permission forbids.
+     */
+    static int openError(int oh) {
+        switch (oh) {
+            case 7400107:   // CAMERA_CONFLICT_CAMERA
+            case 7400109:   // CAMERA_DEVICE_PREEMPTED
+                return ICameraService.ERROR_CAMERA_IN_USE;
+            case 7400101:   // CAMERA_INVALID_ARGUMENT: no such camera any more
+                return ICameraService.ERROR_DISCONNECTED;
+            default:
+                return ICameraService.ERROR_DISABLED;
+        }
     }
 
     /** connectDevice's answer: the device as the app's ICameraDeviceUser (an in-process interface). */

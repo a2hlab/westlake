@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class OhCamera1 {
     private OhCamera1() {}
 
+    private static final int ICameraService_ERROR_CAMERA_IN_USE = android.hardware.ICameraService.ERROR_CAMERA_IN_USE;
     private static final int CAMERA_MSG_SHUTTER = 0x002;
     private static final int CAMERA_MSG_FOCUS = 0x004;
     private static final int CAMERA_MSG_COMPRESSED_IMAGE = 0x100;
@@ -111,11 +112,14 @@ public final class OhCamera1 {
         List<OhCameraService.Camera> all = OhCameraService.cameras();
         if (id < 0 || id >= all.size()) return -19;
         State s = new State(all.get(id), cameraRef);
-        s.handle = OhCameraDevice.nativeOpen(s.camera.ohId);
-        if (s.handle == 0) {
+        long handle = OhCameraDevice.nativeOpen(s.camera.ohId);
+        if (handle <= 0) {
             s.handler.getLooper().quitSafely();
-            return -13;
+            System.err.println("[WL-CAMERA] Camera1 camera " + s.camera.ohId + " not opened: OH " + (-handle));
+            // Camera.open: -EACCES "Fail to connect to camera service", -EBUSY "Camera initialization failed"
+            return OhCameraDevice.openError((int) -handle) == ICameraService_ERROR_CAMERA_IN_USE ? -16 : -13;
         }
+        s.handle = handle;
         defaults(s);
         long key = NEXT.getAndIncrement();
         try {
