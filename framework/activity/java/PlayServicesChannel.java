@@ -1095,9 +1095,35 @@ public final class PlayServicesChannel {
         }
     }
 
+    /**
+     * Whether this host answers Services Framework's settings table itself (LocalGservices). Not when the host is
+     * microG: its GServicesProvider keeps check-in's settings, the Android ID among them, and the Play Store reads
+     * them there (with LocalGservices it found none and Google answered its requests with 400).
+     */
+    private static boolean standsInForGservices(String authority) {
+        if (!isHost() || !LocalGservices.AUTHORITY.equals(authority)) return false;
+        Boolean own = sMicrogGservices;
+        if (own == null) {
+            own = false;
+            try {
+                android.content.pm.ProviderInfo info = application().getPackageManager()
+                        .resolveContentProvider(authority, 0);
+                own = info != null && application().getPackageName().equals(info.packageName)
+                        && info.name != null && info.name.startsWith("org.microg.");
+            } catch (RuntimeException e) {
+                System.err.println(TAG + "gservices provider lookup failed: " + e.getClass().getName());
+            }
+            sMicrogGservices = own;
+            if (own) System.err.println(TAG + "gservices: this host's own provider (microG) answers " + authority);
+        }
+        return !own;
+    }
+
+    private static volatile Boolean sMicrogGservices;
+
     /** getContentProvider for an authority in the other process, or null. */
     public static ContentProviderHolder provider(String authority) {
-        if (isHost() && LocalGservices.AUTHORITY.equals(authority)) return LocalGservices.holder();
+        if (standsInForGservices(authority)) return LocalGservices.holder();
         ContentProviderHolder routed = ownProcessProvider(authority);
         if (routed != null) return routed;
         if (serves()) {
@@ -1907,7 +1933,14 @@ public final class PlayServicesChannel {
                 case PACKAGE_INFO: {
                     String name = data.readString();
                     long packageFlags = data.readLong();
-                    reply.writeTypedObject(own(name) ? packages.getPackageInfo(name, packageFlags, user) : null, 0);
+                    PackageInfo answer = own(name) ? packages.getPackageInfo(name, packageFlags, user) : null;
+                    if (answer != null && (packageFlags & (PackageManager.GET_SIGNATURES
+                            | PackageManager.GET_SIGNING_CERTIFICATES)) != 0) {
+                        // microG's signature spoofing for the package this host is (user-approved 11-26)
+                        adapter.packagemanager.GuestPackages.fakeHostedSignature(packages.getPackageInfo(name,
+                                PackageManager.GET_PERMISSIONS | PackageManager.GET_META_DATA, user), answer);
+                    }
+                    reply.writeTypedObject(answer, 0);
                     return true;
                 }
                 case APPLICATION_INFO: {
@@ -1934,7 +1967,7 @@ public final class PlayServicesChannel {
                     String authority = data.readString();
                     long providerFlags = data.readLong();
                     // Services Framework's settings table, which this process keeps (LocalGservices).
-                    if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
+                    if (standsInForGservices(authority)) {
                         ContentProviderHolder holder = LocalGservices.holder();
                         reply.writeTypedObject(holder != null ? holder.info : null, 0);
                         return true;
@@ -2397,7 +2430,7 @@ public final class PlayServicesChannel {
     private static final java.util.Set<String> UNEXPORTED_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private static IBinder localProvider(String authority) throws RemoteException {
-        if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
+        if (standsInForGservices(authority)) {
             ContentProviderHolder holder = LocalGservices.holder();
             return holder != null && holder.provider != null ? holder.provider.asBinder() : null;
         }

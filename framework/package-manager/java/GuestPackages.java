@@ -286,6 +286,31 @@ public final class GuestPackages {
         }
     }
 
+    /**
+     * The same spoofing for a package this process hosts (a Play host answering another app about itself): full is its own
+     * PackageInfo with permissions and meta-data, value the answer to fake. Only a package that requests
+     * FAKE_PACKAGE_SIGNATURE and names a certificate in "fake-signature" (microG) is affected.
+     */
+    public static void fakeHostedSignature(PackageInfo full, PackageInfo value) {
+        if (full == null || value == null || full.requestedPermissions == null || full.applicationInfo == null
+                || full.applicationInfo.metaData == null
+                || !java.util.Arrays.asList(full.requestedPermissions).contains("android.permission.FAKE_PACKAGE_SIGNATURE")) {
+            return;
+        }
+        String certificate = full.applicationInfo.metaData.getString("fake-signature");
+        if (certificate == null || certificate.isEmpty()) return;
+        Signature[] fake = { new Signature(certificate) };
+        if (value.signatures != null) value.signatures = fake;
+        if (value.signingInfo != null) {
+            try {
+                value.signingInfo = new SigningInfo(
+                        new SigningDetails(fake, SigningDetails.SignatureSchemeVersion.SIGNING_BLOCK_V3));
+            } catch (java.security.cert.CertificateException e) {
+                value.signingInfo = null;
+            }
+        }
+    }
+
     /** The packages whose code runs here as code guests (none outside the Play services process). */
     public static synchronized List<String> codePackages() {
         if (!PLAY_SERVICES_HOST) return new ArrayList<>();
