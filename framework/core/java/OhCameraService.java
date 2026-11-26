@@ -265,15 +265,10 @@ public final class OhCameraService {
         m.set(CameraCharacteristics.REQUEST_AVAILABLE_RESULT_KEYS, tags(RESULT_KEYS));
         List<String> listed = new ArrayList<>();
         for (CameraCharacteristics.Key<?> key : CHARACTERISTICS_KEYS) listed.add(key.getName());
-        int[] characteristicsTags = new int[listed.size() + 3];
-        for (int i = 0; i < listed.size(); i++) characteristicsTags[i] = CameraMetadataNative.getTag(listed.get(i));
-        characteristicsTags[listed.size()] = CameraMetadataNative.getTag(
-                CameraCharacteristics.REQUEST_AVAILABLE_REQUEST_KEYS.getName());
-        characteristicsTags[listed.size() + 1] = CameraMetadataNative.getTag(
-                CameraCharacteristics.REQUEST_AVAILABLE_RESULT_KEYS.getName());
-        characteristicsTags[listed.size() + 2] = CameraMetadataNative.getTag(
-                CameraCharacteristics.REQUEST_AVAILABLE_CHARACTERISTICS_KEYS.getName());
-        m.set(CameraCharacteristics.REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, characteristicsTags);
+        listed.add(CameraCharacteristics.REQUEST_AVAILABLE_REQUEST_KEYS.getName());
+        listed.add(CameraCharacteristics.REQUEST_AVAILABLE_RESULT_KEYS.getName());
+        listed.add(CameraCharacteristics.REQUEST_AVAILABLE_CHARACTERISTICS_KEYS.getName());
+        m.set(CameraCharacteristics.REQUEST_AVAILABLE_CHARACTERISTICS_KEYS, tags(listed.toArray(new String[0])));
         System.err.println("[WL-CAMERA] camera " + c.ohId + " facing=" + c.facing() + " orientation=" + c.orientation
                 + " preview=" + c.preview + " jpeg=" + jpeg);
         c.characteristics = m;
@@ -287,7 +282,8 @@ public final class OhCameraService {
             "android.control.afTrigger", "android.control.captureIntent", "android.control.effectMode",
             "android.control.sceneMode", "android.control.videoStabilizationMode", "android.flash.mode",
             "android.jpeg.orientation", "android.jpeg.quality", "android.jpeg.thumbnailQuality",
-            "android.jpeg.thumbnailSize", "android.jpeg.gpsLocation", "android.scaler.cropRegion",
+            "android.jpeg.thumbnailSize", "android.jpeg.gpsCoordinates", "android.jpeg.gpsProcessingMethod",
+            "android.jpeg.gpsTimestamp", "android.scaler.cropRegion",
             "android.statistics.faceDetectMode", "android.noiseReduction.mode", "android.edge.mode",
             "android.lens.opticalStabilizationMode",
     };
@@ -330,9 +326,22 @@ public final class OhCameraService {
             CameraCharacteristics.REQUEST_MAX_NUM_OUTPUT_STREAMS,
     };
 
+    /*
+     * The native tags of these keys. A synthetic key (one CameraMetadataNative composes from others, such as
+     * android.jpeg.gpsLocation) has no tag and is left out, as a HAL's key lists never name one: its lookup threw,
+     * and getCameraCharacteristics with it, so the probe and Open Camera saw no camera at all.
+     */
     private static int[] tags(String[] keys) {
         int[] out = new int[keys.length];
-        for (int i = 0; i < keys.length; i++) out[i] = CameraMetadataNative.getTag(keys[i]);
-        return out;
+        int n = 0;
+        for (String key : keys) {
+            try {
+                out[n++] = CameraMetadataNative.getTag(key);
+            } catch (IllegalArgumentException e) {
+                n--;
+                System.err.println("[WL-CAMERA] no native tag for " + key + ": left out of the key lists");
+            }
+        }
+        return java.util.Arrays.copyOf(out, n);
     }
 }
