@@ -26,8 +26,8 @@ import java.util.List;
  * Each OH camera is an Android camera, "0", "1" in OH's order, described at the LEGACY hardware level: what OH's
  * output profiles say (preview sizes as YUV_420_888 and PRIVATE outputs, photo sizes as JPEG), facing and sensor
  * orientation from OH, and the fixed controls a LEGACY device reports (auto exposure and white balance, no manual
- * sensor, no flash, fixed focus). Opening a camera is the next stage (connectDevice answers ERROR_DISCONNECTED, as
- * for a camera that went away).
+ * sensor, no flash, fixed focus). connectDevice opens the OH camera (OhCameraDevice); Camera1's connect answers
+ * ERROR_DISCONNECTED, as for a camera that went away.
  */
 final class OhCameraService {
     private OhCameraService() {}
@@ -146,10 +146,14 @@ final class OhCameraService {
                 return Boolean.TRUE;
             case "isHiddenPhysicalCamera":
                 return Boolean.FALSE;
-            case "connectDevice":
-            case "connect":
+            case "connectDevice": {
+                Camera c = camera((String) args[1]);
+                return OhCameraDevice.open(c, characteristics(c),
+                        (android.hardware.camera2.ICameraDeviceCallbacks) args[0]);
+            }
+            case "connect":   // Camera1 (android.hardware.Camera.open): not carried to OH yet
                 throw new ServiceSpecificException(ICameraService.ERROR_DISCONNECTED,
-                        "Opening a camera is not carried to OH yet");
+                        "Camera1 is not carried to OH yet");
             default:
                 return LocalServiceBinders.DEFAULT;
         }

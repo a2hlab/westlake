@@ -40,6 +40,7 @@ static struct {
     DeleteCapabilityFn deleteCapability;
     GetOrientationFn getOrientation;
     Camera_Manager *manager;
+    void *lib;
 } g;
 
 static int load(void)
@@ -52,6 +53,7 @@ static int load(void)
         fprintf(stderr, "[WL-CAMERA] libohcamera.so unavailable: %s\n", dlerror());
         return 0;
     }
+    g.lib = lib;
     g.getManager = (GetManagerFn) dlsym(lib, "OH_Camera_GetCameraManager");
     g.getCameras = (GetCamerasFn) dlsym(lib, "OH_CameraManager_GetSupportedCameras");
     g.deleteCameras = (DeleteCamerasFn) dlsym(lib, "OH_CameraManager_DeleteSupportedCameras");
@@ -143,6 +145,333 @@ static jstring Camera_list(JNIEnv *env, jclass clazz)
     return out;
 }
 
+/* ---- stage 2: an open camera, its capture session and outputs (adapter.core.OhCameraDevice) ---------------- */
+
+typedef struct Camera_Input Camera_Input;
+typedef struct Camera_CaptureSession Camera_CaptureSession;
+typedef struct Camera_PreviewOutput Camera_PreviewOutput;
+typedef struct Camera_PhotoOutput Camera_PhotoOutput;
+
+#define WL_MAX_OUTPUTS 8
+
+typedef struct {
+    Camera_Device *cameras;          /* OH's list, kept while the device is open: dev points into it */
+    uint32_t count;
+    Camera_Device *dev;
+    Camera_OutputCapability *capability;
+    Camera_Input *input;
+    Camera_CaptureSession *session;
+    Camera_PreviewOutput *previews[WL_MAX_OUTPUTS];
+    int previewCount;
+    Camera_PhotoOutput *photo;
+    int started;
+} wl_camera;
+
+static void *sym(const char *name)
+{
+    void *f = g.lib != NULL ? dlsym(g.lib, name) : NULL;
+    if (f == NULL) fprintf(stderr, "[WL-CAMERA] libohcamera.so lacks %s\n", name);
+    return f;
+}
+
+#define CALL(type, name, ...) ({ type f_ = (type) sym(name); f_ != NULL ? f_(__VA_ARGS__) : CAMERA_OPERATION_NOT_ALLOWED; })
+
+typedef Camera_ErrorCode (*CreateInputFn)(Camera_Manager *, const Camera_Device *, Camera_Input **);
+typedef Camera_ErrorCode (*InputFn)(Camera_Input *);
+typedef Camera_ErrorCode (*CreateSessionFn)(Camera_Manager *, Camera_CaptureSession **);
+typedef Camera_ErrorCode (*SessionFn)(Camera_CaptureSession *);
+typedef Camera_ErrorCode (*SessionModeFn)(Camera_CaptureSession *, Camera_SceneMode);
+typedef Camera_ErrorCode (*SessionInputFn)(Camera_CaptureSession *, Camera_Input *);
+typedef Camera_ErrorCode (*SessionPreviewFn)(Camera_CaptureSession *, Camera_PreviewOutput *);
+typedef Camera_ErrorCode (*SessionPhotoFn)(Camera_CaptureSession *, Camera_PhotoOutput *);
+typedef Camera_ErrorCode (*CreatePreviewFn)(Camera_Manager *, const Camera_Profile *, const char *, Camera_PreviewOutput **);
+typedef Camera_ErrorCode (*PreviewFn)(Camera_PreviewOutput *);
+typedef Camera_ErrorCode (*CreatePhotoFn)(Camera_Manager *, const Camera_Profile *, const char *, Camera_PhotoOutput **);
+typedef Camera_ErrorCode (*PhotoFn)(Camera_PhotoOutput *);
+
+/* The window behind a Java Surface: the runtime's ANativeWindow (*anw, which the caller then holds), unwrapped
+ * to the OH window it stands for (the bridge's oh_anw_get_oh), as videocodec_natives.cpp does for MediaCodec. */
+static void *ohWindowOf(JNIEnv *env, jobject surface, void **anw)
+{
+    typedef void *(*FromSurface)(JNIEnv *, jobject);
+    typedef void *(*Unwrap)(void *);
+    FromSurface fromSurface = (FromSurface) dlsym(RTLD_DEFAULT, "ANativeWindow_fromSurface");
+    Unwrap unwrap = (Unwrap) dlsym(RTLD_DEFAULT, "oh_anw_get_oh");
+    if (unwrap == NULL) {
+        void *bridge = dlopen("liboh_adapter_bridge.so", RTLD_NOW | RTLD_NOLOAD);
+        if (bridge != NULL) unwrap = (Unwrap) dlsym(bridge, "oh_anw_get_oh");
+    }
+    *anw = fromSurface != NULL && surface != NULL ? fromSurface(env, surface) : NULL;
+    return *anw != NULL && unwrap != NULL ? unwrap(*anw) : NULL;
+}
+
+static void releaseWindow(void *anw)
+{
+    typedef void (*Release)(void *);
+    Release release = anw != NULL ? (Release) dlsym(RTLD_DEFAULT, "ANativeWindow_release") : NULL;
+    if (release != NULL) release(anw);
+}
+
+/* OH's surface id of the window behind a Java Surface, as OH's outputs take it ("<decimal id>"). */
+static int surface_id(JNIEnv *env, jobject surface, char *out, size_t size)
+{
+    typedef int32_t (*GetSurfaceIdFn)(void *, uint64_t *);
+    void *anw = NULL;
+    void *window = ohWindowOf(env, surface, &anw);
+    GetSurfaceIdFn getId = (GetSurfaceIdFn) dlsym(RTLD_DEFAULT, "OH_NativeWindow_GetSurfaceId");
+    if (getId == NULL) {
+        void *nw = dlopen("libnative_window.so", RTLD_NOW);
+        if (nw != NULL) getId = (GetSurfaceIdFn) dlsym(nw, "OH_NativeWindow_GetSurfaceId");
+    }
+    uint64_t id = 0;
+    int ok = window != NULL && getId != NULL && getId(window, &id) == 0 && id != 0;
+    if (ok) snprintf(out, size, "%llu", (unsigned long long) id);
+    releaseWindow(anw);
+    return ok;
+}
+
+static void release_outputs(wl_camera *c)
+{
+    if (c->session != NULL) {
+        if (c->started) CALL(SessionFn, "OH_CaptureSession_Stop", c->session);
+        CALL(SessionFn, "OH_CaptureSession_Release", c->session);
+        c->session = NULL;
+    }
+    c->started = 0;
+    for (int i = 0; i < c->previewCount; i++) CALL(PreviewFn, "OH_PreviewOutput_Release", c->previews[i]);
+    c->previewCount = 0;
+    if (c->photo != NULL) CALL(PhotoFn, "OH_PhotoOutput_Release", c->photo);
+    c->photo = NULL;
+}
+
+/* The OH profile for an output: the exact size in the list (OH's YUV first for previews), else none. */
+static const Camera_Profile *profile_for(Camera_Profile **list, uint32_t size, uint32_t w, uint32_t h, int prefer)
+{
+    const Camera_Profile *any = NULL;
+    for (uint32_t i = 0; i < size; i++) {
+        if (list[i] == NULL || list[i]->size.width != w || list[i]->size.height != h) continue;
+        if ((int) list[i]->format == prefer) return list[i];
+        if (any == NULL) any = list[i];
+    }
+    return any;
+}
+
+static jlong CameraDevice_open(JNIEnv *env, jclass clazz, jstring ohId)
+{
+    (void) clazz;
+    if (!load() || ohId == NULL) return 0;
+    wl_camera *c = calloc(1, sizeof(*c));
+    if (c == NULL) return 0;
+    const char *id = (*env)->GetStringUTFChars(env, ohId, NULL);
+    Camera_ErrorCode rc = g.getCameras(g.manager, &c->cameras, &c->count);
+    for (uint32_t i = 0; rc == CAMERA_OK && id != NULL && i < c->count; i++) {
+        if (c->cameras[i].cameraId != NULL && strcmp(c->cameras[i].cameraId, id) == 0) c->dev = &c->cameras[i];
+    }
+    if (id != NULL) (*env)->ReleaseStringUTFChars(env, ohId, id);
+    if (c->dev == NULL || g.getCapability(g.manager, c->dev, &c->capability) != CAMERA_OK
+            || CALL(CreateInputFn, "OH_CameraManager_CreateCameraInput", g.manager, c->dev, &c->input) != CAMERA_OK
+            || (rc = CALL(InputFn, "OH_CameraInput_Open", c->input)) != CAMERA_OK) {
+        fprintf(stderr, "[WL-CAMERA] opening the camera failed: %d\n", (int) rc);
+        if (c->input != NULL) CALL(InputFn, "OH_CameraInput_Release", c->input);
+        if (c->capability != NULL && g.deleteCapability != NULL) g.deleteCapability(g.manager, c->capability);
+        if (c->cameras != NULL && g.deleteCameras != NULL) g.deleteCameras(g.manager, c->cameras, c->count);
+        free(c);
+        return 0;
+    }
+    return (jlong) (intptr_t) c;
+}
+
+/*
+ * The session for these outputs: kinds[i] 0 = a preview-like stream (OH preview output: the app's SurfaceView,
+ * SurfaceTexture or YUV ImageReader), 1 = JPEG (OH photo output). OH codes are returned (0 = CAMERA_OK); the
+ * outputs are started by nativeStart.
+ */
+static jint CameraDevice_configure(JNIEnv *env, jclass clazz, jlong handle, jobjectArray surfaces, jintArray kinds,
+                                   jintArray widths, jintArray heights)
+{
+    (void) clazz;
+    wl_camera *c = (wl_camera *) (intptr_t) handle;
+    if (c == NULL) return CAMERA_INVALID_ARGUMENT;
+    release_outputs(c);
+    jsize n = surfaces ? (*env)->GetArrayLength(env, surfaces) : 0;
+    if (n > WL_MAX_OUTPUTS) n = WL_MAX_OUTPUTS;
+    jint *kind = n ? (*env)->GetIntArrayElements(env, kinds, NULL) : NULL;
+    jint *w = n ? (*env)->GetIntArrayElements(env, widths, NULL) : NULL;
+    jint *h = n ? (*env)->GetIntArrayElements(env, heights, NULL) : NULL;
+    Camera_ErrorCode rc = CALL(CreateSessionFn, "OH_CameraManager_CreateCaptureSession", g.manager, &c->session);
+    if (rc == CAMERA_OK) CALL(SessionModeFn, "OH_CaptureSession_SetSessionMode", c->session, NORMAL_PHOTO);
+    if (rc == CAMERA_OK) rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
+    if (rc == CAMERA_OK) rc = CALL(SessionInputFn, "OH_CaptureSession_AddInput", c->session, c->input);
+    for (jsize i = 0; rc == CAMERA_OK && i < n; i++) {
+        jobject surface = (*env)->GetObjectArrayElement(env, surfaces, i);
+        char id[32];
+        if (surface == NULL || !surface_id(env, surface, id, sizeof(id))) {
+            fprintf(stderr, "[WL-CAMERA] output %d: no OH surface behind the app's Surface\n", (int) i);
+            rc = CAMERA_INVALID_ARGUMENT;
+        } else if (kind[i] == 1) {
+            const Camera_Profile *p = profile_for(c->capability->photoProfiles, c->capability->photoProfilesSize,
+                                                  (uint32_t) w[i], (uint32_t) h[i], 2000 /* JPEG */);
+            if (p == NULL) rc = CAMERA_INVALID_ARGUMENT;
+            if (rc == CAMERA_OK && c->photo == NULL)
+                rc = CALL(CreatePhotoFn, "OH_CameraManager_CreatePhotoOutput", g.manager, p, id, &c->photo);
+            if (rc == CAMERA_OK) rc = CALL(SessionPhotoFn, "OH_CaptureSession_AddPhotoOutput", c->session, c->photo);
+        } else {
+            const Camera_Profile *p = profile_for(c->capability->previewProfiles, c->capability->previewProfilesSize,
+                                                  (uint32_t) w[i], (uint32_t) h[i], 1003 /* YUV_420_SP */);
+            Camera_PreviewOutput *out = NULL;
+            if (p == NULL) rc = CAMERA_INVALID_ARGUMENT;
+            if (rc == CAMERA_OK) rc = CALL(CreatePreviewFn, "OH_CameraManager_CreatePreviewOutput", g.manager, p, id, &out);
+            if (rc == CAMERA_OK) {
+                c->previews[c->previewCount++] = out;
+                rc = CALL(SessionPreviewFn, "OH_CaptureSession_AddPreviewOutput", c->session, out);
+            }
+        }
+        fprintf(stderr, "[WL-CAMERA] output %d: %s %dx%d -> %d\n", (int) i, kind[i] == 1 ? "jpeg" : "preview",
+                (int) w[i], (int) h[i], (int) rc);
+        if (surface != NULL) (*env)->DeleteLocalRef(env, surface);
+    }
+    if (rc == CAMERA_OK) rc = CALL(SessionFn, "OH_CaptureSession_CommitConfig", c->session);
+    if (kind) (*env)->ReleaseIntArrayElements(env, kinds, kind, JNI_ABORT);
+    if (w) (*env)->ReleaseIntArrayElements(env, widths, w, JNI_ABORT);
+    if (h) (*env)->ReleaseIntArrayElements(env, heights, h, JNI_ABORT);
+    if (rc != CAMERA_OK) release_outputs(c);
+    return (jint) rc;
+}
+
+static jint CameraDevice_start(JNIEnv *env, jclass clazz, jlong handle)
+{
+    (void) env; (void) clazz;
+    wl_camera *c = (wl_camera *) (intptr_t) handle;
+    if (c == NULL || c->session == NULL) return CAMERA_INVALID_ARGUMENT;
+    if (c->started) return CAMERA_OK;
+    Camera_ErrorCode rc = CALL(SessionFn, "OH_CaptureSession_Start", c->session);
+    c->started = rc == CAMERA_OK;
+    return (jint) rc;
+}
+
+static jint CameraDevice_stop(JNIEnv *env, jclass clazz, jlong handle)
+{
+    (void) env; (void) clazz;
+    wl_camera *c = (wl_camera *) (intptr_t) handle;
+    if (c == NULL || c->session == NULL || !c->started) return CAMERA_OK;
+    c->started = 0;
+    return (jint) CALL(SessionFn, "OH_CaptureSession_Stop", c->session);
+}
+
+static jint CameraDevice_capture(JNIEnv *env, jclass clazz, jlong handle)
+{
+    (void) env; (void) clazz;
+    wl_camera *c = (wl_camera *) (intptr_t) handle;
+    if (c == NULL || c->photo == NULL) return CAMERA_INVALID_ARGUMENT;
+    if (!c->started) {
+        Camera_ErrorCode rc = CALL(SessionFn, "OH_CaptureSession_Start", c->session);
+        if (rc != CAMERA_OK) return (jint) rc;
+        c->started = 1;
+    }
+    return (jint) CALL(PhotoFn, "OH_PhotoOutput_Capture", c->photo);
+}
+
+static void CameraDevice_close(JNIEnv *env, jclass clazz, jlong handle)
+{
+    (void) env; (void) clazz;
+    wl_camera *c = (wl_camera *) (intptr_t) handle;
+    if (c == NULL) return;
+    release_outputs(c);
+    if (c->input != NULL) {
+        CALL(InputFn, "OH_CameraInput_Close", c->input);
+        CALL(InputFn, "OH_CameraInput_Release", c->input);
+    }
+    if (c->capability != NULL && g.deleteCapability != NULL) g.deleteCapability(g.manager, c->capability);
+    if (c->cameras != NULL && g.deleteCameras != NULL) g.deleteCameras(g.manager, c->cameras, c->count);
+    free(c);
+}
+
+static const JNINativeMethod kCameraDeviceMethods[] = {
+    {"nativeOpen", "(Ljava/lang/String;)J", (void *) CameraDevice_open},
+    {"nativeConfigure", "(J[Landroid/view/Surface;[I[I[I)I", (void *) CameraDevice_configure},
+    {"nativeStart", "(J)I", (void *) CameraDevice_start},
+    {"nativeStop", "(J)I", (void *) CameraDevice_stop},
+    {"nativeCapture", "(J)I", (void *) CameraDevice_capture},
+    {"nativeClose", "(J)V", (void *) CameraDevice_close},
+};
+
+/* ---- android.hardware.camera2.utils.SurfaceUtils: what an OutputConfiguration asks of an app's Surface ------- */
+
+typedef int32_t (*WindowIntFn)(void *);
+
+static int32_t window_query(JNIEnv *env, jobject surface, const char *name)
+{
+    void *anw = NULL;
+    typedef void *(*FromSurface)(JNIEnv *, jobject);
+    FromSurface fromSurface = (FromSurface) dlsym(RTLD_DEFAULT, "ANativeWindow_fromSurface");
+    WindowIntFn query = (WindowIntFn) dlsym(RTLD_DEFAULT, name);
+    anw = fromSurface != NULL && surface != NULL ? fromSurface(env, surface) : NULL;
+    int32_t value = anw != NULL && query != NULL ? query(anw) : -1;
+    releaseWindow(anw);
+    return value;
+}
+
+/* The Surface's pixel format; a window that does not say is a consumer of implementation-defined buffers
+ * (HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED), as a SurfaceView or SurfaceTexture is. */
+static jint SurfaceUtils_detectType(JNIEnv *env, jclass clazz, jobject surface)
+{
+    (void) clazz;
+    int32_t format = window_query(env, surface, "ANativeWindow_getFormat");
+    return format > 0 ? format : 0x22;
+}
+
+static jint SurfaceUtils_detectDataspace(JNIEnv *env, jclass clazz, jobject surface)
+{
+    (void) env; (void) clazz; (void) surface;
+    return 0;   /* HAL_DATASPACE_UNKNOWN */
+}
+
+static jlong SurfaceUtils_detectUsageFlags(JNIEnv *env, jclass clazz, jobject surface)
+{
+    (void) env; (void) clazz; (void) surface;
+    return 0x100;   /* GRALLOC_USAGE_HW_TEXTURE: a preview consumer */
+}
+
+static jint SurfaceUtils_detectDimens(JNIEnv *env, jclass clazz, jobject surface, jintArray dimens)
+{
+    (void) clazz;
+    jint d[2] = {window_query(env, surface, "ANativeWindow_getWidth"), window_query(env, surface, "ANativeWindow_getHeight")};
+    if (d[0] <= 0 || d[1] <= 0) return -19;   /* NO_INIT */
+    (*env)->SetIntArrayRegion(env, dimens, 0, 2, d);
+    return 0;
+}
+
+static jlong SurfaceUtils_getSurfaceId(JNIEnv *env, jclass clazz, jobject surface)
+{
+    (void) clazz;
+    char id[32];
+    return surface_id(env, surface, id, sizeof(id)) ? (jlong) strtoull(id, NULL, 10) : 0;
+}
+
+static const JNINativeMethod kSurfaceUtilsMethods[] = {
+    {"nativeDetectSurfaceType", "(Landroid/view/Surface;)I", (void *) SurfaceUtils_detectType},
+    {"nativeDetectSurfaceDataspace", "(Landroid/view/Surface;)I", (void *) SurfaceUtils_detectDataspace},
+    {"nativeDetectSurfaceUsageFlags", "(Landroid/view/Surface;)J", (void *) SurfaceUtils_detectUsageFlags},
+    {"nativeDetectSurfaceDimens", "(Landroid/view/Surface;[I)I", (void *) SurfaceUtils_detectDimens},
+    {"nativeGetSurfaceId", "(Landroid/view/Surface;)J", (void *) SurfaceUtils_getSurfaceId},
+};
+
+static int bind_all(JNIEnv *env, const char *name, const JNINativeMethod *methods, size_t n)
+{
+    jclass clazz = (*env)->FindClass(env, name);
+    if (clazz == NULL) {
+        (*env)->ExceptionClear(env);
+        return 0;
+    }
+    int bound = 0;
+    for (size_t i = 0; i < n; i++) {
+        if ((*env)->RegisterNatives(env, clazz, &methods[i], 1) == JNI_OK) bound++;
+        else (*env)->ExceptionClear(env);
+    }
+    (*env)->DeleteLocalRef(env, clazz);
+    return bound;
+}
+
 static const JNINativeMethod kCameraMethods[] = {
     {"nativeCameraList", "()Ljava/lang/String;", (void *) Camera_list},
 };
@@ -157,5 +486,10 @@ int wl_register_oh_cameras(JNIEnv *env)
     int bound = (*env)->RegisterNatives(env, clazz, kCameraMethods, 1) == JNI_OK;
     if (!bound) (*env)->ExceptionClear(env);
     (*env)->DeleteLocalRef(env, clazz);
+    int device = bind_all(env, "adapter/core/OhCameraDevice", kCameraDeviceMethods,
+                          sizeof(kCameraDeviceMethods) / sizeof(kCameraDeviceMethods[0]));
+    int utils = bind_all(env, "android/hardware/camera2/utils/SurfaceUtils", kSurfaceUtilsMethods,
+                         sizeof(kSurfaceUtilsMethods) / sizeof(kSurfaceUtilsMethods[0]));
+    fprintf(stderr, "[WL-NATIVES] camera: service %d/1 device %d/6 SurfaceUtils %d/5\n", bound, device, utils);
     return bound;
 }
