@@ -29,7 +29,7 @@ import java.util.List;
  * sensor, no flash, fixed focus). connectDevice opens the OH camera (OhCameraDevice); Camera1's connect answers
  * ERROR_DISCONNECTED, as for a camera that went away.
  */
-final class OhCameraService {
+public final class OhCameraService {
     private OhCameraService() {}
 
     private static native String nativeCameraList();
@@ -103,6 +103,24 @@ final class OhCameraService {
             Size s = new Size(parse(q[1]), parse(q[2]));
             if (s.getWidth() > 0 && s.getHeight() > 0 && !into.contains(s)) into.add(s);
         }
+    }
+
+    /**
+     * The camera features this device has, as PackageManager reports them: android.hardware.camera for a back camera,
+     * camera.front for a front one, camera.any for either, from the cameras the service lists (so the two always
+     * agree: CameraX compares them). No autofocus, flash or manual sensor: the LEGACY description says none.
+     */
+    public static synchronized List<String> claimedFeatures() {
+        List<String> features = new ArrayList<>();
+        boolean back = false, front = false;
+        for (Camera c : cameras()) {
+            if (c.position == 2) front = true;
+            else back = true;
+        }
+        if (back) features.add("android.hardware.camera");
+        if (front) features.add("android.hardware.camera.front");
+        if (back || front) features.add("android.hardware.camera.any");
+        return features;
     }
 
     static Camera camera(String id) {
