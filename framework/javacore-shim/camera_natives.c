@@ -456,6 +456,118 @@ static const JNINativeMethod kSurfaceUtilsMethods[] = {
     {"nativeGetSurfaceId", "(Landroid/view/Surface;)J", (void *) SurfaceUtils_getSurfaceId},
 };
 
+/* ---- android.hardware.Camera (Camera1): its natives forwarded to adapter.core.OhCamera1 ----------------------- */
+
+static jclass gCamera1;   /* global ref to adapter.core.OhCamera1 */
+
+static jmethodID camera1_method(JNIEnv *env, const char *name, const char *signature)
+{
+    if (gCamera1 == NULL) return NULL;
+    jmethodID m = (*env)->GetStaticMethodID(env, gCamera1, name, signature);
+    if (m == NULL) {
+        (*env)->ExceptionClear(env);
+        fprintf(stderr, "[WL-CAMERA] OhCamera1.%s%s missing\n", name, signature);
+    }
+    return m;
+}
+
+#define CAMERA1_VOID(name, sig, ...) do { jmethodID m_ = camera1_method(env, name, sig); \
+    if (m_ != NULL) (*env)->CallStaticVoidMethod(env, gCamera1, m_, __VA_ARGS__); } while (0)
+
+static jint Camera1_count(JNIEnv *env, jclass clazz, jint deviceId, jint policy)
+{
+    (void) clazz; (void) deviceId; (void) policy;
+    jmethodID m = camera1_method(env, "getNumberOfCameras", "()I");
+    return m != NULL ? (*env)->CallStaticIntMethod(env, gCamera1, m) : 0;
+}
+
+static void Camera1_info(JNIEnv *env, jclass clazz, jint id, jint rotation, jint slow, jint policy, jobject info)
+{
+    (void) clazz; (void) rotation; (void) slow; (void) policy;
+    CAMERA1_VOID("getCameraInfo", "(ILandroid/hardware/Camera$CameraInfo;)V", id, info);
+}
+
+static jint Camera1_setup(JNIEnv *env, jobject thiz, jobject cameraRef, jint id, jstring package, jint rotation,
+                          jboolean slow, jint client, jint policy)
+{
+    (void) package; (void) rotation; (void) slow; (void) client; (void) policy;
+    jmethodID m = camera1_method(env, "setup", "(Ljava/lang/Object;Ljava/lang/Object;I)I");
+    return m != NULL ? (*env)->CallStaticIntMethod(env, gCamera1, m, thiz, cameraRef, id) : -13;
+}
+
+static void Camera1_release(JNIEnv *env, jobject thiz) { CAMERA1_VOID("release", "(Ljava/lang/Object;)V", thiz); }
+static void Camera1_setPreviewSurface(JNIEnv *env, jobject thiz, jobject surface)
+{
+    CAMERA1_VOID("setPreviewSurface", "(Ljava/lang/Object;Landroid/view/Surface;)V", thiz, surface);
+}
+static void Camera1_setPreviewTexture(JNIEnv *env, jobject thiz, jobject texture)
+{
+    CAMERA1_VOID("setPreviewTexture", "(Ljava/lang/Object;Landroid/graphics/SurfaceTexture;)V", thiz, texture);
+}
+static void Camera1_startPreview(JNIEnv *env, jobject thiz) { CAMERA1_VOID("startPreview", "(Ljava/lang/Object;)V", thiz); }
+static void Camera1_stopPreview(JNIEnv *env, jobject thiz) { CAMERA1_VOID("stopPreview", "(Ljava/lang/Object;)V", thiz); }
+static jboolean Camera1_previewEnabled(JNIEnv *env, jobject thiz)
+{
+    jmethodID m = camera1_method(env, "previewEnabled", "(Ljava/lang/Object;)Z");
+    return m != NULL ? (*env)->CallStaticBooleanMethod(env, gCamera1, m, thiz) : JNI_FALSE;
+}
+static void Camera1_autoFocus(JNIEnv *env, jobject thiz) { CAMERA1_VOID("autoFocus", "(Ljava/lang/Object;)V", thiz); }
+static void Camera1_takePicture(JNIEnv *env, jobject thiz, jint msgType)
+{
+    CAMERA1_VOID("takePicture", "(Ljava/lang/Object;I)V", thiz, msgType);
+}
+static void Camera1_setParameters(JNIEnv *env, jobject thiz, jstring params)
+{
+    CAMERA1_VOID("setParameters", "(Ljava/lang/Object;Ljava/lang/String;)V", thiz, params);
+}
+static jstring Camera1_getParameters(JNIEnv *env, jobject thiz)
+{
+    jmethodID m = camera1_method(env, "getParameters", "(Ljava/lang/Object;)Ljava/lang/String;");
+    return m != NULL ? (jstring) (*env)->CallStaticObjectMethod(env, gCamera1, m, thiz) : NULL;
+}
+
+/* What a camera without these features answers: no preview callbacks, zoom, face detection or audio restriction;
+ * the lock, unlock and reconnect a single client never needs; the shutter sound can be disabled. */
+static void Camera1_noop(JNIEnv *env, jobject thiz) { (void) env; (void) thiz; }
+static void Camera1_noopI(JNIEnv *env, jobject thiz, jint v) { (void) env; (void) thiz; (void) v; }
+static void Camera1_noopZZ(JNIEnv *env, jobject thiz, jboolean a, jboolean b) { (void) env; (void) thiz; (void) a; (void) b; }
+static void Camera1_noopBufI(JNIEnv *env, jobject thiz, jbyteArray b, jint m) { (void) env; (void) thiz; (void) b; (void) m; }
+static void Camera1_noopSurface(JNIEnv *env, jobject thiz, jobject s) { (void) env; (void) thiz; (void) s; }
+static jboolean Camera1_shutterSound(JNIEnv *env, jobject thiz, jboolean enabled) { (void) env; (void) thiz; (void) enabled; return JNI_TRUE; }
+static jint Camera1_audioRestriction(JNIEnv *env, jobject thiz) { (void) env; (void) thiz; return 0; }
+
+static const JNINativeMethod kCamera1Methods[] = {
+    {"_getNumberOfCameras", "(II)I", (void *) Camera1_count},
+    {"_getCameraInfo", "(IIIILandroid/hardware/Camera$CameraInfo;)V", (void *) Camera1_info},
+    {"native_setup", "(Ljava/lang/Object;ILjava/lang/String;IZII)I", (void *) Camera1_setup},
+    {"native_release", "()V", (void *) Camera1_release},
+    {"setPreviewSurface", "(Landroid/view/Surface;)V", (void *) Camera1_setPreviewSurface},
+    {"setPreviewTexture", "(Landroid/graphics/SurfaceTexture;)V", (void *) Camera1_setPreviewTexture},
+    {"startPreview", "()V", (void *) Camera1_startPreview},
+    {"_stopPreview", "()V", (void *) Camera1_stopPreview},
+    {"previewEnabled", "()Z", (void *) Camera1_previewEnabled},
+    {"native_autoFocus", "()V", (void *) Camera1_autoFocus},
+    {"native_cancelAutoFocus", "()V", (void *) Camera1_noop},
+    {"native_takePicture", "(I)V", (void *) Camera1_takePicture},
+    {"native_setParameters", "(Ljava/lang/String;)V", (void *) Camera1_setParameters},
+    {"native_getParameters", "()Ljava/lang/String;", (void *) Camera1_getParameters},
+    {"setHasPreviewCallback", "(ZZ)V", (void *) Camera1_noopZZ},
+    {"_addCallbackBuffer", "([BI)V", (void *) Camera1_noopBufI},
+    {"setPreviewCallbackSurface", "(Landroid/view/Surface;)V", (void *) Camera1_noopSurface},
+    {"unlock", "()V", (void *) Camera1_noop},
+    {"lock", "()V", (void *) Camera1_noop},
+    {"reconnect", "()V", (void *) Camera1_noop},
+    {"startSmoothZoom", "(I)V", (void *) Camera1_noopI},
+    {"stopSmoothZoom", "()V", (void *) Camera1_noop},
+    {"setDisplayOrientation", "(I)V", (void *) Camera1_noopI},
+    {"_enableShutterSound", "(Z)Z", (void *) Camera1_shutterSound},
+    {"enableFocusMoveCallback", "(I)V", (void *) Camera1_noopI},
+    {"_startFaceDetection", "(I)V", (void *) Camera1_noopI},
+    {"_stopFaceDetection", "()V", (void *) Camera1_noop},
+    {"setAudioRestriction", "(I)V", (void *) Camera1_noopI},
+    {"getAudioRestriction", "()I", (void *) Camera1_audioRestriction},
+};
+
 static int bind_all(JNIEnv *env, const char *name, const JNINativeMethod *methods, size_t n)
 {
     jclass clazz = (*env)->FindClass(env, name);
@@ -490,6 +602,17 @@ int wl_register_oh_cameras(JNIEnv *env)
                           sizeof(kCameraDeviceMethods) / sizeof(kCameraDeviceMethods[0]));
     int utils = bind_all(env, "android/hardware/camera2/utils/SurfaceUtils", kSurfaceUtilsMethods,
                          sizeof(kSurfaceUtilsMethods) / sizeof(kSurfaceUtilsMethods[0]));
-    fprintf(stderr, "[WL-NATIVES] camera: service %d/1 device %d/6 SurfaceUtils %d/5\n", bound, device, utils);
+    jclass helper = (*env)->FindClass(env, "adapter/core/OhCamera1");
+    int camera1 = 0;
+    if (helper != NULL) {
+        gCamera1 = (jclass) (*env)->NewGlobalRef(env, helper);
+        (*env)->DeleteLocalRef(env, helper);
+        camera1 = bind_all(env, "android/hardware/Camera", kCamera1Methods,
+                           sizeof(kCamera1Methods) / sizeof(kCamera1Methods[0]));
+    } else {
+        (*env)->ExceptionClear(env);
+    }
+    fprintf(stderr, "[WL-NATIVES] camera: service %d/1 device %d/6 SurfaceUtils %d/5 Camera1 %d/%zu\n", bound, device,
+            utils, camera1, sizeof(kCamera1Methods) / sizeof(kCamera1Methods[0]));
     return bound;
 }

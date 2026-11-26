@@ -41,12 +41,12 @@ import java.util.Map;
  * settled. OH gives no per-frame metadata through its NDK.
  */
 final class OhCameraDevice {
-    private static native long nativeOpen(String ohId);
-    private static native int nativeConfigure(long handle, Surface[] surfaces, int[] kinds, int[] widths, int[] heights);
-    private static native int nativeStart(long handle);
-    private static native int nativeStop(long handle);
-    private static native int nativeCapture(long handle);
-    private static native void nativeClose(long handle);
+    static native long nativeOpen(String ohId);
+    static native int nativeConfigure(long handle, Surface[] surfaces, int[] kinds, int[] widths, int[] heights);
+    static native int nativeStart(long handle);
+    static native int nativeStop(long handle);
+    static native int nativeCapture(long handle);
+    static native void nativeClose(long handle);
 
     private static final int HAL_BLOB = 0x21;
     private static final long FRAME_MS = 33;
