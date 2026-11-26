@@ -1260,6 +1260,12 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         CLAIMED_FEATURES.put("android.hardware.faketouch", 0);
         CLAIMED_FEATURES.put("android.hardware.microphone", 0);
         CLAIMED_FEATURES.put("android.hardware.wifi", 0);
+        // Bluetooth as on a phone whose user has it off: LocalServiceBinders' bluetooth_manager gives apps an adapter
+        // in STATE_OFF that refuses enable(). Unclaimed, Play hid every app that asks for Bluetooth ("This app won't
+        // work for your device": Telegram, Kwai, DiDi among the HK top apps), and Android has no such device: a phone
+        // without the feature has no adapter at all, while Westlake's apps get one.
+        CLAIMED_FEATURES.put("android.hardware.bluetooth", 0);
+        CLAIMED_FEATURES.put("android.hardware.bluetooth_le", 0);
         CLAIMED_FEATURES.put("android.hardware.screen.portrait", 0);
         CLAIMED_FEATURES.put("android.hardware.screen.landscape", 0);
         CLAIMED_FEATURES.put("android.hardware.vulkan.version", VULKAN_API_VERSION);
