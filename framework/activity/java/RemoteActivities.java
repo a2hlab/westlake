@@ -175,7 +175,7 @@ public final class RemoteActivities {
         List<ResolveInfo> matches = resolveHere(intent, intent.getType(), PackageManager.MATCH_DEFAULT_ONLY, sameApp);
         if (matches.isEmpty()) throw new SecurityException("activity is not an enabled exported target");
         ActivityInfo info = matches.get(0).activityInfo;
-        if (!AppProcesses.runsHere(AppProcesses.processOf(info)))
+        if (!AppProcesses.runsHere(AppProcesses.activityProcessOf(info)))
             throw new SecurityException("activity sent to the wrong process");
         Intent launch = new Intent(intent);
         launch.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());

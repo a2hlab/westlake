@@ -52,7 +52,7 @@ final class PendingActivityLaunch {
                 throw new SecurityException("pending activity leaves creator namespace");
             intent.setComponent(new ComponentName(info.packageName, info.name));
             IBinder launched;
-            if (AppProcesses.runsHere(AppProcesses.processOf(info))) {
+            if (AppProcesses.runsHere(AppProcesses.activityProcessOf(info))) {
                 launched = RemoteActivities.launchVerified(intent, caller, wantsResult, relay,
                         origin, pid, spawner, uid, true);
             } else {
