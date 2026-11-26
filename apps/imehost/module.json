@@ -7,7 +7,7 @@
     "minAPIVersion": 20,
     "targetAPIVersion": 20,
     "vendor": "westlake",
-    "versionCode": 5,
+    "versionCode": 6,
     "versionName": "1.0.0"
   },
   "module": {
@@ -36,6 +36,8 @@
       {"name": "ohos.permission.GET_NETWORK_INFO"},
       {"name": "ohos.permission.MICROPHONE", "reason": "$string:microphone_reason",
        "usedScene": {"abilities": ["EntryAbility"], "when": "always"}},
+      {"name": "ohos.permission.CAMERA", "reason": "$string:camera_reason",
+       "usedScene": {"abilities": ["EntryAbility"], "when": "inuse"}},
       {"name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:location_reason",
        "usedScene": {"abilities": ["EntryAbility"], "when": "inuse"}},
       {"name": "ohos.permission.LOCATION", "reason": "$string:location_reason",
