@@ -138,6 +138,18 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
     // Category 1: Activity Start (-> OH IAbilityManager)
     // ====================================================================
 
+    /** Starts of the app's own activities that startActivity handed to the main looper and that have not run yet. */
+    private static final java.util.concurrent.atomic.AtomicInteger sQueuedOwnStarts =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /**
+     * ADR-0008: whether a start of one of the app's own activities waits on the main looper. Android adds a started
+     * activity to its task within startActivity; here it is created after the caller's current message.
+     */
+    static boolean ownStartQueued() {
+        return sQueuedOwnStarts.get() > 0;
+    }
+
     /** [BRIDGED] startActivity -> OH IAbilityManager.StartAbility / StartAbilityInMission */
     @Override
     public int startActivity(IApplicationThread caller, String callingPackage,
@@ -177,11 +189,14 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
             final Intent started = intent != null ? new Intent(intent) : null;
             final int startFlags = flags;
             final IBinder from = resultTo;
+            sQueuedOwnStarts.incrementAndGet();
             new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
                 try {
                     bridgeStartActivityWithStack(started, startFlags, from, request);
                 } catch (Throwable t) {
                     System.err.println("[ATMA] deferred startActivity failed: " + t);
+                } finally {
+                    sQueuedOwnStarts.decrementAndGet();
                 }
             });
             return ActivityManager.START_SUCCESS;
