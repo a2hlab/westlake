@@ -1095,9 +1095,35 @@ public final class PlayServicesChannel {
         }
     }
 
+    /**
+     * Whether this host answers Services Framework's settings table itself (LocalGservices). Not when the host is
+     * microG: its GServicesProvider keeps check-in's settings, the Android ID among them, and the Play Store reads
+     * them there (with LocalGservices it found none and Google answered its requests with 400).
+     */
+    private static boolean standsInForGservices(String authority) {
+        if (!isHost() || !LocalGservices.AUTHORITY.equals(authority)) return false;
+        Boolean own = sMicrogGservices;
+        if (own == null) {
+            own = false;
+            try {
+                android.content.pm.ProviderInfo info = application().getPackageManager()
+                        .resolveContentProvider(authority, 0);
+                own = info != null && application().getPackageName().equals(info.packageName)
+                        && info.name != null && info.name.startsWith("org.microg.");
+            } catch (RuntimeException e) {
+                System.err.println(TAG + "gservices provider lookup failed: " + e.getClass().getName());
+            }
+            sMicrogGservices = own;
+            if (own) System.err.println(TAG + "gservices: this host's own provider (microG) answers " + authority);
+        }
+        return !own;
+    }
+
+    private static volatile Boolean sMicrogGservices;
+
     /** getContentProvider for an authority in the other process, or null. */
     public static ContentProviderHolder provider(String authority) {
-        if (isHost() && LocalGservices.AUTHORITY.equals(authority)) return LocalGservices.holder();
+        if (standsInForGservices(authority)) return LocalGservices.holder();
         ContentProviderHolder routed = ownProcessProvider(authority);
         if (routed != null) return routed;
         if (serves()) {
@@ -1236,8 +1262,39 @@ public final class PlayServicesChannel {
     }
 
     /**
-     * A system service of the Play services process, for a client that is a host too: the Play Store's
-     * account manager is the one there (LocalServiceBinders asks for it by name). Null if unreachable.
+     * A service of this app's launched process, for another of its processes (ADR-0002). Play services' account
+     * manager is the launched process's: each process had its own, so an account its UI process added (add-account
+     * runs there) stayed unknown to the launched process, which answers the Play Store and other apps, until a
+     * restart. Null in the launched process, or if it cannot be reached.
+     */
+    public static IBinder homeService(String name) {
+        if (!AppProcesses.isSecondary()) return null;
+        Channel home = ownProcess(AppProcesses.home());
+        IBinder root = home == null ? null : root(home);
+        if (root == null) return null;
+        Parcel data = Parcel.obtain();
+        Parcel reply = Parcel.obtain();
+        try {
+            data.writeString(name);
+            root.transact(SERVICE, data, reply, 0);
+            reply.readException();
+            IBinder service = reply.readStrongBinder();
+            System.err.println(TAG + "service " + name + " from " + AppProcesses.home() + ": "
+                    + (service != null ? "connected" : "refused"));
+            return service;
+        } catch (RemoteException | RuntimeException e) {
+            System.err.println(TAG + "service " + name + " from " + AppProcesses.home() + " failed: " + e);
+            return null;
+        } finally {
+            data.recycle();
+            reply.recycle();
+        }
+    }
+
+    /**
+     * A system service of the Play services process, for its clients: the account manager there is every
+     * client's, the Play Store's included, once the host has verified who the client is (hostService;
+     * LocalServiceBinders asks for it by name). Null if unreachable or refused.
      */
     public static IBinder remoteService(String name) {
         IBinder root = root(SERVICES);
@@ -1715,6 +1772,7 @@ public final class PlayServicesChannel {
         try {
             int listener = SocketBinder.listen(name);
             System.err.println(TAG + "serving on " + name);
+            LocalGservices.watchChanges();
             while (true) {
                 int fd = SocketBinder.accept(listener);
                 Root root = new Root(SocketBinder.peerPid(fd));
@@ -1875,7 +1933,14 @@ public final class PlayServicesChannel {
                 case PACKAGE_INFO: {
                     String name = data.readString();
                     long packageFlags = data.readLong();
-                    reply.writeTypedObject(own(name) ? packages.getPackageInfo(name, packageFlags, user) : null, 0);
+                    PackageInfo answer = own(name) ? packages.getPackageInfo(name, packageFlags, user) : null;
+                    if (answer != null && (packageFlags & (PackageManager.GET_SIGNATURES
+                            | PackageManager.GET_SIGNING_CERTIFICATES)) != 0) {
+                        // microG's signature spoofing for the package this host is (user-approved 11-26)
+                        adapter.packagemanager.GuestPackages.fakeHostedSignature(packages.getPackageInfo(name,
+                                PackageManager.GET_PERMISSIONS | PackageManager.GET_META_DATA, user), answer);
+                    }
+                    reply.writeTypedObject(answer, 0);
                     return true;
                 }
                 case APPLICATION_INFO: {
@@ -1902,7 +1967,7 @@ public final class PlayServicesChannel {
                     String authority = data.readString();
                     long providerFlags = data.readLong();
                     // Services Framework's settings table, which this process keeps (LocalGservices).
-                    if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
+                    if (standsInForGservices(authority)) {
                         ContentProviderHolder holder = LocalGservices.holder();
                         reply.writeTypedObject(holder != null ? holder.info : null, 0);
                         return true;
@@ -1942,7 +2007,7 @@ public final class PlayServicesChannel {
                     return true;
                 }
                 case SERVICE: {
-                    reply.writeStrongBinder(hostService(data.readString()));
+                    reply.writeStrongBinder(hostService(data.readString(), mIdentityEnforced && mVerifiedInfo != null));
                     return true;
                 }
                 case ACTIVITY: {
@@ -2192,20 +2257,41 @@ public final class PlayServicesChannel {
     }
 
     /**
-     * A system service this process keeps, for a client that is a host too: the account manager, for
-     * the Play Store's process only. Other apps keep the plain answers, as an app without visibility of
-     * Google accounts sees on Android, and the account's secrets stay behind the same-certificate check
-     * (LocalAccounts) whoever holds the binder. Each channel's package is what the client says it is,
-     * so this protects nothing until appspawn-x creates the channels (ADR-0001).
+     * A system service this process keeps for its clients: the account manager, as Android's one
+     * AccountManagerService answers every app. LocalAccounts answers each call for the calling uid, with
+     * Android's account visibility, and keeps an account's secrets behind the same-certificate check, so
+     * a client gets this binder only when its uid is its own: when its spawner vouched for the package
+     * on this channel (WESTLAKE_CHANNEL_IDENTITY=enforce). The Play Store's process gets it either way,
+     * as before. Any other client keeps the plain answers (no accounts).
      */
-    private static IBinder hostService(String name) {
+    private static IBinder hostService(String name, boolean verified) {
         if (!isHost() || !"account".equals(name)) return null;
+        // This app's other processes (ADR-0002): one account manager per app, as Android's one system service.
+        if (Binder.getCallingUid() == Process.myUid() && !AppProcesses.isSecondary()) {
+            return android.os.ServiceManager.getService(name);
+        }
         String[] callers = application().getPackageManager().getPackagesForUid(Binder.getCallingUid());
-        if (callers == null || !Arrays.asList(callers).contains(PLAY_STORE)) {
-            System.err.println(TAG + "service " + name + " refused to uid " + Binder.getCallingUid());
+        boolean store = callers != null && Arrays.asList(callers).contains(PLAY_STORE);
+        if (!store && !verified) {
+            System.err.println(TAG + "service " + name + " refused to uid " + Binder.getCallingUid()
+                    + ": its identity is not verified");
             return null;
         }
         return android.os.ServiceManager.getService(name);
+    }
+
+    /**
+     * In the host, hands a broadcast to the app it names while that app is connected, and drops it otherwise: a
+     * notice for the app's registered receivers only (an account listener's ACTION_VISIBLE_ACCOUNTS_CHANGED),
+     * for which no app is started (deliverToClient would hold it and ask for one). False if not delivered.
+     */
+    public static boolean deliverToLiveClient(Intent intent) {
+        if (!isHost() || intent == null) return false;
+        String target = targetPackage(intent);
+        if (target == null || RemotePackages.uidOf(target) < 0) return false;
+        IBinder callback = sClientCallbacks.get(target);
+        return callback != null && callback.isBinderAlive()
+                && send(target, callback, new Held(new Intent(intent), null, null, 0, null, null, false));
     }
 
     /** The calling app as the APIs Play services uses describe it. */
@@ -2344,7 +2430,7 @@ public final class PlayServicesChannel {
     private static final java.util.Set<String> UNEXPORTED_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private static IBinder localProvider(String authority) throws RemoteException {
-        if (isHost() && LocalGservices.AUTHORITY.equals(authority)) {
+        if (standsInForGservices(authority)) {
             ContentProviderHolder holder = LocalGservices.holder();
             return holder != null && holder.provider != null ? holder.provider.asBinder() : null;
         }

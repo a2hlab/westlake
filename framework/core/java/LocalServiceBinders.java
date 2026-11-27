@@ -248,18 +248,35 @@ public final class LocalServiceBinders {
 
     /**
      * The account service. In the Play services host, LocalAccounts as a real IAccountManager.Stub, which
-     * answers other processes too. In the Play Store host, that Stub through its channel: on Android the
-     * Play Store's account manager is the system's, which holds the Google account. Elsewhere, the plain
-     * answers: no accounts.
+     * answers other processes too. In the Play Store host and in every app connected to Play services, that
+     * Stub through its channel: on Android every app's account manager is the system's, which holds the
+     * Google account and answers each app with the accounts visible to it. The host hands it to an app whose
+     * identity it verified (PlayServicesChannel.hostService). Elsewhere, the plain answers: no accounts.
      */
     private static IBinder accountService() throws ClassNotFoundException {
         if (GoogleAuthProxy.client()) return new AccountManagerStub();
-        if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) return new AccountManagerStub();
-        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null) {
+        if (System.getenv("WESTLAKE_PLAY_SERVICES_SERVE") != null) {
+            // One account manager per app: Play services' other processes use its launched process's.
+            IBinder home = playServicesOwnService("homeService", "account");
+            return home != null ? home : new AccountManagerStub();
+        }
+        if (System.getenv("WESTLAKE_PLAY_STORE_SERVE") != null
+                || System.getenv("WESTLAKE_PLAY_SERVICES_CONNECT") != null) {
             IBinder remote = playServicesHostService("account");
             if (remote != null) return remote;
         }
         return proxy("account", "android.accounts.IAccountManager", (method, args) -> DEFAULT);
+    }
+
+    /** PlayServicesChannel.homeService: the launched process's service, in another process of the same app. */
+    private static IBinder playServicesOwnService(String method, String name) {
+        try {
+            return (IBinder) Class.forName("adapter.activity.PlayServicesChannel")
+                    .getMethod(method, String.class).invoke(null, name);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            System.err.println("[" + TAG + "] " + name + " from the launched process unavailable: " + e);
+            return null;
+        }
     }
 
     /** A service of the Play services host, for a process that is its client (PlayServicesChannel). */
