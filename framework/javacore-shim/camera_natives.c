@@ -419,16 +419,42 @@ static jint CameraDevice_configure(JNIEnv *env, jclass clazz, jlong handle, jobj
     (void) clazz;
     wl_camera *c = (wl_camera *) (intptr_t) handle;
     if (c == NULL) return CAMERA_INVALID_ARGUMENT;
-    release_outputs(c);
     jsize n = surfaces ? (*env)->GetArrayLength(env, surfaces) : 0;
     if (n > WL_MAX_OUTPUTS) n = WL_MAX_OUTPUTS;
     jint *kind = n ? (*env)->GetIntArrayElements(env, kinds, NULL) : NULL;
     jint *w = n ? (*env)->GetIntArrayElements(env, widths, NULL) : NULL;
     jint *h = n ? (*env)->GetIntArrayElements(env, heights, NULL) : NULL;
-    Camera_ErrorCode rc = CALL(CreateSessionFn, "OH_CameraManager_CreateCaptureSession", g.manager, &c->session);
-    if (rc == CAMERA_OK) CALL(SessionModeFn, "OH_CaptureSession_SetSessionMode", c->session, NORMAL_PHOTO);
-    if (rc == CAMERA_OK) rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
-    if (rc == CAMERA_OK) rc = CALL(SessionInputFn, "OH_CaptureSession_AddInput", c->session, c->input);
+    Camera_ErrorCode rc = CAMERA_OK;
+    if (c->session != NULL) {
+        /* A configured session is configured again, as OH's camera guide does it: stopped, its outputs removed and
+         * released, the input kept. A second session for the same surfaces and input failed OH's CommitConfig
+         * (7400201) while the first still held them (Open Camera restarting its preview after a picture). */
+        typedef Camera_ErrorCode (*RemovePreviewFn)(Camera_CaptureSession *, Camera_PreviewOutput *);
+        typedef Camera_ErrorCode (*RemovePhotoFn)(Camera_CaptureSession *, Camera_PhotoOutput *);
+        if (c->started) CALL(SessionFn, "OH_CaptureSession_Stop", c->session);
+        c->started = 0;
+        rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
+        for (int i = 0; i < c->previewCount; i++) {
+            if (rc == CAMERA_OK) CALL(RemovePreviewFn, "OH_CaptureSession_RemovePreviewOutput", c->session, c->previews[i]);
+            CALL(PreviewFn, "OH_PreviewOutput_Release", c->previews[i]);
+        }
+        c->previewCount = 0;
+        if (c->photo != NULL) {
+            if (rc == CAMERA_OK) CALL(RemovePhotoFn, "OH_CaptureSession_RemovePhotoOutput", c->session, c->photo);
+            CALL(PhotoFn, "OH_PhotoOutput_Release", c->photo);
+            c->photo = NULL;
+        }
+        if (rc != CAMERA_OK) {   /* the session would not reconfigure: a new one */
+            release_outputs(c);
+            rc = CAMERA_OK;
+        }
+    }
+    if (c->session == NULL) {
+        rc = CALL(CreateSessionFn, "OH_CameraManager_CreateCaptureSession", g.manager, &c->session);
+        if (rc == CAMERA_OK) CALL(SessionModeFn, "OH_CaptureSession_SetSessionMode", c->session, NORMAL_PHOTO);
+        if (rc == CAMERA_OK) rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
+        if (rc == CAMERA_OK) rc = CALL(SessionInputFn, "OH_CaptureSession_AddInput", c->session, c->input);
+    }
     for (jsize i = 0; rc == CAMERA_OK && i < n; i++) {
         jobject surface = (*env)->GetObjectArrayElement(env, surfaces, i);
         char id[32];
