@@ -164,6 +164,7 @@ typedef struct {
     Camera_PreviewOutput *previews[WL_MAX_OUTPUTS];
     int previewCount;
     Camera_PhotoOutput *photo;
+    void *jpegWindow;                /* the JPEG stream's ImageReader window: photos go there */
     int started;
 } wl_camera;
 
@@ -205,6 +206,9 @@ static void *ohWindowOf(JNIEnv *env, jobject surface, void **anw)
     return *anw != NULL && unwrap != NULL ? unwrap(*anw) : NULL;
 }
 
+int wl_imagereader_format_of(void *window);   /* imagereader_natives.c */
+int wl_imagereader_push_blob(void *window, const void *data, size_t length);
+
 static void releaseWindow(void *anw)
 {
     typedef void (*Release)(void *);
@@ -230,6 +234,99 @@ static int surface_id(JNIEnv *env, jobject surface, char *out, size_t size)
     return ok;
 }
 
+/* The format of the ImageReader behind a Java Surface, or -1 when it is no reader's (a SurfaceView, a texture). */
+static int reader_format(JNIEnv *env, jobject surface)
+{
+    void *anw = NULL;
+    void *window = ohWindowOf(env, surface, &anw);
+    int format = wl_imagereader_format_of(window);
+    if (format < 0 && anw != NULL) format = wl_imagereader_format_of(anw);
+    releaseWindow(anw);
+    return format;
+}
+
+/* The ImageReader window behind a Java Surface (the pointer imagereader_natives.c registered), or NULL. */
+static void *reader_window(JNIEnv *env, jobject surface)
+{
+    void *anw = NULL;
+    void *window = ohWindowOf(env, surface, &anw);
+    void *found = wl_imagereader_format_of(window) >= 0 ? window : wl_imagereader_format_of(anw) >= 0 ? anw : NULL;
+    releaseWindow(anw);
+    return found;
+}
+
+/*
+ * Photos. OH's photo output takes only an OH image-receiver surface ("Failed to get photoOutput surface" for an
+ * ImageReader's), so the output has no surface, and each photo OH delivers (its main image: the JPEG) is handed to
+ * the JPEG stream's ImageReader as one image of its bytes (wl_imagereader_push_blob).
+ */
+typedef struct OH_PhotoNative OH_PhotoNative;
+typedef struct OH_ImageNative OH_ImageNative;
+typedef struct OH_NativeBuffer OH_NativeBuffer;
+typedef void (*PhotoAvailableFn)(Camera_PhotoOutput *, OH_PhotoNative *);
+
+#define WL_MAX_CAMERAS 4
+static wl_camera *gOpen[WL_MAX_CAMERAS];
+
+static void *lib_sym(const char *lib, const char *name)
+{
+    void *f = dlsym(RTLD_DEFAULT, name);
+    if (f == NULL) {
+        void *h = dlopen(lib, RTLD_NOW);
+        if (h != NULL) f = dlsym(h, name);
+    }
+    if (f == NULL) fprintf(stderr, "[WL-CAMERA] %s lacks %s\n", lib, name);
+    return f;
+}
+
+static void on_photo(Camera_PhotoOutput *output, OH_PhotoNative *photo)
+{
+    typedef Camera_ErrorCode (*MainImageFn)(OH_PhotoNative *, OH_ImageNative **);
+    typedef Camera_ErrorCode (*PhotoReleaseFn)(OH_PhotoNative *);
+    typedef int32_t (*TypesFn)(OH_ImageNative *, uint32_t **, size_t *);
+    typedef int32_t (*ByteBufferFn)(OH_ImageNative *, uint32_t, OH_NativeBuffer **);
+    typedef int32_t (*BufferSizeFn)(OH_ImageNative *, uint32_t, size_t *);
+    typedef int32_t (*MapFn)(OH_NativeBuffer *, void **);
+    typedef int32_t (*UnmapFn)(OH_NativeBuffer *);
+    wl_camera *c = NULL;
+    for (int i = 0; i < WL_MAX_CAMERAS; i++) if (gOpen[i] != NULL && gOpen[i]->photo == output) c = gOpen[i];
+    MainImageFn mainImage = (MainImageFn) sym("OH_PhotoNative_GetMainImage");
+    PhotoReleaseFn photoRelease = (PhotoReleaseFn) sym("OH_PhotoNative_Release");
+    TypesFn types = (TypesFn) lib_sym("libohimage.so", "OH_ImageNative_GetComponentTypes");
+    ByteBufferFn byteBuffer = (ByteBufferFn) lib_sym("libohimage.so", "OH_ImageNative_GetByteBuffer");
+    BufferSizeFn bufferSize = (BufferSizeFn) lib_sym("libohimage.so", "OH_ImageNative_GetBufferSize");
+    MapFn map = (MapFn) lib_sym("libnative_buffer.so", "OH_NativeBuffer_Map");
+    UnmapFn unmap = (UnmapFn) lib_sym("libnative_buffer.so", "OH_NativeBuffer_Unmap");
+    OH_ImageNative *image = NULL;
+    int delivered = -1;
+    size_t length = 0;
+    if (c != NULL && c->jpegWindow != NULL && mainImage != NULL && types != NULL && byteBuffer != NULL
+            && bufferSize != NULL && map != NULL && mainImage(photo, &image) == CAMERA_OK && image != NULL) {
+        size_t count = 0;
+        types(image, NULL, &count);
+        uint32_t *list = count ? calloc(count, sizeof(uint32_t)) : NULL;
+        if (list != NULL && types(image, &list, &count) == 0 && count > 0) {
+            OH_NativeBuffer *buffer = NULL;
+            void *addr = NULL;
+            if (byteBuffer(image, list[0], &buffer) == 0 && buffer != NULL && bufferSize(image, list[0], &length) == 0
+                    && map(buffer, &addr) == 0 && addr != NULL) {
+                delivered = wl_imagereader_push_blob(c->jpegWindow, addr, length);
+                if (unmap != NULL) unmap(buffer);
+            }
+        }
+        free(list);
+    }
+    fprintf(stderr, "[WL-CAMERA] photo from OH: %zu bytes -> %s\n", length, delivered == 0 ? "the JPEG reader" : "nowhere");
+    /* The main image belongs to the photo (OH_PhotoNative_GetMainImage hands out the photo's own): releasing it as
+     * well freed it twice (the D600's Open Camera died in OH_ImageNative_Release on OH's callback thread). The bytes
+     * were copied (wl_imagereader_push_blob), so the photo goes now and its image with it. */
+    (void) image;
+    if (photoRelease != NULL) photoRelease(photo);
+}
+
+typedef Camera_ErrorCode (*GetRotationFn)(Camera_PreviewOutput *, int, Camera_ImageRotation *);
+typedef Camera_ErrorCode (*SetRotationFn)(Camera_PreviewOutput *, Camera_ImageRotation, bool);
+
 static void release_outputs(wl_camera *c)
 {
     if (c->session != NULL) {
@@ -244,16 +341,43 @@ static void release_outputs(wl_camera *c)
     c->photo = NULL;
 }
 
-/* The OH profile for an output: the exact size in the list (OH's YUV first for previews), else none. */
+/*
+ * The OH profile for an output: the exact size in the list (OH's preferred format first), else the nearest one, as
+ * Android's camera service rounds a SurfaceView or SurfaceTexture stream of an unsupported size to a supported one
+ * (the window then scales the buffers): the same aspect ratio before any other, then the closest area. The D600's
+ * Camera2 probe asked for its SurfaceView's window size, 1200x1794, which OH refused (INVALID_ARGUMENT) since its only
+ * preview profile is 1280x960.
+ */
 static const Camera_Profile *profile_for(Camera_Profile **list, uint32_t size, uint32_t w, uint32_t h, int prefer)
 {
-    const Camera_Profile *any = NULL;
+    const Camera_Profile *exact = NULL, *best = NULL;
+    double bestScore = 0;
+    double aspect = h ? (double) w / (double) h : 1.0;
+    if (aspect < 1.0) aspect = 1.0 / aspect;   /* orientation-free: 1200x1794 matches 1280x960 by shape */
     for (uint32_t i = 0; i < size; i++) {
-        if (list[i] == NULL || list[i]->size.width != w || list[i]->size.height != h) continue;
-        if ((int) list[i]->format == prefer) return list[i];
-        if (any == NULL) any = list[i];
+        const Camera_Profile *p = list[i];
+        if (p == NULL || p->size.width == 0 || p->size.height == 0) continue;
+        if (p->size.width == w && p->size.height == h) {
+            if ((int) p->format == prefer) return p;
+            if (exact == NULL) exact = p;
+            continue;
+        }
+        double a = (double) p->size.width / (double) p->size.height;
+        if (a < 1.0) a = 1.0 / a;
+        double area = (double) p->size.width * p->size.height, want = (double) w * h;
+        double score = (a > aspect ? a - aspect : aspect - a) * 1e7 + (area > want ? area - want : want - area)
+                       + ((int) p->format == prefer ? 0 : 1);
+        if (best == NULL || score < bestScore) {
+            best = p;
+            bestScore = score;
+        }
     }
-    return any;
+    if (exact != NULL) return exact;
+    if (best != NULL) {
+        fprintf(stderr, "[WL-CAMERA] no OH profile of %ux%u: the nearest, %ux%u\n", w, h, best->size.width,
+                best->size.height);
+    }
+    return best;
 }
 
 static jlong CameraDevice_open(JNIEnv *env, jclass clazz, jstring ohId)
@@ -280,6 +404,7 @@ static jlong CameraDevice_open(JNIEnv *env, jclass clazz, jstring ohId)
         free(c);
         return -(jlong) rc;   /* OH's error, negated: a handle is never negative */
     }
+    for (int i = 0; i < WL_MAX_CAMERAS; i++) if (gOpen[i] == NULL) { gOpen[i] = c; break; }
     return (jlong) (intptr_t) c;
 }
 
@@ -294,19 +419,47 @@ static jint CameraDevice_configure(JNIEnv *env, jclass clazz, jlong handle, jobj
     (void) clazz;
     wl_camera *c = (wl_camera *) (intptr_t) handle;
     if (c == NULL) return CAMERA_INVALID_ARGUMENT;
-    release_outputs(c);
     jsize n = surfaces ? (*env)->GetArrayLength(env, surfaces) : 0;
     if (n > WL_MAX_OUTPUTS) n = WL_MAX_OUTPUTS;
     jint *kind = n ? (*env)->GetIntArrayElements(env, kinds, NULL) : NULL;
     jint *w = n ? (*env)->GetIntArrayElements(env, widths, NULL) : NULL;
     jint *h = n ? (*env)->GetIntArrayElements(env, heights, NULL) : NULL;
-    Camera_ErrorCode rc = CALL(CreateSessionFn, "OH_CameraManager_CreateCaptureSession", g.manager, &c->session);
-    if (rc == CAMERA_OK) CALL(SessionModeFn, "OH_CaptureSession_SetSessionMode", c->session, NORMAL_PHOTO);
-    if (rc == CAMERA_OK) rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
-    if (rc == CAMERA_OK) rc = CALL(SessionInputFn, "OH_CaptureSession_AddInput", c->session, c->input);
+    Camera_ErrorCode rc = CAMERA_OK;
+    if (c->session != NULL) {
+        /* A configured session is configured again, as OH's camera guide does it: stopped, its outputs removed and
+         * released, the input kept. A second session for the same surfaces and input failed OH's CommitConfig
+         * (7400201) while the first still held them (Open Camera restarting its preview after a picture). */
+        typedef Camera_ErrorCode (*RemovePreviewFn)(Camera_CaptureSession *, Camera_PreviewOutput *);
+        typedef Camera_ErrorCode (*RemovePhotoFn)(Camera_CaptureSession *, Camera_PhotoOutput *);
+        if (c->started) CALL(SessionFn, "OH_CaptureSession_Stop", c->session);
+        c->started = 0;
+        rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
+        for (int i = 0; i < c->previewCount; i++) {
+            if (rc == CAMERA_OK) CALL(RemovePreviewFn, "OH_CaptureSession_RemovePreviewOutput", c->session, c->previews[i]);
+            CALL(PreviewFn, "OH_PreviewOutput_Release", c->previews[i]);
+        }
+        c->previewCount = 0;
+        if (c->photo != NULL) {
+            if (rc == CAMERA_OK) CALL(RemovePhotoFn, "OH_CaptureSession_RemovePhotoOutput", c->session, c->photo);
+            CALL(PhotoFn, "OH_PhotoOutput_Release", c->photo);
+            c->photo = NULL;
+        }
+        if (rc != CAMERA_OK) {   /* the session would not reconfigure: a new one */
+            release_outputs(c);
+            rc = CAMERA_OK;
+        }
+    }
+    if (c->session == NULL) {
+        rc = CALL(CreateSessionFn, "OH_CameraManager_CreateCaptureSession", g.manager, &c->session);
+        if (rc == CAMERA_OK) CALL(SessionModeFn, "OH_CaptureSession_SetSessionMode", c->session, NORMAL_PHOTO);
+        if (rc == CAMERA_OK) rc = CALL(SessionFn, "OH_CaptureSession_BeginConfig", c->session);
+        if (rc == CAMERA_OK) rc = CALL(SessionInputFn, "OH_CaptureSession_AddInput", c->session, c->input);
+    }
     for (jsize i = 0; rc == CAMERA_OK && i < n; i++) {
         jobject surface = (*env)->GetObjectArrayElement(env, surfaces, i);
         char id[32];
+        int readerFormat = surface != NULL ? reader_format(env, surface) : -1;
+        if (readerFormat == 0x21) kind[i] = 1;   /* a JPEG (BLOB) reader is a photo output, whatever Java judged */
         if (surface == NULL || !surface_id(env, surface, id, sizeof(id))) {
             fprintf(stderr, "[WL-CAMERA] output %d: no OH surface behind the app's Surface\n", (int) i);
             rc = CAMERA_INVALID_ARGUMENT;
@@ -314,8 +467,13 @@ static jint CameraDevice_configure(JNIEnv *env, jclass clazz, jlong handle, jobj
             const Camera_Profile *p = profile_for(c->capability->photoProfiles, c->capability->photoProfilesSize,
                                                   (uint32_t) w[i], (uint32_t) h[i], 2000 /* JPEG */);
             if (p == NULL) rc = CAMERA_INVALID_ARGUMENT;
-            if (rc == CAMERA_OK && c->photo == NULL)
-                rc = CALL(CreatePhotoFn, "OH_CameraManager_CreatePhotoOutput", g.manager, p, id, &c->photo);
+            typedef Camera_ErrorCode (*CreatePhotoBareFn)(Camera_Manager *, const Camera_Profile *, Camera_PhotoOutput **);
+            typedef Camera_ErrorCode (*RegisterPhotoFn)(Camera_PhotoOutput *, PhotoAvailableFn);
+            c->jpegWindow = reader_window(env, surface);
+            if (rc == CAMERA_OK && c->photo == NULL) {
+                rc = CALL(CreatePhotoBareFn, "OH_CameraManager_CreatePhotoOutputWithoutSurface", g.manager, p, &c->photo);
+                if (rc == CAMERA_OK) rc = CALL(RegisterPhotoFn, "OH_PhotoOutput_RegisterPhotoAvailableCallback", c->photo, on_photo);
+            }
             if (rc == CAMERA_OK) rc = CALL(SessionPhotoFn, "OH_CaptureSession_AddPhotoOutput", c->session, c->photo);
         } else {
             const Camera_Profile *p = profile_for(c->capability->previewProfiles, c->capability->previewProfilesSize,
@@ -326,6 +484,18 @@ static jint CameraDevice_configure(JNIEnv *env, jclass clazz, jlong handle, jobj
             if (rc == CAMERA_OK) {
                 c->previews[c->previewCount++] = out;
                 rc = CALL(SessionPreviewFn, "OH_CaptureSession_AddPreviewOutput", c->session, out);
+            }
+            if (rc == CAMERA_OK && readerFormat < 0) {
+                /* A display output (SurfaceView, SurfaceTexture) shows the frames upright, as Android's camera
+                 * service sets the buffers' transform from the sensor orientation; OH computes it for display
+                 * rotation 0. An ImageReader gets the sensor's buffers, as on Android. */
+                GetRotationFn getRotation = (GetRotationFn) sym("OH_PreviewOutput_GetPreviewRotation");
+                SetRotationFn setRotation = (SetRotationFn) sym("OH_PreviewOutput_SetPreviewRotation");
+                Camera_ImageRotation rotation = IAMGE_ROTATION_0;
+                if (getRotation != NULL && setRotation != NULL && getRotation(out, 0, &rotation) == CAMERA_OK) {
+                    Camera_ErrorCode r2 = setRotation(out, rotation, false);
+                    fprintf(stderr, "[WL-CAMERA] output %d: preview rotation %d -> %d\n", (int) i, (int) rotation, (int) r2);
+                }
             }
         }
         fprintf(stderr, "[WL-CAMERA] output %d: %s %dx%d -> %d\n", (int) i, kind[i] == 1 ? "jpeg" : "preview",
@@ -378,6 +548,7 @@ static void CameraDevice_close(JNIEnv *env, jclass clazz, jlong handle)
     (void) env; (void) clazz;
     wl_camera *c = (wl_camera *) (intptr_t) handle;
     if (c == NULL) return;
+    for (int i = 0; i < WL_MAX_CAMERAS; i++) if (gOpen[i] == c) gOpen[i] = NULL;
     release_outputs(c);
     if (c->input != NULL) {
         CALL(InputFn, "OH_CameraInput_Close", c->input);
@@ -418,6 +589,8 @@ static int32_t window_query(JNIEnv *env, jobject surface, const char *name)
 static jint SurfaceUtils_detectType(JNIEnv *env, jclass clazz, jobject surface)
 {
     (void) clazz;
+    int reader = reader_format(env, surface);
+    if (reader > 0) return reader;   /* an ImageReader's own format (JPEG readers are BLOB, 0x21) */
     int32_t format = window_query(env, surface, "ANativeWindow_getFormat");
     return format > 0 ? format : 0x22;
 }
