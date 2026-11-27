@@ -210,6 +210,8 @@ public final class OHServiceManager extends IServiceManager.Stub {
             // caller of another uid, which a provider served to an app over a Play channel has:
             // without it every such query died with a NullPointerException in the provider's process.
             case "permission_checker":
+            // Tethering, which Android always runs (as a module): a device without it answers "unsupported".
+            case "tethering":
                 return LocalServiceBinders.get(name);
             // Explicit stub-null whitelist (feedback.txt line 12): services
             // for which OH has no analog and HelloWorld path tolerates null.

@@ -120,6 +120,20 @@ public final class AppProcesses {
         return info.processName != null && !info.processName.isEmpty() ? info.processName : info.packageName;
     }
 
+    /**
+     * The process an activity runs in: its declared one, except under the managed launch (ADR-0008), where every
+     * activity of an app runs in its launched process. OH gives windows to that process only, the one that holds the
+     * app's OH ability, and SceneBoard refuses a sub-window whose parent belongs to another process ("process check
+     * failed"); the legacy window service an unmanaged window uses does not answer under SceneBoard (CreateWindow
+     * 1005). An activity declared for another process therefore waited for a window forever: Play services' sign-in
+     * pages, declared for its .ui process, on the OnePlus 6 (OH 7.0). Services and providers keep their processes.
+     */
+    public static String activityProcessOf(ComponentInfo info) {
+        if (info == null) return null;
+        if ("1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) return info.packageName;
+        return processOf(info);
+    }
+
     /** Whether a component of this app declared for process runs here. Everything does when this is off. */
     public static boolean runsHere(String process) {
         String self = sSelf;

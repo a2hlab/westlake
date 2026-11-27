@@ -245,7 +245,7 @@ public final class PlayServicesChannel {
         if (app == null || !app.getPackageName().equals(intent.getComponent().getPackageName())) return false;
         String process;
         try {
-            process = AppProcesses.processOf(app.getPackageManager().getActivityInfo(intent.getComponent(), 0));
+            process = AppProcesses.activityProcessOf(app.getPackageManager().getActivityInfo(intent.getComponent(), 0));
         } catch (PackageManager.NameNotFoundException | RuntimeException e) {
             return false;
         }
@@ -456,7 +456,7 @@ public final class PlayServicesChannel {
 
     static IBinder activityProcess(ActivityInfo info) {
         Channel host = channelFor(info.packageName);
-        String process = AppProcesses.processOf(info);
+        String process = AppProcesses.activityProcessOf(info);
         Channel target = process.equals(info.packageName) ? host : remoteProcess(host, info.packageName, process);
         return target == null ? null : root(target);
     }
@@ -479,7 +479,7 @@ public final class PlayServicesChannel {
 
     static IBinder ownActivityProcess(ActivityInfo info) {
         if (!ownPackage().equals(info.packageName)) throw new SecurityException("not an own activity");
-        Channel target = ownProcess(AppProcesses.processOf(info));
+        Channel target = ownProcess(AppProcesses.activityProcessOf(info));
         return target == null ? null : root(target);
     }
 

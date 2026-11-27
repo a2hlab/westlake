@@ -109,6 +109,12 @@ public final class LocalServiceBinders {
                 case "role":
                     binder = proxy(name, "android.app.role.IRoleManager", LocalServiceBinders::role);
                     break;
+                case "tethering":
+                    // A device that does not tether: every request a result listener waits for is answered
+                    // TETHER_ERROR_UNSUPPORTED. TetheringManager waits for that answer and throws "Callback timeout"
+                    // without it; a signed-in Play services asked isTetheringSupported and its main process died.
+                    binder = proxy(name, "android.net.ITetheringConnector", LocalServiceBinders::tethering);
+                    break;
                 case "rollback":
                     // RollbackManager: no rollback available, committed or pending (empty lists).
                     binder = proxy(name, "android.content.rollback.IRollbackManager", (method, args) -> DEFAULT);
@@ -290,6 +296,21 @@ public final class LocalServiceBinders {
                 });
         binder.attachInterface((IInterface) local, descriptor);
         return binder;
+    }
+
+    private static Object tethering(String method, Object[] args) {
+        if (args != null) {
+            for (Object arg : args) {
+                if (arg instanceof android.net.IIntResultListener) {
+                    try {
+                        ((android.net.IIntResultListener) arg).onResult(3 /* TETHER_ERROR_UNSUPPORTED */);
+                    } catch (android.os.RemoteException ignored) {
+                        // the caller went away
+                    }
+                }
+            }
+        }
+        return DEFAULT;
     }
 
     private static Object uiMode(String method, Object[] args) {

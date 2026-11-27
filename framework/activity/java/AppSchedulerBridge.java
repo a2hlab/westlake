@@ -173,6 +173,10 @@ public class AppSchedulerBridge {
                             }
                         }
                         ensureBindApplication(activityThread, bundleName, ohConfigKv);
+                        // A Play host launched as a managed app (its own OH bundle) serves its socket once bound,
+                        // as a direct launch does in directLaunchNoBms; without it the managed Play services process
+                        // served only its other processes' sockets and every client was refused.
+                        if (sBindAppDone) PlayServicesChannel.startHostIfAsked();
                     } finally {
                         sManagedBind.countDown();
                     }
@@ -2059,8 +2063,59 @@ public class AppSchedulerBridge {
     static void launchRemoteActivity(Intent intent, ActivityResults.Request request) {
         String name = intent.getComponent().getClassName();
         PendingLaunchIntents.offer(name, intent, request);
+        // A windowless host's unused OH ability: the first activity another app starts here takes it, and its window
+        // becomes the ability's main window, as the launcher activity's would have been.
+        long[] spare = takeSpareAbility();
+        if (spare != null) {
+            System.err.println("[WL-MANAGED] " + name + " takes the windowless host's OH ability (record "
+                    + spare[0] + ")");
+            scheduleLaunchAbility(null, intent.getComponent().getPackageName(), name, (int) spare[0], null, null,
+                    spare[1], request);
+            ActivityTaskManagerAdapter.raiseOwnMission("an activity another app started");
+            return;
+        }
         scheduleLaunchAbility(null, intent.getComponent().getPackageName(), name,
                 sRemoteActivityRecord.incrementAndGet(), null, null, 0L, request);
+    }
+
+    /*
+     * The OH ability of a windowless host under the managed launch (ADR-0008: Play services in its own OH bundle).
+     * OH starts the bundle's ability when it starts the process, but the host shows no activity of its own, so the
+     * ability's record and token went unused, and an activity another app started here later (the Play Store's
+     * sign-in, in Play services) had no OH ability to give it a window: SceneBoard gives windows to ability
+     * sessions and to sub-windows of the same process only. {record id, token}; one, taken once.
+     */
+    private static long[] sSpareAbility;
+
+    private static synchronized void keepSpareAbility(int recordId, long token) {
+        // A want for the ability an activity already holds (raiseOwnMission's start) leaves it lent.
+        if (sLentAbility != null && sLentAbility[1] == token) return;
+        if (sSpareAbility == null) sSpareAbility = new long[] {recordId, token};
+    }
+
+    private static synchronized long[] takeSpareAbility() {
+        long[] spare = sSpareAbility;
+        sSpareAbility = null;
+        if (spare != null) sLentAbility = spare;
+        return spare;
+    }
+
+    // The spare ability while an activity holds it.
+    private static long[] sLentAbility;
+
+    /**
+     * The windowless host's activity that held its spare OH ability finished, and no other activity of the host is
+     * left: the ability stays, unused again, instead of ending. Ending the app's last ability made OH terminate the
+     * process ("ability is the last", ScheduleTerminateApplication about 19 s later): Play services died right after
+     * the account it had just added. True if the token was the spare one.
+     */
+    static synchronized boolean returnSpareAbility(long token) {
+        if (!"1".equals(System.getenv("WESTLAKE_NO_ACTIVITY")) || sLentAbility == null || sLentAbility[1] != token) {
+            return false;
+        }
+        if (sSpareAbility == null) sSpareAbility = sLentAbility;
+        sLentAbility = null;
+        return true;
     }
 
     private static void scheduleLaunchAbility(Object appThread, String bundleName, String abilityName,
@@ -2082,6 +2137,9 @@ public class AppSchedulerBridge {
                 && remoteRequest == null && !RemoteActivities.interactive()) {
             System.err.println("[WL-PLAY] windowless host: not showing " + abilityName + " for "
                     + describeWant(wantJson));
+            if (ohTokenAddr != 0L && "1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH"))) {
+                keepSpareAbility(abilityRecordId, ohTokenAddr);
+            }
             return;
         }
 

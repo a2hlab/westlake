@@ -175,7 +175,7 @@ public final class RemoteActivities {
         List<ResolveInfo> matches = resolveHere(intent, intent.getType(), PackageManager.MATCH_DEFAULT_ONLY, sameApp);
         if (matches.isEmpty()) throw new SecurityException("activity is not an enabled exported target");
         ActivityInfo info = matches.get(0).activityInfo;
-        if (!AppProcesses.runsHere(AppProcesses.processOf(info)))
+        if (!AppProcesses.runsHere(AppProcesses.activityProcessOf(info)))
             throw new SecurityException("activity sent to the wrong process");
         Intent launch = new Intent(intent);
         launch.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
@@ -423,6 +423,7 @@ public final class RemoteActivities {
             main().post(() -> {
                 if (data != null) data.setExtrasClassLoader(ActivityThread.currentApplication().getClassLoader());
                 event("result_received result_code=" + result);
+                ActivityTaskManagerAdapter.raiseOwnMission("the activity it started in another app returned");
                 if (request != null) ActivityResults.sendNow(request.resultTo, request.resultWho,
                         request.requestCode, result, data);
             });
