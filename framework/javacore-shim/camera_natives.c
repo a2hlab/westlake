@@ -244,16 +244,43 @@ static void release_outputs(wl_camera *c)
     c->photo = NULL;
 }
 
-/* The OH profile for an output: the exact size in the list (OH's YUV first for previews), else none. */
+/*
+ * The OH profile for an output: the exact size in the list (OH's preferred format first), else the nearest one, as
+ * Android's camera service rounds a SurfaceView or SurfaceTexture stream of an unsupported size to a supported one
+ * (the window then scales the buffers): the same aspect ratio before any other, then the closest area. The D600's
+ * Camera2 probe asked for its SurfaceView's window size, 1200x1794, which OH refused (INVALID_ARGUMENT) since its only
+ * preview profile is 1280x960.
+ */
 static const Camera_Profile *profile_for(Camera_Profile **list, uint32_t size, uint32_t w, uint32_t h, int prefer)
 {
-    const Camera_Profile *any = NULL;
+    const Camera_Profile *exact = NULL, *best = NULL;
+    double bestScore = 0;
+    double aspect = h ? (double) w / (double) h : 1.0;
+    if (aspect < 1.0) aspect = 1.0 / aspect;   /* orientation-free: 1200x1794 matches 1280x960 by shape */
     for (uint32_t i = 0; i < size; i++) {
-        if (list[i] == NULL || list[i]->size.width != w || list[i]->size.height != h) continue;
-        if ((int) list[i]->format == prefer) return list[i];
-        if (any == NULL) any = list[i];
+        const Camera_Profile *p = list[i];
+        if (p == NULL || p->size.width == 0 || p->size.height == 0) continue;
+        if (p->size.width == w && p->size.height == h) {
+            if ((int) p->format == prefer) return p;
+            if (exact == NULL) exact = p;
+            continue;
+        }
+        double a = (double) p->size.width / (double) p->size.height;
+        if (a < 1.0) a = 1.0 / a;
+        double area = (double) p->size.width * p->size.height, want = (double) w * h;
+        double score = (a > aspect ? a - aspect : aspect - a) * 1e7 + (area > want ? area - want : want - area)
+                       + ((int) p->format == prefer ? 0 : 1);
+        if (best == NULL || score < bestScore) {
+            best = p;
+            bestScore = score;
+        }
     }
-    return any;
+    if (exact != NULL) return exact;
+    if (best != NULL) {
+        fprintf(stderr, "[WL-CAMERA] no OH profile of %ux%u: the nearest, %ux%u\n", w, h, best->size.width,
+                best->size.height);
+    }
+    return best;
 }
 
 static jlong CameraDevice_open(JNIEnv *env, jclass clazz, jstring ohId)
