@@ -225,6 +225,11 @@ public final class LocalServiceBinders {
                 // when its state changes, reaches StatusBarManager with no service behind it: a
                 // NullPointerException on the main thread (Chrono, starting a timer). OH's status
                 // bar is not bridged, so requests are accepted and nothing changes on screen.
+                // The camera service, over OH's camera framework (OhCameraService): CameraManager listed no camera
+                // without it although the device has OH cameras.
+                case "media.camera":
+                    binder = proxy(name, "android.hardware.ICameraService", OhCameraService::answer, false);
+                    break;
                 case "statusbar":
                     binder = proxy(name, "com.android.internal.statusbar.IStatusBarService",
                             LocalServiceBinders::statusBar);

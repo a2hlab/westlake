@@ -1220,16 +1220,18 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
         // A feature is claimed only where its Android API reaches the hardware: an app that is
         // told the hardware exists takes its hardware path without further checks.
         //
-        // No camera: the board has two (OH's CameraService lists a back and a front one),
-        // but no Android camera service reaches them, so CameraManager lists none. CameraX
-        // checks its camera list against these features: with a back camera claimed and
-        // none listed, its init retries until a timeout and then fails ("Device reporting
-        // less cameras than anticipated"). Claim it again once "media.camera" is provided.
+        // Cameras as "media.camera" lists them (OhCameraService over OH's cameras): CameraX checks its
+        // camera list against these features, and with a back camera claimed and none listed its init
+        // retries until a timeout and then fails ("Device reporting less cameras than anticipated").
         // No Bluetooth either. The adapter is present and off (LocalServiceBinders answers
         // the manager service); claimed, the feature sends apps to ACTION_REQUEST_ENABLE,
         // which nothing here answers.
         if ("android.software.webview".equals(name)) {
             return getSideloadedWebViewPackageInfo() != null;
+        }
+        if (name != null && name.startsWith("android.hardware.camera")
+                && adapter.core.OhCameraService.claimedFeatures().contains(name)) {
+            return version <= 0;
         }
         // As PackageManagerService answers: claimed, at the version asked for or a later one.
         Integer claimed = name != null ? CLAIMED_FEATURES.get(name) : null;
@@ -2315,6 +2317,11 @@ public class PackageManagerAdapter extends IPackageManager.Stub {
             android.content.pm.FeatureInfo info = new android.content.pm.FeatureInfo();
             info.name = entry.getKey();
             info.version = entry.getValue();
+            features.add(info);
+        }
+        for (String camera : adapter.core.OhCameraService.claimedFeatures()) {
+            android.content.pm.FeatureInfo info = new android.content.pm.FeatureInfo();
+            info.name = camera;
             features.add(info);
         }
         if (getSideloadedWebViewPackageInfo() != null) {

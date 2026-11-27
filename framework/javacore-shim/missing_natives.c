@@ -711,6 +711,8 @@ int wl_register_socket_binder(JNIEnv* env);
 int wl_register_extractor(JNIEnv* env);
 int wl_register_video_codec(JNIEnv* env);
 int wl_register_image_reader(JNIEnv* env);
+int wl_register_camera_metadata(JNIEnv* env);
+int wl_register_oh_cameras(JNIEnv* env);
 int wl_register_native_activity(JNIEnv* env);
 
 static int file_path(JNIEnv* env, jobject file, char* out, size_t size)
@@ -1304,42 +1306,7 @@ static const JNINativeMethod kSELinux[] = {
     { "isSELinuxEnforced", "()Z", (void*) wl_selinux_enforced },
 };
 
-static jint wl_camera_count(JNIEnv* e, jclass c, jint device, jint policy)
-{
-    (void) e; (void) c; (void) device; (void) policy;
-    return 0;
-}
-
-/*
- * With no camera listed, every id is unknown. Android's JNI answers getCameraInfo for an unknown id
- * with RuntimeException("Unknown camera ID"), and a connection with -EACCES, which Camera.open turns
- * into "Fail to connect to camera service". Open Camera asks for camera 0's facing without checking
- * the count; the missing native threw UnsatisfiedLinkError, which no caller catches.
- */
-static void wl_camera_info(JNIEnv* e, jclass c, jint id, jint rotation, jint slow, jint policy, jobject info)
-{
-    (void) c; (void) id; (void) rotation; (void) slow; (void) policy; (void) info;
-    jclass failure = (*e)->FindClass(e, "java/lang/RuntimeException");
-    if (failure != NULL) (*e)->ThrowNew(e, failure, "Unknown camera ID");
-}
-
-static jint wl_camera_setup(JNIEnv* e, jobject thiz, jobject self, jint id, jstring package, jint rotation,
-                            jboolean slow, jint client, jint policy)
-{
-    (void) e; (void) thiz; (void) self; (void) id; (void) package; (void) rotation; (void) slow; (void) client;
-    (void) policy;
-    return -EACCES;
-}
-
-/* A camera whose setup failed holds nothing; its finalizer still releases it (Open Camera). */
-static void wl_camera_release(JNIEnv* e, jobject thiz) { (void) e; (void) thiz; }
-
-static const JNINativeMethod kCamera[] = {
-    { "_getNumberOfCameras", "(II)I", (void*) wl_camera_count },
-    { "_getCameraInfo", "(IIIILandroid/hardware/Camera$CameraInfo;)V", (void*) wl_camera_info },
-    { "native_setup", "(Ljava/lang/Object;ILjava/lang/String;IZII)I", (void*) wl_camera_setup },
-    { "native_release", "()V", (void*) wl_camera_release },
-};
+/* android.hardware.Camera's natives are camera_natives.c's (Camera1 over OH's cameras, adapter.core.OhCamera1). */
 
 static void wl_camcorder_init(JNIEnv* e, jclass c) { (void) e; (void) c; }
 static jobject wl_camcorder_profile(JNIEnv* e, jclass c, jint id, jint q) { (void) e; (void) c; (void) id; (void) q; return NULL; }
@@ -1722,13 +1689,14 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
         int ex = wl_register_extractor(env);
         int vc = wl_register_video_codec(env);
         int ir = wl_register_image_reader(env);
+        wl_register_camera_metadata(env);   /* logs its own line */
+        wl_register_oh_cameras(env);
         int more = bind(env, "sun/nio/ch/Net", kNet, (int) (sizeof(kNet) / sizeof(kNet[0])))
                    + bind(env, "android/os/Process", kProcess, (int) (sizeof(kProcess) / sizeof(kProcess[0])))
                    + bind(env, "android/os/PerformanceHintManager", kPerformanceHint,
                           (int) (sizeof(kPerformanceHint) / sizeof(kPerformanceHint[0])))
                    + bind(env, "android/os/SELinux", kSELinux, (int) (sizeof(kSELinux) / sizeof(kSELinux[0])))
                    + bind(env, "android/os/Debug", kDebug, (int) (sizeof(kDebug) / sizeof(kDebug[0])))
-                   + bind(env, "android/hardware/Camera", kCamera, (int) (sizeof(kCamera) / sizeof(kCamera[0])))
                    + bind(env, "android/media/CamcorderProfile", kCamcorderProfile,
                           (int) (sizeof(kCamcorderProfile) / sizeof(kCamcorderProfile[0])));
         snprintf(line, sizeof(line),

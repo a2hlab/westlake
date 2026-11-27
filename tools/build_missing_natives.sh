@@ -3,7 +3,8 @@
 # Builds libwl_missing_natives.so from framework/javacore-shim/missing_natives.c, media_natives.c, extractor_natives.c, text_natives.c, audiorecord_natives.c,
 # audioports_natives.c, localsocket_natives.c, canvas_natives.c, sqlite_natives.c, notification_natives.c, location_natives.c
 # (OH's location service through its NDK), socketbinder_natives.c and
-# imagereader_natives.c (ImageReader over an OH consumer surface), nativeactivity_natives.c (NativeActivity and InputQueue),
+# imagereader_natives.c (ImageReader over an OH consumer surface), camerametadata_natives.c (CameraMetadataNative over
+# AOSP's camera metadata library, third_party/aosp-camera-metadata), camera_natives.c (OH's cameras through its camera NDK), nativeactivity_natives.c (NativeActivity and InputQueue),
 # seccomp_natives.c (Android's app seccomp filter, opt-in with WESTLAKE_ANDROID_SECCOMP=1),
 # plus expat_natives.cpp (AOSP's SAX parser natives over a static, hidden expat) and
 # videocodec_natives.cpp (MediaCodec video and audio over OH's decoders): platform natives
@@ -35,11 +36,16 @@ for f in Net IOUtil SocketChannelImpl ServerSocketChannelImpl DatagramChannelImp
     -I$SRC/libnativehelper/include -I$SRC/libnativehelper/include_jni -I$SRC/libnativehelper/header_only_include \
     -c $OJ/$f.c -o $OBJ/oj_$f.o
 done
-for f in missing_natives media_natives extractor_natives text_natives audiorecord_natives audioports_natives ojluni_nio_natives localsocket_natives canvas_natives sqlite_natives notification_natives location_natives socketbinder_natives imagereader_natives nativeactivity_natives seccomp_natives; do
+for f in missing_natives media_natives extractor_natives text_natives audiorecord_natives audioports_natives ojluni_nio_natives localsocket_natives canvas_natives sqlite_natives notification_natives location_natives socketbinder_natives imagereader_natives nativeactivity_natives seccomp_natives camera_natives; do
   $CC -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni -c $HERE/framework/javacore-shim/$f.c -o $OBJ/$f.o
 done
+# CameraMetadataNative over AOSP's camera metadata library (third_party/aosp-camera-metadata, unmodified sources).
+CM=$HERE/third_party/aosp-camera-metadata
+$CC -fvisibility=hidden -w -I$CM/include -I$CM/compat -c $CM/src/camera_metadata.c -o $OBJ/camera_metadata.o
+$CC -Wall -Wextra -Werror -I$SRC/libnativehelper/include_jni -I$CM/include -I$CM/compat \
+  -c $HERE/framework/javacore-shim/camerametadata_natives.c -o $OBJ/camerametadata_natives.o
 ${CC/clang /clang++ } -shared -fuse-ld=lld -Wl,-soname,libwl_missing_natives.so -Wl,-z,defs \
   $OBJ/missing_natives.o $OBJ/media_natives.o $OBJ/extractor_natives.o $OBJ/text_natives.o $OBJ/audiorecord_natives.o $OBJ/audioports_natives.o $OBJ/ojluni_nio_natives.o \
   $OBJ/localsocket_natives.o $OBJ/canvas_natives.o $OBJ/sqlite_natives.o $OBJ/notification_natives.o $OBJ/location_natives.o $OBJ/socketbinder_natives.o $OBJ/oj_*.o \
-  $OBJ/expat_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/seccomp_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
+  $OBJ/expat_natives.o $OBJ/camerametadata_natives.o $OBJ/camera_metadata.o $OBJ/camera_natives.o $OBJ/imagereader_natives.o $OBJ/nativeactivity_natives.o $OBJ/seccomp_natives.o $OBJ/videocodec_natives.o $OBJ/xmlparse.o $OBJ/xmlrole.o $OBJ/xmltok.o -static-libstdc++ -Wl,--exclude-libs,ALL -Wl,--gc-sections -Wl,--version-script=$HERE/framework/javacore-shim/libwl_missing_natives.map -lm -lc -o $OUT/libwl_missing_natives.so
 echo "built $OUT/libwl_missing_natives.so"
