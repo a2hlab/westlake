@@ -45,6 +45,8 @@ public final class OhCamera1 {
         Surface preview;
         boolean previewing;
         ImageReader jpeg;
+        Surface configuredPreview;   // the outputs the OH session was last configured with
+        String configuredSizes;
         final Map<String, String> parameters = new LinkedHashMap<>();
 
         State(OhCameraService.Camera camera, Object cameraRef) {
@@ -173,6 +175,17 @@ public final class OhCamera1 {
         if (s.previewing) return;
         Size preview = size(s.parameters.get("preview-size"));
         Size picture = size(s.parameters.get("picture-size"));
+        String sizes = preview + "/" + picture;
+        // The same display at the same sizes (an app restarting its preview after a picture, as Android requires):
+        // the configured session starts again. A new session for the same surfaces failed OH's CommitConfig
+        // (7400201) while the old one's outputs still held them.
+        if (s.configuredSizes != null && s.configuredSizes.equals(sizes) && s.configuredPreview == s.preview) {
+            int rc = OhCameraDevice.nativeStart(s.handle);
+            System.err.println("[WL-CAMERA] Camera1 preview restarted: OH " + rc);
+            if (rc != 0) throw new RuntimeException("startPreview failed");
+            s.previewing = true;
+            return;
+        }
         if (s.jpeg == null || s.jpeg.getWidth() != picture.getWidth() || s.jpeg.getHeight() != picture.getHeight()) {
             if (s.jpeg != null) s.jpeg.close();
             s.jpeg = ImageReader.newInstance(picture.getWidth(), picture.getHeight(), ImageFormat.JPEG, 2);
@@ -190,7 +203,12 @@ public final class OhCamera1 {
         int rc = OhCameraDevice.nativeConfigure(s.handle, surfaces, kinds, widths, heights);
         if (rc == 0) rc = OhCameraDevice.nativeStart(s.handle);
         System.err.println("[WL-CAMERA] Camera1 preview " + preview + " picture " + picture + ": OH " + rc);
-        if (rc != 0) throw new RuntimeException("startPreview failed");
+        if (rc != 0) {
+            s.configuredSizes = null;
+            throw new RuntimeException("startPreview failed");
+        }
+        s.configuredPreview = s.preview;
+        s.configuredSizes = sizes;
         s.previewing = true;
     }
 
