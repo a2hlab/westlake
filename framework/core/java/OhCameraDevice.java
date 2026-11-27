@@ -275,13 +275,20 @@ final class OhCameraDevice {
                 @Override public void run() {
                     synchronized (OhCameraDevice.this) {
                         if (mRepeatingId != id || mHandle == 0) return;
-                        deliver(id, mRepeating);
+                        deliver(id, mRepeating, mNextFrame++);
                     }
                     mHandler.postDelayed(this, FRAME_MS);
                 }
             });
         } else {
-            for (final CaptureRequest request : requests) {
+            // The frames these requests produce, numbered now: Android's service answers a capture with the last
+            // frame number of its list, and CameraDeviceImpl checks it (-1 threw for a still capture).
+            long first = mNextFrame;
+            mNextFrame += requests.length;
+            lastFrame = mNextFrame - 1;
+            for (int i = 0; i < requests.length; i++) {
+                final CaptureRequest request = requests[i];
+                final long frame = first + i;
                 boolean still = false;
                 Collection<Surface> targets = request.getTargets();
                 for (Surface target : targets) if (mJpegSurfaces.contains(target)) still = true;
@@ -291,7 +298,7 @@ final class OhCameraDevice {
                 }
                 mHandler.postDelayed(() -> {
                     synchronized (OhCameraDevice.this) {
-                        if (mHandle != 0) deliver(id, request);
+                        if (mHandle != 0) deliver(id, request, frame);
                     }
                 }, still ? 300 : FRAME_MS);
             }
@@ -300,8 +307,7 @@ final class OhCameraDevice {
     }
 
     /** One frame's start and result, as the request asked for it. */
-    private void deliver(int requestId, CaptureRequest request) {
-        long frame = mNextFrame++;
+    private void deliver(int requestId, CaptureRequest request, long frame) {
         long timestamp = System.nanoTime();
         CaptureResultExtras extras = new CaptureResultExtras(requestId, 0, 0, 0, frame, 1, -1, null,
                 frame - 1, -1, -1, false, 0);

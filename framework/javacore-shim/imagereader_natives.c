@@ -137,7 +137,11 @@ typedef struct {
     int width, height, maxImages, format;
     int acquired;
     pthread_mutex_t mu;
+    struct Blob* blobs;          /* JPEGs the camera gave this reader (wl_imagereader_push_blob), oldest first */
 } Reader;
+
+/* A JPEG a camera photo output produced for this reader: no OH buffer carries a JPEG's exact length. */
+typedef struct Blob { uint8_t* data; size_t length; struct Blob* next; } Blob;
 
 typedef struct {
     OHNativeWindowBuffer* windowBuffer;
@@ -146,6 +150,7 @@ typedef struct {
     NativeBufferConfig config;
     NativeBufferPlanes planes;
     bool hasPlanes;
+    Blob* blob;                  /* a camera JPEG instead of an OH buffer */
 } Frame;
 
 static JavaVM* g_vm;
@@ -228,6 +233,69 @@ static void ir_class_init(JNIEnv* env, jclass clazz)
     g_surfaceInit = (*env)->GetMethodID(env, surface, "<init>", "(J)V");
 }
 
+/*
+ * The readers' formats by consumer window, for the camera natives (camera_natives.c): an app's Surface says nothing
+ * of the format its reader was made for, and a camera stream into a JPEG reader must be a photo output, not a
+ * preview one (the D600's Camera2 probe got preview frames in its JPEG reader). Windows are never freed (see the
+ * top), so an entry never outlives its window.
+ */
+#define WL_READERS 64
+static struct { void* window; int halFormat; void* reader; } g_readers[WL_READERS];
+static int g_readerCount;
+static pthread_mutex_t g_readersMu = PTHREAD_MUTEX_INITIALIZER;
+
+static void remember_reader(void* window, int halFormat, void* reader)
+{
+    pthread_mutex_lock(&g_readersMu);
+    int slot = -1;
+    for (int i = 0; i < g_readerCount; i++) if (g_readers[i].window == window) slot = i;
+    if (slot < 0) slot = g_readerCount < WL_READERS ? g_readerCount++ : (int) ((uintptr_t) window % WL_READERS);
+    g_readers[slot].window = window;
+    g_readers[slot].halFormat = halFormat;
+    g_readers[slot].reader = reader;
+    pthread_mutex_unlock(&g_readersMu);
+}
+
+/* The HAL format an ImageReader made this consumer window for, or -1 if it is no reader's. */
+int wl_imagereader_format_of(void* window)
+{
+    int format = -1;
+    pthread_mutex_lock(&g_readersMu);
+    for (int i = 0; i < g_readerCount; i++) if (window != NULL && g_readers[i].window == window) format = g_readers[i].halFormat;
+    pthread_mutex_unlock(&g_readersMu);
+    return format;
+}
+
+static void on_frame(void* context);
+
+/*
+ * A JPEG for the reader of this consumer window (a camera photo output, camera_natives.c): queued and announced as a
+ * frame, so ImageReader's listener acquires it as an image with one plane of exactly its bytes, as Android's JPEG
+ * images are. 0 on success, -1 when the window is no reader's.
+ */
+int wl_imagereader_push_blob(void* window, const void* data, size_t length)
+{
+    Reader* r = NULL;
+    pthread_mutex_lock(&g_readersMu);
+    for (int i = 0; i < g_readerCount; i++) if (window != NULL && g_readers[i].window == window) r = g_readers[i].reader;
+    pthread_mutex_unlock(&g_readersMu);
+    if (r == NULL || data == NULL || length == 0) return -1;
+    Blob* b = calloc(1, sizeof(*b));
+    if (b == NULL || (b->data = malloc(length)) == NULL) {
+        free(b);
+        return -1;
+    }
+    memcpy(b->data, data, length);
+    b->length = length;
+    pthread_mutex_lock(&r->mu);
+    Blob** tail = &r->blobs;
+    while (*tail != NULL) tail = &(*tail)->next;
+    *tail = b;
+    pthread_mutex_unlock(&r->mu);
+    on_frame(r);
+    return 0;
+}
+
 static void ir_init(JNIEnv* env, jobject thiz, jobject weakSelf, jint w, jint h, jint maxImages,
                     jlong usage, jint halFormat, jint dataSpace)
 {
@@ -267,6 +335,7 @@ static void ir_init(JNIEnv* env, jobject thiz, jobject weakSelf, jint w, jint h,
                      (uint64_t) (OH_USAGE_CPU_READ | OH_USAGE_CPU_READ_OFTEN | OH_USAGE_MEM_DMA));
         if (format >= 0) oh.windowOpt(r->window, OH_SET_FORMAT, (int32_t) format);
     }
+    remember_reader(r->window, halFormat, r);
     r->weakSelf = (*env)->NewGlobalRef(env, weakSelf);
     listener.context = r;
     listener.onFrameAvailable = on_frame;
@@ -307,6 +376,32 @@ static jint ir_image_setup(JNIEnv* env, jobject thiz, jobject image)
     if (r->acquired >= r->maxImages) {
         pthread_mutex_unlock(&r->mu);
         return ACQUIRE_MAX_IMAGES;
+    }
+    if (r->blobs != NULL) {
+        Blob* b = r->blobs;
+        r->blobs = b->next;
+        r->acquired++;
+        pthread_mutex_unlock(&r->mu);
+        f = calloc(1, sizeof(*f));
+        if (f == NULL) {
+            free(b->data);
+            free(b);
+            pthread_mutex_lock(&r->mu);
+            r->acquired--;
+            pthread_mutex_unlock(&r->mu);
+            return ACQUIRE_NO_BUFS;
+        }
+        f->blob = b;
+        f->addr = b->data;
+        f->config.width = r->width;      /* a JPEG image reports the picture's size, as on Android */
+        f->config.height = r->height;
+        f->config.stride = 0;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        (*env)->SetLongField(env, image, g_nativeBuffer, (jlong) (intptr_t) f);
+        (*env)->SetLongField(env, image, g_timestamp, (jlong) now.tv_sec * 1000000000LL + now.tv_nsec);
+        (*env)->SetIntField(env, image, g_transform, 0);
+        (*env)->SetIntField(env, image, g_scalingMode, 0);
+        return ACQUIRE_SUCCESS;
     }
     if (oh.acquire(r->image, &windowBuffer, &fence) != 0 || windowBuffer == NULL) {
         pthread_mutex_unlock(&r->mu);
@@ -369,6 +464,17 @@ static void ir_release_image(JNIEnv* env, jobject thiz, jobject image)
     Frame* f = frame_of(env, image);
     if (f == NULL) return;
     (*env)->SetLongField(env, image, g_nativeBuffer, 0);
+    if (f->blob != NULL) {
+        free(f->blob->data);
+        free(f->blob);
+        if (r != NULL) {
+            pthread_mutex_lock(&r->mu);
+            if (r->acquired > 0) r->acquired--;
+            pthread_mutex_unlock(&r->mu);
+        }
+        free(f);
+        return;
+    }
     if (f->buffer != NULL) oh.unmap(f->buffer);
     if (r != NULL) {
         oh.release(r->image, f->windowBuffer, -1);
@@ -428,6 +534,14 @@ static jobjectArray si_create_planes(JNIEnv* env, jobject image, jint numPlanes,
     }
     out = (*env)->NewObjectArray(env, numPlanes, g_planeClass, NULL);
     if (out == NULL || numPlanes <= 0) return out;
+    if (f->blob != NULL) {
+        /* A JPEG: one plane of its bytes, row and pixel stride 0, as Android's JPEG images have. */
+        jobject plane = new_plane(env, image, f->addr, (jlong) f->blob->length, 0, 0);
+        if (plane == NULL) return NULL;
+        (*env)->SetObjectArrayElement(env, out, 0, plane);
+        (*env)->DeleteLocalRef(env, plane);
+        return out;
+    }
     w = f->config.width;
     h = f->config.height;
     stride = f->config.stride > 0 ? f->config.stride : w;
