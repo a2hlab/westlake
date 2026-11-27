@@ -286,7 +286,6 @@ static void on_photo(Camera_PhotoOutput *output, OH_PhotoNative *photo)
     typedef int32_t (*TypesFn)(OH_ImageNative *, uint32_t **, size_t *);
     typedef int32_t (*ByteBufferFn)(OH_ImageNative *, uint32_t, OH_NativeBuffer **);
     typedef int32_t (*BufferSizeFn)(OH_ImageNative *, uint32_t, size_t *);
-    typedef int32_t (*ImageReleaseFn)(OH_ImageNative *);
     typedef int32_t (*MapFn)(OH_NativeBuffer *, void **);
     typedef int32_t (*UnmapFn)(OH_NativeBuffer *);
     wl_camera *c = NULL;
@@ -296,7 +295,6 @@ static void on_photo(Camera_PhotoOutput *output, OH_PhotoNative *photo)
     TypesFn types = (TypesFn) lib_sym("libohimage.so", "OH_ImageNative_GetComponentTypes");
     ByteBufferFn byteBuffer = (ByteBufferFn) lib_sym("libohimage.so", "OH_ImageNative_GetByteBuffer");
     BufferSizeFn bufferSize = (BufferSizeFn) lib_sym("libohimage.so", "OH_ImageNative_GetBufferSize");
-    ImageReleaseFn imageRelease = (ImageReleaseFn) lib_sym("libohimage.so", "OH_ImageNative_Release");
     MapFn map = (MapFn) lib_sym("libnative_buffer.so", "OH_NativeBuffer_Map");
     UnmapFn unmap = (UnmapFn) lib_sym("libnative_buffer.so", "OH_NativeBuffer_Unmap");
     OH_ImageNative *image = NULL;
@@ -319,7 +317,10 @@ static void on_photo(Camera_PhotoOutput *output, OH_PhotoNative *photo)
         free(list);
     }
     fprintf(stderr, "[WL-CAMERA] photo from OH: %zu bytes -> %s\n", length, delivered == 0 ? "the JPEG reader" : "nowhere");
-    if (image != NULL && imageRelease != NULL) imageRelease(image);
+    /* The main image belongs to the photo (OH_PhotoNative_GetMainImage hands out the photo's own): releasing it as
+     * well freed it twice (the D600's Open Camera died in OH_ImageNative_Release on OH's callback thread). The bytes
+     * were copied (wl_imagereader_push_blob), so the photo goes now and its image with it. */
+    (void) image;
     if (photoRelease != NULL) photoRelease(photo);
 }
 
