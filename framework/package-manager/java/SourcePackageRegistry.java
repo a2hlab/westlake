@@ -127,6 +127,29 @@ public final class SourcePackageRegistry {
         return parsed != null ? parsed.packageName : null;
     }
 
+    /** Whether the registered package declares a component (activity, alias, receiver, service, provider) by this class. */
+    public static synchronized boolean hasComponent(String className) {
+        if (parsed == null || className == null) return false;
+        return declares(parsed.activities, className) || declares(parsed.receivers, className)
+                || declares(parsed.services, className) || declares(parsed.providers, className);
+    }
+
+    /**
+     * Whether a component is enabled as the package manager decides it: for the app's own, its run-time state
+     * (setComponentEnabledSetting) over the manifest; for another app's, the manifest.
+     */
+    public static boolean isEnabled(android.content.pm.ComponentInfo info) {
+        return ComponentStates.isEnabled(info);
+    }
+
+    private static boolean declares(java.util.List<? extends PackageParser.Component<?>> components, String className) {
+        if (components == null) return false;
+        for (PackageParser.Component<?> component : components) {
+            if (className.equals(component.className)) return true;
+        }
+        return false;
+    }
+
     /** The app's data directory, which also holds the guest packages' (GuestPackages). */
     public static synchronized String dataDir() {
         return location != null ? location.dataDir : null;
@@ -423,8 +446,11 @@ public final class SourcePackageRegistry {
                         == PackageManager.PERMISSION_GRANTED) granted.add(permission);
             }
         }
+        // The app's own run-time component states (setComponentEnabledSetting) over its manifest, as
+        // Android's parser applies a user's states: DEFAULT for an app that never set one.
+        FrameworkPackageUserState userState = ComponentStates.userState();
         PackageInfo value = PackageParser.generatePackageInfo(parsed, null, (int) flags,
-                0, 0, granted, FrameworkPackageUserState.DEFAULT, 0);
+                0, 0, granted, userState, 0);
         if (value == null) return null;
         int preMeta = probeDiscoveryMeta(value);
         bootClassSigningKeys(value);
