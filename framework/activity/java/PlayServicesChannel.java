@@ -467,6 +467,7 @@ public final class PlayServicesChannel {
         try {
             data.writeTypedObject(intent, 0); data.writeTypedObject(caller, 0);
             data.writeBoolean(wantsResult); data.writeStrongBinder(callback);
+            data.writeString(System.getenv("ASX_LAUNCH_ACTIVITY"));   // the OH ability the host raises for the result
             if (!root.transact(START_ACTIVITY_FOR_RESULT, data, reply, 0)) return null;
             reply.readException(); return reply.readStrongBinder();
         } finally { data.recycle(); reply.recycle(); }
@@ -490,6 +491,7 @@ public final class PlayServicesChannel {
             data.writeStrongBinder(sender); data.writeTypedObject(fillIn, 0);
             data.writeInt(mask); data.writeInt(values); data.writeTypedObject(caller, 0);
             data.writeBoolean(wantsResult); data.writeStrongBinder(callback);
+            data.writeString(System.getenv("ASX_LAUNCH_ACTIVITY"));   // the OH ability the host raises for the result
             if (!host.transact(START_PENDING_ACTIVITY, data, reply, 0)) return null;
             reply.readException(); return reply.readStrongBinder();
         } finally { data.recycle(); reply.recycle(); }
@@ -1823,6 +1825,7 @@ public final class PlayServicesChannel {
                     int mask = data.readInt(), values = data.readInt();
                     ComponentName caller = data.readTypedObject(ComponentName.CREATOR);
                     boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
+                    if (data.dataAvail() > 0) ActivityTaskManagerAdapter.rememberAbility(mVerifiedInfo.packageName, data.readString());
                     reply.writeStrongBinder(PendingActivityLaunch.accept(sender, fillIn, mask, values,
                             caller, wantsResult, callback, mVerifiedInfo, mPeerPid, mVerifiedSpawner, Binder.getCallingUid()));
                     return true;
@@ -1910,6 +1913,7 @@ public final class PlayServicesChannel {
                     Intent intent = data.readTypedObject(Intent.CREATOR);
                     ComponentName caller = data.readTypedObject(ComponentName.CREATOR);
                     boolean wantsResult = data.readBoolean(); IBinder callback = data.readStrongBinder();
+                    if (data.dataAvail() > 0) ActivityTaskManagerAdapter.rememberAbility(mVerifiedInfo.packageName, data.readString());
                     reply.writeStrongBinder(RemoteActivities.accept(intent, caller, wantsResult, callback,
                             mVerifiedInfo, mPeerPid, mVerifiedSpawner, Binder.getCallingUid(), mOwnApplication));
                     return true;

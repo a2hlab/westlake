@@ -98,10 +98,66 @@ public class ActivityTaskManagerAdapter extends IActivityTaskManager.Stub {
         String ability = System.getenv("ASX_LAUNCH_ACTIVITY");
         if (bundle == null || ability == null) return;
         try {
-            int rc = nativeStartAbility(bundle, ability, null, null, null, 0L);
+            // Not nativeStartAbility: under the managed launch its starts of the app's own activities run in this
+            // process (activity_task_manager_adapter.cpp), so it launched the bundle's activity here instead of
+            // raising anything (Play services' settings page, over the account chooser it was meant to bring up).
+            // This is OH's own StartAbility for the bundle's ability, which OH answers by bringing the ability's
+            // mission forward.
+            int rc = nativeStartAbilityInMission(bundle, ability, null, null, null, -1);
             System.err.println("[WL-MANAGED] the app's OH mission to the front (" + why + "): rc=" + rc);
         } catch (Throwable t) {
             System.err.println("[WL-MANAGED] the app's OH mission to the front (" + why + ") failed: " + t);
+        }
+    }
+
+    /**
+     * The caller's side of raiseOwnMission: brings another managed app's OH mission to the front, a while after this
+     * app handed it an activity. A host raising its own mission from the background gets rc 0 from OH and stays
+     * under the caller on OH 7.0 + SceneBoard (Play services' account chooser behind Pinterest's "Continue with
+     * Google"), while the same start made by the app in front brings it up, as it did from the shell. The host's
+     * bundle ability is the activity its managed bundle was made at: from WESTLAKE_HOST_ABILITIES, else its
+     * launcher activity; the starts come after the host has had time to make the activity's window.
+     */
+    // The OH ability of each verified app that started an activity here (its managed bundle's), which it sends with
+    // the start: the host raises the caller with it when the result goes back.
+    private static final java.util.Map<String, String> sAbilities = new java.util.concurrent.ConcurrentHashMap<>();
+
+    static void rememberAbility(String pkg, String ability) {
+        if (pkg != null && ability != null && !ability.isEmpty()) sAbilities.put(pkg, ability);
+    }
+
+    static void raiseMissionOf(String pkg, String why) {
+        if (!"1".equals(System.getenv("WESTLAKE_MANAGED_LAUNCH")) || pkg == null) return;
+        String ability = sAbilities.get(pkg);
+        // A host without a launcher activity (Play services) is named by the launch: WESTLAKE_HOST_ABILITIES
+        // lists package:ability pairs for the hosts the app was given.
+        String hosts = System.getenv("WESTLAKE_HOST_ABILITIES");
+        if (ability == null && hosts != null) for (String pair : hosts.split(",")) {
+            int colon = pair.indexOf(':');
+            if (colon > 0 && pair.substring(0, colon).equals(pkg)) ability = pair.substring(colon + 1);
+        }
+        if (ability == null) try {
+            android.content.Intent launch = android.app.ActivityThread.currentApplication().getPackageManager()
+                    .getLaunchIntentForPackage(pkg);
+            if (launch != null && launch.getComponent() != null) ability = launch.getComponent().getClassName();
+        } catch (Throwable t) {
+            System.err.println("[WL-MANAGED] " + pkg + "'s launcher activity: " + t);
+        }
+        if (ability == null) {
+            System.err.println("[WL-MANAGED] " + pkg + "'s OH mission (" + why + "): no launcher activity");
+            return;
+        }
+        final String name = ability;
+        android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        for (long delay : new long[] {1200L, 3000L}) {
+            main.postDelayed(() -> {
+                try {
+                    int rc = nativeStartAbility(pkg, name, null, null, null, 0L);
+                    System.err.println("[WL-MANAGED] " + pkg + "'s OH mission to the front (" + why + "): rc=" + rc);
+                } catch (Throwable t) {
+                    System.err.println("[WL-MANAGED] " + pkg + "'s OH mission to the front failed: " + t);
+                }
+            }, delay);
         }
     }
 

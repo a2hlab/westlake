@@ -82,6 +82,7 @@ public final class RemoteActivities {
             pending.cancellation = cancellation;
             if (pending.done.get()) pending.cancelRemote();
             event("start_sent target=" + target.packageName + " process=" + target.processName);
+            ActivityTaskManagerAdapter.raiseMissionOf(target.packageName, "an activity this app started there");
             return ActivityManager.START_SUCCESS;
         } catch (RemoteException | RuntimeException error) {
             pending.abandon();
@@ -115,6 +116,7 @@ public final class RemoteActivities {
             if (pending.cancellation == null) { pending.abandon(); return ActivityManager.START_CANCELED; }
             if (pending.done.get()) pending.cancelRemote();
             event("pending_activity_sent creator=" + facts.packageName);
+            ActivityTaskManagerAdapter.raiseMissionOf(facts.packageName, "a pending activity this app started there");
             return ActivityManager.START_SUCCESS;
         } catch (RemoteException | RuntimeException error) {
             pending.abandon();
@@ -385,6 +387,9 @@ public final class RemoteActivities {
                         data.writeInterfaceToken(RESULT); data.writeInt(result); data.writeTypedObject(intent, 0);
                         callback.transact(1, data, null, IBinder.FLAG_ONEWAY);
                         event("result_sent caller=" + caller.getPackageName() + " result_code=" + result);
+                        // The caller raises its own mission when the result arrives, from the background, which OH
+                        // 7.0 + SceneBoard does not bring forward; this host, still in front, raises it too.
+                        ActivityTaskManagerAdapter.raiseMissionOf(caller.getPackageName(), "the result went back");
                     } catch (RemoteException | RuntimeException error) { event("result_peer_unavailable=true"); }
                     finally { data.recycle(); }
                 }
